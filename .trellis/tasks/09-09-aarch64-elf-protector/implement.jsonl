@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"The implementation introduces production, test, fixture, benchmark, and CI boundaries that need a stable repository layout."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"ELF parsing and runtime validation require typed, fail-closed diagnostics and consistent error propagation."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"The MVP has strict test, analyzer, coverage, and review requirements."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Binary range, address, and diagnostic logic must have single owners rather than duplicated helpers."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Data crosses binary parsing, analysis, reports, fixture harnesses, and runtime E2E boundaries."}
+{"file":".trellis/tasks/09-09-aarch64-elf-protector/research.md","reason":"Pinned AsmStone, Android bionic, Waydroid prerequisites, and GitHub ARM64 runner constraints are required design inputs."}

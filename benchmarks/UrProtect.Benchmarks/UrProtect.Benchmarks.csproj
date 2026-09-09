@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>UrProtect.Benchmarks</RootNamespace>
+    <AssemblyName>UrProtect.Benchmarks</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/UrProtect.Core/UrProtect.Core.csproj" />
+  </ItemGroup>
+</Project>

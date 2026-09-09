@@ -1,0 +1,38 @@
+namespace AsmStone.Model;
+
+[Flags]
+public enum A64Feature : ulong
+{
+    None = 0,
+    Base = 1UL << 0,
+    Neon = 1UL << 1,
+    FloatingPoint = 1UL << 2,
+    Crypto = 1UL << 3,
+    Lse = 1UL << 4,
+    Rcpc = 1UL << 5,
+    DotProduct = 1UL << 6,
+    Ras = 1UL << 7,
+    PointerAuthentication = 1UL << 8,
+    BranchTargetIdentification = 1UL << 9,
+    Sme = 1UL << 10,
+    Sve = 1UL << 11,
+    Sve2 = 1UL << 12,
+    Mte = 1UL << 13,
+    Rme = 1UL << 14,
+    Mops = 1UL << 15,
+    Crc = 1UL << 16,
+    FullFp16 = 1UL << 17,
+    Bf16 = 1UL << 18,
+    I8mm = 1UL << 19,
+    Fp8 = 1UL << 20,
+    Lse2 = 1UL << 21,
+    Sme2 = 1UL << 22,
+    Sme2p1 = 1UL << 23,
+    Sme2p2 = 1UL << 24,
+    Sme2p3 = 1UL << 25,
+    Sve2p1 = 1UL << 26,
+    Sve2p2 = 1UL << 27,
+    Sve2p3 = 1UL << 28,
+    Mte2 = 1UL << 29,
+    Full = ulong.MaxValue,
+}

@@ -1,0 +1,170 @@
+# Implementation Plan
+
+This checklist is for the infrastructure-only MVP. Do not run `task.py start` until the planning artifacts have been reviewed and approved.
+
+## 1. Bootstrap and repository contracts
+
+- [ ] Confirm the repository layout and add a .NET solution targeting the pinned SDK/runtime chosen for AsmStone compatibility.
+- [ ] Add build-wide settings for nullable/reference safety, analyzers, deterministic builds, warnings-as-errors policy, and test categories.
+- [ ] Record the pinned AsmStone revision and dependency/license provenance.
+- [ ] Create separate production, test, fixture, benchmark, and CI/tooling boundaries; do not put fixture generation into runtime parsing code.
+- [ ] Define the CLI/report contract for validate, analyze, and optional no-op copy operations.
+
+Validation:
+
+```text
+dotnet restore --locked-mode
+dotnet build --configuration Release --no-restore
+dotnet test --configuration Release --no-build
+```
+
+Rollback point: retain the empty solution and dependency lock before adding parser behavior.
+
+## 2. Binary primitives
+
+- [ ] Implement bounded byte reads and immutable slices.
+- [ ] Implement explicit little-endian integer decoding and checked address/range arithmetic.
+- [ ] Add property tests for range containment, overflow, empty ranges, and offset/length conversions.
+- [ ] Add diagnostics that retain source offset, field name, and stable error code.
+
+Validation:
+
+```text
+dotnet test --filter Category=Binary
+dotnet test --collect:"XPlat Code Coverage"
+```
+
+Rollback point: binary primitives must be independently usable before ELF parsing is added.
+
+## 3. ELF header and program-header model
+
+- [ ] Add immutable models for the ELF header and program headers.
+- [ ] Parse only after all header/table ranges pass bounds checks.
+- [ ] Validate the agreed `ELF64`/little-endian/AArch64/`ET_DYN` profile.
+- [ ] Make section headers optional for runtime analysis.
+- [ ] Model unknown program types and extended numbering as explicit results.
+- [ ] Add valid, truncated, overflowed, stripped, and unknown-extension fixtures.
+
+Validation:
+
+```text
+dotnet test --filter Category=ElfHeader
+```
+
+Risk: over-rejecting valid page-boundary segment layouts. Keep segment overlap policy in one validator and compare fixtures with `readelf`/`llvm-readelf`.
+
+## 4. LoadMap and dynamic metadata
+
+- [ ] Implement file-offset, ELF-virtual-address, and runtime-address value types.
+- [ ] Build `LoadMap` only from validated `PT_LOAD` records.
+- [ ] Parse and validate `PT_DYNAMIC`, interpreter, TLS, RELRO, GNU property, EH frame, stack, and note records.
+- [ ] Add bounded string, hash, symbol, version, dynamic-tag, and relocation-table views.
+- [ ] Recognize common AArch64 RELA, RELR, Android RELR, and legacy Android packed-relocation forms without applying or rewriting them.
+- [ ] Add raw-preservation tests for unknown tags and unmodeled payloads.
+
+Validation:
+
+```text
+dotnet test --filter Category=ElfMetadata
+readelf -hW -lW -dW <fixture>
+llvm-readelf -hW -lW -dW <fixture>
+```
+
+Rollback point: keep metadata parsing read-only until all table-range tests are stable.
+
+## 5. AsmStone adapter and AArch64 analysis
+
+- [ ] Add the pinned AsmStone dependency behind a local adapter.
+- [ ] Map decode outcomes into project-owned records and diagnostics.
+- [ ] Scan only executable `PT_LOAD` file-backed bytes.
+- [ ] Add conservative entrypoint/symbol/relocation candidate discovery.
+- [ ] Classify the selected branch, PC-relative, literal, and common load/store instruction families.
+- [ ] Preserve unknown instructions and unresolved indirect control flow as explicit boundaries.
+- [ ] Add small contract vectors, not an exhaustive duplicate ISA suite.
+
+Validation:
+
+```text
+dotnet test --filter Category=Aarch64Adapter
+```
+
+Risk: an AsmStone defect must produce a minimized upstream reproducer, not a permanent local opcode fork.
+
+## 6. No-op validation pipeline
+
+- [ ] Orchestrate parse, validate, LoadMap construction, metadata indexing, analysis, and report generation.
+- [ ] Add optional source-to-destination byte copy without reserialization.
+- [ ] Compare source and destination bytes before publishing the destination.
+- [ ] Use a temporary destination and atomic publish semantics.
+- [ ] Add baseline/re-output tests for every fixture class.
+- [ ] Define which file metadata is copied or intentionally not promised; keep content byte identity mandatory.
+
+Validation:
+
+```text
+dotnet test --filter Category=NoOp
+cmp original.elf output.elf
+```
+
+## 7. Fixture generation and runtime harness
+
+- [ ] Add a manifest schema containing language, toolchain, linker, target triple, runtime, flags, artifact kind, expected features, and behavior oracle.
+- [ ] Implement minimal C/C++ GCC and Clang fixtures first.
+- [ ] Add musl, Rust, Go, Zig, NativeAOT, and NDK/JNI fixtures according to the priority matrix.
+- [ ] Keep source fixtures small and deterministic; store generated binaries only when required for regression or provenance.
+- [ ] Implement baseline and output execution with captured exit code, stdout, stderr, generated files, signals, and Android JNI results.
+- [ ] Add `readelf`/`llvm-readelf` structural oracle comparisons without making those tools runtime dependencies.
+
+Validation:
+
+```text
+dotnet test --filter Category=Fixtures
+./scripts/run-fixture-matrix.sh --profile pr
+```
+
+## 8. GitHub ARM64 CI
+
+- [ ] Add explicit native ARM64 Linux jobs for glibc and the pinned ARM64 musl container.
+- [ ] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
+- [ ] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching image hashes.
+- [ ] Add ARM64 AVD software-emulation smoke only with explicit `tcg`/`software` labeling and no KVM assumption.
+- [ ] Fail required jobs when a claimed runtime profile silently falls back to an unsupported execution mode.
+- [ ] Upload logs, environment manifests, failing binaries/APKs, minimized inputs, and linker output.
+
+Validation:
+
+```text
+uname -m
+dotnet --info
+clang --version
+gcc --version
+```
+
+The first Android-container workflow should be an explicit feasibility experiment. Promote it to a required gate only after the hosted runner capability is stable.
+
+## 9. Fuzzing, coverage, and benchmarks
+
+- [ ] Add parser fuzz targets with bounded allocations and timeouts.
+- [ ] Seed malformed corpus entries for every parser rejection class.
+- [ ] Add coverage collection for project code and module-specific thresholds after a baseline run.
+- [ ] Add property tests for parser/model invariants and no-op byte identity.
+- [ ] Add native ARM64 benchmarks for parse, map, metadata, analysis, copy, allocations, and peak memory.
+- [ ] Store benchmark baselines by runner image, SDK, and fixture manifest version.
+
+Validation:
+
+```text
+dotnet test --collect:"XPlat Code Coverage"
+dotnet run --project <benchmark-project> --configuration Release
+```
+
+## 10. Final planning and review gate
+
+- [ ] Run the PRD convergence pass and remove temporary brainstorm wording.
+- [ ] Confirm `design.md` and `implement.md` match the final PRD without contradictory scope.
+- [ ] Curate `implement.jsonl` and `check.jsonl` with real applicable spec/research entries.
+- [ ] Run repository checks for task artifacts and manifest syntax.
+- [ ] Present the final planning summary to the user.
+- [ ] Only after a subsequent explicit approval, run `python3 ./.trellis/scripts/task.py start` and begin implementation.
+
+Rollback point: if feasibility, fixture scope, or no-op identity cannot be demonstrated, return to planning rather than widening the MVP.

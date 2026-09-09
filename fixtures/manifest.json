@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "c-gcc-glibc-pie",
+      "language": "c",
+      "toolchain": "gcc",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "pie",
+      "tier": "pr"
+    },
+    {
+      "id": "c-clang-musl-pie",
+      "language": "c",
+      "toolchain": "clang",
+      "runtime": "musl",
+      "target": "aarch64-linux-musl",
+      "artifact": "pie",
+      "tier": "pr"
+    },
+    {
+      "id": "android-ndk-jni",
+      "language": "c++",
+      "toolchain": "android-ndk-clang",
+      "runtime": "bionic",
+      "target": "aarch64-linux-android",
+      "artifact": "apk-jni-shared-object",
+      "tier": "pr"
+    },
+    {
+      "id": "rust-gnu",
+      "language": "rust",
+      "toolchain": "rustc",
+      "runtime": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact": "pie",
+      "tier": "nightly"
+    },
+    {
+      "id": "go-cgo",
+      "language": "go",
+      "toolchain": "go",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "pie",
+      "tier": "nightly"
+    },
+    {
+      "id": "zig-musl",
+      "language": "zig",
+      "toolchain": "zig",
+      "runtime": "musl",
+      "target": "aarch64-linux-musl",
+      "artifact": "pie",
+      "tier": "nightly"
+    },
+    {
+      "id": "csharp-nativeaot",
+      "language": "csharp",
+      "toolchain": "dotnet-nativeaot",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "pie",
+      "tier": "nightly"
+    }
+  ]
+}

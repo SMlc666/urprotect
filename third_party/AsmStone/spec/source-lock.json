@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "aarchmrs": {
+      "repository": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/maz/AARCHMRS",
+      "ref": "tooling",
+      "commit": "1b73e640fbc3f035d16d7a292308ffd8a1405e74",
+      "architecture": "v9Ap6-A",
+      "build": "445",
+      "schema": "2.5.5",
+      "instructionsSha256": "46225f370080e5ff095f1f1961d60d286e5336dc31b4e33ae1638484d4ebaa04",
+      "featuresSha256": "8f0ab76ec3f3fbb0c78cd5839a716441c96d15aee9557c95693a7968524cf943",
+      "registersSha256": "ef32c141afdb85fdf842f971d3d809388ee0d734fa1bed8bd422b3fd8ded1bc6"
+    },
+    "llvm": {
+      "repository": "https://github.com/llvm/llvm-project",
+      "ref": "main",
+      "commit": "87b1a2f7246bc0a4ed5335c45635bddb75847890",
+      "tablegen": "llvm/lib/Target/AArch64/AArch64.td",
+      "tablegenJsonSha256": "728f5eb9a7fb5d04f417e61e7f74181db7c17f1afebf512131c188be1066b82f",
+      "generatedCatalogSha256": "3cc69c4b1140122ad14f1df46fe5b0a142608445eb077175b7601da15d6a9486",
+      "recordCount": 8840,
+      "encodableRecordCount": 7484,
+      "pseudoRecordCount": 1356,
+      "completeEncodingCount": 7484,
+      "partialEncodingCount": 0,
+      "operandTypeCount": 456
+    }
+  }
+}

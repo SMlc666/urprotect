@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Record runner
+        run: |
+          uname -a
+          test "$(uname -m)" = "aarch64"
+          dotnet --info
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Test
+        run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
+      - name: Check coverage floor
+        run: python3 scripts/check-coverage.py
+      - name: Fixture smoke
+        run: ./scripts/run-fixture-matrix.sh --profile pr
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ github.run_id }}
+          path: |
+            tests/**/TestResults/**
+            /tmp/urprotect-*.out
+            /tmp/urprotect-*.err
+          if-no-files-found: warn
+
+  android-container-probe:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe Android container prerequisites
+        run: |
+          set -o pipefail
+          ./.github/scripts/check-android-container.sh 2>&1 | tee android-container-probe.log
+      - name: Upload Android probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-container-probe-${{ github.run_id }}
+          path: android-container-probe.log
+          if-no-files-found: warn
+
+  benchmark:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet restore UrProtect.sln --locked-mode
+      - run: dotnet run --project benchmarks/UrProtect.Benchmarks --configuration Release --no-restore

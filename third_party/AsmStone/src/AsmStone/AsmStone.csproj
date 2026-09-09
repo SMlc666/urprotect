@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>AsmStone</RootNamespace>
+    <AssemblyName>AsmStone</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <PackageId>AsmStone</PackageId>
+    <Description>Managed AArch64 assembler and disassembler.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="README.md" />
+    <None Include="../../docs/THIRD_PARTY.md" Pack="true" PackagePath="THIRD_PARTY.md" />
+    <None Include="../../spec/source-lock.json" Pack="true" PackagePath="spec/source-lock.json" />
+  </ItemGroup>
+
+</Project>

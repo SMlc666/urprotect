@@ -1,0 +1,56 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Core", "src\UrProtect.Core\UrProtect.Core.csproj", "{3D7C9D7F-64C0-4A8C-9CE5-5D35FD0E0E01}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Cli", "src\UrProtect.Cli\UrProtect.Cli.csproj", "{B76964A7-4D97-4BD6-A173-2796B7A4A5AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Core.Tests", "tests\UrProtect.Core.Tests\UrProtect.Core.Tests.csproj", "{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Benchmarks", "benchmarks\UrProtect.Benchmarks\UrProtect.Benchmarks.csproj", "{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "third_party", "third_party", "{1FD13B3B-BA5E-403F-8ECE-6529B6989F44}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "AsmStone", "AsmStone", "{A35054FB-6C44-44D5-9ED1-FCA889ADDC88}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F8A658B3-D9D0-4843-9FB5-027C8448B4CA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AsmStone", "third_party\AsmStone\src\AsmStone\AsmStone.csproj", "{1D9200B6-51AF-4EE4-8997-103A01BEAD84}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3D7C9D7F-64C0-4A8C-9CE5-5D35FD0E0E01}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D7C9D7F-64C0-4A8C-9CE5-5D35FD0E0E01}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D7C9D7F-64C0-4A8C-9CE5-5D35FD0E0E01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D7C9D7F-64C0-4A8C-9CE5-5D35FD0E0E01}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B76964A7-4D97-4BD6-A173-2796B7A4A5AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B76964A7-4D97-4BD6-A173-2796B7A4A5AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B76964A7-4D97-4BD6-A173-2796B7A4A5AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B76964A7-4D97-4BD6-A173-2796B7A4A5AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1D9200B6-51AF-4EE4-8997-103A01BEAD84}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1D9200B6-51AF-4EE4-8997-103A01BEAD84}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1D9200B6-51AF-4EE4-8997-103A01BEAD84}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1D9200B6-51AF-4EE4-8997-103A01BEAD84}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A35054FB-6C44-44D5-9ED1-FCA889ADDC88} = {1FD13B3B-BA5E-403F-8ECE-6529B6989F44}
+		{F8A658B3-D9D0-4843-9FB5-027C8448B4CA} = {A35054FB-6C44-44D5-9ED1-FCA889ADDC88}
+		{1D9200B6-51AF-4EE4-8997-103A01BEAD84} = {F8A658B3-D9D0-4843-9FB5-027C8448B4CA}
+	EndGlobalSection
+EndGlobal

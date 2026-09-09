@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Use the project quality and testing checklist when reviewing parser, analysis, fixture, and CI changes."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review all malformed ELF, unsupported profile, AsmStone, container, and E2E failures for stable fail-closed behavior."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review contracts from ELF bytes through reports, no-op artifacts, runtime fixtures, and CI metadata."}
+{"file":".trellis/tasks/09-09-aarch64-elf-protector/design.md","reason":"Review implementation against the architecture boundaries, no-op byte-identity contract, runtime tiers, and deferred scope."}
+{"file":".trellis/tasks/09-09-aarch64-elf-protector/implement.md","reason":"Review the ordered implementation, validation commands, risk points, and final planning gate."}
+{"file":".trellis/tasks/09-09-aarch64-elf-protector/research.md","reason":"Check that dependency, Android, container, and runner claims remain consistent with the chosen pinned inputs."}

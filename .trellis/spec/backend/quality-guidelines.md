@@ -1,0 +1,76 @@
+# Quality Guidelines
+
+> Code quality standards for backend development.
+
+---
+
+## Overview
+
+<!--
+Document your project's quality standards here.
+
+Questions to answer:
+- What patterns are forbidden?
+- What linting rules do you enforce?
+- What are your testing requirements?
+- What code review standards apply?
+-->
+
+Production code targets .NET 8 with nullable reference types, analyzers,
+deterministic builds, warnings as errors, and locked restore. Keep the MVP
+read-only and preserve unknown ELF data; do not add speculative rewrite paths.
+
+---
+
+## Forbidden Patterns
+
+<!-- Patterns that should never be used and why -->
+
+Do not use a general-purpose ELF library in the runtime parser, unchecked casts
+from ELF counts to array sizes, duplicated address conversion helpers, local
+opcode workarounds for AsmStone gaps, or silent fallback from native ARM64 to
+QEMU/emulation in a required CI job.
+
+---
+
+## Required Patterns
+
+<!-- Patterns that must always be used -->
+
+Use immutable/bounds-checked binary reads, project-owned adapter DTOs, typed
+diagnostic codes, and explicit file/virtual/runtime address types. Pin AsmStone
+and preserve its license/source notices. Keep fixture and benchmark tooling
+outside production parsing code.
+
+---
+
+## Testing Requirements
+
+<!-- What level of testing is expected -->
+
+Every parser or pipeline change needs focused unit tests plus malformed-input
+coverage. New ELF behavior should include a valid fixture, a rejection fixture,
+and an external `readelf`/`llvm-readelf` comparison when applicable. No-op
+output tests must compare bytes, and runtime tests must compare observable
+behavior rather than addresses affected by ASLR.
+
+Coverage is measured for project code, not AsmStone internals. Track line and
+branch coverage, with higher error-path expectations for binary primitives,
+LoadMap, relocation indexing, and output publication. Benchmarks record
+throughput, allocations, and peak memory on native ARM64 Linux.
+
+---
+
+## Code Review Checklist
+
+<!-- What reviewers should check -->
+
+Reviewers must check:
+
+- all offsets, sizes, counts, and address arithmetic are checked;
+- program headers remain authoritative when sections are absent;
+- unknown data and instructions are preserved/reported rather than guessed;
+- diagnostics fail closed at the correct boundary;
+- no-op output is byte-identical and atomically published;
+- CI records runner/toolchain/emulation metadata and does not hide failures;
+- tests cover the changed behavior and the relevant rejection path.

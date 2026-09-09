@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "asmstone": {
+        "type": "Project"
+      },
+      "urprotect.core": {
+        "type": "Project",
+        "dependencies": {
+          "AsmStone": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

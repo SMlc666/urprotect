@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>UrProtect.Core</RootNamespace>
+    <AssemblyName>UrProtect.Core</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../third_party/AsmStone/src/AsmStone/AsmStone.csproj" />
+  </ItemGroup>
+</Project>

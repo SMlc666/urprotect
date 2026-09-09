@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.artifacts/
+.coverage/
+.tmp/
+**/TestResults/
+*.user
+*.suo
+
+**/TestResults/
+coverage.cobertura.xml
