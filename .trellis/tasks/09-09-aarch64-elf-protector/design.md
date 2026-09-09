@@ -183,6 +183,13 @@ Android jobs are separate:
 
 Both Android runtime modes must install a test APK and exercise the real library-loading/JNI path. If the container cannot run on the hosted kernel, the failure is visible and the project does not claim container E2E coverage.
 
+The initial GitHub ARM64 hosted-runner probe confirmed that the runner provides
+an AArch64 host, namespaces, and cgroups but does not expose Binder/BinderFS,
+LXC, or a Wayland/headless compositor. Until a supported runner or explicit
+container image strategy supplies those capabilities, the container workflow is
+an informational, non-gating capability probe; Linux build/test and benchmark
+jobs remain independent of it.
+
 ## 8. CI, Coverage, Fuzzing, and Benchmarks
 
 ### CI gates

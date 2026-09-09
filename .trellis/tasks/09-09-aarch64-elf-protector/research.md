@@ -57,3 +57,8 @@ Planning conclusions:
 - The native Linux gate must run directly on the ARM64 host; an x86 runner plus QEMU is not an equivalent result.
 - Android ARM64 AVD software emulation is a separate profile and must be labeled as software emulation. The project does not claim physical Android device support.
 - Runner, kernel, libc, page size, toolchain, and acceleration-mode metadata must be retained with every compatibility result.
+
+Observed hosted-runner probe:
+
+- On the first GitHub ARM64 workflow dispatch, `aarch64`, Linux namespaces, and cgroups were available, but Binder/BinderFS, LXC, and a Wayland/headless compositor were absent.
+- The Android container probe therefore remains informational and non-gating. The workflow records the missing capabilities rather than claiming container E2E coverage or failing the Linux build/test gate.

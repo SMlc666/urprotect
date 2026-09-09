@@ -52,9 +52,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Probe Android container prerequisites
+        id: android_container_probe
+        continue-on-error: true
         run: |
           set -o pipefail
           ./.github/scripts/check-android-container.sh 2>&1 | tee android-container-probe.log
+      - name: Record unavailable container capability
+        if: steps.android_container_probe.outcome == 'failure'
+        run: |
+          {
+            echo '## Android container capability'
+            echo
+            echo 'The hosted ARM64 runner does not currently expose all Android container prerequisites.'
+            echo 'This is an informational feasibility result; Android container E2E is not claimed or used as a gate.'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Android probe evidence
         if: always()
         uses: actions/upload-artifact@v4
