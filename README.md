@@ -25,6 +25,34 @@ dotnet build --configuration Release
 dotnet test --configuration Release
 ```
 
+## Fixture Matrix
+
+The fixture manifest covers a small, explicit set of ELF producers instead of
+claiming a full language/toolchain Cartesian product:
+
+```sh
+./scripts/run-fixture-matrix.sh --profile pr
+./scripts/run-fixture-matrix.sh --profile nightly
+```
+
+The native Linux fixture runner builds and executes C/C++ (GCC and LLVM/Clang),
+Rust, Go, Zig, and NativeAOT samples when the pinned/hosted toolchain is
+available. Each executable is validated and copied through the no-op CLI, then
+the baseline and copied output behavior are compared. Optional profiles are
+reported as `SKIP` with the reason; required PR profiles fail the job when
+their toolchain is missing or their output is invalid.
+
+The Android sample is an APK/JNI fixture. On the GitHub ARM64 runner it is
+attempted in an explicitly software-emulated ARM64 AVD:
+
+```sh
+./scripts/run-android-avd.sh
+```
+
+The script never claims physical-device or native-hardware validation. If the
+host lacks Android command-line tools, an emulator, or Gradle, it records an
+`ANDROID_AVD_UNAVAILABLE` report instead of silently skipping the capability.
+
 ## CLI
 
 ```sh

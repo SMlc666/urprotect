@@ -1,68 +1,145 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "android": {
+    "apiLevel": 35,
+    "systemImage": "system-images;android-35;google_apis;arm64-v8a",
+    "ndkVersion": "27.2.12479018",
+    "cmakeVersion": "3.22.1",
+    "gradleVersion": "8.9",
+    "androidGradlePlugin": "8.7.3",
+    "packageName": "com.example.urprotect",
+    "avdName": "urprotect-api35-arm64-tcg"
+  },
   "profiles": [
     {
       "id": "c-gcc-glibc-pie",
       "language": "c",
       "toolchain": "gcc",
+      "builder": "gcc-c",
       "runtime": "glibc",
       "target": "aarch64-linux-gnu",
       "artifact": "pie",
-      "tier": "pr"
+      "source": "fixtures/samples/c/main.c",
+      "tier": "pr",
+      "required": true,
+      "execution": "native-linux"
     },
     {
-      "id": "c-clang-musl-pie",
-      "language": "c",
-      "toolchain": "clang",
-      "runtime": "musl",
-      "target": "aarch64-linux-musl",
-      "artifact": "pie",
-      "tier": "pr"
-    },
-    {
-      "id": "android-ndk-jni",
+      "id": "cxx-gcc-glibc-pie",
       "language": "c++",
-      "toolchain": "android-ndk-clang",
-      "runtime": "bionic",
-      "target": "aarch64-linux-android",
-      "artifact": "apk-jni-shared-object",
-      "tier": "pr"
+      "toolchain": "gcc-g++",
+      "builder": "gcc-cxx",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "pie",
+      "source": "fixtures/samples/cxx/main.cpp",
+      "tier": "pr",
+      "required": true,
+      "execution": "native-linux"
+    },
+    {
+      "id": "c-clang-glibc-pie",
+      "language": "c",
+      "toolchain": "llvm-clang",
+      "builder": "clang-c",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "pie",
+      "source": "fixtures/samples/c/main.c",
+      "tier": "pr",
+      "required": true,
+      "execution": "native-linux"
+    },
+    {
+      "id": "cxx-clang-glibc-pie",
+      "language": "c++",
+      "toolchain": "llvm-clang++",
+      "builder": "clang-cxx",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "pie",
+      "source": "fixtures/samples/cxx/main.cpp",
+      "tier": "pr",
+      "required": true,
+      "execution": "native-linux"
     },
     {
       "id": "rust-gnu",
       "language": "rust",
       "toolchain": "rustc",
+      "builder": "rust-gnu",
       "runtime": "glibc",
       "target": "aarch64-unknown-linux-gnu",
       "artifact": "pie",
-      "tier": "nightly"
+      "source": "fixtures/samples/rust/src/main.rs",
+      "tier": "pr",
+      "required": true,
+      "execution": "native-linux"
     },
     {
-      "id": "go-cgo",
+      "id": "go-pie",
       "language": "go",
       "toolchain": "go",
+      "builder": "go-pie",
       "runtime": "glibc",
       "target": "aarch64-linux-gnu",
       "artifact": "pie",
-      "tier": "nightly"
+      "source": "fixtures/samples/go/main.go",
+      "tier": "pr",
+      "required": true,
+      "execution": "native-linux"
+    },
+    {
+      "id": "c-musl-gcc-pie",
+      "language": "c",
+      "toolchain": "musl-gcc",
+      "builder": "musl-gcc",
+      "runtime": "musl",
+      "target": "aarch64-linux-musl",
+      "artifact": "pie",
+      "source": "fixtures/samples/c/main.c",
+      "tier": "nightly",
+      "required": false,
+      "execution": "native-linux"
     },
     {
       "id": "zig-musl",
       "language": "zig",
       "toolchain": "zig",
+      "builder": "zig-musl",
       "runtime": "musl",
       "target": "aarch64-linux-musl",
       "artifact": "pie",
-      "tier": "nightly"
+      "source": "fixtures/samples/zig/main.zig",
+      "tier": "nightly",
+      "required": false,
+      "execution": "native-linux"
     },
     {
       "id": "csharp-nativeaot",
       "language": "csharp",
       "toolchain": "dotnet-nativeaot",
+      "builder": "nativeaot",
       "runtime": "glibc",
       "target": "aarch64-linux-gnu",
       "artifact": "pie",
-      "tier": "nightly"
+      "source": "fixtures/samples/nativeaot/NativeAotFixture.csproj",
+      "tier": "nightly",
+      "required": false,
+      "execution": "native-linux"
+    },
+    {
+      "id": "android-ndk-jni",
+      "language": "c",
+      "toolchain": "android-ndk-clang",
+      "builder": "android-ndk",
+      "runtime": "bionic",
+      "target": "aarch64-linux-android",
+      "artifact": "apk-jni-shared-object",
+      "source": "fixtures/samples/android-jni",
+      "tier": "nightly",
+      "required": false,
+      "execution": "android-avd-tcg"
     }
   ]
 }
