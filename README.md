@@ -42,15 +42,17 @@ the baseline and copied output behavior are compared. Optional profiles are
 reported as `SKIP` with the reason; required PR profiles fail the job when
 their toolchain is missing or their output is invalid.
 
-The Android sample is an APK/JNI fixture. On the GitHub ARM64 runner it is
-attempted in an explicitly software-emulated ARM64 AVD:
+The Android sample is an APK/JNI fixture. On the GitHub x86_64 runner it is
+attempted in an explicitly software-emulated `arm64-v8a` AVD:
 
 ```sh
 ./scripts/run-android-avd.sh
 ```
 
-The script never claims physical-device or native-hardware validation. If the
-host lacks Android command-line tools, an emulator, or Gradle, it records an
+The script never claims physical-device or native-hardware validation. It is
+specifically intended to exercise bionic, the Android linker,
+`System.loadLibrary`, and JNI with an AArch64 native library. If the host lacks
+Android command-line tools, an emulator, or Gradle, it records an
 `ANDROID_AVD_UNAVAILABLE` report instead of silently skipping the capability.
 
 ## CLI

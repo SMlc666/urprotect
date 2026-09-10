@@ -74,27 +74,28 @@ jobs:
           path: android-container-probe.log
           if-no-files-found: warn
 
-  android-avd-tcg:
+  android-arm64-tcg-on-x64:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 35
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Run ARM64 AVD software-emulation E2E
+      - name: Run arm64-v8a AVD TCG E2E
         run: ./scripts/run-android-avd.sh
       - name: Upload Android AVD evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-avd-tcg-${{ github.run_id }}
-          path: .artifacts/android-avd-tcg/
+          name: android-arm64-tcg-on-x64-${{ github.run_id }}
+          path: .artifacts/android-arm64-tcg-on-x64/
           if-no-files-found: warn
 
   fixture-nightly:
