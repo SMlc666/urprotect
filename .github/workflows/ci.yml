@@ -84,6 +84,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Install Android emulator host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpulse0
+          dpkg-query -W libpulse0 | tee android-emulator-host-dependencies.txt
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -95,7 +100,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-arm64-tcg-on-x64-${{ github.run_id }}
-          path: .artifacts/android-arm64-tcg-on-x64/
+          path: |
+            .artifacts/android-arm64-tcg-on-x64/
+            android-emulator-host-dependencies.txt
           if-no-files-found: warn
 
   fixture-nightly:
