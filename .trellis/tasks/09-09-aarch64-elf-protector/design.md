@@ -165,6 +165,22 @@ Diagnostics should have stable machine-readable codes for malformed headers, tru
 
 Fixtures are small source programs with a manifest, not opaque checked-in binaries only. Each manifest record includes language, compiler distribution/version, linker, target triple, libc/runtime, flags, artifact kind, expected ELF features, and baseline behavior.
 
+The checked-in fixture manifest is schema version 2. Its covering set currently
+contains required PR profiles for GCC/Clang C and C++, Rust, and Go, plus
+optional nightly profiles for musl, Zig, NativeAOT, and Android NDK/JNI. The
+native runner builds each selected artifact on the ARM64 host, executes the
+baseline, validates and byte-copies it through the CLI, then compares baseline
+and no-op output exit status/stdout/stderr. Missing optional toolchains are
+reported as `SKIP`; missing required PR toolchains or invalid outputs fail.
+
+The Android fixture is a small Gradle/CMake APK with an arm64-v8a JNI library.
+`scripts/run-android-avd.sh` pins API 35, the `google_apis;arm64-v8a` system
+image, NDK 27.2, and an explicit `-no-accel` emulator mode. It installs the APK,
+starts `System.loadLibrary`, invokes JNI, and checks the expected logcat result.
+Missing Android command-line tools or Gradle are recorded as
+`ANDROID_AVD_UNAVAILABLE`; this is an informational feasibility result, not a
+physical-device or native-hardware claim.
+
 Priority profiles:
 
 - PR: representative GCC/Clang C/C++, one glibc and one musl profile, NDK JNI smoke, and one representative fixture for Rust, Go, Zig, and NativeAOT where supported by the pinned SDK.

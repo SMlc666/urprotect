@@ -62,3 +62,9 @@ Observed hosted-runner probe:
 
 - On the first GitHub ARM64 workflow dispatch, `aarch64`, Linux namespaces, and cgroups were available, but Binder/BinderFS, LXC, and a Wayland/headless compositor were absent.
 - The Android container probe therefore remains informational and non-gating. The workflow records the missing capabilities rather than claiming container E2E coverage or failing the Linux build/test gate.
+
+Fixture/AVD implementation evidence:
+
+- The ARM64 host has native GCC/Clang, Rust, and Go available in the current environment; Zig and musl tooling are optional and are reported explicitly when absent.
+- The Android AVD script records host architecture, page size, KVM absence, SDK/tool paths, emulator mode, logs, and APK artifacts. It uses `-no-accel` and never labels software emulation as native hardware.
+- The current environment has `adb` but no Android SDK manager, AVD manager, emulator, or Gradle, so the AVD path correctly emits `ANDROID_AVD_UNAVAILABLE` without claiming that the test ran.

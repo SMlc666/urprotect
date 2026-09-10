@@ -34,7 +34,11 @@ tests/
 benchmarks/
 └── UrProtect.Benchmarks/
 fixtures/
+└── samples/             # deterministic source programs and Android fixture
 scripts/
+├── run-fixture-matrix.sh
+├── run-android-avd.sh
+└── validate-fixtures.py
 third_party/
 └── AsmStone/             # pinned upstream source and attribution
 ```

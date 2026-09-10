@@ -74,3 +74,18 @@ Reviewers must check:
 - no-op output is byte-identical and atomically published;
 - CI records runner/toolchain/emulation metadata and does not hide failures;
 - tests cover the changed behavior and the relevant rejection path.
+
+## Fixture and Android CI Contract
+
+The manifest at `fixtures/manifest.json` is the single source of truth for
+language/toolchain profiles. `scripts/validate-fixtures.py` must reject
+duplicate/unsafe IDs, missing fields, unsupported tiers, and source paths that
+escape the repository. `scripts/run-fixture-matrix.sh` must execute selected
+native profiles only on `aarch64`, validate/copy every produced ELF through the
+CLI, and compare baseline/no-op exit status and stdout/stderr. Optional profile
+toolchain failures are explicit `SKIP` records; required PR profile failures
+fail the job.
+
+The Android script uses an `arm64-v8a` API 35 AVD with `-no-accel`. Missing SDK,
+AVD, emulator, or Gradle tools produces `ANDROID_AVD_UNAVAILABLE` evidence; it
+must not be presented as physical-device or native-hardware validation.

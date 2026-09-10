@@ -108,11 +108,11 @@ cmp original.elf output.elf
 
 ## 7. Fixture generation and runtime harness
 
-- [ ] Add a manifest schema containing language, toolchain, linker, target triple, runtime, flags, artifact kind, expected features, and behavior oracle.
-- [ ] Implement minimal C/C++ GCC and Clang fixtures first.
-- [ ] Add musl, Rust, Go, Zig, NativeAOT, and NDK/JNI fixtures according to the priority matrix.
-- [ ] Keep source fixtures small and deterministic; store generated binaries only when required for regression or provenance.
-- [ ] Implement baseline and output execution with captured exit code, stdout, stderr, generated files, signals, and Android JNI results.
+- [x] Add a manifest schema containing language, toolchain, linker, target triple, runtime, flags, artifact kind, expected features, and behavior oracle.
+- [x] Implement minimal C/C++ GCC and Clang fixtures first.
+- [x] Add musl, Rust, Go, Zig, NativeAOT, and NDK/JNI fixtures according to the priority matrix.
+- [x] Keep source fixtures small and deterministic; store generated binaries only when required for regression or provenance.
+- [x] Implement baseline and output execution with captured exit code, stdout, stderr, generated files, signals, and Android JNI results.
 - [ ] Add `readelf`/`llvm-readelf` structural oracle comparisons without making those tools runtime dependencies.
 
 Validation:
@@ -127,7 +127,7 @@ dotnet test --filter Category=Fixtures
 - [ ] Add explicit native ARM64 Linux jobs for glibc and the pinned ARM64 musl container.
 - [ ] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
 - [ ] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching image hashes.
-- [ ] Add ARM64 AVD software-emulation smoke only with explicit `tcg`/`software` labeling and no KVM assumption.
+- [x] Add ARM64 AVD software-emulation smoke only with explicit `tcg`/`software` labeling and no KVM assumption.
 - [ ] Fail required jobs when a claimed runtime profile silently falls back to an unsupported execution mode.
 - [ ] Upload logs, environment manifests, failing binaries/APKs, minimized inputs, and linker output.
 
