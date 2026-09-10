@@ -112,7 +112,15 @@ sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 if [[ -z "${sdk_root}" ]]; then
   sdk_root="$(cd "$(dirname "${sdkmanager}")/../../.." && pwd)"
 fi
+runner_temp="${RUNNER_TEMP:-${repo_root}/.artifacts}"
+avd_home="${runner_temp}/urprotect-android-avd"
+sdk_home="${runner_temp}/urprotect-android-sdk-home"
+mkdir -p "${avd_home}" "${sdk_home}"
+export ANDROID_AVD_HOME="${avd_home}"
+export ANDROID_SDK_HOME="${sdk_home}"
 echo "android_sdk=${sdk_root}" | tee -a "${report}"
+echo "android_avd_home=${ANDROID_AVD_HOME}" | tee -a "${report}"
+echo "android_sdk_home=${ANDROID_SDK_HOME}" | tee -a "${report}"
 echo "system_image=${system_image}" | tee -a "${report}"
 echo "ndk_version=${ndk_version}" | tee -a "${report}"
 echo "cmake_version=${cmake_version}" | tee -a "${report}"
@@ -170,7 +178,13 @@ fi
 timeout 15 "${emulator}" -accel-check > "${artifact_root}/accel-check.txt" 2>&1 || true
 
 echo "no" | timeout 60 "${avdmanager}" create avd --force --name "${avd_name}" \
-  --package "${system_image}" --device "pixel_2" > "${artifact_root}/avd-create.log" 2>&1
+  --package "${system_image}" > "${artifact_root}/avd-create.log" 2>&1
+timeout 30 "${avdmanager}" list avd > "${artifact_root}/avd-list.log" 2>&1
+if ! grep -q "Name: ${avd_name}" "${artifact_root}/avd-list.log"; then
+  echo "Android AVD was not created: ${avd_name}" >&2
+  cat "${artifact_root}/avd-list.log" >&2
+  exit 1
+fi
 
 timeout 300 "${gradle}" --no-daemon --console=plain \
   -p "${repo_root}/fixtures/samples/android-jni" :app:assembleDebug
