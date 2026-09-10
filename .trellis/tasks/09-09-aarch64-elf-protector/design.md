@@ -175,7 +175,7 @@ reported as `SKIP`; missing required PR toolchains or invalid outputs fail.
 
 The Android fixture is a small Gradle/CMake APK with an arm64-v8a JNI library.
 `scripts/run-android-avd.sh` pins API 35, the `google_apis;arm64-v8a` system
-image, NDK 27.2, and an explicit `-no-accel` emulator mode. It installs the APK,
+image, NDK 27.2, and an explicit `-accel off` emulator mode on an x86_64 host. It installs the APK,
 starts `System.loadLibrary`, invokes JNI, and checks the expected logcat result.
 Missing Android command-line tools or Gradle are recorded as
 `ANDROID_AVD_UNAVAILABLE`; this is an informational feasibility result, not a
@@ -195,7 +195,7 @@ Android jobs are separate:
 
 1. Static APK/ELF inspection always runs.
 2. An ARM64 Waydroid-like container is attempted only after a capability probe confirms Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching ARM64 system/vendor images.
-3. An ARM64 AVD in software emulation is labeled `tcg`/`software` and never treated as physical or native-hardware validation.
+3. An `x86_64` GitHub runner hosts an `arm64-v8a` AVD in TCG software emulation for bionic/linker/JNI coverage. It is labeled `android-arm64-tcg-on-x64`, starts with `-accel off`, uses software graphics, and never counts as physical or native-hardware validation.
 
 Both Android runtime modes must install a test APK and exercise the real library-loading/JNI path. If the container cannot run on the hosted kernel, the failure is visible and the project does not claim container E2E coverage.
 
@@ -204,7 +204,9 @@ an AArch64 host, namespaces, and cgroups but does not expose Binder/BinderFS,
 LXC, or a Wayland/headless compositor. Until a supported runner or explicit
 container image strategy supplies those capabilities, the container workflow is
 an informational, non-gating capability probe; Linux build/test and benchmark
-jobs remain independent of it.
+jobs remain independent of it. The x86_64 TCG path is the separate Android
+runtime experiment because GitHub's x86_64 image is the practical place to
+obtain Android SDK/emulator host tools; its guest ABI remains `arm64-v8a`.
 
 ## 8. CI, Coverage, Fuzzing, and Benchmarks
 

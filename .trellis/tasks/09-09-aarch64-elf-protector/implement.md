@@ -128,6 +128,7 @@ dotnet test --filter Category=Fixtures
 - [ ] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
 - [ ] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching image hashes.
 - [x] Add ARM64 AVD software-emulation smoke only with explicit `tcg`/`software` labeling and no KVM assumption.
+- [ ] Add x86_64-hosted `arm64-v8a` TCG E2E for bionic, Android linker, `System.loadLibrary`, and JNI; keep it nightly/manual/release until stability is demonstrated.
 - [ ] Fail required jobs when a claimed runtime profile silently falls back to an unsupported execution mode.
 - [ ] Upload logs, environment manifests, failing binaries/APKs, minimized inputs, and linker output.
 

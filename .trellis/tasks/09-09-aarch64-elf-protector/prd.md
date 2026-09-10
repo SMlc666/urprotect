@@ -20,7 +20,7 @@ The tool should provide a conservative, reproducible way to analyze and safely p
 - Initial input boundary: ELF64 little-endian `EM_AARCH64` user-space binaries, limited to `ET_DYN` PIE executables and dynamically linked shared objects; both stripped and unstripped inputs are in scope.
 - No-op output: when the infrastructure pipeline emits an output artifact, it must be byte-for-byte identical to the validated input; it must not rebuild or discard unmodeled data.
 - Execution infrastructure: GitHub-hosted ARM64 runners are the official native Linux execution environment; no contributed physical Linux or Android devices are assumed.
-- Android constraints: GitHub ARM64 runners are assumed not to provide KVM. Android validation may use an ARM64 Android container (Waydroid-like) and an ARM64 AVD in software emulation, with each mode labeled accurately.
+- Android constraints: GitHub ARM64 runners are assumed not to provide KVM or a usable Android SDK/emulator stack. Android validation may use an ARM64 Android container (Waydroid-like) and an `x86_64` GitHub runner hosting an `arm64-v8a` AVD in TCG software emulation, with each mode labeled accurately.
 - CI quality: E2E behavior, compiler/toolchain coverage, benchmarks, coverage, fuzzing, reproducibility, and failure artifacts are first-class requirements.
 - MVP behavior: provide parsing, structural validation, address/control-flow analysis foundations, AsmStone integration, and a safe no-op validation pipeline; defer all actual protection transformations.
 - Dependency policy: pin AsmStone and all compiler, SDK, NDK, image, and container inputs; preserve relevant licenses and provenance.
@@ -50,7 +50,7 @@ For every required runtime profile, the test flow must build a baseline artifact
 
 ### R6. Android execution tiers
 
-The CI plan must distinguish static Android ELF/APK validation, ARM64 Android container validation, and ARM64 AVD software-emulation validation. A container job is eligible for the primary bionic E2E gate only after checking Binder/BinderFS, namespaces/cgroups, LXC, headless Wayland/graphics prerequisites, and matching ARM64 system/vendor images. AVD software emulation must never be labeled as native hardware validation.
+The CI plan must distinguish static Android ELF/APK validation, ARM64 Android container validation, and `x86_64` host plus `arm64-v8a` AVD TCG validation. The AVD path is specifically intended to exercise bionic, the Android linker, `System.loadLibrary`, and JNI with an AArch64 native library; it must use `-accel off`/software rendering and be placed in nightly/manual/release tiers rather than the fast PR gate until runtime is proven stable. A container job is eligible for the primary bionic E2E gate only after checking Binder/BinderFS, namespaces/cgroups, LXC, headless Wayland/graphics prerequisites, and matching ARM64 system/vendor images. Neither TCG nor container execution may be labeled as native hardware validation.
 
 ### R7. CI and reproducibility
 

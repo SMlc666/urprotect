@@ -86,6 +86,8 @@ CLI, and compare baseline/no-op exit status and stdout/stderr. Optional profile
 toolchain failures are explicit `SKIP` records; required PR profile failures
 fail the job.
 
-The Android script uses an `arm64-v8a` API 35 AVD with `-no-accel`. Missing SDK,
-AVD, emulator, or Gradle tools produces `ANDROID_AVD_UNAVAILABLE` evidence; it
-must not be presented as physical-device or native-hardware validation.
+The Android script uses an `arm64-v8a` API 35 AVD on an x86_64 runner with
+`-accel off` and software graphics. Missing SDK, AVD, emulator, or Gradle tools
+produces `ANDROID_AVD_UNAVAILABLE` evidence; boot, install, ABI, linker, or JNI
+failures remain test failures. The result must not be presented as
+physical-device or native-hardware validation.

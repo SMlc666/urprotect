@@ -55,7 +55,7 @@ Planning conclusions:
 
 - Use an explicit versioned ARM64 Linux label such as `ubuntu-24.04-arm`, subject to availability for the repository and current GitHub image policy.
 - The native Linux gate must run directly on the ARM64 host; an x86 runner plus QEMU is not an equivalent result.
-- Android ARM64 AVD software emulation is a separate profile and must be labeled as software emulation. The project does not claim physical Android device support.
+- Android ARM64 AVD software emulation is a separate profile and must be labeled as software emulation. The project does not claim physical Android device support. The planned runtime experiment uses an x86_64 host with an `arm64-v8a` guest in TCG mode.
 - Runner, kernel, libc, page size, toolchain, and acceleration-mode metadata must be retained with every compatibility result.
 
 Observed hosted-runner probe:
@@ -66,5 +66,5 @@ Observed hosted-runner probe:
 Fixture/AVD implementation evidence:
 
 - The ARM64 host has native GCC/Clang, Rust, and Go available in the current environment; Zig and musl tooling are optional and are reported explicitly when absent.
-- The Android AVD script records host architecture, page size, KVM absence, SDK/tool paths, emulator mode, logs, and APK artifacts. It uses `-no-accel` and never labels software emulation as native hardware.
-- The current environment has `adb` but no Android SDK manager, AVD manager, emulator, or Gradle, so the AVD path correctly emits `ANDROID_AVD_UNAVAILABLE` without claiming that the test ran.
+- The Android AVD script records host architecture, page size, KVM status, SDK/tool paths, emulator mode, logs, and APK artifacts. The guest path uses `arm64-v8a`, `-accel off`, and software graphics; it never labels TCG as native hardware.
+- The current ARM64 environment has `adb` but no Android SDK manager, AVD manager, emulator, or Gradle, so the ARM64-hosted probe correctly emits `ANDROID_AVD_UNAVAILABLE`. The runtime experiment should target a GitHub x86_64 runner, where Android host tools are practical, while keeping the guest image `arm64-v8a`.
