@@ -122,8 +122,12 @@ if ! timeout 15 "${sdkmanager}" --version > "${artifact_root}/sdkmanager-version
   report_unavailable "sdkmanager version probe failed"
   exit 0
 fi
-if ! timeout 15 "${avdmanager}" --help > "${artifact_root}/avdmanager-help.txt" 2>&1; then
-  report_unavailable "avdmanager help probe failed"
+set +e
+timeout 15 "${avdmanager}" --help > "${artifact_root}/avdmanager-help.txt" 2>&1
+avdmanager_help_status=$?
+set -e
+if ! grep -qE 'Usage:|Valid actions' "${artifact_root}/avdmanager-help.txt"; then
+  report_unavailable "avdmanager help probe failed (status ${avdmanager_help_status})"
   exit 0
 fi
 if ! timeout 15 "${gradle}" --version > "${artifact_root}/gradle-version.txt" 2>&1; then
