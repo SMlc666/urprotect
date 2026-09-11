@@ -131,7 +131,7 @@ dotnet test --filter Category=Fixtures
 - [x] Add x86_64-hosted x86_64-guest TCG E2E with the `arm64-v8a` native bridge for bionic, Android linker, `System.loadLibrary`, and JNI; keep it nightly/manual/release until stability is demonstrated. A full ARM64 Android guest remains a separate capability target because the released emulator rejects it on x86_64 hosts.
 - [x] Add lockfile-keyed NuGet caching to all .NET CI jobs and an exact-package Android SDK cache to the x86_64 native-bridge job; keep Gradle caching owned by `setup-gradle` and exclude build outputs/AVD state.
 - [x] Cancel superseded CI runs and report Android SDK cache hit/miss status in the workflow summary.
-- [ ] Measure cache hit rate and job timing across several scheduled/manual runs before considering clean AVD snapshot caching.
+- [x] Measure cache hit rate and job timing across several scheduled/manual runs before considering clean AVD snapshot caching. The writable SDK-root cache reached an exact 3.0 GB hit on run `34594255238`; all jobs passed, while the Android TCG/JNI step remained dominated by the cold guest boot.
 - [ ] Fail required jobs when a claimed runtime profile silently falls back to an unsupported execution mode.
 - [ ] Upload logs, environment manifests, failing binaries/APKs, minimized inputs, and linker output.
 

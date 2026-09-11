@@ -125,7 +125,7 @@ jobs:
           {
             echo '## CI cache status'
             echo
-            echo 'Android SDK cache hit: `${{ steps.android-sdk-cache.outputs.cache-hit }}`'
+            echo "Android SDK cache hit: \`${{ steps['android-sdk-cache'].outputs['cache-hit'] }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: gradle/actions/setup-gradle@v4
         with:

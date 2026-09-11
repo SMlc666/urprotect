@@ -68,7 +68,9 @@ the pinned command-line tools, API 35 emulator, platform-tools, build-tools,
 CMake, NDK, and x86_64 Google APIs system-image directories. Build outputs,
 APKs, and AVD runtime state are intentionally not cached. Android cache
 hit/miss status is reported in the workflow summary; clean AVD snapshot caching
-remains deferred until it has a deterministic reset contract.
+remains deferred until it has a deterministic reset contract. The SDK cache
+uses a writable runner-temp root rather than the root-owned preinstalled SDK;
+this avoids tar permission failures during cache restore.
 
 ## CLI
 
