@@ -215,7 +215,7 @@ Android jobs are separate:
 2. An ARM64 Waydroid-like container is attempted only after a capability probe confirms Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching ARM64 system/vendor images.
 3. An `x86_64` GitHub runner hosts an x86_64 AVD in TCG software emulation for bionic/linker/JNI coverage, with the AArch64 library loaded through `libndk_translation.so`. It is labeled `android-arm64-native-bridge-on-x64`, starts with `-accel off`, uses software graphics, and never counts as physical, native-hardware, or full ARM64-guest validation.
 
-Both Android runtime modes must install a test APK and exercise the real library-loading/JNI path. If the container cannot run on the hosted kernel, the failure is visible and the project does not claim container E2E coverage.
+Both Android runtime modes must install a test APK and exercise the real library-loading/JNI path. If the container cannot run on the hosted kernel, the failure is visible and the project does not claim container E2E coverage. Because software-emulated AVD boot is slow, the native-bridge job is opt-in for manual workflow dispatches and automatic for scheduled runs; it must not block the core build/test or fixture jobs when omitted.
 
 The initial GitHub ARM64 hosted-runner probe confirmed that the runner provides
 an AArch64 host, namespaces, and cgroups but does not expose Binder/BinderFS,

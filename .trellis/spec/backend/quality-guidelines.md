@@ -98,6 +98,11 @@ install, ABI, native-bridge, linker, or JNI failures remain test failures. The
 result must not be presented as physical-device, native-hardware, or full
 ARM64-guest validation.
 
+The slow native-bridge AVD job is optional on manual `workflow_dispatch` runs:
+the `run_android_native_bridge` boolean input defaults to `false`. Scheduled
+runs retain automatic Android coverage, while core build/test and fixture jobs
+must remain independent of the optional AVD job.
+
 ## CI Cache Contract
 
 `actions/setup-dotnet` owns the NuGet cache for every job that restores the

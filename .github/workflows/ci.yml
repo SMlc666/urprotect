@@ -4,6 +4,14 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_android_native_bridge:
+        description: >-
+          Run the slow x86_64 Android AVD native-bridge E2E (scheduled runs
+          always execute it).
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 3 * * *'
 
@@ -85,8 +93,9 @@ jobs:
           path: android-container-probe.log
           if-no-files-found: warn
 
+  # Scheduled runs exercise this slow path; manual runs opt in explicitly.
   android-arm64-native-bridge-on-x64:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_android_native_bridge == true)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:

@@ -61,6 +61,12 @@ native-bridge translation path. If the host lacks Android command-line tools,
 an emulator, or Gradle, it records an `ANDROID_AVD_UNAVAILABLE` report instead
 of silently skipping the capability.
 
+The native-bridge AVD job is intentionally optional for manual CI runs because
+software-emulated boot can take many minutes. Scheduled runs execute it
+automatically; use the `run_android_native_bridge` workflow-dispatch input to
+opt in when manually validating the Android path. Core build/test and native
+fixture jobs do not depend on this optional job.
+
 ## CI Cache Policy
 
 CI caches NuGet packages from the pinned project lock files, while
