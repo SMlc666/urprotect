@@ -83,6 +83,8 @@ skip_or_fail() {
 run_binary_case() {
   local id="$1"
   local binary="$2"
+  local launcher="${3:-}"
+  local library_path="${4:-}"
   local case_root="${artifact_root}/${id}"
   local copy="${case_root}/no-op-copy"
   local baseline_stdout="${case_root}/baseline.stdout"
@@ -96,8 +98,13 @@ run_binary_case() {
   file "${binary}" > "${case_root}/file.txt"
   readelf -hW -lW -dW "${binary}" > "${case_root}/readelf.txt" 2>&1 || true
 
+  local -a run_command=("${binary}")
+  if [[ -n "${launcher}" ]]; then
+    run_command=(env "LD_LIBRARY_PATH=${library_path}" "${launcher}" "${binary}")
+  fi
+
   set +e
-  timeout "${run_timeout}" "${binary}" >"${baseline_stdout}" 2>"${baseline_stderr}"
+  timeout "${run_timeout}" "${run_command[@]}" >"${baseline_stdout}" 2>"${baseline_stderr}"
   local baseline_status=$?
   set -e
   printf '%s\n' "${baseline_status}" > "${baseline_status_file}"
@@ -110,8 +117,13 @@ run_binary_case() {
     > "${case_root}/validator.stdout" 2> "${case_root}/validator.stderr"
   cmp -- "${binary}" "${copy}"
 
+  if [[ -n "${launcher}" ]]; then
+    run_command=(env "LD_LIBRARY_PATH=${library_path}" "${launcher}" "${copy}")
+  else
+    run_command=("${copy}")
+  fi
   set +e
-  timeout "${run_timeout}" "${copy}" >"${output_stdout}" 2>"${output_stderr}"
+  timeout "${run_timeout}" "${run_command[@]}" >"${output_stdout}" 2>"${output_stderr}"
   local output_status=$?
   set -e
   printf '%s\n' "${output_status}" > "${output_status_file}"
@@ -127,7 +139,7 @@ run_binary_case() {
 
 build_profile() {
   local profile_json="$1"
-  local id language builder source output_dir binary
+  local id language builder source output_dir binary launcher library_path musl_root
   id="$(profile_value "${profile_json}" id)"
   language="$(profile_value "${profile_json}" language)"
   builder="$(profile_value "${profile_json}" builder)"
@@ -158,6 +170,13 @@ build_profile() {
       ;;
     musl-gcc)
       has_tool musl-gcc || { skip_or_fail "${profile_json}" "musl-gcc is unavailable"; return; }
+      musl_root="${MUSL_TOOLCHAIN_ROOT:-$(cd "$(dirname "$(command -v musl-gcc)")/.." && pwd)}"
+      launcher="${musl_root}/lib/ld-musl-aarch64.so.1"
+      library_path="${musl_root}/lib"
+      if [[ ! -x "${launcher}" ]]; then
+        skip_or_fail "${profile_json}" "musl loader is unavailable: ${launcher}"
+        return
+      fi
       musl-gcc -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
@@ -176,6 +195,13 @@ build_profile() {
       ;;
     zig-musl)
       has_tool zig || { skip_or_fail "${profile_json}" "zig is unavailable"; return; }
+      musl_root="${MUSL_TOOLCHAIN_ROOT:-}"
+      launcher="${musl_root}/lib/ld-musl-aarch64.so.1"
+      library_path="${musl_root}/lib"
+      if [[ -z "${musl_root}" || ! -x "${launcher}" ]]; then
+        skip_or_fail "${profile_json}" "musl loader is unavailable for Zig: ${launcher}"
+        return
+      fi
       zig build-exe "${source}" -target aarch64-linux-musl -O ReleaseSafe -fstrip \
         -femit-bin="${output_dir}/fixture"
       binary="${output_dir}/fixture"
@@ -210,7 +236,7 @@ build_profile() {
     echo "FAIL ${id}: builder did not produce executable ${binary}" >&2
     return 1
   fi
-  run_binary_case "${id}" "${binary}"
+  run_binary_case "${id}" "${binary}" "${launcher:-}" "${library_path:-}"
 }
 
 echo "Running fixture tier ${requested_profile} on $(uname -m)"

@@ -37,6 +37,7 @@ fixtures/
 └── samples/             # deterministic source programs and Android fixture
 scripts/
 ├── run-fixture-matrix.sh
+├── install-native-toolchains.sh
 ├── run-android-avd.sh
 └── validate-fixtures.py
 third_party/

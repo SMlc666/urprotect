@@ -101,7 +101,7 @@
       "artifact": "pie",
       "source": "fixtures/samples/c/main.c",
       "tier": "nightly",
-      "required": false,
+      "required": true,
       "execution": "native-linux"
     },
     {
@@ -114,7 +114,7 @@
       "artifact": "pie",
       "source": "fixtures/samples/zig/main.zig",
       "tier": "nightly",
-      "required": false,
+      "required": true,
       "execution": "native-linux"
     },
     {
@@ -127,7 +127,7 @@
       "artifact": "pie",
       "source": "fixtures/samples/nativeaot/NativeAotFixture.csproj",
       "tier": "nightly",
-      "required": false,
+      "required": true,
       "execution": "native-linux"
     },
     {

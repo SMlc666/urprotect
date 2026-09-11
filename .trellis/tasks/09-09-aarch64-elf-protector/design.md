@@ -167,11 +167,13 @@ Fixtures are small source programs with a manifest, not opaque checked-in binari
 
 The checked-in fixture manifest is schema version 2. Its covering set currently
 contains required PR profiles for GCC/Clang C and C++, Rust, and Go, plus
-optional nightly profiles for musl, Zig, NativeAOT, and Android NDK/JNI. The
+required nightly profiles for pinned native musl-gcc, Zig, and NativeAOT, and
+an optional Android NDK/JNI profile executed by the separate Android job. The
 native runner builds each selected artifact on the ARM64 host, executes the
 baseline, validates and byte-copies it through the CLI, then compares baseline
-and no-op output exit status/stdout/stderr. Missing optional toolchains are
-reported as `SKIP`; missing required PR toolchains or invalid outputs fail.
+and no-op output exit status/stdout/stderr. Missing required toolchains or
+invalid outputs fail; only the Android profile is intentionally delegated to
+its separately provisioned runtime job.
 
 The Android fixture is a small Gradle/CMake APK with an arm64-v8a JNI library.
 The released Android Emulator rejects a `google_apis;arm64-v8a` system image on
@@ -188,13 +190,19 @@ physical-device or native-hardware claim.
 
 Priority profiles:
 
-- PR: representative GCC/Clang C/C++, one glibc and one musl profile, NDK JNI smoke, and one representative fixture for Rust, Go, Zig, and NativeAOT where supported by the pinned SDK.
-- Nightly: compiler and linker version matrix, optimization/LTO, stripped/unstripped, TLS, C++ exceptions, constructors, `dlopen`, Go cgo, Rust musl, Zig musl, and expanded NDK/API profiles.
+- PR: representative GCC/Clang C/C++, one glibc profile, and representative Rust and Go fixtures.
+- Nightly: pinned native musl-gcc and Zig toolchains, NativeAOT, compiler and linker version matrix, optimization/LTO, stripped/unstripped, TLS, C++ exceptions, constructors, `dlopen`, Go cgo, Rust musl, Zig musl, and expanded NDK/API profiles. The Android NDK/JNI profile remains in the separate native-bridge job.
 - Release: all required profiles, reproducible rebuild checks, complete no-op identity checks, and full runtime E2E.
 
 The matrix is a covering set, not a Cartesian product. Apple LLVM is included only if a reproducible `aarch64-linux-*` toolchain produces ELF; normal Darwin output belongs to a future Mach-O project.
 
-Linux runtime jobs use a versioned GitHub-hosted ARM64 label, for example `ubuntu-24.04-arm`, with glibc on the host. Musl fixtures run from a pinned `linux/arm64` container on that ARM64 host; a QEMU fallback is not accepted for the native Linux gate.
+Linux runtime jobs use a versioned GitHub-hosted ARM64 label, for example
+`ubuntu-24.04-arm`, with glibc on the host. Nightly musl-gcc and Zig fixtures
+use pinned native ARM64 toolchain archives installed on that same runner; a
+QEMU fallback, glibc substitution, or host-architecture substitution is not
+accepted for the native Linux gate. A pinned `linux/arm64` container remains a
+future alternative only if its toolchain provenance and runtime behavior are
+equivalent and explicitly recorded.
 
 Android jobs are separate:
 

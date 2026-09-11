@@ -36,11 +36,13 @@ claiming a full language/toolchain Cartesian product:
 ```
 
 The native Linux fixture runner builds and executes C/C++ (GCC and LLVM/Clang),
-Rust, Go, Zig, and NativeAOT samples when the pinned/hosted toolchain is
-available. Each executable is validated and copied through the no-op CLI, then
-the baseline and copied output behavior are compared. Optional profiles are
-reported as `SKIP` with the reason; required PR profiles fail the job when
-their toolchain is missing or their output is invalid.
+Rust, Go, musl-gcc, Zig, and NativeAOT samples. Nightly ARM64 CI installs the
+musl-gcc and Zig toolchains from pinned, checksum-verified archives before
+running the required profiles. Each executable is validated and copied through
+the no-op CLI, then the baseline and copied output behavior are compared. A
+missing required toolchain or invalid output fails the job rather than falling
+back to glibc; only the Android profile is handled by the separate Android
+runtime job.
 
 The Android sample is an APK/JNI fixture. The released Android Emulator cannot
 boot an `arm64-v8a` system image on an x86_64 host, even with `-accel off`. On

@@ -145,7 +145,7 @@ jobs:
   fixture-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -158,6 +158,23 @@ jobs:
             src/UrProtect.Cli/packages.lock.json
             tests/UrProtect.Core.Tests/packages.lock.json
             benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Cache native ARM64 fixture toolchains
+        id: native-fixture-toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/urprotect-fixture-toolchains
+          key: native-fixture-toolchains-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-native-toolchains.sh') }}
+      - name: Install pinned native ARM64 fixture toolchains
+        run: |
+          mkdir -p .artifacts/fixtures/nightly
+          ./scripts/install-native-toolchains.sh | tee .artifacts/fixtures/nightly/toolchains.txt
+      - name: Record native fixture toolchain cache status
+        run: |
+          {
+            echo '## Native fixture toolchain cache'
+            echo
+            echo "Cache hit: \`${{ steps['native-fixture-toolchain-cache'].outputs['cache-hit'] }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Restore
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build

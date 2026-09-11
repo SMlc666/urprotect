@@ -10,8 +10,6 @@
     <DebugSymbols>false</DebugSymbols>
     <StripSymbols>true</StripSymbols>
     <PublishTrimmed>true</PublishTrimmed>
-    <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <AssemblyName>urprotect-fixture-nativeaot</AssemblyName>
   </PropertyGroup>
 </Project>

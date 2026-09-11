@@ -83,8 +83,11 @@ duplicate/unsafe IDs, missing fields, unsupported tiers, and source paths that
 escape the repository. `scripts/run-fixture-matrix.sh` must execute selected
 native profiles only on `aarch64`, validate/copy every produced ELF through the
 CLI, and compare baseline/no-op exit status and stdout/stderr. Optional profile
-toolchain failures are explicit `SKIP` records; required PR profile failures
-fail the job.
+toolchain failures are explicit `SKIP` records only for optional profiles;
+required nightly musl-gcc, Zig, and NativeAOT profiles fail the job. The
+nightly ARM64 job must install musl-gcc and Zig from pinned checksum-verified
+archives before invoking the matrix; it must not silently substitute glibc,
+QEMU, or another host architecture.
 
 The Android script uses an x86_64 API 35 AVD on an x86_64 runner with
 `-accel off` and software graphics. The APK contains only the `arm64-v8a`
