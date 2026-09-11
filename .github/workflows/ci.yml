@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: urprotect-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04-arm
@@ -19,6 +23,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
       - name: Record runner
         run: |
           uname -a
@@ -78,6 +89,9 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -90,6 +104,26 @@ jobs:
           sudo apt-get install -y --no-install-recommends libpulse0
           dpkg-query -W libpulse0 | tee android-emulator-host-dependencies.txt
       - uses: android-actions/setup-android@v3
+      - name: Cache Android SDK packages
+        id: android-sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_SDK_ROOT }}/emulator
+            ${{ env.ANDROID_SDK_ROOT }}/platform-tools
+            ${{ env.ANDROID_SDK_ROOT }}/platforms/android-35
+            ${{ env.ANDROID_SDK_ROOT }}/build-tools/35.0.0
+            ${{ env.ANDROID_SDK_ROOT }}/cmake/3.22.1
+            ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+            ${{ env.ANDROID_SDK_ROOT }}/system-images/android-35/google_apis/x86_64
+          key: android-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/manifest.json', 'scripts/run-android-avd.sh', '.github/workflows/ci.yml') }}
+      - name: Record Android SDK cache status
+        run: |
+          {
+            echo '## CI cache status'
+            echo
+            echo 'Android SDK cache hit: `${{ steps.android-sdk-cache.outputs.cache-hit }}`'
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -114,6 +148,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
       - name: Restore
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
@@ -137,5 +178,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
       - run: dotnet restore UrProtect.sln --locked-mode
       - run: dotnet run --project benchmarks/UrProtect.Benchmarks --configuration Release --no-restore

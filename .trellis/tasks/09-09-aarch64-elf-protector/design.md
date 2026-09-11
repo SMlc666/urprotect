@@ -239,6 +239,21 @@ Release:
 
 Infrastructure failures may be retried according to a bounded policy, but test failures must not be hidden by automatic retries or `allow_failure`.
 
+CI cache policy:
+
+- `actions/setup-dotnet` caches the global NuGet package folder from the pinned
+  SDK using `global.json` and every project lock file as dependencies.
+- `gradle/actions/setup-gradle` remains the sole owner of Gradle User Home
+  caching; a second overlapping Gradle cache is forbidden.
+- The Android native-bridge job caches only its pinned SDK package directories
+  (emulator, platform-tools, API 35 platform/build-tools, CMake 3.22.1, NDK
+  27.2.12479018, and the API 35 Google APIs x86_64 system image). The cache key
+  includes the runner OS/architecture, manifest/script inputs, and a cache
+  schema version.
+- Build outputs, APKs, `bin/obj`, and dirty AVD runtime state are not cached.
+  Cache hit/miss and timing data are reported in the workflow summary. AVD
+  snapshot caching is deferred until a clean snapshot contract is proven.
+
 ### Coverage and properties
 
 Coverage is measured for project code, not AsmStone internals. Critical modules use branch and error-path targets in addition to overall line coverage. Property tests cover range arithmetic, load-map round trips, dynamic-table bounds, relocation decoding, and byte identity. Malformed fixtures cover truncation, overflow, invalid segment relationships, unterminated strings, inconsistent table sizes, and unknown tags.

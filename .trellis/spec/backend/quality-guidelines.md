@@ -94,3 +94,18 @@ emulator, or Gradle tools produces `ANDROID_AVD_UNAVAILABLE` evidence; boot,
 install, ABI, native-bridge, linker, or JNI failures remain test failures. The
 result must not be presented as physical-device, native-hardware, or full
 ARM64-guest validation.
+
+## CI Cache Contract
+
+`actions/setup-dotnet` owns the NuGet cache for every job that restores the
+solution. Its key must hash `global.json` and all project `packages.lock.json`
+files, while restore remains `--locked-mode`. `gradle/actions/setup-gradle`
+owns Gradle caching; do not add a second cache for `~/.gradle`.
+
+The Android native-bridge job may cache only the pinned SDK package
+directories: emulator, platform-tools, API 35 platform/build-tools, CMake
+3.22.1, NDK 27.2.12479018, and the API 35 Google APIs x86_64 system image.
+The key must include the runner OS/architecture, manifest versions, and the
+cache schema version. Do not cache `bin/`, `obj/`, Gradle build outputs, APK
+outputs, or a running/dirty AVD. Cache hit/miss status belongs in the step
+summary so timing regressions remain visible.
