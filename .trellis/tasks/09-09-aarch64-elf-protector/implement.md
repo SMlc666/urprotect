@@ -77,7 +77,7 @@ Rollback point: keep metadata parsing read-only until all table-range tests are 
 - [x] Add the pinned AsmStone dependency behind a local adapter.
 - [x] Map decode outcomes into project-owned records and diagnostics.
 - [x] Scan only executable `PT_LOAD` file-backed bytes.
-- [ ] Add conservative entrypoint/symbol/relocation candidate discovery.
+- [x] Add conservative entrypoint/symbol/relocation candidate discovery.
 - [x] Classify the selected branch, PC-relative, literal, and common load/store instruction families.
 - [x] Preserve unknown instructions and unresolved indirect control flow as explicit boundaries.
 - [x] Add small contract vectors, not an exhaustive duplicate ISA suite.

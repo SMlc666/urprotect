@@ -49,6 +49,15 @@ public static class ElfParser
             return new ElfParseResult(null, diagnostics.ToArray());
         }
 
+        if (header.ProgramHeaderCount == ElfConstants.PnXnum
+            || (header.SectionHeaderOffset != 0
+                && (header.SectionHeaderCount == 0 || header.SectionNameIndex == ElfConstants.ShnXindex)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.UnsupportedExtendedNumbering,
+                "ELF extended table numbering is not supported by the initial parser boundary.");
+        }
+
         if (header.Machine != ElfConstants.MachineAarch64)
         {
             diagnostics.Error(
@@ -244,6 +253,13 @@ public static class ElfParser
                 memorySize,
                 alignment);
             result.Add(programHeader);
+            if (!programHeader.IsKnownType)
+            {
+                diagnostics.Warning(
+                    DiagnosticCode.UnknownProgramHeaderType,
+                    $"Program header {index} has unknown type 0x{type:X8}; it is preserved as raw metadata.",
+                    offset);
+            }
             ValidateProgramHeader(reader, programHeader, diagnostics);
         }
 

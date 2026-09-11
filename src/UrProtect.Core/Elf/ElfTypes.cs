@@ -15,6 +15,8 @@ public static class ElfConstants
     public const ushort SymbolEntrySize64 = 24;
     public const ushort RelaEntrySize64 = 24;
     public const ushort RelrEntrySize64 = 8;
+    public const ushort PnXnum = ushort.MaxValue;
+    public const ushort ShnXindex = ushort.MaxValue;
 
     public const uint PtNull = 0;
     public const uint PtLoad = 1;
@@ -105,6 +107,22 @@ public readonly record struct ElfHeader(
     public bool IsDynamic => Type == ElfConstants.TypeDyn;
 }
 
+public enum ProgramHeaderKind
+{
+    Unknown,
+    Null,
+    Load,
+    Dynamic,
+    Interp,
+    Note,
+    Phdr,
+    Tls,
+    GnuEhFrame,
+    GnuStack,
+    GnuRelro,
+    GnuProperty,
+}
+
 public readonly record struct ProgramHeader(
     uint Type,
     uint Flags,
@@ -115,6 +133,24 @@ public readonly record struct ProgramHeader(
     ulong MemorySize,
     ulong Alignment)
 {
+    public ProgramHeaderKind Kind => Type switch
+    {
+        ElfConstants.PtNull => ProgramHeaderKind.Null,
+        ElfConstants.PtLoad => ProgramHeaderKind.Load,
+        ElfConstants.PtDynamic => ProgramHeaderKind.Dynamic,
+        ElfConstants.PtInterp => ProgramHeaderKind.Interp,
+        ElfConstants.PtNote => ProgramHeaderKind.Note,
+        ElfConstants.PtPhdr => ProgramHeaderKind.Phdr,
+        ElfConstants.PtTls => ProgramHeaderKind.Tls,
+        ElfConstants.PtGnuEhFrame => ProgramHeaderKind.GnuEhFrame,
+        ElfConstants.PtGnuStack => ProgramHeaderKind.GnuStack,
+        ElfConstants.PtGnuRelro => ProgramHeaderKind.GnuRelro,
+        ElfConstants.PtGnuProperty => ProgramHeaderKind.GnuProperty,
+        _ => ProgramHeaderKind.Unknown,
+    };
+
+    public bool IsKnownType => Kind != ProgramHeaderKind.Unknown;
+
     public bool IsLoadable => Type == ElfConstants.PtLoad;
 
     public bool IsExecutable => (Flags & ElfConstants.PfX) != 0;

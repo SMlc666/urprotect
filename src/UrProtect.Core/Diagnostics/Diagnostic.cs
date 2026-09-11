@@ -19,6 +19,8 @@ public enum DiagnosticCode
     InvalidHeader,
     TableOutOfBounds,
     InvalidProgramHeader,
+    UnsupportedExtendedNumbering,
+    UnknownProgramHeaderType,
     InvalidSegment,
     InvalidAlignment,
     MissingLoadSegment,

@@ -139,6 +139,14 @@ public sealed class Aarch64Analyzer
             }
         }
 
+        foreach (var relocation in file.RelaRelocations)
+        {
+            if (relocation.Offset != 0)
+            {
+                starts.Add(relocation.Offset);
+            }
+        }
+
         foreach (var virtualAddress in starts)
         {
             var segment = file.LoadMap.Segments.FirstOrDefault(candidate =>

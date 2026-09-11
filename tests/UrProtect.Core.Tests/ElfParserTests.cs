@@ -71,6 +71,32 @@ public sealed class ElfParserTests
     }
 
     [Fact]
+    public void RejectsUnsupportedExtendedNumberingExplicitly()
+    {
+        var bytes = ElfFixture.MinimalPie();
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(56), ElfConstants.PnXnum);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnsupportedExtendedNumbering);
+    }
+
+    [Fact]
+    public void PreservesUnknownProgramHeaderTypesAsWarnings()
+    {
+        var bytes = ElfFixture.MinimalPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(64), 0x60000000);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Equal(ProgramHeaderKind.Unknown, result.File!.ProgramHeaders[0].Kind);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnknownProgramHeaderType);
+    }
+
+    [Fact]
     public void RejectsTruncatedInput()
     {
         var bytes = ElfFixture.MinimalPie()[..32];
