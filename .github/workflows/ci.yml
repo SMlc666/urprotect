@@ -28,6 +28,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/environment
+          ./.github/scripts/record-environment.sh \
+            .artifacts/environment/build-and-test.txt \
+            aarch64 native-linux-glibc
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -38,11 +44,6 @@ jobs:
             src/UrProtect.Cli/packages.lock.json
             tests/UrProtect.Core.Tests/packages.lock.json
             benchmarks/UrProtect.Benchmarks/packages.lock.json
-      - name: Record runner
-        run: |
-          uname -a
-          test "$(uname -m)" = "aarch64"
-          dotnet --info
       - name: Restore
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
@@ -61,6 +62,7 @@ jobs:
           path: |
             tests/**/TestResults/**
             .artifacts/fixtures/pr/
+            .artifacts/environment/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
           if-no-files-found: warn
@@ -100,6 +102,12 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Record Android host environment
+        run: |
+          mkdir -p .artifacts/android-arm64-native-bridge-on-x64
+          ./.github/scripts/record-environment.sh \
+            .artifacts/android-arm64-native-bridge-on-x64/host-environment.txt \
+            x86_64 android-arm64-native-bridge-on-x64
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -157,6 +165,12 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/fixtures/nightly
+          ./.github/scripts/record-environment.sh \
+            .artifacts/fixtures/nightly/environment-before-toolchains.txt \
+            aarch64 native-linux-fixture
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -177,6 +191,11 @@ jobs:
         run: |
           mkdir -p .artifacts/fixtures/nightly
           ./scripts/install-native-toolchains.sh | tee .artifacts/fixtures/nightly/toolchains.txt
+      - name: Record provisioned toolchain environment
+        run: |
+          ./.github/scripts/record-environment.sh \
+            .artifacts/fixtures/nightly/environment-after-toolchains.txt \
+            aarch64 native-linux-fixture
       - name: Record native fixture toolchain cache status
         run: |
           {
@@ -204,6 +223,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/benchmark
+          ./.github/scripts/record-environment.sh \
+            .artifacts/benchmark/environment.txt \
+            aarch64 native-linux-benchmark
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -216,3 +241,13 @@ jobs:
             benchmarks/UrProtect.Benchmarks/packages.lock.json
       - run: dotnet restore UrProtect.sln --locked-mode
       - run: dotnet run --project benchmarks/UrProtect.Benchmarks --configuration Release --no-restore
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ github.run_id }}
+          path: |
+            .artifacts/benchmark/
+            BenchmarkDotNet.Artifacts/
+            benchmarks/UrProtect.Benchmarks/BenchmarkDotNet.Artifacts/
+          if-no-files-found: warn

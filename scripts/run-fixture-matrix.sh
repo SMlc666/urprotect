@@ -96,7 +96,42 @@ run_binary_case() {
 
   mkdir -p "${case_root}"
   file "${binary}" > "${case_root}/file.txt"
-  readelf -hW -lW -dW "${binary}" > "${case_root}/readelf.txt" 2>&1 || true
+  if ! readelf -hW -lW -dW "${binary}" > "${case_root}/readelf.txt" 2>&1; then
+    echo "FAIL ${id}: readelf structural oracle could not inspect the ELF" >&2
+    return 1
+  fi
+  if ! python3 - "${case_root}/readelf.txt" "${id}" <<'PY'
+import pathlib
+import sys
+
+report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+profile_id = sys.argv[2]
+required = (
+    ("Class", "ELF64"),
+    ("Data", "2's complement, little endian"),
+    ("Machine", "AArch64"),
+)
+fields = {}
+for line in report.splitlines():
+    if ":" in line:
+        name, value = line.split(":", 1)
+        fields[name.strip()] = value.strip()
+missing = [f"{name}={value}" for name, value in required if fields.get(name) != value]
+if not fields.get("Type", "").startswith("DYN"):
+    missing.append("Type=DYN")
+if "There is no dynamic section in this file." in report:
+    missing.append("dynamic section")
+if missing:
+    print(
+        f"{profile_id}: readelf oracle mismatch; missing {', '.join(missing)}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+  then
+    echo "FAIL ${id}: readelf structural oracle rejected the supported ELF profile" >&2
+    return 1
+  fi
 
   local -a run_command=("${binary}")
   if [[ -n "${launcher}" ]]; then

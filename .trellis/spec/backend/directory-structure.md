@@ -40,6 +40,9 @@ scripts/
 ├── install-native-toolchains.sh
 ├── run-android-avd.sh
 └── validate-fixtures.py
+.github/scripts/
+├── check-android-container.sh
+└── record-environment.sh
 third_party/
 └── AsmStone/             # pinned upstream source and attribution
 ```

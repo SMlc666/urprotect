@@ -175,6 +175,11 @@ and no-op output exit status/stdout/stderr. Missing required toolchains or
 invalid outputs fail; only the Android profile is intentionally delegated to
 its separately provisioned runtime job.
 
+The fixture harness also invokes `readelf` as an external structural oracle.
+It records the report and rejects outputs that are not ELF64, little-endian,
+AArch64, dynamically typed `ET_DYN` files with a dynamic section. This oracle
+is a CI/test dependency only; the product parser remains self-owned.
+
 The Android fixture is a small Gradle/CMake APK with an arm64-v8a JNI library.
 The released Android Emulator rejects a `google_apis;arm64-v8a` system image on
 an x86_64 host before boot, so `scripts/run-android-avd.sh` pins an API 35
@@ -251,6 +256,15 @@ Release:
 ```
 
 Infrastructure failures may be retried according to a bounded policy, but test failures must not be hidden by automatic retries or `allow_failure`.
+
+Every native ARM64 build, fixture, and benchmark job invokes a repository-owned
+environment probe with an expected `aarch64` host. The report records the
+kernel, libc, page size, runner image, toolchain versions, and emulation
+indicators; an architecture mismatch fails before the job can claim native
+coverage. The Android native-bridge job records a separate `x86_64` host and
+the explicit TCG/native-bridge execution mode. Environment reports, logs, and
+failure outputs are uploaded with `if: always()` so a failed job retains its
+diagnostic context.
 
 CI cache policy:
 

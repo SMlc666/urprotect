@@ -89,6 +89,14 @@ nightly ARM64 job must install the pinned Ubuntu Noble musl packages and the
 checksum-verified Zig archive before invoking the matrix; it must not silently
 substitute glibc, QEMU, or another host architecture.
 
+Native Linux jobs must invoke `.github/scripts/record-environment.sh` with an
+expected `aarch64` host and retain its atomic key-value report as a CI artifact.
+The probe records the kernel, libc, page size, runner image, emulation
+indicators, and available tool versions; an architecture mismatch fails the
+job rather than being relabeled as native execution. The x86_64 Android
+native-bridge job records its separate `x86_64` host and explicit translated
+execution mode.
+
 The Android script uses an x86_64 API 35 AVD on an x86_64 runner with
 `-accel off` and software graphics. The APK contains only the `arm64-v8a`
 library, and the guest must expose `libndk_translation.so` plus the ARM64 ISA
@@ -102,6 +110,11 @@ The slow native-bridge AVD job is optional on manual `workflow_dispatch` runs:
 the `run_android_native_bridge` boolean input defaults to `false`. Scheduled
 runs retain automatic Android coverage, while core build/test and fixture jobs
 must remain independent of the optional AVD job.
+
+Fixture, benchmark, and Android jobs upload their environment and runtime
+evidence with `if: always()`. Build outputs and AVD state remain excluded from
+cache paths; failure artifacts may include logs, ELF/APK outputs, linker
+diagnostics, and toolchain manifests.
 
 ## CI Cache Contract
 

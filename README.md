@@ -67,6 +67,12 @@ automatically; use the `run_android_native_bridge` workflow-dispatch input to
 opt in when manually validating the Android path. Core build/test and native
 fixture jobs do not depend on this optional job.
 
+Native CI jobs retain an environment manifest with the host architecture,
+kernel/libc, page size, toolchain versions, and emulation indicators. Native
+ARM64 jobs fail if the runner is not `aarch64`; the Android native-bridge job
+records its x86_64 host and translated execution mode separately. Fixture,
+benchmark, and Android evidence is uploaded even when the job fails.
+
 ## CI Cache Policy
 
 CI caches NuGet packages from the pinned project lock files, while

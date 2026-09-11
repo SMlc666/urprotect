@@ -113,7 +113,7 @@ cmp original.elf output.elf
 - [x] Add musl, Rust, Go, Zig, NativeAOT, and NDK/JNI fixtures according to the priority matrix.
 - [x] Keep source fixtures small and deterministic; store generated binaries only when required for regression or provenance.
 - [x] Implement baseline and output execution with captured exit code, stdout, stderr, generated files, signals, and Android JNI results.
-- [ ] Add `readelf`/`llvm-readelf` structural oracle comparisons without making those tools runtime dependencies.
+- [x] Add a `readelf` structural oracle comparison for ELF64 little-endian AArch64 `ET_DYN` fixture outputs without making the tool a runtime dependency; `llvm-readelf` remains an optional cross-check.
 
 Validation:
 
@@ -126,7 +126,7 @@ dotnet test --filter Category=Fixtures
 
 - [ ] Add explicit native ARM64 Linux jobs for glibc and a separately pinned ARM64 musl runtime container; the current native-host fixture gate uses the checksum-verified musl toolchain archive below.
 - [x] Add pinned checksum-verified native ARM64 musl-gcc and Zig provisioning for the nightly fixture job; do not fall back to QEMU, glibc, or another host architecture.
-- [ ] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
+- [x] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
 - [ ] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching image hashes.
 - [x] Add ARM64 AVD software-emulation smoke only with explicit `tcg`/`software` labeling and no KVM assumption.
 - [x] Add x86_64-hosted x86_64-guest TCG E2E with the `arm64-v8a` native bridge for bionic, Android linker, `System.loadLibrary`, and JNI; keep it nightly/manual/release until stability is demonstrated. A full ARM64 Android guest remains a separate capability target because the released emulator rejects it on x86_64 hosts.
@@ -134,8 +134,8 @@ dotnet test --filter Category=Fixtures
 - [x] Add lockfile-keyed NuGet caching to all .NET CI jobs and an exact-package Android SDK cache to the x86_64 native-bridge job; keep Gradle caching owned by `setup-gradle` and exclude build outputs/AVD state.
 - [x] Cancel superseded CI runs and report Android SDK cache hit/miss status in the workflow summary.
 - [x] Measure cache hit rate and job timing across several scheduled/manual runs before considering clean AVD snapshot caching. The writable SDK-root cache reached an exact 3.0 GB hit on run `34594255238`; all jobs passed, while the Android TCG/JNI step remained dominated by the cold guest boot.
-- [ ] Fail required jobs when a claimed runtime profile silently falls back to an unsupported execution mode.
-- [ ] Upload logs, environment manifests, failing binaries/APKs, minimized inputs, and linker output.
+- [x] Fail required jobs when a claimed runtime profile silently falls back to an unsupported execution mode; native jobs enforce host architecture and the Android script verifies its explicit translated execution mode.
+- [x] Upload logs, environment manifests, failing binaries/APKs, and linker output from fixture, benchmark, and Android jobs; minimized parser/fuzz inputs remain part of the fuzzing work below.
 
 Validation:
 
