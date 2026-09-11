@@ -191,7 +191,12 @@ physical-device or native-hardware claim.
 Priority profiles:
 
 - PR: representative GCC/Clang C/C++, one glibc profile, and representative Rust and Go fixtures.
-- Nightly: pinned native musl-gcc and Zig toolchains, NativeAOT, compiler and linker version matrix, optimization/LTO, stripped/unstripped, TLS, C++ exceptions, constructors, `dlopen`, Go cgo, Rust musl, Zig musl, and expanded NDK/API profiles. The Android NDK/JNI profile remains in the separate native-bridge job.
+- Nightly: pinned native musl-gcc (Ubuntu Noble `musl`, `musl-dev`, and
+  `musl-tools` version `1.2.4-2`) and Zig 0.13.0 toolchains, NativeAOT,
+  compiler and linker version matrix, optimization/LTO, stripped/unstripped,
+  TLS, C++ exceptions, constructors, `dlopen`, Go cgo, Rust musl, Zig musl,
+  and expanded NDK/API profiles. The Android NDK/JNI profile remains in the
+  separate native-bridge job.
 - Release: all required profiles, reproducible rebuild checks, complete no-op identity checks, and full runtime E2E.
 
 The matrix is a covering set, not a Cartesian product. Apple LLVM is included only if a reproducible `aarch64-linux-*` toolchain produces ELF; normal Darwin output belongs to a future Mach-O project.

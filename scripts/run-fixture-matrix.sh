@@ -171,8 +171,8 @@ build_profile() {
     musl-gcc)
       has_tool musl-gcc || { skip_or_fail "${profile_json}" "musl-gcc is unavailable"; return; }
       musl_root="${MUSL_TOOLCHAIN_ROOT:-$(cd "$(dirname "$(command -v musl-gcc)")/.." && pwd)}"
-      launcher="${musl_root}/lib/ld-musl-aarch64.so.1"
-      library_path="${musl_root}/lib"
+      launcher="${MUSL_TOOLCHAIN_LOADER:-${musl_root}/lib/ld-musl-aarch64.so.1}"
+      library_path="${MUSL_TOOLCHAIN_LIBRARY_PATH:-${musl_root}/lib}"
       if [[ ! -x "${launcher}" ]]; then
         skip_or_fail "${profile_json}" "musl loader is unavailable: ${launcher}"
         return
@@ -196,8 +196,8 @@ build_profile() {
     zig-musl)
       has_tool zig || { skip_or_fail "${profile_json}" "zig is unavailable"; return; }
       musl_root="${MUSL_TOOLCHAIN_ROOT:-}"
-      launcher="${musl_root}/lib/ld-musl-aarch64.so.1"
-      library_path="${musl_root}/lib"
+      launcher="${MUSL_TOOLCHAIN_LOADER:-${musl_root}/lib/ld-musl-aarch64.so.1}"
+      library_path="${MUSL_TOOLCHAIN_LIBRARY_PATH:-${musl_root}/lib}"
       if [[ -z "${musl_root}" || ! -x "${launcher}" ]]; then
         skip_or_fail "${profile_json}" "musl loader is unavailable for Zig: ${launcher}"
         return

@@ -65,7 +65,7 @@ Observed hosted-runner probe:
 
 Fixture/AVD implementation evidence:
 
-- The ARM64 host has native GCC/Clang, Rust, and Go available. CI installs pinned native ARM64 musl-gcc (musl.cc archive with SHA-512 verification) and Zig 0.13.0 (official tarball with SHA-256 verification); their nightly profiles are required and fail closed if installation or execution is unavailable.
+- The ARM64 host has native GCC/Clang, Rust, and Go available. CI installs pinned native ARM64 musl packages (`musl`, `musl-dev`, and `musl-tools` version `1.2.4-2`) from Ubuntu Noble and Zig 0.13.0 from the official tarball with SHA-256 verification; their nightly profiles are required and fail closed if installation or execution is unavailable.
 - The Android AVD script records host architecture, page size, KVM status, SDK/tool paths, emulator mode, native-bridge properties, logs, and APK artifacts. The guest path uses an x86_64 system image, `-accel off`, and software graphics; it never labels TCG/native bridge as native hardware or a full ARM64 guest.
 - The current ARM64 environment has `adb` but no Android SDK manager, AVD manager, emulator, or Gradle, so the ARM64-hosted probe correctly emits `ANDROID_AVD_UNAVAILABLE`. The runtime experiment targets a GitHub x86_64 runner, where Android host tools are practical, and keeps the APK library ABI `arm64-v8a` while using the x86_64 image's native bridge.
 - The first x86_64 hosted attempt installed the Android host tooling successfully; its initial unavailable result was caused by probing unsupported `avdmanager --version`, not by missing SDK infrastructure. Use `avdmanager --help` for the capability probe before creating the AVD.
