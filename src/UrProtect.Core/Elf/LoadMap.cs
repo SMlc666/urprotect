@@ -36,6 +36,46 @@ public sealed class LoadMap
 
     public IReadOnlyList<LoadSegment> Segments => segments;
 
+    public bool TryFileOffsetToVirtualAddress(
+        FileOffset fileOffset,
+        ulong size,
+        out VirtualAddress virtualAddress)
+    {
+        if (TryFileOffsetToVirtualAddress(fileOffset.Value, size, out var rawAddress))
+        {
+            virtualAddress = new VirtualAddress(rawAddress);
+            return true;
+        }
+
+        virtualAddress = default;
+        return false;
+    }
+
+    public bool TryFileOffsetToVirtualAddress(
+        FileOffset fileOffset,
+        out VirtualAddress virtualAddress) =>
+        TryFileOffsetToVirtualAddress(fileOffset, 1, out virtualAddress);
+
+    public bool TryVirtualAddressToFileOffset(
+        VirtualAddress virtualAddress,
+        ulong size,
+        out FileOffset fileOffset)
+    {
+        if (TryVirtualAddressToFileOffset(virtualAddress.Value, size, out var rawOffset))
+        {
+            fileOffset = new FileOffset(rawOffset);
+            return true;
+        }
+
+        fileOffset = default;
+        return false;
+    }
+
+    public bool TryVirtualAddressToFileOffset(
+        VirtualAddress virtualAddress,
+        out FileOffset fileOffset) =>
+        TryVirtualAddressToFileOffset(virtualAddress, 1, out fileOffset);
+
     public static LoadMap Create(IEnumerable<ProgramHeader> programHeaders)
     {
         ArgumentNullException.ThrowIfNull(programHeaders);
@@ -133,9 +173,39 @@ public sealed class LoadMap
         return true;
     }
 
+    public static bool TryRuntimeAddressToVirtualAddress(
+        RuntimeAddress runtimeAddress,
+        ulong loadBias,
+        out VirtualAddress virtualAddress)
+    {
+        if (TryRuntimeAddressToVirtualAddress(runtimeAddress.Value, loadBias, out var rawAddress))
+        {
+            virtualAddress = new VirtualAddress(rawAddress);
+            return true;
+        }
+
+        virtualAddress = default;
+        return false;
+    }
+
     public static bool TryVirtualAddressToRuntimeAddress(ulong virtualAddress, ulong loadBias, out ulong runtimeAddress)
     {
         runtimeAddress = virtualAddress + loadBias;
         return runtimeAddress >= virtualAddress;
+    }
+
+    public static bool TryVirtualAddressToRuntimeAddress(
+        VirtualAddress virtualAddress,
+        ulong loadBias,
+        out RuntimeAddress runtimeAddress)
+    {
+        if (TryVirtualAddressToRuntimeAddress(virtualAddress.Value, loadBias, out var rawAddress))
+        {
+            runtimeAddress = new RuntimeAddress(rawAddress);
+            return true;
+        }
+
+        runtimeAddress = default;
+        return false;
     }
 }

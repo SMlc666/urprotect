@@ -106,6 +106,11 @@ For a file-backed address, mapping requires containment in the file-backed part 
 
 Every conversion returns a success/failure result with the segment that established the mapping. No caller may reconstruct the mapping using `p_vaddr + offset` independently.
 
+Public mapping overloads use `FileOffset`, `VirtualAddress`, and
+`RuntimeAddress` value types. Raw integer overloads remain at the parser
+boundary for decoding ELF fields, but cross-layer mapping code uses the typed
+forms to keep address domains distinct.
+
 ### 4.4 Dynamic metadata
 
 The first dynamic model should cover the tags needed to locate and validate:

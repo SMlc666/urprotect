@@ -55,7 +55,7 @@ Risk: over-rejecting valid page-boundary segment layouts. Keep segment overlap p
 
 ## 4. LoadMap and dynamic metadata
 
-- [ ] Implement file-offset, ELF-virtual-address, and runtime-address value types.
+- [x] Implement file-offset, ELF-virtual-address, and runtime-address value types.
 - [x] Build `LoadMap` only from validated `PT_LOAD` records.
 - [ ] Parse and validate `PT_DYNAMIC`, interpreter, TLS, RELRO, GNU property, EH frame, stack, and note records.
 - [ ] Add bounded string, hash, symbol, version, dynamic-tag, and relocation-table views.

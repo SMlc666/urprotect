@@ -55,6 +55,10 @@ public sealed class BinaryPropertyTests
             Assert.True(result.File!.LoadMap.TryFileOffsetToVirtualAddress(offset, out var virtualAddress));
             Assert.True(result.File.LoadMap.TryVirtualAddressToFileOffset(virtualAddress, out var roundTrip));
             Assert.Equal(offset, roundTrip);
+
+            Assert.True(result.File.LoadMap.TryFileOffsetToVirtualAddress(new FileOffset(offset), out VirtualAddress typedVirtualAddress));
+            Assert.True(result.File.LoadMap.TryVirtualAddressToFileOffset(typedVirtualAddress, out FileOffset typedRoundTrip));
+            Assert.Equal(offset, typedRoundTrip.Value);
         }
     }
 
@@ -69,5 +73,10 @@ public sealed class BinaryPropertyTests
         Assert.True(LoadMap.TryVirtualAddressToRuntimeAddress(3, 4, out var runtimeAddress));
         Assert.Equal(7UL, runtimeAddress);
         Assert.False(LoadMap.TryVirtualAddressToRuntimeAddress(ulong.MaxValue, 1, out _));
+
+        Assert.True(LoadMap.TryRuntimeAddressToVirtualAddress(new RuntimeAddress(7), 4, out VirtualAddress typedVirtualAddress));
+        Assert.Equal(3UL, typedVirtualAddress.Value);
+        Assert.True(LoadMap.TryVirtualAddressToRuntimeAddress(new VirtualAddress(3), 4, out RuntimeAddress typedRuntimeAddress));
+        Assert.Equal(7UL, typedRuntimeAddress.Value);
     }
 }
