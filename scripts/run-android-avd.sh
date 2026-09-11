@@ -122,6 +122,7 @@ fi
 runner_temp="${RUNNER_TEMP:-${repo_root}/.artifacts}"
 avd_home="${runner_temp}/urprotect-android-avd"
 sdk_home="${runner_temp}/urprotect-android-sdk-home"
+boot_timeout_seconds="${ANDROID_BOOT_TIMEOUT_SECONDS:-900}"
 mkdir -p "${avd_home}" "${sdk_home}"
 export ANDROID_AVD_HOME="${avd_home}"
 export ANDROID_SDK_HOME="${sdk_home}"
@@ -133,6 +134,7 @@ echo "ndk_version=${ndk_version}" | tee -a "${report}"
 echo "cmake_version=${cmake_version}" | tee -a "${report}"
 echo "guest_abi=${guest_abi}" | tee -a "${report}"
 echo "native_bridge_abi=${native_bridge_abi}" | tee -a "${report}"
+echo "boot_timeout_seconds=${boot_timeout_seconds}" | tee -a "${report}"
 echo "mode=android-arm64-native-bridge-on-x64" | tee -a "${report}"
 
 if ! timeout 15 "${sdkmanager}" --version > "${artifact_root}/sdkmanager-version.txt" 2>&1; then
@@ -232,8 +234,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-timeout 300 "${adb}" wait-for-device
-boot_deadline=$((SECONDS + 300))
+timeout "${boot_timeout_seconds}" "${adb}" wait-for-device
+boot_deadline=$((SECONDS + boot_timeout_seconds))
 until [[ "$("${adb}" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; do
   if (( SECONDS >= boot_deadline )); then
     echo "Android AVD did not boot in software-emulation mode" >&2
