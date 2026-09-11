@@ -63,9 +63,10 @@ of silently skipping the capability.
 
 The native-bridge AVD job is intentionally optional for manual CI runs because
 software-emulated boot can take many minutes. Scheduled runs execute it
-automatically; use the `run_android_native_bridge` workflow-dispatch input to
-opt in when manually validating the Android path. Core build/test and native
-fixture jobs do not depend on this optional job.
+automatically, and published releases execute the release validation tier; use
+the `run_android_native_bridge` workflow-dispatch input to opt in when manually
+validating the Android path. Core build/test and native fixture jobs do not
+depend on this optional manual job.
 
 Native CI jobs retain an environment manifest with the host architecture,
 kernel/libc, page size, toolchain versions, and emulation indicators. Native

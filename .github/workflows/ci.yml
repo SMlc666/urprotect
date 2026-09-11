@@ -7,13 +7,15 @@ on:
     inputs:
       run_android_native_bridge:
         description: >-
-          Run the slow x86_64 Android AVD native-bridge E2E (scheduled runs
-          always execute it).
+          Run the slow x86_64 Android AVD native-bridge E2E (scheduled and
+          release runs always execute it).
         required: false
         default: false
         type: boolean
   schedule:
     - cron: '17 3 * * *'
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -68,7 +70,7 @@ jobs:
           if-no-files-found: warn
 
   android-container-probe:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
@@ -95,9 +97,9 @@ jobs:
           path: android-container-probe.log
           if-no-files-found: warn
 
-  # Scheduled runs exercise this slow path; manual runs opt in explicitly.
+  # Scheduled/release runs exercise this slow path; manual runs opt in explicitly.
   android-arm64-native-bridge-on-x64:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_android_native_bridge == true)
+    if: github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_android_native_bridge == true)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -160,16 +162,23 @@ jobs:
           if-no-files-found: warn
 
   fixture-nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Select fixture tier
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == release ]]; then
+            echo 'FIXTURE_TIER=release' >> "$GITHUB_ENV"
+          else
+            echo 'FIXTURE_TIER=nightly' >> "$GITHUB_ENV"
+          fi
       - name: Record runner environment
         run: |
-          mkdir -p .artifacts/fixtures/nightly
+          mkdir -p ".artifacts/fixtures/${FIXTURE_TIER}"
           ./.github/scripts/record-environment.sh \
-            .artifacts/fixtures/nightly/environment-before-toolchains.txt \
+            ".artifacts/fixtures/${FIXTURE_TIER}/environment-before-toolchains.txt" \
             aarch64 native-linux-fixture
       - uses: actions/setup-dotnet@v4
         with:
@@ -189,12 +198,12 @@ jobs:
           key: native-fixture-toolchains-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-native-toolchains.sh') }}
       - name: Install pinned native ARM64 fixture toolchains
         run: |
-          mkdir -p .artifacts/fixtures/nightly
-          ./scripts/install-native-toolchains.sh | tee .artifacts/fixtures/nightly/toolchains.txt
+          mkdir -p ".artifacts/fixtures/${FIXTURE_TIER}"
+          ./scripts/install-native-toolchains.sh | tee ".artifacts/fixtures/${FIXTURE_TIER}/toolchains.txt"
       - name: Record provisioned toolchain environment
         run: |
           ./.github/scripts/record-environment.sh \
-            .artifacts/fixtures/nightly/environment-after-toolchains.txt \
+            ".artifacts/fixtures/${FIXTURE_TIER}/environment-after-toolchains.txt" \
             aarch64 native-linux-fixture
       - name: Record native fixture toolchain cache status
         run: |
@@ -208,19 +217,19 @@ jobs:
       - name: Build
         run: dotnet build UrProtect.sln --configuration Release --no-restore
       - name: Run bounded parser fuzz target
-        run: FUZZ_RESULTS_DIRECTORY=.artifacts/fixtures/nightly/fuzz ./scripts/run-parser-fuzz.sh
+        run: FUZZ_RESULTS_DIRECTORY=".artifacts/fixtures/${FIXTURE_TIER}/fuzz" ./scripts/run-parser-fuzz.sh
       - name: Run compiler and language fixture matrix
-        run: ./scripts/run-fixture-matrix.sh --profile nightly
+        run: ./scripts/run-fixture-matrix.sh --profile "${FIXTURE_TIER}"
       - name: Upload fixture evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fixture-nightly-${{ github.run_id }}
-          path: .artifacts/fixtures/nightly/
+          name: fixture-${{ github.run_id }}
+          path: .artifacts/fixtures/
           if-no-files-found: warn
 
   benchmark:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:

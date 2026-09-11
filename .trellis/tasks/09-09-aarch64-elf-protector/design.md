@@ -264,6 +264,12 @@ Release:
   and retained failure artifacts
 ```
 
+The GitHub workflow maps push/pull-request events to the fast gate, scheduled
+and opt-in manual dispatches to the nightly matrix, and published releases to
+the release fixture/benchmark/Android validation tier. The manual Android
+input remains false by default; release validation is intentionally explicit
+and automatic.
+
 Infrastructure failures may be retried according to a bounded policy, but test failures must not be hidden by automatic retries or `allow_failure`.
 
 Every native ARM64 build, fixture, and benchmark job invokes a repository-owned
