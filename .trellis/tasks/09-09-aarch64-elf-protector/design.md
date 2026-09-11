@@ -294,7 +294,7 @@ Fuzz targets begin at the immutable ELF parser and validation boundary. A fuzz i
 
 ### Benchmarks
 
-Use a repeatable .NET benchmark harness on native ARM64 Linux. Measure parsing, LoadMap construction, dynamic/relocation indexing, instruction scanning, report generation, no-op copying, allocations, and peak memory over small, medium, large, stripped, and relocation-dense fixtures. Do not use Android TCG or native-bridge timing as a native performance baseline.
+Use a repeatable .NET benchmark harness on native ARM64 Linux. Measure parsing, LoadMap construction, dynamic/relocation indexing, instruction scanning, report generation, no-op copying, allocations, and peak working-set memory over small, medium, large, stripped, and relocation-dense fixtures. The current harness covers the small infrastructure fixture; the expanded fixture corpus remains a follow-up. CI stores results with the runner image, SDK, Git SHA, and fixture-manifest hash. Do not use Android TCG or native-bridge timing as a native performance baseline.
 
 ## 9. Reproducibility and Supply Chain
 

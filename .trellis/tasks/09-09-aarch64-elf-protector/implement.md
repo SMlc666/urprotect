@@ -154,8 +154,8 @@ The first Android-container workflow should be an explicit feasibility experimen
 - [ ] Seed malformed corpus entries for every parser rejection class.
 - [ ] Add coverage collection for project code and module-specific thresholds after a baseline run.
 - [ ] Add property tests for parser/model invariants and no-op byte identity.
-- [ ] Add native ARM64 benchmarks for parse, map, metadata, analysis, copy, allocations, and peak memory.
-- [ ] Store benchmark baselines by runner image, SDK, and fixture manifest version.
+- [x] Add native ARM64 benchmarks for parse, map, metadata, analysis, copy, allocations, and peak memory.
+- [x] Store benchmark results with runner image, SDK, Git SHA, and fixture manifest hash metadata in the CI artifact; historical comparison remains a release-process concern.
 
 Validation:
 

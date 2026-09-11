@@ -229,6 +229,10 @@ jobs:
           ./.github/scripts/record-environment.sh \
             .artifacts/benchmark/environment.txt \
             aarch64 native-linux-benchmark
+          {
+            echo "git_sha=${GITHUB_SHA}"
+            echo "fixture_manifest_sha256=$(sha256sum fixtures/manifest.json | cut -d' ' -f1)"
+          } > .artifacts/benchmark/metadata.txt
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -240,7 +244,7 @@ jobs:
             tests/UrProtect.Core.Tests/packages.lock.json
             benchmarks/UrProtect.Benchmarks/packages.lock.json
       - run: dotnet restore UrProtect.sln --locked-mode
-      - run: dotnet run --project benchmarks/UrProtect.Benchmarks --configuration Release --no-restore
+      - run: dotnet run --project benchmarks/UrProtect.Benchmarks --configuration Release --no-restore | tee .artifacts/benchmark/results.txt
       - name: Upload benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
