@@ -137,6 +137,11 @@ For the initial no-op path, relocation records are parsed, bounded, classified, 
 
 The implementation should retain the raw relocation type and addend even when the semantic classifier returns `Unknown`. A future rewrite planner may accept only a strict supported subset and must reject the rest.
 
+Common AArch64 RELA types are classified into project-owned kinds (relative,
+absolute, branch/call, ADR/ADRP, load/store, TLS, and related dynamic forms).
+Unknown types remain raw and produce a structured warning in the no-op report;
+they are not applied or guessed.
+
 ## 5. AsmStone Adapter and Analysis
 
 Pin one AsmStone revision in the dependency manifest. The adapter should expose project-owned records such as:

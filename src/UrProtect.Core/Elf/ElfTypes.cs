@@ -78,6 +78,31 @@ public static class ElfConstants
     public const ulong DtAndroidRelr = 0x60000013;
     public const ulong DtAndroidRelrsz = 0x60000014;
     public const ulong DtAndroidRelrent = 0x60000015;
+
+    public const uint RArm64None = 0;
+    public const uint RArm64Abs64 = 257;
+    public const uint RArm64Abs32 = 258;
+    public const uint RArm64Prel64 = 260;
+    public const uint RArm64Prel32 = 261;
+    public const uint RArm64AdrPrelLo21 = 274;
+    public const uint RArm64AdrPrelPgHi21 = 275;
+    public const uint RArm64AddAbsLo12Nc = 277;
+    public const uint RArm64Ldst8AbsLo12Nc = 278;
+    public const uint RArm64CondBr19 = 280;
+    public const uint RArm64Jump26 = 282;
+    public const uint RArm64Call26 = 283;
+    public const uint RArm64Ldst16AbsLo12Nc = 284;
+    public const uint RArm64Ldst32AbsLo12Nc = 285;
+    public const uint RArm64Ldst64AbsLo12Nc = 286;
+    public const uint RArm64Copy = 1024;
+    public const uint RArm64GlobDat = 1025;
+    public const uint RArm64JumpSlot = 1026;
+    public const uint RArm64Relative = 1027;
+    public const uint RArm64TlsDtpMod64 = 1028;
+    public const uint RArm64TlsDtpRel64 = 1029;
+    public const uint RArm64TlsTprel64 = 1030;
+    public const uint RArm64TlsDesc = 1031;
+    public const uint RArm64IRelative = 1032;
 }
 
 public enum ElfFileKind
@@ -185,6 +210,29 @@ public readonly record struct DynamicSymbol(
     ulong Value,
     ulong Size);
 
+public enum Aarch64RelocationKind
+{
+    Unknown,
+    None,
+    Absolute64,
+    Absolute32,
+    Prel64,
+    Prel32,
+    Relative,
+    GlobalData,
+    JumpSlot,
+    Copy,
+    Call26,
+    Jump26,
+    ConditionalBranch19,
+    AdrPrelLo21,
+    AdrPrelPgHi21,
+    AddAbsLo12,
+    LoadStore,
+    ThreadLocal,
+    IRelative,
+}
+
 public readonly record struct RelaRelocation(
     ulong Offset,
     ulong Info,
@@ -195,6 +243,35 @@ public readonly record struct RelaRelocation(
     public uint Type => unchecked((uint)(Info & 0xFFFFFFFF));
 
     public uint SymbolIndex => unchecked((uint)(Info >> 32));
+
+    public Aarch64RelocationKind Kind => Type switch
+    {
+        ElfConstants.RArm64None => Aarch64RelocationKind.None,
+        ElfConstants.RArm64Abs64 => Aarch64RelocationKind.Absolute64,
+        ElfConstants.RArm64Abs32 => Aarch64RelocationKind.Absolute32,
+        ElfConstants.RArm64Prel64 => Aarch64RelocationKind.Prel64,
+        ElfConstants.RArm64Prel32 => Aarch64RelocationKind.Prel32,
+        ElfConstants.RArm64Relative => Aarch64RelocationKind.Relative,
+        ElfConstants.RArm64GlobDat => Aarch64RelocationKind.GlobalData,
+        ElfConstants.RArm64JumpSlot => Aarch64RelocationKind.JumpSlot,
+        ElfConstants.RArm64Copy => Aarch64RelocationKind.Copy,
+        ElfConstants.RArm64Call26 => Aarch64RelocationKind.Call26,
+        ElfConstants.RArm64Jump26 => Aarch64RelocationKind.Jump26,
+        ElfConstants.RArm64CondBr19 => Aarch64RelocationKind.ConditionalBranch19,
+        ElfConstants.RArm64AdrPrelLo21 => Aarch64RelocationKind.AdrPrelLo21,
+        ElfConstants.RArm64AdrPrelPgHi21 => Aarch64RelocationKind.AdrPrelPgHi21,
+        ElfConstants.RArm64AddAbsLo12Nc => Aarch64RelocationKind.AddAbsLo12,
+        ElfConstants.RArm64Ldst8AbsLo12Nc
+            or ElfConstants.RArm64Ldst16AbsLo12Nc
+            or ElfConstants.RArm64Ldst32AbsLo12Nc
+            or ElfConstants.RArm64Ldst64AbsLo12Nc => Aarch64RelocationKind.LoadStore,
+        ElfConstants.RArm64TlsDtpMod64
+            or ElfConstants.RArm64TlsDtpRel64
+            or ElfConstants.RArm64TlsTprel64
+            or ElfConstants.RArm64TlsDesc => Aarch64RelocationKind.ThreadLocal,
+        ElfConstants.RArm64IRelative => Aarch64RelocationKind.IRelative,
+        _ => Aarch64RelocationKind.Unknown,
+    };
 }
 
 public readonly record struct RelrWord(ulong Value, ulong SourceAddress);

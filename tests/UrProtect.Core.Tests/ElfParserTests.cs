@@ -247,4 +247,18 @@ public sealed class ElfParserTests
         Assert.Equal("/lib", result.File.DynamicMetadata.RunPath);
         Assert.Null(result.File.DynamicMetadata.Rpath);
     }
+
+    [Fact]
+    public void ClassifiesCommonAarch64RelocationKindsWithoutApplyingThem()
+    {
+        var relative = new RelaRelocation(0, ElfConstants.RArm64Relative, 0, 0x1000, false);
+        var branch = new RelaRelocation(0, ElfConstants.RArm64Call26, 0, 0x1004, false);
+        var loadStore = new RelaRelocation(0, ElfConstants.RArm64Ldst64AbsLo12Nc, 0, 0x1008, false);
+        var unknown = new RelaRelocation(0, 0xFFFF, 0, 0x100C, false);
+
+        Assert.Equal(Aarch64RelocationKind.Relative, relative.Kind);
+        Assert.Equal(Aarch64RelocationKind.Call26, branch.Kind);
+        Assert.Equal(Aarch64RelocationKind.LoadStore, loadStore.Kind);
+        Assert.Equal(Aarch64RelocationKind.Unknown, unknown.Kind);
+    }
 }

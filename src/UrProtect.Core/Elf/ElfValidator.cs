@@ -51,6 +51,17 @@ public static class ElfValidator
             }
         }
 
+        foreach (var relocation in file.RelaRelocations)
+        {
+            if (relocation.Kind == Aarch64RelocationKind.Unknown)
+            {
+                diagnostics.Warning(
+                    DiagnosticCode.UnsupportedRelocation,
+                    $"AArch64 relocation type {relocation.Type} is preserved but not semantically classified.",
+                    relocation.SourceAddress);
+            }
+        }
+
         return new ElfValidationReport(diagnostics.ToArray());
     }
 }
