@@ -202,7 +202,8 @@ build_profile() {
         skip_or_fail "${profile_json}" "musl loader is unavailable for Zig: ${launcher}"
         return
       fi
-      zig build-exe "${source}" -target aarch64-linux-musl -O ReleaseSafe -fstrip \
+      zig build-exe "${source}" -target aarch64-linux-musl -dynamic -fPIE -lc \
+        -O ReleaseSafe -fstrip \
         -femit-bin="${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
