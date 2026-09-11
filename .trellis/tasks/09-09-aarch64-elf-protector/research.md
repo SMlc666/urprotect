@@ -55,7 +55,7 @@ Planning conclusions:
 
 - Use an explicit versioned ARM64 Linux label such as `ubuntu-24.04-arm`, subject to availability for the repository and current GitHub image policy.
 - The native Linux gate must run directly on the ARM64 host; an x86 runner plus QEMU is not an equivalent result.
-- Android ARM64 AVD software emulation is a separate profile and must be labeled as software emulation. The project does not claim physical Android device support. The planned runtime experiment uses an x86_64 host with an `arm64-v8a` guest in TCG mode.
+- Android ARM64 AVD software emulation is a separate profile and must be labeled as software emulation. The project does not claim physical Android device support. The released emulator rejects an `arm64-v8a` system image on an x86_64 host, so the practical hosted experiment uses an x86_64 guest in TCG mode with the image's `libndk_translation.so` native bridge for an `arm64-v8a` APK.
 - Runner, kernel, libc, page size, toolchain, and acceleration-mode metadata must be retained with every compatibility result.
 
 Observed hosted-runner probe:
@@ -66,8 +66,9 @@ Observed hosted-runner probe:
 Fixture/AVD implementation evidence:
 
 - The ARM64 host has native GCC/Clang, Rust, and Go available in the current environment; Zig and musl tooling are optional and are reported explicitly when absent.
-- The Android AVD script records host architecture, page size, KVM status, SDK/tool paths, emulator mode, logs, and APK artifacts. The guest path uses `arm64-v8a`, `-accel off`, and software graphics; it never labels TCG as native hardware.
-- The current ARM64 environment has `adb` but no Android SDK manager, AVD manager, emulator, or Gradle, so the ARM64-hosted probe correctly emits `ANDROID_AVD_UNAVAILABLE`. The runtime experiment should target a GitHub x86_64 runner, where Android host tools are practical, while keeping the guest image `arm64-v8a`.
+- The Android AVD script records host architecture, page size, KVM status, SDK/tool paths, emulator mode, native-bridge properties, logs, and APK artifacts. The guest path uses an x86_64 system image, `-accel off`, and software graphics; it never labels TCG/native bridge as native hardware or a full ARM64 guest.
+- The current ARM64 environment has `adb` but no Android SDK manager, AVD manager, emulator, or Gradle, so the ARM64-hosted probe correctly emits `ANDROID_AVD_UNAVAILABLE`. The runtime experiment targets a GitHub x86_64 runner, where Android host tools are practical, and keeps the APK library ABI `arm64-v8a` while using the x86_64 image's native bridge.
 - The first x86_64 hosted attempt installed the Android host tooling successfully; its initial unavailable result was caused by probing unsupported `avdmanager --version`, not by missing SDK infrastructure. Use `avdmanager --help` for the capability probe before creating the AVD.
 - The next x86_64 attempt passed the SDK and AVD-manager probes but the emulator binary could not load `libpulse.so.0`; the workflow now installs and records the Ubuntu `libpulse0` host dependency before running the emulator.
 - After the host-library fix, the emulator reached its launch step but could not find the AVD created by `avdmanager`. The script now sets explicit shared `ANDROID_AVD_HOME`/`ANDROID_SDK_HOME` paths, lets `avdmanager` select the default device profile, and verifies the named AVD before boot.
+- The following hosted run proved the AVD directory and APK build, then failed with `Avd's CPU Architecture 'arm64' is not supported by the QEMU2 emulator on x86_64 host`. This confirms that `-accel off` selects software CPU execution but does not add cross-architecture support to the released Android Emulator. The manifest and workflow now use the supported x86_64 API 35 image and require `libndk_translation.so`, `ro.dalvik.vm.isa.arm64=x86_64`, and an arm64-only APK before reporting native-bridge coverage.

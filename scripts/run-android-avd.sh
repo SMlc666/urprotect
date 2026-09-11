@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 manifest="${repo_root}/fixtures/manifest.json"
-artifact_root="${ANDROID_ARTIFACT_ROOT:-${repo_root}/.artifacts/android-arm64-tcg-on-x64}"
+artifact_root="${ANDROID_ARTIFACT_ROOT:-${repo_root}/.artifacts/android-arm64-native-bridge-on-x64}"
 mkdir -p "${artifact_root}"
 report="${artifact_root}/environment.txt"
 exec > >(tee "${artifact_root}/run.log") 2>&1
@@ -14,8 +14,9 @@ exec > >(tee "${artifact_root}/run.log") 2>&1
   echo "page_size=$(getconf PAGESIZE 2>/dev/null || echo unknown)"
   echo "kvm=$(test -e /dev/kvm && echo present || echo absent)"
   echo "expected_host=x86_64"
-  echo "expected_guest=arm64-v8a"
-  echo "mode=android-arm64-tcg-on-x64"
+  echo "expected_guest=x86_64"
+  echo "native_bridge_abi=arm64-v8a"
+  echo "mode=android-arm64-native-bridge-on-x64"
 } > "${report}"
 
 android_value() {
@@ -30,8 +31,14 @@ PY
 
 api_level="$(android_value apiLevel)"
 system_image="$(android_value systemImage)"
-if [[ "${system_image}" != *";arm64-v8a" ]]; then
-  echo "Android manifest must select an arm64-v8a system image: ${system_image}" >&2
+guest_abi="$(android_value guestAbi)"
+native_bridge_abi="$(android_value nativeBridgeAbi)"
+if [[ "${guest_abi}" != "x86_64" || "${system_image}" != *";x86_64" ]]; then
+  echo "Android manifest must select an x86_64 guest system image: ${system_image}" >&2
+  exit 1
+fi
+if [[ "${native_bridge_abi}" != "arm64-v8a" ]]; then
+  echo "Android manifest must select arm64-v8a native bridge coverage: ${native_bridge_abi}" >&2
   exit 1
 fi
 ndk_version="$(android_value ndkVersion)"
@@ -85,14 +92,14 @@ done
 report_unavailable() {
   local reason="$1"
   echo "ANDROID_AVD_UNAVAILABLE ${reason}"
-  echo "Mode: android-arm64-tcg-on-x64 (x86_64 host, arm64-v8a guest, TCG/software CPU emulation)."
+  echo "Mode: android-arm64-native-bridge-on-x64 (x86_64 host, x86_64 guest, TCG/software CPU emulation, arm64-v8a native bridge)."
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
-      echo "## Android ARM64 TCG E2E unavailable"
+      echo "## Android ARM64 native-bridge E2E unavailable"
       echo
       echo "${reason}"
       echo
-      echo 'Mode: `android-arm64-tcg-on-x64` (x86_64 host, `arm64-v8a` guest, TCG/software CPU emulation).'
+      echo 'Mode: `android-arm64-native-bridge-on-x64` (x86_64 host, `x86_64` guest, TCG/software CPU emulation, `arm64-v8a` native bridge).'
     } >> "${GITHUB_STEP_SUMMARY}"
   fi
   return 0
@@ -124,7 +131,9 @@ echo "android_sdk_home=${ANDROID_SDK_HOME}" | tee -a "${report}"
 echo "system_image=${system_image}" | tee -a "${report}"
 echo "ndk_version=${ndk_version}" | tee -a "${report}"
 echo "cmake_version=${cmake_version}" | tee -a "${report}"
-echo "mode=android-arm64-tcg-on-x64" | tee -a "${report}"
+echo "guest_abi=${guest_abi}" | tee -a "${report}"
+echo "native_bridge_abi=${native_bridge_abi}" | tee -a "${report}"
+echo "mode=android-arm64-native-bridge-on-x64" | tee -a "${report}"
 
 if ! timeout 15 "${sdkmanager}" --version > "${artifact_root}/sdkmanager-version.txt" 2>&1; then
   report_unavailable "sdkmanager version probe failed"
@@ -235,9 +244,17 @@ done
 
 "${adb}" shell getprop > "${artifact_root}/device-properties.txt"
 guest_abis="$("${adb}" shell getprop ro.product.cpu.abilist 2>/dev/null | tr -d '\r')"
+native_bridge="$("${adb}" shell getprop ro.dalvik.vm.native.bridge 2>/dev/null | tr -d '\r')"
+native_bridge_isa="$("${adb}" shell getprop ro.dalvik.vm.isa.arm64 2>/dev/null | tr -d '\r')"
 echo "guest_abis=${guest_abis}" | tee -a "${report}"
-if [[ ",${guest_abis}," != *,arm64-v8a,* ]]; then
-  echo "Android AVD guest ABI mismatch: expected arm64-v8a, got ${guest_abis}" >&2
+echo "native_bridge=${native_bridge}" | tee -a "${report}"
+echo "native_bridge_isa_arm64=${native_bridge_isa}" | tee -a "${report}"
+if [[ ",${guest_abis}," != *,x86_64,* ]]; then
+  echo "Android AVD guest ABI mismatch: expected x86_64, got ${guest_abis}" >&2
+  exit 1
+fi
+if [[ "${native_bridge}" != *"libndk_translation.so"* || "${native_bridge_isa}" != "x86_64" ]]; then
+  echo "Android AVD does not expose the arm64-v8a native bridge: bridge=${native_bridge}, arm64_isa=${native_bridge_isa}" >&2
   exit 1
 fi
 
@@ -257,4 +274,4 @@ while :; do
   sleep 3
 done
 
-echo "PASS android-arm64-tcg-on-x64: APK installed, bionic loaded libfixture.so, Android linker resolved the AArch64 library, and JNI returned the expected value"
+echo "PASS android-arm64-native-bridge-on-x64: x86_64 Android guest used bionic/native bridge to load the arm64-v8a libfixture.so through System.loadLibrary, and JNI returned the expected value"

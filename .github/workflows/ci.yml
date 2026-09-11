@@ -74,7 +74,7 @@ jobs:
           path: android-container-probe.log
           if-no-files-found: warn
 
-  android-arm64-tcg-on-x64:
+  android-arm64-native-bridge-on-x64:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -93,15 +93,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Run arm64-v8a AVD TCG E2E
+      - name: Run arm64-v8a native-bridge E2E on x86_64 AVD
         run: ./scripts/run-android-avd.sh
       - name: Upload Android AVD evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-arm64-tcg-on-x64-${{ github.run_id }}
+          name: android-arm64-native-bridge-on-x64-${{ github.run_id }}
           path: |
-            .artifacts/android-arm64-tcg-on-x64/
+            .artifacts/android-arm64-native-bridge-on-x64/
             android-emulator-host-dependencies.txt
           if-no-files-found: warn
 

@@ -71,7 +71,7 @@ def main() -> int:
             source.relative_to(repo_root)
         except ValueError:
             raise SystemExit(f"{profile_id}.source must remain inside the repository")
-        if profile["execution"] in {"native-linux", "android-arm64-tcg-on-x64"} and not source.exists():
+        if profile["execution"] in {"native-linux", "android-arm64-native-bridge-on-x64"} and not source.exists():
             raise SystemExit(f"{profile_id} source does not exist: {source}")
         ids.add(profile_id)
         if TIERS[tier] <= TIERS[requested]:

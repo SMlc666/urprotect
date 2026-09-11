@@ -174,9 +174,14 @@ and no-op output exit status/stdout/stderr. Missing optional toolchains are
 reported as `SKIP`; missing required PR toolchains or invalid outputs fail.
 
 The Android fixture is a small Gradle/CMake APK with an arm64-v8a JNI library.
-`scripts/run-android-avd.sh` pins API 35, the `google_apis;arm64-v8a` system
-image, NDK 27.2, and an explicit `-accel off` emulator mode on an x86_64 host. It installs the APK,
-starts `System.loadLibrary`, invokes JNI, and checks the expected logcat result.
+The released Android Emulator rejects a `google_apis;arm64-v8a` system image on
+an x86_64 host before boot, so `scripts/run-android-avd.sh` pins an API 35
+`google_apis;x86_64` system image, NDK 27.2, and an explicit `-accel off`
+emulator mode on an x86_64 host. The API 35 x86_64 image must expose
+`libndk_translation.so` and map the arm64 ISA to x86_64. The script installs
+the APK, starts `System.loadLibrary`, invokes JNI, and checks the expected
+logcat result. This exercises the Android linker and AArch64 library through
+native bridge translation, not a full ARM64 Android guest.
 Missing Android command-line tools or Gradle are recorded as
 `ANDROID_AVD_UNAVAILABLE`; this is an informational feasibility result, not a
 physical-device or native-hardware claim.
@@ -195,7 +200,7 @@ Android jobs are separate:
 
 1. Static APK/ELF inspection always runs.
 2. An ARM64 Waydroid-like container is attempted only after a capability probe confirms Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching ARM64 system/vendor images.
-3. An `x86_64` GitHub runner hosts an `arm64-v8a` AVD in TCG software emulation for bionic/linker/JNI coverage. It is labeled `android-arm64-tcg-on-x64`, starts with `-accel off`, uses software graphics, and never counts as physical or native-hardware validation.
+3. An `x86_64` GitHub runner hosts an x86_64 AVD in TCG software emulation for bionic/linker/JNI coverage, with the AArch64 library loaded through `libndk_translation.so`. It is labeled `android-arm64-native-bridge-on-x64`, starts with `-accel off`, uses software graphics, and never counts as physical, native-hardware, or full ARM64-guest validation.
 
 Both Android runtime modes must install a test APK and exercise the real library-loading/JNI path. If the container cannot run on the hosted kernel, the failure is visible and the project does not claim container E2E coverage.
 
@@ -204,9 +209,11 @@ an AArch64 host, namespaces, and cgroups but does not expose Binder/BinderFS,
 LXC, or a Wayland/headless compositor. Until a supported runner or explicit
 container image strategy supplies those capabilities, the container workflow is
 an informational, non-gating capability probe; Linux build/test and benchmark
-jobs remain independent of it. The x86_64 TCG path is the separate Android
-runtime experiment because GitHub's x86_64 image is the practical place to
-obtain Android SDK/emulator host tools; its guest ABI remains `arm64-v8a`.
+jobs remain independent of it. The x86_64 native-bridge path is the separate
+Android runtime experiment because GitHub's x86_64 image is the practical place
+to obtain Android SDK/emulator host tools. Its guest ABI is x86_64; the APK's
+native library ABI remains `arm64-v8a` and is translated by bionic's native
+bridge. A full ARM64 guest still requires an ARM64-compatible Android runtime.
 
 ## 8. CI, Coverage, Fuzzing, and Benchmarks
 
@@ -242,7 +249,7 @@ Fuzz targets begin at the immutable ELF parser and validation boundary. A fuzz i
 
 ### Benchmarks
 
-Use a repeatable .NET benchmark harness on native ARM64 Linux. Measure parsing, LoadMap construction, dynamic/relocation indexing, instruction scanning, report generation, no-op copying, allocations, and peak memory over small, medium, large, stripped, and relocation-dense fixtures. Do not use Android TCG timing as a native performance baseline.
+Use a repeatable .NET benchmark harness on native ARM64 Linux. Measure parsing, LoadMap construction, dynamic/relocation indexing, instruction scanning, report generation, no-op copying, allocations, and peak memory over small, medium, large, stripped, and relocation-dense fixtures. Do not use Android TCG or native-bridge timing as a native performance baseline.
 
 ## 9. Reproducibility and Supply Chain
 

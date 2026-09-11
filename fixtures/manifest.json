@@ -2,13 +2,15 @@
   "schemaVersion": 2,
   "android": {
     "apiLevel": 35,
-    "systemImage": "system-images;android-35;google_apis;arm64-v8a",
+    "systemImage": "system-images;android-35;google_apis;x86_64",
+    "guestAbi": "x86_64",
+    "nativeBridgeAbi": "arm64-v8a",
     "ndkVersion": "27.2.12479018",
     "cmakeVersion": "3.22.1",
     "gradleVersion": "8.9",
     "androidGradlePlugin": "8.7.3",
     "packageName": "com.example.urprotect",
-    "avdName": "urprotect-api35-arm64-tcg"
+    "avdName": "urprotect-api35-x86-bridge"
   },
   "profiles": [
     {
@@ -139,7 +141,7 @@
       "source": "fixtures/samples/android-jni",
       "tier": "nightly",
       "required": false,
-      "execution": "android-arm64-tcg-on-x64"
+      "execution": "android-arm64-native-bridge-on-x64"
     }
   ]
 }
