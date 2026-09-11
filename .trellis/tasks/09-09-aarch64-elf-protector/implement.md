@@ -42,8 +42,8 @@ Rollback point: binary primitives must be independently usable before ELF parsin
 - [x] Parse only after all header/table ranges pass bounds checks.
 - [x] Validate the agreed `ELF64`/little-endian/AArch64/`ET_DYN` profile.
 - [x] Make section headers optional for runtime analysis.
-- [ ] Model unknown program types and extended numbering as explicit results.
-- [ ] Add valid, truncated, overflowed, stripped, and unknown-extension fixtures.
+- [x] Model unknown program types and extended numbering as explicit results.
+- [x] Add valid, truncated, overflowed, stripped, and unknown-extension fixtures.
 
 Validation:
 

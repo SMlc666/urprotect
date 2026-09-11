@@ -205,6 +205,28 @@ public readonly record struct AndroidPackedRelocationTable(
     bool IsRela,
     ReadOnlyMemory<byte> RawBytes);
 
+public readonly record struct ElfNote(
+    uint SegmentType,
+    uint Type,
+    ReadOnlyMemory<byte> Name,
+    ReadOnlyMemory<byte> Descriptor,
+    ulong FileOffset);
+
+public sealed record ElfDynamicMetadata(
+    IReadOnlyList<string> NeededLibraries,
+    string? Soname,
+    string? Rpath,
+    string? RunPath,
+    ReadOnlyMemory<byte> StringTable)
+{
+    public static ElfDynamicMetadata Empty { get; } = new(
+        Array.Empty<string>(),
+        null,
+        null,
+        null,
+        ReadOnlyMemory<byte>.Empty);
+}
+
 public readonly record struct FileRange(ulong Offset, ulong Size)
 {
     public bool TryGetEnd(out ulong end)
@@ -230,6 +252,8 @@ public sealed class ElfFile
         IReadOnlyList<ProgramHeader> programHeaders,
         IReadOnlyList<SectionHeader> sectionHeaders,
         LoadMap loadMap,
+        IReadOnlyList<ElfNote> notes,
+        ElfDynamicMetadata dynamicMetadata,
         IReadOnlyList<DynamicEntry> dynamicEntries,
         IReadOnlyList<RelaRelocation> relaRelocations,
         IReadOnlyList<RelrWord> relrWords,
@@ -241,6 +265,8 @@ public sealed class ElfFile
         ProgramHeaders = programHeaders;
         SectionHeaders = sectionHeaders;
         LoadMap = loadMap;
+        Notes = notes;
+        DynamicMetadata = dynamicMetadata;
         DynamicEntries = dynamicEntries;
         RelaRelocations = relaRelocations;
         RelrWords = relrWords;
@@ -257,6 +283,10 @@ public sealed class ElfFile
     public IReadOnlyList<SectionHeader> SectionHeaders { get; }
 
     public LoadMap LoadMap { get; }
+
+    public IReadOnlyList<ElfNote> Notes { get; }
+
+    public ElfDynamicMetadata DynamicMetadata { get; }
 
     public IReadOnlyList<DynamicEntry> DynamicEntries { get; }
 

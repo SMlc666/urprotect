@@ -1,5 +1,6 @@
 using UrProtect.Core.Binary;
 using UrProtect.Core.Diagnostics;
+using System.Text;
 
 namespace UrProtect.Core.Elf;
 
@@ -111,7 +112,9 @@ public static class ElfParser
 
         var sectionHeaders = ParseSectionHeaders(reader, header, diagnostics);
         var loadMap = LoadMap.Create(programHeaders);
+        var notes = ParseNotes(reader, programHeaders, diagnostics);
         var dynamicEntries = ParseDynamicEntries(reader, programHeaders, diagnostics);
+        var dynamicMetadata = ParseDynamicMetadata(reader, loadMap, dynamicEntries, diagnostics);
         var relaRelocations = ParseRelaRelocations(
             reader,
             loadMap,
@@ -131,6 +134,8 @@ public static class ElfParser
             programHeaders,
             sectionHeaders,
             loadMap,
+            notes,
+            dynamicMetadata,
             dynamicEntries,
             relaRelocations,
             relrWords,
@@ -372,6 +377,168 @@ public static class ElfParser
         }
 
         return result;
+    }
+
+    private static List<ElfNote> ParseNotes(
+        BoundedReader reader,
+        IReadOnlyList<ProgramHeader> programHeaders,
+        DiagnosticBag diagnostics)
+    {
+        var result = new List<ElfNote>();
+        foreach (var header in programHeaders.Where(header =>
+                     header.Type is ElfConstants.PtNote or ElfConstants.PtGnuProperty))
+        {
+            if (header.FileSize == 0)
+            {
+                continue;
+            }
+
+            if (!TryAdd(header.Offset, header.FileSize, out var segmentEnd))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.NoteMalformed,
+                    "The note segment range overflowed.",
+                    header.Offset);
+                continue;
+            }
+
+            var cursor = header.Offset;
+            while (cursor < segmentEnd)
+            {
+                if (segmentEnd - cursor < 12
+                    || !reader.TryReadUInt32(cursor, out var nameSize)
+                    || !reader.TryReadUInt32(cursor + 4, out var descriptorSize)
+                    || !reader.TryReadUInt32(cursor + 8, out var type))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.NoteMalformed,
+                        "The ELF note header is truncated.",
+                        cursor);
+                    break;
+                }
+
+                var nameOffset = cursor + 12;
+                if (!TryAlign4(nameSize, out var alignedNameSize)
+                    || !TryAlign4(descriptorSize, out var alignedDescriptorSize)
+                    || !TryAdd(nameOffset, alignedNameSize, out var descriptorOffset)
+                    || !TryAdd(descriptorOffset, alignedDescriptorSize, out var nextOffset)
+                    || nextOffset > segmentEnd
+                    || !reader.Contains(nameOffset, nameSize)
+                    || !reader.Contains(descriptorOffset, descriptorSize)
+                    || !reader.TrySlice(nameOffset, nameSize, out var name)
+                    || !reader.TrySlice(descriptorOffset, descriptorSize, out var descriptor))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.NoteMalformed,
+                        "The ELF note payload is outside the note segment.",
+                        cursor);
+                    break;
+                }
+
+                result.Add(new ElfNote(header.Type, type, name, descriptor, cursor));
+                cursor = nextOffset;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryAlign4(ulong value, out ulong aligned)
+    {
+        if (value > ulong.MaxValue - 3)
+        {
+            aligned = default;
+            return false;
+        }
+
+        aligned = (value + 3) & ~3UL;
+        return true;
+    }
+
+    private static ElfDynamicMetadata ParseDynamicMetadata(
+        BoundedReader reader,
+        LoadMap loadMap,
+        IReadOnlyList<DynamicEntry> dynamicEntries,
+        DiagnosticBag diagnostics)
+    {
+        var stringTags = dynamicEntries.Where(entry => entry.Tag is
+            ElfConstants.DtNeeded or
+            ElfConstants.DtSoname or
+            ElfConstants.DtRpath or
+            ElfConstants.DtRunPath).ToArray();
+        var hasStringTable = TryGetDynamicValue(dynamicEntries, ElfConstants.DtStrTab, out var stringAddress);
+        var hasStringSize = TryGetDynamicValue(dynamicEntries, ElfConstants.DtStrSz, out var stringSize);
+        if (!hasStringTable && !hasStringSize && stringTags.Length == 0)
+        {
+            return ElfDynamicMetadata.Empty;
+        }
+
+        if (!hasStringTable || !hasStringSize
+            || !TryResolveVirtualRange(reader, loadMap, stringAddress, stringSize, out var fileOffset)
+            || !reader.TrySlice(fileOffset, stringSize, out var stringTable))
+        {
+            diagnostics.Error(
+                DiagnosticCode.DynamicTableMalformed,
+                "The dynamic string table is missing or does not map to file-backed bytes.",
+                stringAddress);
+            return ElfDynamicMetadata.Empty;
+        }
+
+        var needed = new List<string>();
+        string? soname = null;
+        string? rpath = null;
+        string? runPath = null;
+        foreach (var entry in stringTags)
+        {
+            if (!TryReadString(entry.Value, stringTable, out var value))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.DynamicTableMalformed,
+                    $"Dynamic string offset {entry.Value} is outside the string table.",
+                    entry.Value);
+                continue;
+            }
+
+            switch (entry.Tag)
+            {
+                case ElfConstants.DtNeeded:
+                    needed.Add(value);
+                    break;
+                case ElfConstants.DtSoname:
+                    soname = value;
+                    break;
+                case ElfConstants.DtRpath:
+                    rpath = value;
+                    break;
+                case ElfConstants.DtRunPath:
+                    runPath = value;
+                    break;
+            }
+        }
+
+        return new ElfDynamicMetadata(needed, soname, rpath, runPath, stringTable);
+
+        static bool TryReadString(
+            ulong offset,
+            ReadOnlyMemory<byte> table,
+            out string value)
+        {
+            value = string.Empty;
+            if (offset >= (ulong)table.Length)
+            {
+                return false;
+            }
+
+            var bytes = table.Span[(int)offset..];
+            var terminator = bytes.IndexOf((byte)0);
+            if (terminator < 0)
+            {
+                return false;
+            }
+
+            value = Encoding.UTF8.GetString(bytes[..terminator]);
+            return true;
+        }
     }
 
     private static IReadOnlyList<DynamicEntry> ParseDynamicEntries(

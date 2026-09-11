@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Elf;
 
@@ -184,5 +185,66 @@ public sealed class ElfParserTests
         Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.NotNull(result.File);
         Assert.Contains(result.File!.DynamicEntries, entry => entry.Tag == unknownTag && entry.Value == 0x1234);
+    }
+
+    [Fact]
+    public void ParsesAlignedNotePayloadsFromNoteSegments()
+    {
+        var bytes = ElfFixture.MinimalPie();
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(56), 5);
+        var programHeaderOffset = 64 + (4 * ElfConstants.ProgramHeaderSize64);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(programHeaderOffset), ElfConstants.PtNote);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(programHeaderOffset + 4), ElfConstants.PfR);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(programHeaderOffset + 8), 0x1E0);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(programHeaderOffset + 16), 0x1E0);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(programHeaderOffset + 32), 20);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(programHeaderOffset + 40), 20);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(programHeaderOffset + 48), 4);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x1E0), 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x1E4), 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x1E8), 5);
+        Encoding.ASCII.GetBytes("GNU\0").CopyTo(bytes.AsSpan(0x1EC));
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x1F0), 0xB);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        var note = Assert.Single(result.File!.Notes);
+        Assert.Equal(ElfConstants.PtNote, note.SegmentType);
+        Assert.Equal(5U, note.Type);
+        Assert.Equal("GNU\0", Encoding.ASCII.GetString(note.Name.Span));
+        Assert.Equal(0xBU, BinaryPrimitives.ReadUInt32LittleEndian(note.Descriptor.Span));
+    }
+
+    [Fact]
+    public void ResolvesBoundedDynamicStringMetadata()
+    {
+        var bytes = ElfFixture.MinimalPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(232), ElfConstants.PtNull);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(176 + 32), 96);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x180), ElfConstants.DtStrTab);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x188), 0x1E0);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x190), ElfConstants.DtStrSz);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x198), 28);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1A0), ElfConstants.DtNeeded);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1A8), 1);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1B0), ElfConstants.DtSoname);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1B8), 9);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1C0), ElfConstants.DtRunPath);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1C8), 23);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1D0), ElfConstants.DtNull);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1D8), 0);
+        Encoding.ASCII.GetBytes("\0libc.so\0libfixture.so\0/lib\0").CopyTo(bytes.AsSpan(0x1E0));
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Equal("libc.so", Assert.Single(result.File!.DynamicMetadata.NeededLibraries));
+        Assert.Equal("libfixture.so", result.File.DynamicMetadata.Soname);
+        Assert.Equal("/lib", result.File.DynamicMetadata.RunPath);
+        Assert.Null(result.File.DynamicMetadata.Rpath);
     }
 }

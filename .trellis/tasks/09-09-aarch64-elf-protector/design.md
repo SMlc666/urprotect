@@ -90,6 +90,10 @@ Build an immutable program-header list and validate, at minimum:
 
 The validator must distinguish a malformed input from a valid but unsupported profile. Both are failures for any future mutation operation, but diagnostics must make the difference visible.
 
+`PT_NOTE` and `PT_GNU_PROPERTY` payloads are exposed as bounds-checked note
+records with preserved name and descriptor bytes. Unknown note types and
+properties remain raw data; malformed alignment or payload ranges are errors.
+
 ### 4.3 LoadMap
 
 `LoadMap` is the only component allowed to convert between:
@@ -116,6 +120,11 @@ The first dynamic model should cover the tags needed to locate and validate:
 - PLT/GOT metadata and GNU property references.
 
 The model keeps the raw dynamic entry and a typed interpretation. Unknown tags remain available in the raw list and are not discarded.
+
+The current typed interpretation also exposes bounded `DT_STRTAB` strings for
+`DT_NEEDED`, `DT_SONAME`, `DT_RPATH`, and `DT_RUNPATH`, while retaining the raw
+string-table bytes. Missing terminators, invalid offsets, and unmapped tables
+are errors; symbol-version decoding remains a later metadata increment.
 
 ### 4.5 Relocations
 

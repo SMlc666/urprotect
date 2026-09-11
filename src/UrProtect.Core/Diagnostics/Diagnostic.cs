@@ -23,6 +23,7 @@ public enum DiagnosticCode
     UnknownProgramHeaderType,
     InvalidSegment,
     InvalidAlignment,
+    NoteMalformed,
     MissingLoadSegment,
     MissingDynamicSegment,
     DynamicTableMalformed,
