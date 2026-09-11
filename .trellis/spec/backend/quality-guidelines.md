@@ -103,8 +103,9 @@ files, while restore remains `--locked-mode`. `gradle/actions/setup-gradle`
 owns Gradle caching; do not add a second cache for `~/.gradle`.
 
 The Android native-bridge job may cache only the pinned SDK package
-directories: emulator, platform-tools, API 35 platform/build-tools, CMake
-3.22.1, NDK 27.2.12479018, and the API 35 Google APIs x86_64 system image.
+directories: command-line tools, emulator, platform-tools, API 35
+platform/build-tools, CMake 3.22.1, NDK 27.2.12479018, and the API 35 Google
+APIs x86_64 system image.
 The key must include the runner OS/architecture, manifest versions, and the
 cache schema version. Do not cache `bin/`, `obj/`, Gradle build outputs, APK
 outputs, or a running/dirty AVD. Cache hit/miss status belongs in the step

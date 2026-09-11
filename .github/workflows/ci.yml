@@ -103,12 +103,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libpulse0
           dpkg-query -W libpulse0 | tee android-emulator-host-dependencies.txt
-      - uses: android-actions/setup-android@v3
       - name: Cache Android SDK packages
         id: android-sdk-cache
         uses: actions/cache@v4
         with:
           path: |
+            ${{ env.ANDROID_SDK_ROOT }}/cmdline-tools
+            ${{ env.ANDROID_SDK_ROOT }}/tools
             ${{ env.ANDROID_SDK_ROOT }}/emulator
             ${{ env.ANDROID_SDK_ROOT }}/platform-tools
             ${{ env.ANDROID_SDK_ROOT }}/platforms/android-35
@@ -117,6 +118,7 @@ jobs:
             ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
             ${{ env.ANDROID_SDK_ROOT }}/system-images/android-35/google_apis/x86_64
           key: android-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/manifest.json', 'scripts/run-android-avd.sh', '.github/workflows/ci.yml') }}
+      - uses: android-actions/setup-android@v3
       - name: Record Android SDK cache status
         run: |
           {
