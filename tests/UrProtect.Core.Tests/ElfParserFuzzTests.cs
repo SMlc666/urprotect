@@ -11,8 +11,9 @@ public sealed class ElfParserFuzzTests
     {
         var random = new Random(0xA64E1F);
         var stopwatch = Stopwatch.StartNew();
+        var iterations = ReadIterationCount("URPROTECT_FUZZ_RANDOM_ITERATIONS", 512);
 
-        for (var iteration = 0; iteration < 512; iteration++)
+        for (var iteration = 0; iteration < iterations; iteration++)
         {
             var bytes = new byte[random.Next(0, 4097)];
             random.NextBytes(bytes);
@@ -33,8 +34,9 @@ public sealed class ElfParserFuzzTests
     {
         var random = new Random(0xE1F5AFE);
         var seed = ElfFixture.MinimalPie();
+        var iterations = ReadIterationCount("URPROTECT_FUZZ_MUTATION_ITERATIONS", 256);
 
-        for (var iteration = 0; iteration < 256; iteration++)
+        for (var iteration = 0; iteration < iterations; iteration++)
         {
             var bytes = (byte[])seed.Clone();
             var mutationCount = random.Next(1, 16);
@@ -47,5 +49,15 @@ public sealed class ElfParserFuzzTests
 
             Assert.Null(exception);
         }
+    }
+
+    private static int ReadIterationCount(string variable, int fallback)
+    {
+        if (!int.TryParse(Environment.GetEnvironmentVariable(variable), out var value))
+        {
+            return fallback;
+        }
+
+        return Math.Clamp(value, 1, 100_000);
     }
 }

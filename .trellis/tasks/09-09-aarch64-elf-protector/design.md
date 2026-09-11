@@ -292,6 +292,12 @@ Coverage is measured for project code, not AsmStone internals. Critical modules 
 
 Fuzz targets begin at the immutable ELF parser and validation boundary. A fuzz iteration must never write outside a bounded buffer, allocate from an unchecked count, hang, or mutate the input. Minimized crashes and interesting structural cases become permanent corpus entries with toolchain/environment metadata.
 
+The MVP includes deterministic malformed-corpus tests and a bounded parser fuzz
+runner. `scripts/run-parser-fuzz.sh` caps generated input sizes through the
+test target, accepts bounded iteration overrides, applies a process timeout,
+and retains a TRX result in the nightly fixture artifact. This is a parser
+smoke/fuzz contract, not a replacement for a future coverage-guided engine.
+
 ### Benchmarks
 
 Use a repeatable .NET benchmark harness on native ARM64 Linux. Measure parsing, LoadMap construction, dynamic/relocation indexing, instruction scanning, report generation, no-op copying, allocations, and peak working-set memory over small, medium, large, stripped, and relocation-dense fixtures. The current harness covers the small infrastructure fixture; the expanded fixture corpus remains a follow-up. CI stores results with the runner image, SDK, Git SHA, and fixture-manifest hash. Do not use Android TCG or native-bridge timing as a native performance baseline.

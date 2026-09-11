@@ -134,3 +134,8 @@ schema version. Do not cache `bin/`, `obj/`, Gradle build outputs, APK outputs,
 or a running/dirty AVD. Cache hit/miss status belongs in the step summary so
 timing regressions remain visible. A cache hit that falls back to a package
 redownload or reports tar permission errors is not considered effective.
+
+Parser fuzz smoke runs use `scripts/run-parser-fuzz.sh`, bounded random and
+mutated-valid inputs, a maximum input size enforced by the test, and an
+explicit process timeout. Fuzz results and minimized corpus additions belong
+in CI artifacts; a fuzz failure must not be converted into a successful skip.

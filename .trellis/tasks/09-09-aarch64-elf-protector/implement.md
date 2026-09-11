@@ -150,10 +150,10 @@ The first Android-container workflow should be an explicit feasibility experimen
 
 ## 9. Fuzzing, coverage, and benchmarks
 
-- [ ] Add parser fuzz targets with bounded allocations and timeouts.
-- [ ] Seed malformed corpus entries for every parser rejection class.
-- [ ] Add coverage collection for project code and module-specific thresholds after a baseline run.
-- [ ] Add property tests for parser/model invariants and no-op byte identity.
+- [x] Add parser fuzz targets with bounded allocations and timeouts.
+- [x] Seed deterministic malformed corpus entries for the current parser rejection classes, plus mutated valid ELF seeds.
+- [x] Add coverage collection for project code and module-specific thresholds after a baseline run.
+- [x] Add property/fuzz tests for parser/model invariants and no-op byte identity.
 - [x] Add native ARM64 benchmarks for parse, map, metadata, analysis, copy, allocations, and peak memory.
 - [x] Store benchmark results with runner image, SDK, Git SHA, and fixture manifest hash metadata in the CI artifact; historical comparison remains a release-process concern.
 
