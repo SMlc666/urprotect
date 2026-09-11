@@ -55,10 +55,15 @@ public static class ElfValidator
         {
             if (relocation.Kind == Aarch64RelocationKind.Unknown)
             {
+                var diagnosticOffset = file.LoadMap.TryVirtualAddressToFileOffset(
+                    relocation.SourceAddress,
+                    out var sourceOffset)
+                    ? sourceOffset
+                    : (ulong?)null;
                 diagnostics.Warning(
                     DiagnosticCode.UnsupportedRelocation,
                     $"AArch64 relocation type {relocation.Type} is preserved but not semantically classified.",
-                    relocation.SourceAddress);
+                    diagnosticOffset);
             }
         }
 
