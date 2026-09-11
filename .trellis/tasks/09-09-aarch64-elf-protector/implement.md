@@ -57,8 +57,9 @@ Risk: over-rejecting valid page-boundary segment layouts. Keep segment overlap p
 
 - [x] Implement file-offset, ELF-virtual-address, and runtime-address value types.
 - [x] Build `LoadMap` only from validated `PT_LOAD` records.
-- [ ] Parse and validate `PT_DYNAMIC`, interpreter, TLS, RELRO, GNU property, EH frame, stack, and note records.
-- [ ] Add bounded string, hash, symbol, version, dynamic-tag, and relocation-table views.
+- [x] Parse and bounds-validate `PT_DYNAMIC`, interpreter, TLS, RELRO, GNU property, EH frame, stack, and note program-header records; specialized TLS/property semantics remain raw/deferred.
+- [x] Add bounded string, hash, symbol, dynamic-tag, and relocation-table views.
+- [ ] Add symbol-version views for `DT_VERSYM`/`DT_VERNEED`.
 - [x] Recognize common AArch64 RELA, RELR, Android RELR, and legacy Android packed-relocation forms without applying or rewriting them.
 - [x] Add raw-preservation tests for unknown tags and unmodeled payloads.
 
@@ -124,10 +125,12 @@ dotnet test --filter Category=Fixtures
 
 ## 8. GitHub ARM64 CI
 
-- [ ] Add explicit native ARM64 Linux jobs for glibc and a separately pinned ARM64 musl runtime container; the current native-host fixture gate uses the checksum-verified musl toolchain archive below.
+- [x] Add explicit native ARM64 Linux jobs for glibc and musl-loader execution; the current native-host fixture gate uses the pinned Ubuntu musl packages below.
+- [ ] Add a separately pinned ARM64 musl runtime container for an independent libc profile.
 - [x] Add pinned checksum-verified native ARM64 musl-gcc and Zig provisioning for the nightly fixture job; do not fall back to QEMU, glibc, or another host architecture.
 - [x] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
-- [ ] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, headless graphics, and matching image hashes.
+- [x] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, and headless graphics prerequisites.
+- [ ] Add matching ARM64 system/vendor image hashes and promote the container probe only after the hosted capability contract is available.
 - [x] Add ARM64 AVD software-emulation smoke only with explicit `tcg`/`software` labeling and no KVM assumption.
 - [x] Add x86_64-hosted x86_64-guest TCG E2E with the `arm64-v8a` native bridge for bionic, Android linker, `System.loadLibrary`, and JNI; keep it nightly/manual/release until stability is demonstrated. A full ARM64 Android guest remains a separate capability target because the released emulator rejects it on x86_64 hosts.
 - [x] Make the slow native-bridge AVD job opt-in for manual workflow dispatches while retaining scheduled execution; core build/test and fixture jobs remain independent.
