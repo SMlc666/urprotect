@@ -248,9 +248,11 @@ CI cache policy:
 - The Android native-bridge job caches only its pinned SDK package directories
   (command-line tools, emulator, platform-tools, API 35 platform/build-tools,
   CMake 3.22.1, NDK 27.2.12479018, and the API 35 Google APIs x86_64 system
-  image). Restore occurs before Android SDK setup so setup does not redownload
-  cached packages. The cache key includes the runner OS/architecture,
-  manifest/script inputs, and a cache schema version.
+  image). The SDK root is a runner-writable `${{ runner.temp }}/android-sdk`,
+  not the root-owned preinstalled SDK path. Restore occurs before Android SDK
+  setup so setup does not redownload cached packages. The cache key includes
+  the runner OS/architecture, manifest/script inputs, and a cache schema
+  version; bump the schema when the package set or cache layout changes.
 - Build outputs, APKs, `bin/obj`, and dirty AVD runtime state are not cached.
   Cache hit/miss and timing data are reported in the workflow summary. AVD
   snapshot caching is deferred until a clean snapshot contract is proven.

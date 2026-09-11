@@ -106,7 +106,10 @@ The Android native-bridge job may cache only the pinned SDK package
 directories: command-line tools, emulator, platform-tools, API 35
 platform/build-tools, CMake 3.22.1, NDK 27.2.12479018, and the API 35 Google
 APIs x86_64 system image.
-The key must include the runner OS/architecture, manifest versions, and the
-cache schema version. Do not cache `bin/`, `obj/`, Gradle build outputs, APK
-outputs, or a running/dirty AVD. Cache hit/miss status belongs in the step
-summary so timing regressions remain visible.
+The SDK root must be a runner-writable directory such as `${{ runner.temp }}`;
+do not restore an archive over root-owned preinstalled SDK paths. The key must
+include the runner OS/architecture, manifest/script inputs, and the cache
+schema version. Do not cache `bin/`, `obj/`, Gradle build outputs, APK outputs,
+or a running/dirty AVD. Cache hit/miss status belongs in the step summary so
+timing regressions remain visible. A cache hit that falls back to a package
+redownload or reports tar permission errors is not considered effective.
