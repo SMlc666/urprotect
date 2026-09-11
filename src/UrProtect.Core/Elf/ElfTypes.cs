@@ -163,6 +163,12 @@ public readonly record struct RelaRelocation(
 
 public readonly record struct RelrWord(ulong Value, ulong SourceAddress);
 
+public readonly record struct AndroidPackedRelocationTable(
+    ulong Address,
+    ulong Size,
+    bool IsRela,
+    ReadOnlyMemory<byte> RawBytes);
+
 public readonly record struct FileRange(ulong Offset, ulong Size)
 {
     public bool TryGetEnd(out ulong end)
@@ -191,6 +197,7 @@ public sealed class ElfFile
         IReadOnlyList<DynamicEntry> dynamicEntries,
         IReadOnlyList<RelaRelocation> relaRelocations,
         IReadOnlyList<RelrWord> relrWords,
+        IReadOnlyList<AndroidPackedRelocationTable> androidPackedRelocations,
         IReadOnlyList<DynamicSymbol> dynamicSymbols)
     {
         Bytes = bytes;
@@ -201,6 +208,7 @@ public sealed class ElfFile
         DynamicEntries = dynamicEntries;
         RelaRelocations = relaRelocations;
         RelrWords = relrWords;
+        AndroidPackedRelocations = androidPackedRelocations;
         DynamicSymbols = dynamicSymbols;
     }
 
@@ -219,6 +227,8 @@ public sealed class ElfFile
     public IReadOnlyList<RelaRelocation> RelaRelocations { get; }
 
     public IReadOnlyList<RelrWord> RelrWords { get; }
+
+    public IReadOnlyList<AndroidPackedRelocationTable> AndroidPackedRelocations { get; }
 
     public IReadOnlyList<DynamicSymbol> DynamicSymbols { get; }
 

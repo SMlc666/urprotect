@@ -109,6 +109,11 @@ public static class ElfParser
             dynamicEntries,
             diagnostics);
         var relrWords = ParseRelrWords(reader, loadMap, dynamicEntries, diagnostics);
+        var androidPackedRelocations = ParseAndroidPackedRelocations(
+            reader,
+            loadMap,
+            dynamicEntries,
+            diagnostics);
         var dynamicSymbols = ParseDynamicSymbols(reader, loadMap, dynamicEntries, diagnostics);
 
         var file = new ElfFile(
@@ -120,6 +125,7 @@ public static class ElfParser
             dynamicEntries,
             relaRelocations,
             relrWords,
+            androidPackedRelocations,
             dynamicSymbols);
 
         var validation = ElfValidator.Validate(file);
@@ -580,6 +586,53 @@ public static class ElfParser
         }
 
         return result;
+    }
+
+    private static List<AndroidPackedRelocationTable> ParseAndroidPackedRelocations(
+        BoundedReader reader,
+        LoadMap loadMap,
+        IReadOnlyList<DynamicEntry> dynamicEntries,
+        DiagnosticBag diagnostics)
+    {
+        var result = new List<AndroidPackedRelocationTable>();
+        ParseTable(ElfConstants.DtAndroidRel, ElfConstants.DtAndroidRelsz, isRela: false);
+        ParseTable(ElfConstants.DtAndroidRela, ElfConstants.DtAndroidRelasz, isRela: true);
+        return result;
+
+        void ParseTable(ulong addressTag, ulong sizeTag, bool isRela)
+        {
+            var hasAddress = TryGetDynamicValue(dynamicEntries, addressTag, out var address);
+            var hasSize = TryGetDynamicValue(dynamicEntries, sizeTag, out var size);
+            if (!hasAddress && !hasSize)
+            {
+                return;
+            }
+
+            if (!hasAddress || !hasSize || size == 0)
+            {
+                if (size != 0)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.RelocationTableMalformed,
+                        "The Android packed relocation table is missing an address or size tag.",
+                        address);
+                }
+
+                return;
+            }
+
+            if (!TryResolveVirtualRange(reader, loadMap, address, size, out var fileOffset)
+                || !reader.TrySlice(fileOffset, size, out var rawBytes))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.DynamicPointerUnmapped,
+                    "The Android packed relocation table does not map to file-backed bytes.",
+                    address);
+                return;
+            }
+
+            result.Add(new AndroidPackedRelocationTable(address, size, isRela, rawBytes));
+        }
     }
 
     private static IReadOnlyList<DynamicSymbol> ParseDynamicSymbols(

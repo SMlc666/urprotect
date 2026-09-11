@@ -4,11 +4,11 @@ This checklist is for the infrastructure-only MVP. Do not run `task.py start` un
 
 ## 1. Bootstrap and repository contracts
 
-- [ ] Confirm the repository layout and add a .NET solution targeting the pinned SDK/runtime chosen for AsmStone compatibility.
-- [ ] Add build-wide settings for nullable/reference safety, analyzers, deterministic builds, warnings-as-errors policy, and test categories.
-- [ ] Record the pinned AsmStone revision and dependency/license provenance.
-- [ ] Create separate production, test, fixture, benchmark, and CI/tooling boundaries; do not put fixture generation into runtime parsing code.
-- [ ] Define the CLI/report contract for validate, analyze, and optional no-op copy operations.
+- [x] Confirm the repository layout and add a .NET solution targeting the pinned SDK/runtime chosen for AsmStone compatibility.
+- [x] Add build-wide settings for nullable/reference safety, analyzers, deterministic builds, warnings-as-errors policy, and test categories.
+- [x] Record the pinned AsmStone revision and dependency/license provenance.
+- [x] Create separate production, test, fixture, benchmark, and CI/tooling boundaries; do not put fixture generation into runtime parsing code.
+- [x] Define the CLI/report contract for validate, analyze, and optional no-op copy operations.
 
 Validation:
 
@@ -22,10 +22,10 @@ Rollback point: retain the empty solution and dependency lock before adding pars
 
 ## 2. Binary primitives
 
-- [ ] Implement bounded byte reads and immutable slices.
-- [ ] Implement explicit little-endian integer decoding and checked address/range arithmetic.
-- [ ] Add property tests for range containment, overflow, empty ranges, and offset/length conversions.
-- [ ] Add diagnostics that retain source offset, field name, and stable error code.
+- [x] Implement bounded byte reads and immutable slices.
+- [x] Implement explicit little-endian integer decoding and checked address/range arithmetic.
+- [x] Add property tests for range containment, overflow, empty ranges, and offset/length conversions.
+- [x] Add diagnostics that retain source offset, field name, and stable error code.
 
 Validation:
 
@@ -38,10 +38,10 @@ Rollback point: binary primitives must be independently usable before ELF parsin
 
 ## 3. ELF header and program-header model
 
-- [ ] Add immutable models for the ELF header and program headers.
-- [ ] Parse only after all header/table ranges pass bounds checks.
-- [ ] Validate the agreed `ELF64`/little-endian/AArch64/`ET_DYN` profile.
-- [ ] Make section headers optional for runtime analysis.
+- [x] Add immutable models for the ELF header and program headers.
+- [x] Parse only after all header/table ranges pass bounds checks.
+- [x] Validate the agreed `ELF64`/little-endian/AArch64/`ET_DYN` profile.
+- [x] Make section headers optional for runtime analysis.
 - [ ] Model unknown program types and extended numbering as explicit results.
 - [ ] Add valid, truncated, overflowed, stripped, and unknown-extension fixtures.
 
@@ -56,11 +56,11 @@ Risk: over-rejecting valid page-boundary segment layouts. Keep segment overlap p
 ## 4. LoadMap and dynamic metadata
 
 - [ ] Implement file-offset, ELF-virtual-address, and runtime-address value types.
-- [ ] Build `LoadMap` only from validated `PT_LOAD` records.
+- [x] Build `LoadMap` only from validated `PT_LOAD` records.
 - [ ] Parse and validate `PT_DYNAMIC`, interpreter, TLS, RELRO, GNU property, EH frame, stack, and note records.
 - [ ] Add bounded string, hash, symbol, version, dynamic-tag, and relocation-table views.
-- [ ] Recognize common AArch64 RELA, RELR, Android RELR, and legacy Android packed-relocation forms without applying or rewriting them.
-- [ ] Add raw-preservation tests for unknown tags and unmodeled payloads.
+- [x] Recognize common AArch64 RELA, RELR, Android RELR, and legacy Android packed-relocation forms without applying or rewriting them.
+- [x] Add raw-preservation tests for unknown tags and unmodeled payloads.
 
 Validation:
 
@@ -74,13 +74,13 @@ Rollback point: keep metadata parsing read-only until all table-range tests are 
 
 ## 5. AsmStone adapter and AArch64 analysis
 
-- [ ] Add the pinned AsmStone dependency behind a local adapter.
-- [ ] Map decode outcomes into project-owned records and diagnostics.
-- [ ] Scan only executable `PT_LOAD` file-backed bytes.
+- [x] Add the pinned AsmStone dependency behind a local adapter.
+- [x] Map decode outcomes into project-owned records and diagnostics.
+- [x] Scan only executable `PT_LOAD` file-backed bytes.
 - [ ] Add conservative entrypoint/symbol/relocation candidate discovery.
-- [ ] Classify the selected branch, PC-relative, literal, and common load/store instruction families.
-- [ ] Preserve unknown instructions and unresolved indirect control flow as explicit boundaries.
-- [ ] Add small contract vectors, not an exhaustive duplicate ISA suite.
+- [x] Classify the selected branch, PC-relative, literal, and common load/store instruction families.
+- [x] Preserve unknown instructions and unresolved indirect control flow as explicit boundaries.
+- [x] Add small contract vectors, not an exhaustive duplicate ISA suite.
 
 Validation:
 
@@ -92,12 +92,12 @@ Risk: an AsmStone defect must produce a minimized upstream reproducer, not a per
 
 ## 6. No-op validation pipeline
 
-- [ ] Orchestrate parse, validate, LoadMap construction, metadata indexing, analysis, and report generation.
-- [ ] Add optional source-to-destination byte copy without reserialization.
-- [ ] Compare source and destination bytes before publishing the destination.
-- [ ] Use a temporary destination and atomic publish semantics.
-- [ ] Add baseline/re-output tests for every fixture class.
-- [ ] Define which file metadata is copied or intentionally not promised; keep content byte identity mandatory.
+- [x] Orchestrate parse, validate, LoadMap construction, metadata indexing, analysis, and report generation.
+- [x] Add optional source-to-destination byte copy without reserialization.
+- [x] Compare source and destination bytes before publishing the destination.
+- [x] Use a temporary destination and atomic publish semantics.
+- [x] Add baseline/re-output tests for every fixture class.
+- [x] Define which file metadata is copied or intentionally not promised; keep content byte identity mandatory.
 
 Validation:
 

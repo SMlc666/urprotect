@@ -118,4 +118,45 @@ public sealed class ElfParserTests
         Assert.True(result.File.LoadMap.TryVirtualAddressToFileOffset(0x1200, out var fileOffset));
         Assert.Equal(0x200UL, fileOffset);
     }
+
+    [Fact]
+    public void PreservesBoundedAndroidPackedRelocationTable()
+    {
+        var bytes = ElfFixture.MinimalPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x190), ElfConstants.DtAndroidRel);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x198), 0x1F0);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1A0), ElfConstants.DtAndroidRelsz);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1A8), 8);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1B0), ElfConstants.DtNull);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x1B8), 0);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(176 + 32), 64);
+        bytes[0x1F0] = 0x81;
+        bytes[0x1F1] = 0x80;
+        bytes[0x1F2] = 0x01;
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        var table = Assert.Single(result.File!.AndroidPackedRelocations);
+        Assert.False(table.IsRela);
+        Assert.Equal(0x1F0UL, table.Address);
+        Assert.Equal(8UL, table.Size);
+        Assert.Equal(bytes.AsSpan(0x1F0, 8).ToArray(), table.RawBytes.ToArray());
+    }
+
+    [Fact]
+    public void PreservesUnknownDynamicTagsWithoutGuessing()
+    {
+        var bytes = ElfFixture.MinimalPie();
+        const ulong unknownTag = 0x70000001;
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x180), unknownTag);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x188), 0x1234);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Contains(result.File!.DynamicEntries, entry => entry.Tag == unknownTag && entry.Value == 0x1234);
+    }
 }
