@@ -78,6 +78,10 @@ jobs:
       - name: Probe Android container prerequisites
         run: |
           set +e
+          export ANDROID_CONTAINER_SYSTEM_IMAGE="${RUNNER_TEMP}/android-container/lineage-arm64-system.zip"
+          export ANDROID_CONTAINER_VENDOR_IMAGE="${RUNNER_TEMP}/android-container/lineage-arm64-vendor.zip"
+          export ANDROID_CONTAINER_SYSTEM_SHA256='c4b45fad36bee7c0db8a1d9315a5be0035520c53d3d005a807735ae9b7ee79cf'
+          export ANDROID_CONTAINER_VENDOR_SHA256='1e6d33d464277ea3964e4658001c8882f21325616d6bcc66d473bc9ee1e246c7'
           ./.github/scripts/check-android-container.sh 2>&1 | tee android-container-probe.log
           probe_status=${PIPESTATUS[0]}
           if [[ "${probe_status}" -ne 0 ]]; then

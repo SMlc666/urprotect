@@ -130,7 +130,7 @@ dotnet test --filter Category=Fixtures
 - [x] Add pinned checksum-verified native ARM64 musl-gcc and Zig provisioning for the nightly fixture job; do not fall back to QEMU, glibc, or another host architecture.
 - [x] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
 - [x] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, and headless graphics prerequisites.
-- [ ] Add matching ARM64 system/vendor image hashes and promote the container probe only after the hosted capability contract is available.
+- [x] Add matching ARM64 system/vendor image URLs and hashes to the fixture manifest; keep container promotion gated on hosted capability availability.
 - [x] Add ARM64 AVD software-emulation smoke only with explicit `tcg`/`software` labeling and no KVM assumption.
 - [x] Add x86_64-hosted x86_64-guest TCG E2E with the `arm64-v8a` native bridge for bionic, Android linker, `System.loadLibrary`, and JNI; keep it nightly/manual/release until stability is demonstrated. A full ARM64 Android guest remains a separate capability target because the released emulator rejects it on x86_64 hosts.
 - [x] Make the slow native-bridge AVD job opt-in for manual workflow dispatches while retaining scheduled execution; core build/test and fixture jobs remain independent.

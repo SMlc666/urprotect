@@ -10,7 +10,14 @@
     "gradleVersion": "8.9",
     "androidGradlePlugin": "8.7.3",
     "packageName": "com.example.urprotect",
-    "avdName": "urprotect-api35-x86-bridge"
+    "avdName": "urprotect-api35-x86-bridge",
+    "container": {
+      "profile": "waydroid-arm64-mainline",
+      "systemImageUrl": "https://ota.waydro.id/system/lineage/waydroid_arm64/VANILLA.json",
+      "systemImageSha256": "c4b45fad36bee7c0db8a1d9315a5be0035520c53d3d005a807735ae9b7ee79cf",
+      "vendorImageUrl": "https://ota.waydro.id/vendor/waydroid_arm64/MAINLINE.json",
+      "vendorImageSha256": "1e6d33d464277ea3964e4658001c8882f21325616d6bcc66d473bc9ee1e246c7"
+    }
   },
   "profiles": [
     {

@@ -39,6 +39,18 @@ def main() -> int:
     data = json.loads(manifest_path.read_text())
     if data.get("schemaVersion") != 2:
         raise SystemExit("fixture manifest schemaVersion must be 2")
+    android = data.get("android")
+    if not isinstance(android, dict):
+        raise SystemExit("fixture manifest must contain an android object")
+    container = android.get("container")
+    if not isinstance(container, dict):
+        raise SystemExit("fixture manifest android.container must be an object")
+    for field in ("profile", "systemImageUrl", "systemImageSha256", "vendorImageUrl", "vendorImageSha256"):
+        if not isinstance(container.get(field), str) or not container[field]:
+            raise SystemExit(f"fixture manifest android.container.{field} must be a non-empty string")
+    for field in ("systemImageSha256", "vendorImageSha256"):
+        if not re.fullmatch(r"[0-9a-f]{64}", container[field]):
+            raise SystemExit(f"fixture manifest android.container.{field} must be a lowercase SHA-256")
     profiles = data.get("profiles")
     if not isinstance(profiles, list) or not profiles:
         raise SystemExit("fixture manifest must contain a non-empty profiles array")

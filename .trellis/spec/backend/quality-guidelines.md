@@ -114,6 +114,12 @@ install, ABI, native-bridge, linker, or JNI failures remain test failures. The
 result must not be presented as physical-device, native-hardware, or full
 ARM64-guest validation.
 
+The Android container probe receives pinned Waydroid ARM64 system/vendor image
+URLs and SHA-256 values from `fixtures/manifest.json`. It verifies local image
+files when provisioned and reports missing files/checksum mismatches as
+capability evidence; until Binder/LXC/graphics and both matching images are
+available, the probe remains informational and must not claim bionic E2E.
+
 The slow native-bridge AVD job is optional on manual `workflow_dispatch` runs:
 the `run_android_native_bridge` boolean input defaults to `false`. Scheduled
 runs retain automatic Android coverage, while core build/test and fixture jobs

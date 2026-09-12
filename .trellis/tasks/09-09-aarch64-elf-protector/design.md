@@ -249,6 +249,13 @@ Android jobs are separate:
 
 Both Android runtime modes must install a test APK and exercise the real library-loading/JNI path. If the container cannot run on the hosted kernel, the failure is visible and the project does not claim container E2E coverage. Because software-emulated AVD boot is slow, the native-bridge job is opt-in for manual workflow dispatches and automatic for scheduled runs; it must not block the core build/test or fixture jobs when omitted.
 
+The container profile pins the Waydroid ARM64 VANILLA system manifest
+`c4b45fad36bee7c0db8a1d9315a5be0035520c53d3d005a807735ae9b7ee79cf` and
+MAINLINE vendor manifest
+`1e6d33d464277ea3964e4658001c8882f21325616d6bcc66d473bc9ee1e246c7` in the
+fixture manifest. The probe verifies downloaded archive hashes when paths are
+provided; absent images are a visible capability gap, not a fallback.
+
 The initial GitHub ARM64 hosted-runner probe confirmed that the runner provides
 an AArch64 host, namespaces, and cgroups but does not expose Binder/BinderFS,
 LXC, or a Wayland/headless compositor. Until a supported runner or explicit
