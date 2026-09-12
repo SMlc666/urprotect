@@ -159,4 +159,4 @@ git diff --check
 - [x] Preserve Wrapper 0.1 compatibility evidence until 0.2 is promoted.
 - [x] Run final task-context validation and full quality review.
 - [x] Update PRD acceptance only after observable evidence is recorded.
-- [ ] Archive after commit/push and successful CI verification.
+- [x] Archive after commit/push and successful CI verification.
