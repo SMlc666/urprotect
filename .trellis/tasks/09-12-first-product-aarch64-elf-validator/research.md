@@ -32,3 +32,8 @@
   report schema v1; there is no public core library compatibility promise yet.
 - glibc and musl bundles are both release targets, but Android native-bridge
   timing is never a native performance baseline.
+- `RuntimeIdentifiers` is pinned at the solution level for `linux-arm64` and
+  `linux-musl-arm64`; locked restore carries both runtime targets, while the
+  publish script selects one with `-p:RuntimeIdentifier` and emits a normalized
+  single-file archive. The ARM64 host can validate the glibc archive directly;
+  musl smoke requires the matching musl loader package.

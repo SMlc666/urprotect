@@ -30,7 +30,7 @@ public sealed class CliApplicationTests
         using var document = JsonDocument.Parse(stdout.ToString());
         var root = document.RootElement;
         Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("0.1.0", root.GetProperty("toolVersion").GetString());
+        Assert.Equal(CliApplication.ToolVersion, root.GetProperty("toolVersion").GetString());
         Assert.True(root.GetProperty("success").GetBoolean());
         Assert.Equal(input.Length, root.GetProperty("input").GetProperty("byteLength").GetInt32());
         Assert.Equal(

@@ -5,6 +5,8 @@
       "asmstone": {
         "type": "Project"
       }
-    }
+    },
+    "net8.0/linux-arm64": {},
+    "net8.0/linux-musl-arm64": {}
   }
 }

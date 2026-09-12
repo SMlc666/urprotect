@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>UrProtect.Cli</RootNamespace>
     <AssemblyName>urprotect</AssemblyName>
+    <Version>0.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../UrProtect.Core/UrProtect.Core.csproj" />

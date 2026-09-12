@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_release_rehearsal:
+        description: Run the ARM64 release packaging and smoke validation without publishing release assets.
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 3 * * *'
   release:
@@ -314,4 +319,57 @@ jobs:
             .artifacts/benchmark/
             BenchmarkDotNet.Artifacts/
             benchmarks/UrProtect.Benchmarks/BenchmarkDotNet.Artifacts/
+          if-no-files-found: warn
+
+  release-package:
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_release_rehearsal == true)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Install pinned musl runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl=1.2.4-2
+      - name: Resolve product version
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == release ]]; then
+            tag="${{ github.event.release.tag_name }}"
+            version="${tag#v}"
+          else
+            version='0.1.0'
+          fi
+          echo "URPROTECT_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "release_version=${version}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Package glibc and musl bundles
+        run: ./scripts/package-release.sh "${URPROTECT_VERSION}" .artifacts/release
+      - name: Smoke test release bundles
+        run: ./scripts/release-smoke.sh .artifacts/release
+      - name: Publish GitHub release assets
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" .artifacts/release/* --clobber
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.run_id }}
+          path: .artifacts/release/
           if-no-files-found: warn

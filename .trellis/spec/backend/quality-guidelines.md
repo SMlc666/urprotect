@@ -169,3 +169,10 @@ When a test project references a production project, its `packages.lock.json`
 must be regenerated with `dotnet restore --force-evaluate` and committed. A
 locked restore is required in CI and must fail on a stale project-reference
 graph rather than silently updating it.
+
+Release bundles must be self-contained single-file outputs built with the
+matching pinned runtime identifier (`linux-arm64` or `linux-musl-arm64`). The
+package script must validate ELF class/machine/interpreter, include third-party
+notices and an SBOM-equivalent inventory, create relative checksum entries, and
+use normalized tar ownership/order/timestamps. Release smoke must execute both
+bundles on native ARM64, using the musl loader explicitly for the musl bundle.

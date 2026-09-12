@@ -55,6 +55,18 @@ model; it publishes only after byte-for-byte identity is proven.
 This release does not rewrite code, encrypt code, inject runtime logic,
 virtualize control flow, or claim physical Android-device compatibility.
 
+Release bundles are produced only for native ARM64 glibc and musl profiles:
+
+```sh
+./scripts/package-release.sh 0.1.0 .artifacts/release
+./scripts/release-smoke.sh .artifacts/release
+```
+
+Each archive contains the single-file executable, supported-boundary README,
+third-party notices, provenance, and an SBOM-equivalent inventory. The musl
+bundle must be smoke-tested in an environment providing
+`/lib/ld-musl-aarch64.so.1`.
+
 ## Fixture Matrix
 
 The fixture manifest covers a small, explicit set of ELF producers instead of

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using UrProtect.Core.Diagnostics;
@@ -18,7 +19,12 @@ public enum ProductExitCode
 
 public sealed class CliApplication
 {
-    public const string ToolVersion = "0.1.0";
+    public static string ToolVersion =>
+        typeof(CliApplication).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion
+            .Split('+', 2)[0]
+        ?? "0.1.0";
 
     public static int Run(string[] args, TextWriter stdout, TextWriter stderr)
     {

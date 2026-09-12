@@ -55,13 +55,13 @@ dotnet test --filter Category=Report
 
 ## 4. Publish profiles
 
-- [ ] Add explicit `linux-arm64` glibc and `linux-musl-arm64` publish profiles
+- [x] Add explicit `linux-arm64` glibc and `linux-musl-arm64` publish profiles
   compatible with `global.json` and locked restore.
-- [ ] Produce self-contained archives with versioned names, notices, checksums,
+- [x] Produce self-contained archives with versioned names, notices, checksums,
   and a manifest containing SDK/AsmStone/fixture provenance.
-- [ ] Run each packaged executable with `--help`, `validate`, `--json`, and
+- [x] Run each packaged executable with `--help`, `validate`, `--json`, and
   `--copy` on its matching native profile.
-- [ ] Add SBOM/dependency inventory generation without adding runtime parser
+- [x] Add SBOM/dependency inventory generation without adding runtime parser
   dependencies.
 
 Validation:
