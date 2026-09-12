@@ -99,7 +99,7 @@ PY
 
   packed_wrapper="${extracted}/packed.elf"
   packed_report="${extracted}/packed-report.json"
-  source_help="${extracted}/source-help.txt"
+  source_help="${extracted}/source-run.txt"
   if [[ -n "${musl_container_binary}" ]]; then
     relative_binary="${binary#${extracted}/}"
     docker run --rm --platform linux/arm64 \
@@ -110,15 +110,15 @@ PY
       --launcher "/smoke/${relative_binary}" \
       --json /smoke/packed-report.json
     docker run --rm --platform linux/arm64 \
-      "${musl_container_image}" /bin/ls \
+      "${musl_container_image}" /bin/true \
       > "${source_help}"
     docker run --rm --platform linux/arm64 \
       -v "$(realpath "${extracted}"):/smoke" \
       "${musl_container_image}" /smoke/packed.elf \
       > "${extracted}/packed-help.txt"
   else
-    /bin/ls > "${source_help}"
-    "${binary}" pack /bin/ls \
+    /bin/true > "${source_help}"
+    "${binary}" pack /bin/true \
       --output "${packed_wrapper}" \
       --launcher "${binary}" \
       --json "${packed_report}"
