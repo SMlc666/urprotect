@@ -129,7 +129,15 @@ The model keeps the raw dynamic entry and a typed interpretation. Unknown tags r
 The current typed interpretation also exposes bounded `DT_STRTAB` strings for
 `DT_NEEDED`, `DT_SONAME`, `DT_RPATH`, and `DT_RUNPATH`, while retaining the raw
 string-table bytes. Missing terminators, invalid offsets, and unmapped tables
-are errors; symbol-version decoding remains a later metadata increment.
+are errors.
+
+When present, `DT_VERSYM` is bounded to the materialized dynamic-symbol count
+and exposed as raw 16-bit version indices with the hidden bit separated from
+the index. `DT_VERNEED`/`DT_VERNEEDNUM` are traversed through bounded
+`Elf64_Verneed`/`Elf64_Vernaux` chains, with dependency and version names
+resolved through the same checked string table. Missing chain links,
+backwards/cyclic offsets, truncated records, and invalid names fail closed;
+absent version tags remain valid.
 
 ### 4.5 Relocations
 

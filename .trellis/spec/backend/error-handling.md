@@ -33,6 +33,7 @@ for severity, code, message, and optional file offset. Aggregate diagnostics in
 
 Important codes include `TableOutOfBounds`, `InvalidSegment`,
 `DynamicTableMalformed`, `AddressOverflow`, `AddressUnmapped`,
+`SymbolVersionTableMalformed`, `VersionNeedTableMalformed`,
 `AsmStoneUnavailable`, `OutputIdentityMismatch`, and I/O failure codes.
 
 ---

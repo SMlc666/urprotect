@@ -210,6 +210,51 @@ public readonly record struct DynamicSymbol(
     ulong Value,
     ulong Size);
 
+public readonly record struct SymbolVersionIndex(ushort RawValue)
+{
+    public const ushort HiddenMask = 0x8000;
+    public const ushort IndexMask = 0x7FFF;
+
+    public bool IsHidden => (RawValue & HiddenMask) != 0;
+
+    public ushort Index => (ushort)(RawValue & IndexMask);
+}
+
+public readonly record struct VersionNeedAuxiliary(
+    uint Hash,
+    ushort Flags,
+    ushort Other,
+    uint NameOffset,
+    string Name,
+    ReadOnlyMemory<byte> RawBytes);
+
+public sealed record VersionNeed(
+    ushort Version,
+    ushort AuxiliaryCount,
+    uint FileNameOffset,
+    uint AuxiliaryOffset,
+    uint NextOffset,
+    string FileName,
+    IReadOnlyList<VersionNeedAuxiliary> Auxiliaries,
+    ReadOnlyMemory<byte> RawBytes);
+
+public sealed record ElfSymbolVersionMetadata(
+    ulong VersionTableAddress,
+    ReadOnlyMemory<byte> VersionTableBytes,
+    IReadOnlyList<SymbolVersionIndex> VersionIndices,
+    ulong VersionNeedAddress,
+    ReadOnlyMemory<byte> VersionNeedBytes,
+    IReadOnlyList<VersionNeed> NeededVersions)
+{
+    public static ElfSymbolVersionMetadata Empty { get; } = new(
+        0,
+        ReadOnlyMemory<byte>.Empty,
+        Array.Empty<SymbolVersionIndex>(),
+        0,
+        ReadOnlyMemory<byte>.Empty,
+        Array.Empty<VersionNeed>());
+}
+
 public enum Aarch64RelocationKind
 {
     Unknown,
@@ -331,6 +376,7 @@ public sealed class ElfFile
         LoadMap loadMap,
         IReadOnlyList<ElfNote> notes,
         ElfDynamicMetadata dynamicMetadata,
+        ElfSymbolVersionMetadata symbolVersions,
         IReadOnlyList<DynamicEntry> dynamicEntries,
         IReadOnlyList<RelaRelocation> relaRelocations,
         IReadOnlyList<RelrWord> relrWords,
@@ -344,6 +390,7 @@ public sealed class ElfFile
         LoadMap = loadMap;
         Notes = notes;
         DynamicMetadata = dynamicMetadata;
+        SymbolVersions = symbolVersions;
         DynamicEntries = dynamicEntries;
         RelaRelocations = relaRelocations;
         RelrWords = relrWords;
@@ -364,6 +411,8 @@ public sealed class ElfFile
     public IReadOnlyList<ElfNote> Notes { get; }
 
     public ElfDynamicMetadata DynamicMetadata { get; }
+
+    public ElfSymbolVersionMetadata SymbolVersions { get; }
 
     public IReadOnlyList<DynamicEntry> DynamicEntries { get; }
 

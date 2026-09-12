@@ -89,3 +89,4 @@ Fixture/AVD implementation evidence:
 - ELF note and GNU-property program segments now have a bounds-checked note view that preserves names/descriptors and enforces four-byte note alignment. Malformed note payloads fail with a typed diagnostic rather than being guessed.
 - Dynamic metadata now resolves bounded `DT_STRTAB` values for `DT_NEEDED`, `DT_SONAME`, `DT_RPATH`, and `DT_RUNPATH`; invalid offsets are rejected while raw dynamic entries and string-table bytes remain available.
 - Common AArch64 relocation numbers now map to project-owned semantic kinds, while unknown types remain preserved and produce no-op warnings instead of being applied.
+- Symbol-version metadata now exposes bounded `DT_VERSYM` indices and `DT_VERNEED`/`DT_VERNEEDNUM` dependency chains, preserving raw record bytes while rejecting truncated, cyclic, backwards, or invalid-name chains.

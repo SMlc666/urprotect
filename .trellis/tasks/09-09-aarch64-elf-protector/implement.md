@@ -59,7 +59,7 @@ Risk: over-rejecting valid page-boundary segment layouts. Keep segment overlap p
 - [x] Build `LoadMap` only from validated `PT_LOAD` records.
 - [x] Parse and bounds-validate `PT_DYNAMIC`, interpreter, TLS, RELRO, GNU property, EH frame, stack, and note program-header records; specialized TLS/property semantics remain raw/deferred.
 - [x] Add bounded string, hash, symbol, dynamic-tag, and relocation-table views.
-- [ ] Add symbol-version views for `DT_VERSYM`/`DT_VERNEED`.
+- [x] Add symbol-version views for `DT_VERSYM`/`DT_VERNEED` with bounded chain traversal and malformed-input tests.
 - [x] Recognize common AArch64 RELA, RELR, Android RELR, and legacy Android packed-relocation forms without applying or rewriting them.
 - [x] Add raw-preservation tests for unknown tags and unmodeled payloads.
 

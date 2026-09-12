@@ -19,6 +19,7 @@ public sealed class ElfParserTests
         Assert.Equal(2, result.File.LoadMap.Segments.Count);
         Assert.Single(result.File.LoadMap.Segments, segment => segment.IsExecutable);
         Assert.Empty(result.File.DynamicSymbols);
+        Assert.Empty(result.File.SymbolVersions.VersionIndices);
     }
 
     [Fact]
@@ -260,5 +261,140 @@ public sealed class ElfParserTests
         Assert.Equal(Aarch64RelocationKind.Call26, branch.Kind);
         Assert.Equal(Aarch64RelocationKind.LoadStore, loadStore.Kind);
         Assert.Equal(Aarch64RelocationKind.Unknown, unknown.Kind);
+    }
+
+    [Fact]
+    public void ParsesBoundedSymbolVersionTables()
+    {
+        var bytes = VersionedPie();
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        var versions = result.File!.SymbolVersions;
+        Assert.Equal(0x180UL, versions.VersionTableAddress);
+        Assert.Equal(bytes.AsSpan(0x180, 4).ToArray(), versions.VersionTableBytes.ToArray());
+        Assert.Equal(2, versions.VersionIndices.Count);
+        Assert.Equal(2, versions.VersionIndices[1].Index);
+        Assert.False(versions.VersionIndices[1].IsHidden);
+        var need = Assert.Single(versions.NeededVersions);
+        Assert.Equal("libc.so", need.FileName);
+        var auxiliary = Assert.Single(need.Auxiliaries);
+        Assert.Equal(2, auxiliary.Other);
+        Assert.Equal("GLIBC_2.34", auxiliary.Name);
+        Assert.Equal(32, versions.VersionNeedBytes.Length);
+    }
+
+    [Fact]
+    public void RejectsUnmappedSymbolVersionTable()
+    {
+        var bytes = VersionedPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x298), 0x3FF);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.SymbolVersionTableMalformed);
+    }
+
+    [Fact]
+    public void RejectsVersionNeedChainShorterThanDeclaredCount()
+    {
+        var bytes = VersionedPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x2B8), 2);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.VersionNeedTableMalformed);
+    }
+
+    private static byte[] VersionedPie()
+    {
+        var bytes = ElfFixture.MinimalPie();
+        Array.Resize(ref bytes, 0x404);
+
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(24), 0x1400);
+
+        // Extend the first load segment to cover the synthetic metadata.
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(64 + 32), 0x400);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(64 + 40), 0x400);
+
+        // Move the executable segment and entry point away from the metadata.
+        WriteProgramHeaderField(bytes, 120, 8, 0x400);
+        WriteProgramHeaderField(bytes, 120, 16, 0x1400);
+
+        // Move PT_DYNAMIC and PT_INTERP into the enlarged first load segment.
+        WriteProgramHeaderField(bytes, 176, 8, 0x240);
+        WriteProgramHeaderField(bytes, 176, 16, 0x240);
+        WriteProgramHeaderField(bytes, 176, 32, 0xA0);
+        WriteProgramHeaderField(bytes, 176, 40, 0xA0);
+        WriteProgramHeaderField(bytes, 232, 8, 0x3C0);
+        WriteProgramHeaderField(bytes, 232, 16, 0x3C0);
+        "/lib/ld-linux-aarch64.so.1\0"u8.CopyTo(bytes.AsSpan(0x3C0));
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x400), 0xD503201F);
+
+        // SysV hash: one bucket and two symbol-chain entries.
+        WriteUInt32(bytes, 0x120, 1);
+        WriteUInt32(bytes, 0x124, 2);
+
+        // The null symbol and one named dynamic symbol.
+        WriteUInt32(bytes, 0x148, 1);
+        bytes[0x14C] = 0x12;
+        WriteUInt16(bytes, 0x14E, 1);
+        WriteUInt64(bytes, 0x150, 0x1400);
+        WriteUInt64(bytes, 0x158, 4);
+
+        Encoding.ASCII.GetBytes("\0libc.so\0GLIBC_2.34\0").CopyTo(bytes.AsSpan(0x160));
+
+        // Two symbol-version indices, one for the null symbol and one for the named symbol.
+        WriteUInt16(bytes, 0x180, 0);
+        WriteUInt16(bytes, 0x182, 2);
+
+        // Elf64_Verneed followed by one Elf64_Vernaux.
+        WriteUInt16(bytes, 0x190, 1);
+        WriteUInt16(bytes, 0x192, 1);
+        WriteUInt32(bytes, 0x194, 1);
+        WriteUInt32(bytes, 0x198, 16);
+        WriteUInt32(bytes, 0x19C, 0);
+        WriteUInt32(bytes, 0x1A0, 0x1234);
+        WriteUInt16(bytes, 0x1A4, 0);
+        WriteUInt16(bytes, 0x1A6, 2);
+        WriteUInt32(bytes, 0x1A8, 9);
+        WriteUInt32(bytes, 0x1AC, 0);
+
+        WriteDynamicEntry(bytes, 0x240, ElfConstants.DtHash, 0x120);
+        WriteDynamicEntry(bytes, 0x250, ElfConstants.DtSymTab, 0x130);
+        WriteDynamicEntry(bytes, 0x260, ElfConstants.DtSymEnt, ElfConstants.SymbolEntrySize64);
+        WriteDynamicEntry(bytes, 0x270, ElfConstants.DtStrTab, 0x160);
+        WriteDynamicEntry(bytes, 0x280, ElfConstants.DtStrSz, 20);
+        WriteDynamicEntry(bytes, 0x290, ElfConstants.DtVersym, 0x180);
+        WriteDynamicEntry(bytes, 0x2A0, ElfConstants.DtVerneed, 0x190);
+        WriteDynamicEntry(bytes, 0x2B0, ElfConstants.DtVerneedNum, 1);
+        WriteDynamicEntry(bytes, 0x2C0, ElfConstants.DtNull, 0);
+        return bytes;
+
+        static void WriteDynamicEntry(byte[] destination, int offset, ulong tag, ulong value)
+        {
+            WriteUInt64(destination, offset, tag);
+            WriteUInt64(destination, offset + 8, value);
+        }
+
+        static void WriteProgramHeaderField(byte[] destination, int offset, int fieldOffset, ulong value) =>
+            WriteUInt64(destination, offset + fieldOffset, value);
+
+        static void WriteUInt16(byte[] destination, int offset, ushort value) =>
+            BinaryPrimitives.WriteUInt16LittleEndian(destination.AsSpan(offset), value);
+
+        static void WriteUInt32(byte[] destination, int offset, uint value) =>
+            BinaryPrimitives.WriteUInt32LittleEndian(destination.AsSpan(offset), value);
+
+        static void WriteUInt64(byte[] destination, int offset, ulong value) =>
+            BinaryPrimitives.WriteUInt64LittleEndian(destination.AsSpan(offset), value);
     }
 }

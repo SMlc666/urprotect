@@ -29,6 +29,8 @@ public enum DiagnosticCode
     DynamicTableMalformed,
     DynamicTableUnterminated,
     DynamicPointerUnmapped,
+    SymbolVersionTableMalformed,
+    VersionNeedTableMalformed,
     RelocationTableMalformed,
     SymbolTableMalformed,
     UnsupportedDynamicTag,

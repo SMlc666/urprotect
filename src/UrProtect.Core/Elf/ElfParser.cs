@@ -127,6 +127,13 @@ public static class ElfParser
             dynamicEntries,
             diagnostics);
         var dynamicSymbols = ParseDynamicSymbols(reader, loadMap, dynamicEntries, diagnostics);
+        var symbolVersions = ParseSymbolVersions(
+            reader,
+            loadMap,
+            dynamicEntries,
+            dynamicMetadata,
+            dynamicSymbols,
+            diagnostics);
 
         var file = new ElfFile(
             bytes,
@@ -136,6 +143,7 @@ public static class ElfParser
             loadMap,
             notes,
             dynamicMetadata,
+            symbolVersions,
             dynamicEntries,
             relaRelocations,
             relrWords,
@@ -490,7 +498,7 @@ public static class ElfParser
         string? runPath = null;
         foreach (var entry in stringTags)
         {
-            if (!TryReadString(entry.Value, stringTable, out var value))
+            if (!TryReadString(stringTable, entry.Value, out var value))
             {
                 diagnostics.Error(
                     DiagnosticCode.DynamicTableMalformed,
@@ -517,28 +525,314 @@ public static class ElfParser
         }
 
         return new ElfDynamicMetadata(needed, soname, rpath, runPath, stringTable);
+    }
 
-        static bool TryReadString(
-            ulong offset,
-            ReadOnlyMemory<byte> table,
-            out string value)
+    private static ElfSymbolVersionMetadata ParseSymbolVersions(
+        BoundedReader reader,
+        LoadMap loadMap,
+        IReadOnlyList<DynamicEntry> dynamicEntries,
+        ElfDynamicMetadata dynamicMetadata,
+        IReadOnlyList<DynamicSymbol> dynamicSymbols,
+        DiagnosticBag diagnostics)
+    {
+        var hasVersionTable = TryGetDynamicValue(
+            dynamicEntries,
+            ElfConstants.DtVersym,
+            out var versionTableAddress);
+        var hasVersionNeed = TryGetDynamicValue(
+            dynamicEntries,
+            ElfConstants.DtVerneed,
+            out var versionNeedAddress);
+        var hasVersionNeedCount = TryGetDynamicValue(
+            dynamicEntries,
+            ElfConstants.DtVerneedNum,
+            out var versionNeedCount);
+        if (!hasVersionTable && !hasVersionNeed && !hasVersionNeedCount)
         {
-            value = string.Empty;
-            if (offset >= (ulong)table.Length)
-            {
-                return false;
-            }
-
-            var bytes = table.Span[(int)offset..];
-            var terminator = bytes.IndexOf((byte)0);
-            if (terminator < 0)
-            {
-                return false;
-            }
-
-            value = Encoding.UTF8.GetString(bytes[..terminator]);
-            return true;
+            return ElfSymbolVersionMetadata.Empty;
         }
+
+        var versionIndices = new List<SymbolVersionIndex>();
+        var versionTableBytes = ReadOnlyMemory<byte>.Empty;
+        if (hasVersionTable)
+        {
+            if (dynamicSymbols.Count == 0)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SymbolVersionTableMalformed,
+                    "DT_VERSYM is present but no bounded dynamic symbol table is available.",
+                    versionTableAddress);
+            }
+            else if (!TryMultiply(
+                         (ulong)dynamicSymbols.Count,
+                         sizeof(ushort),
+                         out var versionTableSize)
+                || !TryResolveVirtualRange(
+                    reader,
+                    loadMap,
+                    versionTableAddress,
+                    versionTableSize,
+                    out var versionTableFileOffset)
+                || !reader.TrySlice(versionTableFileOffset, versionTableSize, out versionTableBytes))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SymbolVersionTableMalformed,
+                    "The DT_VERSYM table is outside file-backed memory.",
+                    versionTableAddress);
+            }
+            else
+            {
+                for (ulong index = 0; index < (ulong)dynamicSymbols.Count; index++)
+                {
+                    if (!TryElementOffset(
+                            versionTableFileOffset,
+                            sizeof(ushort),
+                            index,
+                            out var entryOffset)
+                        || !reader.TryReadUInt16(entryOffset, out var rawValue))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.SymbolVersionTableMalformed,
+                            "The DT_VERSYM table contains a truncated entry.",
+                            entryOffset);
+                        versionIndices.Clear();
+                        break;
+                    }
+
+                    versionIndices.Add(new SymbolVersionIndex(rawValue));
+                }
+            }
+        }
+
+        var neededVersions = new List<VersionNeed>();
+        var versionNeedBytes = ReadOnlyMemory<byte>.Empty;
+        ulong? rawVersionNeedStart = null;
+        ulong rawVersionNeedEnd = 0;
+        if (hasVersionNeed || hasVersionNeedCount)
+        {
+            if (!hasVersionNeed || !hasVersionNeedCount)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.VersionNeedTableMalformed,
+                    "DT_VERNEED and DT_VERNEEDNUM must be provided together.",
+                    hasVersionNeed ? versionNeedAddress : null);
+            }
+            else if (versionNeedCount > int.MaxValue
+                || versionNeedCount > (ulong)reader.Length / 16)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.VersionNeedTableMalformed,
+                    "The DT_VERNEED count exceeds the bounded input size.",
+                    versionNeedAddress);
+            }
+            else
+            {
+                var currentAddress = versionNeedAddress;
+                for (ulong index = 0; index < versionNeedCount; index++)
+                {
+                    if (!TryResolveVirtualRange(
+                            reader,
+                            loadMap,
+                            currentAddress,
+                            16,
+                            out var recordFileOffset)
+                        || !reader.TryReadUInt16(recordFileOffset, out var version)
+                        || !reader.TryReadUInt16(recordFileOffset + 2, out var auxiliaryCount)
+                        || !reader.TryReadUInt32(recordFileOffset + 4, out var fileNameOffset)
+                        || !reader.TryReadUInt32(recordFileOffset + 8, out var auxiliaryOffset)
+                        || !reader.TryReadUInt32(recordFileOffset + 12, out var nextOffset)
+                        || !reader.TrySlice(recordFileOffset, 16, out var rawRecord))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.VersionNeedTableMalformed,
+                            "The DT_VERNEED record is truncated or unmapped.",
+                            currentAddress);
+                        break;
+                    }
+
+                    if (!TryReadString(
+                            dynamicMetadata.StringTable,
+                            fileNameOffset,
+                            out var fileName))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.VersionNeedTableMalformed,
+                            $"The DT_VERNEED file-name offset {fileNameOffset} is outside the dynamic string table.",
+                            currentAddress);
+                        break;
+                    }
+
+                    UpdateRawRange(recordFileOffset, 16);
+                    var auxiliaries = new List<VersionNeedAuxiliary>();
+                    var currentAuxiliaryAddress = default(ulong);
+                    if (auxiliaryCount > 0)
+                    {
+                        if (auxiliaryOffset == 0
+                            || !TryAdd(currentAddress, auxiliaryOffset, out currentAuxiliaryAddress))
+                        {
+                            diagnostics.Error(
+                                DiagnosticCode.VersionNeedTableMalformed,
+                                "The DT_VERNEED auxiliary offset is invalid.",
+                                currentAddress);
+                            break;
+                        }
+                    }
+
+                    var auxiliaryMalformed = false;
+                    for (ulong auxiliaryIndex = 0; auxiliaryIndex < auxiliaryCount; auxiliaryIndex++)
+                    {
+                        if (!TryResolveVirtualRange(
+                                reader,
+                                loadMap,
+                                currentAuxiliaryAddress,
+                                16,
+                                out var auxiliaryFileOffset)
+                            || !reader.TryReadUInt32(auxiliaryFileOffset, out var hash)
+                            || !reader.TryReadUInt16(auxiliaryFileOffset + 4, out var flags)
+                            || !reader.TryReadUInt16(auxiliaryFileOffset + 6, out var other)
+                            || !reader.TryReadUInt32(auxiliaryFileOffset + 8, out var nameOffset)
+                            || !reader.TryReadUInt32(auxiliaryFileOffset + 12, out var nextAuxiliaryOffset)
+                            || !reader.TrySlice(auxiliaryFileOffset, 16, out var rawAuxiliary)
+                            || !TryReadString(dynamicMetadata.StringTable, nameOffset, out var name))
+                        {
+                            diagnostics.Error(
+                                DiagnosticCode.VersionNeedTableMalformed,
+                                "The DT_VERNEED auxiliary record is truncated, unmapped, or has an invalid name.",
+                                currentAuxiliaryAddress);
+                            auxiliaryMalformed = true;
+                            break;
+                        }
+
+                        auxiliaries.Add(new VersionNeedAuxiliary(
+                            hash,
+                            flags,
+                            other,
+                            nameOffset,
+                            name,
+                            rawAuxiliary));
+                        UpdateRawRange(auxiliaryFileOffset, 16);
+
+                        if (auxiliaryIndex + 1 < auxiliaryCount)
+                        {
+                            if (nextAuxiliaryOffset == 0
+                                || !TryAdd(
+                                    currentAuxiliaryAddress,
+                                    nextAuxiliaryOffset,
+                                    out var nextAuxiliaryAddress)
+                                || nextAuxiliaryAddress <= currentAuxiliaryAddress)
+                            {
+                                diagnostics.Error(
+                                    DiagnosticCode.VersionNeedTableMalformed,
+                                    "The DT_VERNEED auxiliary chain terminates or moves backwards before its declared count.",
+                                    currentAuxiliaryAddress);
+                                auxiliaryMalformed = true;
+                                break;
+                            }
+
+                            currentAuxiliaryAddress = nextAuxiliaryAddress;
+                        }
+                        else if (nextAuxiliaryOffset != 0)
+                        {
+                            diagnostics.Error(
+                                DiagnosticCode.VersionNeedTableMalformed,
+                                "The DT_VERNEED auxiliary chain has entries beyond its declared count.",
+                                currentAuxiliaryAddress);
+                            auxiliaryMalformed = true;
+                            break;
+                        }
+                    }
+
+                    if (auxiliaryMalformed)
+                    {
+                        break;
+                    }
+
+                    neededVersions.Add(new VersionNeed(
+                        version,
+                        auxiliaryCount,
+                        fileNameOffset,
+                        auxiliaryOffset,
+                        nextOffset,
+                        fileName,
+                        auxiliaries,
+                        rawRecord));
+
+                    if (index + 1 < versionNeedCount)
+                    {
+                        if (nextOffset == 0
+                            || !TryAdd(currentAddress, nextOffset, out var nextAddress)
+                            || nextAddress <= currentAddress)
+                        {
+                            diagnostics.Error(
+                                DiagnosticCode.VersionNeedTableMalformed,
+                                "The DT_VERNEED chain terminates or moves backwards before its declared count.",
+                                currentAddress);
+                            break;
+                        }
+
+                        currentAddress = nextAddress;
+                    }
+                    else if (nextOffset != 0)
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.VersionNeedTableMalformed,
+                            "The DT_VERNEED chain has entries beyond its declared count.",
+                            currentAddress);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (rawVersionNeedStart is ulong start
+            && rawVersionNeedEnd >= start
+            && reader.TrySlice(start, rawVersionNeedEnd - start, out var rawVersionNeedBytes))
+        {
+            versionNeedBytes = rawVersionNeedBytes;
+        }
+
+        return new ElfSymbolVersionMetadata(
+            versionTableAddress,
+            versionTableBytes,
+            versionIndices,
+            versionNeedAddress,
+            versionNeedBytes,
+            neededVersions);
+
+        void UpdateRawRange(ulong fileOffset, ulong size)
+        {
+            if (!TryAdd(fileOffset, size, out var end))
+            {
+                return;
+            }
+
+            rawVersionNeedStart = rawVersionNeedStart is ulong start
+                ? Math.Min(start, fileOffset)
+                : fileOffset;
+            rawVersionNeedEnd = Math.Max(rawVersionNeedEnd, end);
+        }
+    }
+
+    private static bool TryReadString(
+        ReadOnlyMemory<byte> table,
+        ulong offset,
+        out string value)
+    {
+        value = string.Empty;
+        if (offset >= (ulong)table.Length)
+        {
+            return false;
+        }
+
+        var bytes = table.Span[(int)offset..];
+        var terminator = bytes.IndexOf((byte)0);
+        if (terminator < 0)
+        {
+            return false;
+        }
+
+        value = Encoding.UTF8.GetString(bytes[..terminator]);
+        return true;
     }
 
     private static IReadOnlyList<DynamicEntry> ParseDynamicEntries(

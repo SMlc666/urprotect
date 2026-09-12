@@ -139,3 +139,9 @@ Parser fuzz smoke runs use `scripts/run-parser-fuzz.sh`, bounded random and
 mutated-valid inputs, a maximum input size enforced by the test, and an
 explicit process timeout. Fuzz results and minimized corpus additions belong
 in CI artifacts; a fuzz failure must not be converted into a successful skip.
+
+Symbol-version parsing must derive the `DT_VERSYM` extent from the bounded
+dynamic-symbol count and must bound `DT_VERNEED` traversal by
+`DT_VERNEEDNUM`. Version-chain offsets must make forward progress and names
+must resolve through the validated dynamic string table; raw records remain
+available without applying or rewriting them.
