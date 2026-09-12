@@ -39,3 +39,9 @@
   handling preserved multi-call dispatch and produced the expected output.
 - Tampering with the compressed frame produced exit code 5 and prevented the
   payload from launching.
+- The ARM64 Debian musl-container job uses the glibc self-contained launcher to
+  wrap and execute the musl fixture. The container's Debian userland can run
+  that launcher, while the recovered fixture still enters through
+  `/lib/ld-musl-aarch64.so.1`; publishing the launcher itself as a musl .NET
+  single-file binary would require additional musl-compatible C++/zlib runtime
+  libraries that are not part of the pinned Debian image.

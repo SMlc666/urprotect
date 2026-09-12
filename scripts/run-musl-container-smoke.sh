@@ -95,7 +95,7 @@ packed="${artifact_root}/packed-fixture"
 mkdir -p "${launcher_directory}"
 dotnet publish "${repo_root}/src/UrProtect.Cli" \
   --configuration Release \
-  --runtime linux-musl-arm64 \
+  --runtime linux-arm64 \
   --self-contained true \
   --output "${launcher_directory}" \
   --no-restore \

@@ -99,27 +99,32 @@ PY
 
   packed_wrapper="${extracted}/packed.elf"
   packed_report="${extracted}/packed-report.json"
+  source_help="${extracted}/source-help.txt"
   if [[ -n "${musl_container_binary}" ]]; then
     relative_binary="${binary#${extracted}/}"
     docker run --rm --platform linux/arm64 \
       -v "$(realpath "${extracted}"):/smoke" \
       "${musl_container_image}" "${musl_container_binary}" \
-      pack "/smoke/${relative_binary}" \
+      pack /bin/ls \
       --output /smoke/packed.elf \
       --launcher "/smoke/${relative_binary}" \
       --json /smoke/packed-report.json
+    docker run --rm --platform linux/arm64 \
+      "${musl_container_image}" /bin/ls --help \
+      > "${source_help}"
     docker run --rm --platform linux/arm64 \
       -v "$(realpath "${extracted}"):/smoke" \
       "${musl_container_image}" /smoke/packed.elf --help \
       > "${extracted}/packed-help.txt"
   else
-    "${binary}" pack "${binary}" \
+    /bin/ls --help > "${source_help}"
+    "${binary}" pack /bin/ls \
       --output "${packed_wrapper}" \
       --launcher "${binary}" \
       --json "${packed_report}"
     "${packed_wrapper}" --help > "${extracted}/packed-help.txt"
   fi
-  cmp -- "${extracted}/help.txt" "${extracted}/packed-help.txt"
+  cmp -- "${source_help}" "${extracted}/packed-help.txt"
   file "${packed_wrapper}" > "${extracted}/packed-file.txt"
   readelf -hW -lW -dW "${packed_wrapper}" > "${extracted}/packed-readelf.txt"
   python3 - "${extracted}/packed-readelf.txt" <<'PY'
