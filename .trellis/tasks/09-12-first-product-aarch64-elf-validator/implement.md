@@ -77,13 +77,13 @@ acceptance fixture.
 
 ## 5. Release CI and evidence
 
-- [ ] Add a release packaging job triggered only by published releases or an
+- [x] Add a release packaging job triggered only by published releases or an
   explicit manual release rehearsal input.
-- [ ] Reuse native glibc fixture, pinned musl container, and Android JNI jobs;
+- [x] Reuse native glibc fixture, pinned musl container, and Android JNI jobs;
   keep Android native-bridge opt-in for manual non-release dispatches.
-- [ ] Upload archives, checksums, SBOM, report goldens, environment manifests,
+- [x] Upload archives, checksums, SBOM, report goldens, environment manifests,
   fixture logs, and failed ELF/APK inputs with `if: always()`.
-- [ ] Add a release smoke script that installs/extracts each archive in a clean
+- [x] Add a release smoke script that installs/extracts each archive in a clean
   temporary directory and checks the documented commands.
 
 Validation:

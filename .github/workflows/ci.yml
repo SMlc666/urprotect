@@ -323,6 +323,8 @@ jobs:
 
   release-package:
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_release_rehearsal == true)
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -340,9 +342,11 @@ jobs:
             tests/UrProtect.Core.Tests/packages.lock.json
             benchmarks/UrProtect.Benchmarks/packages.lock.json
       - name: Resolve product version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == release ]]; then
-            tag="${{ github.event.release.tag_name }}"
+            tag="${RELEASE_TAG}"
             version="${tag#v}"
           else
             version='0.1.0'
@@ -363,7 +367,8 @@ jobs:
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" .artifacts/release/* --clobber
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "${RELEASE_TAG}" .artifacts/release/* --clobber
       - name: Upload release evidence
         if: always()
         uses: actions/upload-artifact@v4

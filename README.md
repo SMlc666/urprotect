@@ -67,6 +67,9 @@ third-party notices, provenance, and an SBOM-equivalent inventory. The musl
 bundle must be smoke-tested in an environment providing
 `/lib/ld-musl-aarch64.so.1`.
 
+The release workflow also runs the musl bundle inside a pinned ARM64 musl
+container when the host does not provide compatible C++/zlib runtime libraries.
+
 ## Fixture Matrix
 
 The fixture manifest covers a small, explicit set of ELF producers instead of

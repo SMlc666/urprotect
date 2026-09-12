@@ -125,6 +125,12 @@ Each package contains:
 - `THIRD_PARTY_NOTICES` and AsmStone/LLVM/AARCHMRS provenance;
 - version/checksum metadata.
 
+The release workflow also grants `contents: write` only to the release package
+job so a published release can receive its archives through `gh release
+upload`; ordinary CI retains read-only repository permissions. Release tags
+are passed through environment variables rather than interpolated into shell
+commands.
+
 Release jobs build from a clean checkout, record `global.json`, AsmStone commit,
 fixture manifest hash, runner/environment manifest, and package checksums.
 Build outputs are artifacts, never dependency caches.

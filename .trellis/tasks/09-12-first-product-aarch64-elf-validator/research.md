@@ -42,3 +42,8 @@
   `sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243`
   when Docker is available, because a self-contained .NET musl binary still
   needs musl-compatible `libstdc++`, zlib, and compiler runtime libraries.
+- Manual release rehearsal `34670903115` completed the package job, native
+  glibc/musl fixture jobs, benchmark, pinned ARM64 musl container smoke, and
+  Android capability probe; the release package produced both archives and
+  passed checksum plus clean extraction/command smoke. The Android AVD stayed
+  skipped because its manual input was false.
