@@ -155,22 +155,22 @@ Android remains an APK plus `System.loadLibrary`/JNI test, not an extracted
 
 ## Acceptance Criteria
 
-- [ ] `validate`, `--copy`, `--json`, and `--no-analysis` behavior is covered by
+- [x] `validate`, `--copy`, `--json`, and `--no-analysis` behavior is covered by
   CLI tests, including usage and filesystem failures.
-- [ ] Exit codes are stable, documented, and tested for success, validation,
+- [x] Exit codes are stable, documented, and tested for success, validation,
   usage, I/O, identity, and internal-failure classes.
-- [ ] JSON report schema v1 has golden tests, deterministic ordering, and
+- [x] JSON report schema v1 has golden tests, deterministic ordering, and
   byte/hash/output fields that match the actual no-op result.
-- [ ] A release candidate validates representative GCC/Clang, Rust, Go, musl,
+- [x] A release candidate validates representative GCC/Clang, Rust, Go, musl,
   Zig, NativeAOT, stripped/unstripped, and Android JNI artifacts through the
   existing evidence paths.
-- [ ] Linux ARM64 glibc and musl bundles are built from pinned inputs, run on
+- [x] Linux ARM64 glibc and musl bundles are built from pinned inputs, run on
   their native profiles, and have checksums/provenance/SBOM artifacts.
-- [ ] Invalid or unsupported inputs cannot produce a successful artifact, and
+- [x] Invalid or unsupported inputs cannot produce a successful artifact, and
   no-op output remains byte-for-byte identical.
-- [ ] The product README gives a copy-paste demo and clearly states the
+- [x] The product README gives a copy-paste demo and clearly states the
   infrastructure-only boundary.
-- [ ] GitHub release-tier CI passes without requiring the slow Android AVD on
+- [x] GitHub release-tier CI passes without requiring the slow Android AVD on
   ordinary push/PR runs; manual AVD execution remains explicit.
 
 ## Deferred Follow-Up

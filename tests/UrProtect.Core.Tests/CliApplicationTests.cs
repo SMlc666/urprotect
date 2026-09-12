@@ -172,6 +172,24 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    [Trait("Category", "Cli")]
+    public void MapsUnexpectedOutputWriterFailureToInternalExitCode()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[] { "validate", inputPath, "--no-analysis" },
+            new ThrowingWriter(),
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Internal, exitCode);
+        Assert.Contains("InternalFailure", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     [Trait("Category", "Report")]
     public void SerializesTheSameReportForRepeatedRuns()
     {
@@ -204,5 +222,10 @@ public sealed class CliApplicationTests
         public string Path(string fileName) => System.IO.Path.Combine(directory.FullName, fileName);
 
         public void Dispose() => directory.Delete(recursive: true);
+    }
+
+    private sealed class ThrowingWriter : StringWriter
+    {
+        public override void WriteLine(string? value) => throw new InvalidOperationException("synthetic writer failure");
     }
 }

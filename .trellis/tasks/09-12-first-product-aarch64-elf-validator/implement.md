@@ -95,15 +95,15 @@ git diff --check
 
 ## 6. Documentation and final review
 
-- [ ] Rewrite README around the first product quickstart, supported boundary,
+- [x] Rewrite README around the first product quickstart, supported boundary,
   report example, no-op guarantee, and explicit non-goals.
-- [ ] Add release/operator documentation for glibc versus musl packages and
+- [x] Add release/operator documentation for glibc versus musl packages and
   Android validation labels.
-- [ ] Run the PRD convergence pass and ensure design/implementation contracts
+- [x] Run the PRD convergence pass and ensure design/implementation contracts
   agree.
-- [ ] Run task context validation and final review; update specs with any new
+- [x] Run task context validation and final review; update specs with any new
   executable contract.
-- [ ] Present the final planning summary and wait for explicit implementation
+- [x] Present the final planning summary and receive explicit implementation
   approval.
 
 Rollback point: if a stable report or package contract cannot be demonstrated,
