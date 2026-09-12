@@ -110,19 +110,19 @@ PY
       --launcher "/smoke/${relative_binary}" \
       --json /smoke/packed-report.json
     docker run --rm --platform linux/arm64 \
-      "${musl_container_image}" /bin/ls --version \
+      "${musl_container_image}" /bin/ls \
       > "${source_help}"
     docker run --rm --platform linux/arm64 \
       -v "$(realpath "${extracted}"):/smoke" \
-      "${musl_container_image}" /smoke/packed.elf --version \
+      "${musl_container_image}" /smoke/packed.elf \
       > "${extracted}/packed-help.txt"
   else
-    /bin/ls --version > "${source_help}"
+    /bin/ls > "${source_help}"
     "${binary}" pack /bin/ls \
       --output "${packed_wrapper}" \
       --launcher "${binary}" \
       --json "${packed_report}"
-    "${packed_wrapper}" --version > "${extracted}/packed-help.txt"
+    "${packed_wrapper}" > "${extracted}/packed-help.txt"
   fi
   cmp -- "${source_help}" "${extracted}/packed-help.txt"
   file "${packed_wrapper}" > "${extracted}/packed-file.txt"
