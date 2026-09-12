@@ -26,6 +26,8 @@ Rollback: retain the current human CLI path until report/exit-code tests pass.
 - [x] Atomically publish report files and preserve the existing no-op copy rules.
 - [x] Add tests for malformed options, missing values, missing input, output
   conflict, report failure, identity mismatch, and unexpected exceptions.
+- [x] Regenerate the test project's lock file after adding the CLI project
+  reference and verify locked restore.
 
 Validation:
 
@@ -40,7 +42,7 @@ dotnet test --filter Category=NoOp
   symbols/version entries, notes/properties, relocation counts, analysis
   boundaries, and ordered diagnostics.
 - [x] Include source/output byte lengths and SHA-256 values when applicable.
-- [ ] Add checked-in golden JSON files for synthetic valid, stripped, warning, and invalid
+- [x] Add checked-in golden JSON files for synthetic valid, stripped, warning, and invalid
   cases.
 - [x] Verify repeated runs produce identical JSON apart from explicitly excluded
   path/timing fields.

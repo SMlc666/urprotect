@@ -13,6 +13,7 @@ public sealed record ProductReport(
     bool Success,
     ProductInputReport Input,
     ProductElfReport? Elf,
+    ProductDynamicReport? Dynamic,
     ProductSummaryReport Summary,
     IReadOnlyList<ProductDiagnosticReport> Diagnostics,
     ProductOutputReport? Output);
@@ -25,6 +26,12 @@ public sealed record ProductElfReport(
     string Machine,
     string Type,
     string Kind);
+
+public sealed record ProductDynamicReport(
+    IReadOnlyList<string> NeededLibraries,
+    string? Soname,
+    string? Rpath,
+    string? RunPath);
 
 public sealed record ProductSummaryReport(
     int ProgramHeaders,
@@ -93,6 +100,7 @@ public static class ProductReportFactory
             result.IsSuccess,
             new ProductInputReport(input.Length, inputHash),
             CreateElfReport(result),
+            CreateDynamicReport(result),
             CreateSummary(result),
             result.Diagnostics.Select(ProductDiagnosticReport.From).ToArray(),
             outputRequested
@@ -108,6 +116,7 @@ public static class ProductReportFactory
             toolVersion,
             false,
             new ProductInputReport(null, null),
+            null,
             null,
             new ProductSummaryReport(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             new[] { diagnostic },
@@ -147,5 +156,20 @@ public static class ProductReportFactory
             file?.RelrWords.Count ?? 0,
             file?.AndroidPackedRelocations.Count ?? 0,
             result.Analysis?.Candidates.Count ?? 0);
+    }
+
+    private static ProductDynamicReport? CreateDynamicReport(NoOpValidationResult result)
+    {
+        if (result.File is null)
+        {
+            return null;
+        }
+
+        var metadata = result.File.DynamicMetadata;
+        return new ProductDynamicReport(
+            metadata.NeededLibraries,
+            metadata.Soname,
+            metadata.Rpath,
+            metadata.RunPath);
     }
 }

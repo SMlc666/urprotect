@@ -164,3 +164,8 @@ The product CLI owns stable exit codes and report schema serialization. JSON
 stream mode (`--json -`) reserves stdout for one document, report files are
 written through a flushed temporary sibling and atomic rename, and copy-mode
 reports must use the same input snapshot passed to the no-op writer.
+
+When a test project references a production project, its `packages.lock.json`
+must be regenerated with `dotnet restore --force-evaluate` and committed. A
+locked restore is required in CI and must fail on a stale project-reference
+graph rather than silently updating it.

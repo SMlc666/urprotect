@@ -100,6 +100,27 @@ public sealed class CliApplicationTests
 
     [Fact]
     [Trait("Category", "Cli")]
+    public void DoesNotPublishJsonFileForInvalidInput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("invalid.elf");
+        var reportPath = directory.Path("report.json");
+        File.WriteAllBytes(inputPath, new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' });
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[] { "validate", inputPath, "--json", reportPath },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Validation, exitCode);
+        Assert.False(File.Exists(reportPath));
+        Assert.Contains("InputTooSmall", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "Cli")]
     public void ReturnsUsageCodeForUnknownArguments()
     {
         using var stdout = new StringWriter();

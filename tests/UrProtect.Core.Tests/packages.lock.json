@@ -110,6 +110,12 @@
       "asmstone": {
         "type": "Project"
       },
+      "urprotect": {
+        "type": "Project",
+        "dependencies": {
+          "UrProtect.Core": "[1.0.0, )"
+        }
+      },
       "urprotect.core": {
         "type": "Project",
         "dependencies": {

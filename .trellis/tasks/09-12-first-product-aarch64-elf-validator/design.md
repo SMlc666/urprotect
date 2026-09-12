@@ -65,6 +65,12 @@ parser. It emits deterministic property order and array order. Suggested shape:
     "type": "ET_DYN",
     "kind": "PieExecutable"
   },
+  "dynamic": {
+    "neededLibraries": [],
+    "soname": "libfixture.so",
+    "rpath": "/lib",
+    "runPath": "/lib"
+  },
   "summary": {
     "programHeaders": 11,
     "loadSegments": 4,

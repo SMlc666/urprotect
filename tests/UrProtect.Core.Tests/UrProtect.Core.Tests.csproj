@@ -20,4 +20,7 @@
     <ProjectReference Include="../../src/UrProtect.Core/UrProtect.Core.csproj" />
     <ProjectReference Include="../../src/UrProtect.Cli/UrProtect.Cli.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="GoldenReports/*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

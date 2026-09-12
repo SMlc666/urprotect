@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "toolVersion": "0.1.0",
+  "success": true,
+  "input": {
+    "byteLength": 516,
+    "sha256": "a374bfc252d410053284ce7640cb1de5bb75015f92033bfe2cf752d13eebc8ba"
+  },
+  "elf": {
+    "class": "ELF64",
+    "endianness": "little",
+    "machine": "AArch64",
+    "type": "ET_DYN",
+    "kind": "PieExecutable"
+  },
+  "dynamic": {
+    "neededLibraries": []
+  },
+  "summary": {
+    "programHeaders": 4,
+    "loadSegments": 2,
+    "dynamicEntries": 2,
+    "dynamicSymbols": 0,
+    "symbolVersionIndices": 0,
+    "versionNeeds": 0,
+    "notes": 0,
+    "relaRelocations": 0,
+    "relrWords": 0,
+    "androidPackedRelocations": 0,
+    "analysisCandidates": 0
+  },
+  "diagnostics": []
+}
