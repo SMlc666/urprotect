@@ -288,7 +288,7 @@ the release fixture/benchmark/Android validation tier. The manual Android
 input remains false by default; release validation is intentionally explicit
 and automatic.
 
-The nightly/release matrix also includes an independent ARM64 Alpine/musl
+The nightly/release matrix also includes an independent ARM64 Debian/musl
 container smoke. Its platform-specific .NET SDK image digest is pinned in the
 workflow; the job builds a musl PIE, validates it through the product CLI,
 proves byte identity, and compares baseline/no-op behavior. This supplements,

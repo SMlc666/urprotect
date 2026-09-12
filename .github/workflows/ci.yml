@@ -233,10 +233,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     container:
-      image: mcr.microsoft.com/dotnet/sdk@sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243
+      image: mcr.microsoft.com/dotnet/sdk@sha256:2a4ce54f70cde53d58db3face36aeb5cf4aa272c2e4676ffc3586021413b14b4
       options: --user root
     env:
-      URPROTECT_CONTAINER_IMAGE: mcr.microsoft.com/dotnet/sdk@sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243
+      URPROTECT_CONTAINER_IMAGE: mcr.microsoft.com/dotnet/sdk@sha256:2a4ce54f70cde53d58db3face36aeb5cf4aa272c2e4676ffc3586021413b14b4
     steps:
       - name: Bootstrap source and musl tools
         shell: sh
@@ -244,7 +244,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          apk add --no-cache bash binutils ca-certificates coreutils file gcc git musl-dev nodejs python3
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bash binutils ca-certificates coreutils file git musl-dev musl-tools python3
           git init .
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch --depth=1 origin "${GITHUB_SHA}"

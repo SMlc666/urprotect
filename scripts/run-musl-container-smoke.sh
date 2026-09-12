@@ -6,7 +6,7 @@ artifact_root="${MUSL_CONTAINER_ARTIFACT_ROOT:-${repo_root}/.artifacts/musl-cont
 run_timeout="${MUSL_CONTAINER_TIMEOUT_SECONDS:-45}"
 mkdir -p "${artifact_root}"
 
-for required_command in cmp dotnet file gcc python3 readelf timeout; do
+for required_command in cmp dotnet file musl-gcc python3 readelf timeout; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "${required_command} is required for the musl container smoke" >&2
     exit 127
@@ -24,7 +24,7 @@ binary="${build_directory}/fixture"
 copy="${artifact_root}/no-op-copy"
 mkdir -p "${build_directory}"
 
-gcc -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none \
+musl-gcc -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none \
   "${source_file}" -o "${binary}"
 file "${binary}" > "${artifact_root}/file.txt"
 readelf -hW -lW -dW "${binary}" > "${artifact_root}/readelf.txt"
