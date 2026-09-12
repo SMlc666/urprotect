@@ -626,7 +626,7 @@ static int urp_write_payload_and_exec(
 
     int directory_fd = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (directory_fd < 0) {
-        urp_cleanup_payload(directory, payload_path);
+        urp_cleanup_payload(directory, NULL);
         return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not open the private payload directory");
     }
     int payload_fd = openat(

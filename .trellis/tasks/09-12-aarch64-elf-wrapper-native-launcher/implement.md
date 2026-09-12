@@ -55,7 +55,8 @@ Rollback: keep frame generation managed-only until native vectors are identical.
   inherited descriptors, exit status, and standard streams through `execve`.
 - [x] Emit stable diagnostics and non-zero statuses for every pre-exec failure;
   never invoke a shell or environment-controlled path.
-- [x] Build a static AArch64 PIE with no interpreter or dynamic dependencies.
+- [x] Build a static AArch64 PIE with no interpreter or dynamic dependencies,
+  including an explicit no-dynamic-linker override for older musl specs.
 
 Validation:
 

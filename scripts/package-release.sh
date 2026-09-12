@@ -186,6 +186,7 @@ EOF
     "${repo_root}/native/urprotect-launcher/sha256.c" \
     "${repo_root}/native/urprotect-launcher/sha256.h" \
     "${repo_root}/native/urprotect-launcher/README.md" \
+    "${repo_root}/native/urprotect-launcher/musl-static-pie.specs" \
     "${repo_root}/native/urprotect-launcher/Makefile" \
     "${repo_root}/native/urprotect-launcher/build.sh" \
     "${repo_root}/native/urprotect-launcher/provenance.sh" \

@@ -61,6 +61,12 @@
 - CI installs the exact Ubuntu Noble `musl`, `musl-dev`, and `musl-tools`
   package versions selected for the native ARM64 jobs; provenance records the
   compiler path/hash/spec hash and installed package versions when available.
+- CI run `34693063892` exposed two portability details: the Debian Bookworm
+  musl 1.2.3 specs selected `Scrt1.o` and injected `PT_INTERP` despite
+  `-static-pie`, so the build now uses the checked-in `musl-static-pie.specs`
+  fragment (selecting `rcrt1.o`) plus an explicit `--no-dynamic-linker`; signal
+  assertions compare the wrapper with a baseline shell because `timeout`
+  reports signal exits differently across runner images.
 
 ## Known scope
 

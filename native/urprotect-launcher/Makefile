@@ -11,6 +11,18 @@ BUILD_DIR ?= build
 CC_BIN := $(firstword $(CC))
 READELF ?= readelf
 SOURCE_DATE_EPOCH ?= 0
+MUSL_STATIC_PIE_SPECS ?= $(CURDIR)/musl-static-pie.specs
+MUSL_BASE_SPECS ?= /usr/lib/aarch64-linux-musl/musl-gcc.specs
+MUSL_REAL_CC ?= aarch64-linux-gnu-gcc
+MUSL_MODE := $(findstring musl,$(CC))
+ifneq ($(MUSL_MODE),)
+MUSL_LINK_CC := $(MUSL_REAL_CC)
+MUSL_LINK_SPECS := -specs=$(MUSL_BASE_SPECS) -specs=$(MUSL_STATIC_PIE_SPECS)
+else
+MUSL_LINK_CC := $(CC)
+MUSL_LINK_SPECS :=
+endif
+MUSL_LINK_CC_BIN := $(firstword $(MUSL_LINK_CC))
 
 CPPFLAGS := -I. -I../../third_party/miniz
 CFLAGS := -std=c11 -O2 -g0 -fPIE -ffunction-sections -fdata-sections \
@@ -24,7 +36,9 @@ MINIZ_CPPFLAGS := -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_DEFLATE_APIS \
 MINIZ_CFLAGS := -std=c11 -O2 -g0 -fPIE -ffunction-sections -fdata-sections \
                 -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector \
                 -Wall -Wextra
-LDFLAGS := -static-pie -Wl,--build-id=none,--gc-sections,-z,relro,-z,now -Wl,-s
+# Older musl-gcc specs select Scrt1.o and add an interpreter; use the static
+# PIE CRT fragment after the distribution specs and suppress that interpreter.
+LDFLAGS := -static-pie -Wl,--no-dynamic-linker,--build-id=none,--gc-sections,-z,relro,-z,now -Wl,-s
 
 LAUNCHER := $(BUILD_DIR)/urprotect-launcher
 SELF_TEST := $(BUILD_DIR)/urprotect-launcher-self-test
@@ -45,22 +59,31 @@ check-host:
 		echo "AArch64 compiler '$(CC)' is unavailable; install musl-gcc or invoke make with an explicit CC=aarch64-linux-gnu-gcc override" >&2; \
 		exit 127; \
 	fi
+	@if ! command -v "$(MUSL_LINK_CC_BIN)" >/dev/null 2>&1; then \
+		echo "AArch64 link compiler '$(MUSL_LINK_CC)' is unavailable" >&2; \
+		exit 127; \
+	fi
 	@target="`$(CC) -dumpmachine 2>/dev/null || true`"; \
 	case "$$target" in *aarch64*) ;; *) \
 		echo "compiler '$(CC)' targets '$$target', not AArch64" >&2; exit 2 ;; esac
+	@if [ "$(MUSL_MODE)" != "" ]; then \
+		target="`$(MUSL_LINK_CC) -dumpmachine 2>/dev/null || true`"; \
+		case "$$target" in *aarch64*) ;; *) \
+			echo "link compiler '$(MUSL_LINK_CC)' targets '$$target', not AArch64" >&2; exit 2 ;; esac; \
+	fi
 
 launcher: check-host $(LAUNCHER)
 
-$(LAUNCHER): $(LAUNCHER_OBJECTS)
+$(LAUNCHER): $(LAUNCHER_OBJECTS) $(MUSL_STATIC_PIE_SPECS)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CFLAGS) $(LDFLAGS) $(LAUNCHER_OBJECTS) -o "$@"
+	$(MUSL_LINK_CC) $(CFLAGS) $(MUSL_LINK_SPECS) $(LDFLAGS) $(LAUNCHER_OBJECTS) -o "$@"
 	chmod 0755 "$@"
 
 self-test: check-host $(SELF_TEST)
 
-$(SELF_TEST): $(SELF_TEST_OBJECTS)
+$(SELF_TEST): $(SELF_TEST_OBJECTS) $(MUSL_STATIC_PIE_SPECS)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CFLAGS) $(LDFLAGS) $(SELF_TEST_OBJECTS) -o "$@"
+	$(MUSL_LINK_CC) $(CFLAGS) $(MUSL_LINK_SPECS) $(LDFLAGS) $(SELF_TEST_OBJECTS) -o "$@"
 	chmod 0755 "$@"
 
 $(BUILD_DIR)/launcher_main.o: launcher_main.c sha256.h ../../third_party/miniz/miniz_tinfl.h
@@ -97,7 +120,7 @@ check-elf: $(LAUNCHER)
 	fi
 
 provenance: $(LAUNCHER)
-	./provenance.sh "$(BUILD_DIR)/PROVENANCE.txt" "$(CC)" "$(LAUNCHER)" "$(SOURCE_DATE_EPOCH)"
+	./provenance.sh "$(BUILD_DIR)/PROVENANCE.txt" "$(CC)" "$(LAUNCHER)" "$(SOURCE_DATE_EPOCH)" "$(MUSL_LINK_CC)" "$(MUSL_LINK_SPECS)" "$(MUSL_BASE_SPECS)"
 
 test: check-host check-elf self-test
 	"$(SELF_TEST)"

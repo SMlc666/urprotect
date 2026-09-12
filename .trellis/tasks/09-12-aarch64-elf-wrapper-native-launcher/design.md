@@ -153,10 +153,11 @@ optional heap, and zlib-header APIs. If trimming miniz changes source files,
 record the patch and checksums.
 
 Build with the pinned native ARM64 musl/static toolchain using static-PIE
-flags, hidden build paths, no build ID, and stripped symbols. The build
-manifest records compiler/linker versions, flags, miniz commit/file hashes,
-SHA-256 source revision, and resulting launcher hash. Release notices include
-the native source and applicable MIT notice.
+flags, the checked-in `musl-static-pie.specs` fragment (selecting `rcrt1.o`
+and suppressing `PT_INTERP` for older musl specs), hidden build paths, no build
+ID, and stripped symbols. The build manifest records compiler/linker versions,
+flags, miniz commit/file hashes, SHA-256 source revision, and resulting launcher
+hash. Release notices include the native source and applicable MIT notice.
 
 ## 5. Launcher Runtime
 

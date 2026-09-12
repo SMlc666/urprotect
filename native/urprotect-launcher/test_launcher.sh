@@ -213,11 +213,13 @@ if [[ "${shell_status}" -ne 17 ]]; then
 fi
 
 set +e
-timeout 10 "${shell_wrapper}" -c 'kill -TERM $$'
+(/bin/sh -c 'kill -TERM $$') 2>/dev/null
+baseline_signal_status=$?
+("${shell_wrapper}" -c 'kill -TERM $$') 2>/dev/null
 signal_status=$?
 set -e
-if [[ "${signal_status}" -ne 15 ]]; then
-  echo "signaled payload returned ${signal_status}, expected 15" >&2
+if [[ "${signal_status}" -ne "${baseline_signal_status}" || "${signal_status}" -eq 0 ]]; then
+  echo "signaled payload returned ${signal_status}, baseline returned ${baseline_signal_status}" >&2
   exit 1
 fi
 

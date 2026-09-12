@@ -14,8 +14,10 @@ Build on a native AArch64 host with the pinned musl toolchain used by CI:
 ```
 
 The output is a static `ET_DYN` PIE with no `PT_INTERP` or `DT_NEEDED` entries.
-`CC` may be overridden for an explicitly identified AArch64 cross compiler in
-local tests, but required CI jobs must use the pinned native ARM64 toolchain.
+The checked-in `musl-static-pie.specs` fragment selects musl's `rcrt1.o` and
+suppresses the interpreter on older Debian musl-gcc packages. `CC` may be
+overridden for an explicitly identified AArch64 cross compiler in local tests,
+but required CI jobs must use the pinned native ARM64 toolchain.
 The build records compiler, linker, miniz, source-hash, and launcher-hash
 information in `build/PROVENANCE.txt`.
 
