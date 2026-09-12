@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"The product adds a report/release boundary while preserving the existing source, fixture, benchmark, and CI layout."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"The CLI product needs stable exit-code mapping, fail-closed diagnostics, and atomic artifact behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Report serialization, release packaging, locked restore, coverage, and native CI must follow the project quality contract."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"The report projection must reuse core diagnostics and no-op identity logic rather than duplicate parser contracts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The product spans CLI options, core validation, JSON reports, packaged binaries, fixtures, and release CI."}
+{"file":".trellis/tasks/09-12-first-product-aarch64-elf-validator/research.md","reason":"Product packaging, RID, native runtime, Android, and prior MVP evidence are recorded for the release plan."}

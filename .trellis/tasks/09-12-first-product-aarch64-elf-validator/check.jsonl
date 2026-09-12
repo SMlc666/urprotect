@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review CLI/report/release changes against analyzer, test, coverage, provenance, and CI requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review exit-code mapping, JSON/report failures, no-op identity failures, and unexpected exception handling."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check the data flow from CLI input through core result, report, archive, and runtime acceptance evidence."}
+{"file":".trellis/tasks/09-12-first-product-aarch64-elf-validator/prd.md","reason":"Verify every implementation change against the first-product scope and acceptance criteria."}
+{"file":".trellis/tasks/09-12-first-product-aarch64-elf-validator/design.md","reason":"Review report, packaging, compatibility, rollback, and release boundaries."}
+{"file":".trellis/tasks/09-12-first-product-aarch64-elf-validator/implement.md","reason":"Review ordered implementation steps and release validation commands before each milestone."}
+{"file":".trellis/tasks/09-12-first-product-aarch64-elf-validator/research.md","reason":"Confirm that product claims remain consistent with verified runtime, packaging, and Android limitations."}

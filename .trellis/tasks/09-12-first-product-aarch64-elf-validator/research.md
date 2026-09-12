@@ -1,0 +1,34 @@
+# First Product Research
+
+## Existing evidence
+
+- The archived AArch64 ELF MVP already validates ELF64 little-endian AArch64
+  `ET_DYN` PIE/shared-object inputs, preserves unknown data, and proves no-op
+  byte identity.
+- The current GitHub workflow has native ARM64 glibc fixture coverage, pinned
+  native musl/Zig fixture provisioning, a pinned ARM64 musl container smoke,
+  x86_64 Android native-bridge coverage, and release-tier conditions.
+- The current CLI is intentionally small and human-text oriented. Product work
+  should add a report/exit-code boundary rather than make fixture scripts parse
+  human output.
+
+## Release/runtime constraints
+
+- `global.json` pins .NET SDK `8.0.424`; release publish profiles must either
+  restore the required RIDs under locked mode or document the compatible
+  publish setup before producing archives.
+- The ARM64 musl container uses the platform-specific
+  `mcr.microsoft.com/dotnet/sdk` `8.0.424-bookworm-slim` manifest digest
+  `sha256:00c73d766c2c8fea23a9214954a5dec33c022c1a530c09e0f2a5e333fa4578ed`.
+- The Android native-bridge AVD remains slow software emulation and is manual
+  opt-in outside schedule/release workflows.
+- Waydroid ARM64 system/vendor manifests are pinned in `fixtures/manifest.json`
+  for provenance, but the hosted ARM64 runner currently lacks the Binder/LXC/
+  graphics capabilities required to claim container E2E.
+
+## Product decisions
+
+- The first public compatibility contract is the CLI, stable exit classes, and
+  report schema v1; there is no public core library compatibility promise yet.
+- glibc and musl bundles are both release targets, but Android native-bridge
+  timing is never a native performance baseline.
