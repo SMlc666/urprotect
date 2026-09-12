@@ -248,6 +248,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bash binutils ca-certificates coreutils file git musl-dev musl-tools python3
           git init .
+          git config --global --add safe.directory "$PWD"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch --depth=1 origin "${GITHUB_SHA}"
           git checkout --detach "${GITHUB_SHA}"
