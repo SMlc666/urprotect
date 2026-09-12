@@ -42,6 +42,7 @@ scripts/
 ├── run-musl-container-smoke.sh
 ├── package-release.sh
 ├── release-smoke.sh
+├── measure-launcher.sh
 ├── run-packed-fixture-matrix.sh
 ├── install-native-toolchains.sh
 ├── run-android-avd.sh
@@ -50,7 +51,10 @@ scripts/
 ├── check-android-container.sh
 └── record-environment.sh
 third_party/
-└── AsmStone/             # pinned upstream source and attribution
+├── AsmStone/             # pinned upstream source and attribution
+└── miniz/                # pinned raw-deflate inflater and notice
+native/
+└── urprotect-launcher/   # static AArch64 Wrapper 0.2 runtime launcher
 ```
 
 ---

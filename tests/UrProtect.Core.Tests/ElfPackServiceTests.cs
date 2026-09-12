@@ -14,7 +14,7 @@ public sealed class ElfPackServiceTests
         var launcherPath = directory.Path("launcher.elf");
         var outputPath = directory.Path("wrapped.elf");
         var source = ElfFixture.MinimalPie();
-        var launcher = ElfFixture.MinimalPie();
+        var launcher = ElfFixture.StaticPieLauncher();
         File.WriteAllBytes(inputPath, source);
         File.WriteAllBytes(launcherPath, launcher);
 
@@ -24,6 +24,9 @@ public sealed class ElfPackServiceTests
         Assert.Equal(outputPath, result.OutputPath);
         var wrapper = File.ReadAllBytes(outputPath);
         Assert.NotEqual(source, wrapper);
+        Assert.Equal((ushort)1, result.LauncherAbiVersion);
+        Assert.Equal((ushort)1, result.FrameVersion);
+        Assert.NotNull(result.LauncherSha256);
         var payload = PayloadFrameCodec.ReadWrapper(wrapper, new PayloadFrameLimits());
         Assert.True(payload.IsSuccess, string.Join(Environment.NewLine, payload.Diagnostics));
         Assert.Equal(source, payload.SourceBytes);
@@ -39,7 +42,7 @@ public sealed class ElfPackServiceTests
         var firstOutputPath = directory.Path("wrapped-first.elf");
         var secondOutputPath = directory.Path("wrapped-second.elf");
         File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
-        File.WriteAllBytes(launcherPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
 
         var first = new ElfPackService().Pack(inputPath, firstOutputPath, launcherPath);
         var second = new ElfPackService().Pack(inputPath, secondOutputPath, launcherPath);
@@ -68,6 +71,42 @@ public sealed class ElfPackServiceTests
         Assert.False(File.Exists(outputPath));
     }
 
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsAnUnmarkedStaticPieLauncherWithoutPublishingOutput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher(includeMarker: false));
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.LauncherUnavailable);
+        Assert.False(File.Exists(outputPath));
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsDynamicLauncherWithoutPublishingOutput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.MinimalPie());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.LauncherUnavailable);
+        Assert.False(File.Exists(outputPath));
+    }
+
 
     [Fact]
     [Trait("Category", "PackCli")]
@@ -87,6 +126,7 @@ public sealed class ElfPackServiceTests
     {
         var copy = source.ToArray();
         copy.AsSpan(232, 56).Clear();
+        copy.AsSpan(24, 8).Clear();
         return copy;
     }
 

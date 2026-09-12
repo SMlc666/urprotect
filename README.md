@@ -1,7 +1,8 @@
 # urprotect
 
-`urprotect` is **UrProtect Validator 0.1**, a C#/.NET command-line product for
-conservative ELF64 AArch64 validation and the first outer ELF packaging shell.
+`urprotect` is **UrProtect Validator 0.1** with the **AArch64 ELF Wrapper 0.2**
+runtime shell, a C#/.NET command-line product for conservative ELF64 AArch64
+validation and outer ELF packaging.
 It validates supported `ET_DYN` PIE executables and dynamically linked shared
 objects, emits a stable JSON report, can produce a byte-identical no-op copy,
 and can wrap a supported executable in a new self-extracting AArch64 ELF.
@@ -68,18 +69,21 @@ Pack only a Linux ARM64 dynamically linked `ET_DYN` PIE executable with a
 ```sh
 urprotect pack ./program \
   --output ./program.wrapped \
+  --launcher ./urprotect-launcher \
   --json ./program.pack.json
 ```
 
-The default launcher is the published self-contained `urprotect` executable.
-When invoking the command through `dotnet` or a renamed launcher, pass the
-published AArch64 launcher explicitly:
+Build the small native launcher on a native AArch64 host with the pinned musl
+toolchain used by CI:
 
 ```sh
-urprotect pack ./program \
-  --output ./program.wrapped \
-  --launcher ./urprotect
+./native/urprotect-launcher/build.sh
+./native/urprotect-launcher/build.sh test
 ```
+
+The launcher is a static AArch64 `ET_DYN` PIE with no interpreter or shared
+library dependencies. `pack` requires `--launcher`; it never silently turns
+the C# packer into the runtime wrapper.
 
 The first wrapper profile supports native ARM64 Linux glibc and is exercised by
 the PR covering fixture matrix. Shared objects, static `ET_EXEC`, Android
@@ -91,7 +95,7 @@ directory is taken from the environment.
 Release bundles are produced only for native ARM64 glibc and musl profiles:
 
 ```sh
-./scripts/package-release.sh 0.1.0 .artifacts/release
+./scripts/package-release.sh 0.2.0 .artifacts/release
 ./scripts/release-smoke.sh .artifacts/release
 ```
 
@@ -123,10 +127,10 @@ baseline and copied output behavior are compared. A missing required toolchain
 or invalid output fails the job rather than falling back to glibc; only the
 Android profile is handled by the separate Android runtime job.
 
-The packed fixture runner first builds the native PR covering set, publishes a
-self-contained ARM64 launcher, packs each executable, verifies that wrapper
-bytes differ, and compares baseline/wrapped status and standard streams
-through the real loader.
+The packed fixture runner first builds the native PR covering set and the
+static native ARM64 launcher, runs the native codec/integration checks, packs
+each executable, verifies that wrapper bytes differ, and compares
+baseline/wrapped status and standard streams through the real loader.
 
 The Android sample is an APK/JNI fixture. The released Android Emulator cannot
 boot an `arm64-v8a` system image on an x86_64 host, even with `-accel off`. On
@@ -177,9 +181,10 @@ this avoids tar permission failures during cache restore.
 dotnet run --project src/UrProtect.Cli -- validate ./program --copy ./program.checked
 ```
 
-`dotnet run` is suitable for validation. For `pack`, use a published
-self-contained ARM64 `urprotect` launcher or pass one with `--launcher`; a
-framework host such as `dotnet` is not used as the wrapper launcher.
+`dotnet run` is suitable for validation and packing when paired with the
+native launcher. For `pack`, pass the static ARM64 launcher with `--launcher`;
+a framework host such as `dotnet` and the C# packer itself are never used as
+the wrapper launcher.
 
 The copy path is published only after the output bytes have been compared with
 the input. Unknown or unsupported data is never rebuilt by the no-op pipeline.

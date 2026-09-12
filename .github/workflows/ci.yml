@@ -61,6 +61,11 @@ jobs:
         run: python3 scripts/check-coverage.py
       - name: Fixture smoke
         run: ./scripts/run-fixture-matrix.sh --profile pr
+      - name: Install pinned native launcher toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make musl=1.2.4-2 musl-dev=1.2.4-2 musl-tools=1.2.4-2
       - name: Packed fixture smoke
         run: ./scripts/run-packed-fixture-matrix.sh --profile pr
       - name: Upload test evidence
@@ -259,7 +264,7 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bash binutils ca-certificates coreutils file git \
-            musl=1.2.3-1 musl-dev=1.2.3-1 musl-tools=1.2.3-1 python3
+            make musl=1.2.3-1 musl-dev=1.2.3-1 musl-tools=1.2.3-1 python3
           git init .
           git config --global --add safe.directory "$PWD"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -352,10 +357,15 @@ jobs:
             tag="${RELEASE_TAG}"
             version="${tag#v}"
           else
-            version='0.1.0'
+            version='0.2.0'
           fi
           echo "URPROTECT_VERSION=${version}" >> "$GITHUB_ENV"
           echo "release_version=${version}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install pinned native launcher toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            make musl=1.2.4-2 musl-dev=1.2.4-2 musl-tools=1.2.4-2
       - name: Restore
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
@@ -365,6 +375,7 @@ jobs:
       - name: Smoke test release bundles
         env:
           URPROTECT_MUSL_CONTAINER_IMAGE: mcr.microsoft.com/dotnet/sdk@sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243
+          RELEASE_SMOKE_ARTIFACT_ROOT: .artifacts/release/smoke
         run: ./scripts/release-smoke.sh .artifacts/release
       - name: Publish GitHub release assets
         if: github.event_name == 'release'

@@ -57,6 +57,7 @@ public sealed record WrapperPayloadResult(
 public static class PayloadFrameCodec
 {
     public const ushort FormatVersion = 1;
+    public const ushort LauncherAbiVersion = LauncherContract.AbiVersion;
     public const ushort HeaderSize = 112;
     public const int TrailerSize = 24;
     public const uint DeflateFlag = (uint)PayloadCompression.Deflate;
@@ -78,11 +79,7 @@ public static class PayloadFrameCodec
         var errors = new DiagnosticBag();
         encoding = null;
 
-        if (string.IsNullOrWhiteSpace(sourceName)
-            || sourceName.Contains('\0')
-            || sourceName.Contains('/')
-            || sourceName.Contains('\\')
-            || (ulong)Encoding.UTF8.GetByteCount(sourceName) > limits.MaximumSourceNameBytes)
+        if (!TryEncodeSourceName(sourceName, limits.MaximumSourceNameBytes, out var sourceNameBytes))
         {
             errors.Error(DiagnosticCode.PayloadMalformed, "The source argv[0] name is invalid or exceeds its limit.");
             diagnostics = errors.ToArray();
@@ -134,7 +131,6 @@ public static class PayloadFrameCodec
             return false;
         }
 
-        var sourceNameBytes = Encoding.UTF8.GetBytes(sourceName);
         if (!TryCheckedAdd(frameOffset, HeaderSize, out var nameOffset)
             || !TryCheckedAdd(nameOffset, (ulong)sourceNameBytes.Length, out var payloadOffset)
             || !TryCheckedAdd(payloadOffset, (ulong)encoded.Length, out var frameEnd)
@@ -271,9 +267,12 @@ public static class PayloadFrameCodec
         if (string.IsNullOrWhiteSpace(sourceName)
             || sourceName.Contains('\0')
             || sourceName.Contains('/')
-            || sourceName.Contains('\\'))
+            || sourceName.Contains('\\')
+            || sourceName is "." or "..")
         {
-            diagnostics.Error(DiagnosticCode.PayloadMalformed, "The source argv[0] name is empty or contains a NUL.");
+            diagnostics.Error(
+                DiagnosticCode.PayloadMalformed,
+                "The source argv[0] name is empty, unsafe, or contains a path separator.");
             return Failure(diagnostics, sourceSize, encodedSize);
         }
 
@@ -485,7 +484,8 @@ public static class PayloadFrameCodec
             return !string.IsNullOrWhiteSpace(sourceName)
                 && !sourceName.Contains('\0')
                 && !sourceName.Contains('/')
-                && !sourceName.Contains('\\');
+                && !sourceName.Contains('\\')
+                && sourceName is not "." and not "..";
         }
         catch (DecoderFallbackException)
         {
@@ -497,5 +497,32 @@ public static class PayloadFrameCodec
     {
         result = left + right;
         return result >= left;
+    }
+
+    private static bool TryEncodeSourceName(
+        string sourceName,
+        ulong maximumBytes,
+        out byte[] encoded)
+    {
+        encoded = Array.Empty<byte>();
+        if (string.IsNullOrWhiteSpace(sourceName)
+            || sourceName is "." or ".."
+            || sourceName.Contains('\0')
+            || sourceName.Contains('/')
+            || sourceName.Contains('\\'))
+        {
+            return false;
+        }
+
+        try
+        {
+            encoded = new UTF8Encoding(false, true).GetBytes(sourceName);
+        }
+        catch (EncoderFallbackException)
+        {
+            return false;
+        }
+
+        return (ulong)encoded.Length <= maximumBytes;
     }
 }

@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_root="${1:-${repo_root}/.artifacts/release}"
 
-for required_command in cmp file python3 readelf sha256sum tar timeout; do
+for required_command in cmp file find grep mktemp python3 readelf realpath sha256sum tar timeout; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "${required_command} is required for release smoke testing" >&2
     exit 127
@@ -30,19 +30,89 @@ else
   exit 1
 fi
 
+smoke_artifact_root="${RELEASE_SMOKE_ARTIFACT_ROOT:-}"
+if [[ -n "${smoke_artifact_root}" ]]; then
+  mkdir -p "${smoke_artifact_root}"
+fi
+current_extracted=""
+cleanup_on_exit() {
+  local status=$?
+  if [[ -n "${current_extracted}" ]]; then
+    if [[ "${status}" -eq 0 || -z "${smoke_artifact_root}" ]]; then
+      rm -rf -- "${current_extracted}"
+    else
+      printf 'release smoke failure artifacts: %s\n' "${current_extracted}" >&2
+    fi
+  fi
+  exit "${status}"
+}
+trap cleanup_on_exit EXIT
+
 for archive in "${archives[@]}"; do
-  extracted="$(mktemp -d "${release_root}/.smoke.XXXXXX")"
-  cleanup() {
-    rm -rf -- "${extracted}"
-  }
-  trap cleanup RETURN
+  if [[ -n "${smoke_artifact_root}" ]]; then
+    extracted="$(mktemp -d "${smoke_artifact_root}/run.XXXXXX")"
+  else
+    extracted="$(mktemp -d "${release_root}/.smoke.XXXXXX")"
+  fi
+  current_extracted="${extracted}"
   tar --extract --gzip --file "${archive}" --directory "${extracted}"
   binary="$(find "${extracted}" -type f -name urprotect -perm -u+x -print -quit)"
   if [[ -z "${binary}" ]]; then
     echo "archive has no executable: ${archive}" >&2
     exit 1
   fi
+  native_launcher="$(find "${extracted}" -type f -name urprotect-launcher -perm -u+x -print -quit)"
+  if [[ -z "${native_launcher}" ]]; then
+    echo "archive has no native launcher: ${archive}" >&2
+    exit 1
+  fi
+  native_launcher_self_test="$(find "${extracted}" -type f -name urprotect-launcher-self-test -perm -u+x -print -quit)"
+  if [[ -z "${native_launcher_self_test}" ]]; then
+    echo "archive has no native launcher self-test: ${archive}" >&2
+    exit 1
+  fi
+  native_launcher_provenance="$(find "${extracted}" -type f -name native-launcher-provenance.txt -print -quit)"
+  if [[ -z "${native_launcher_provenance}" ]]; then
+    echo "archive has no native launcher provenance: ${archive}" >&2
+    exit 1
+  fi
+  "${native_launcher_self_test}" > "${extracted}/native-launcher-self-test.txt"
+  grep -a -q 'URPROTECT-AARCH64-LAUNCHER-V1' "${native_launcher}"
+  python3 - "${native_launcher}" "${native_launcher_provenance}" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+launcher, provenance = map(pathlib.Path, sys.argv[1:])
+values = {}
+for line in provenance.read_text().splitlines():
+    if "=" in line:
+        key, value = line.split("=", 1)
+        values[key] = value
+actual = hashlib.sha256(launcher.read_bytes()).hexdigest()
+assert values.get("launcher_sha256") == actual
+assert values.get("schema") == "urprotect-native-launcher-provenance-v1"
+assert values.get("launcher_abi") == "1"
+assert values.get("launcher_marker") == "URPROTECT-AARCH64-LAUNCHER-V1"
+PY
   readelf -lW "${binary}" > "${extracted}/program-headers.txt"
+  readelf -hW -lW -dW "${native_launcher}" > "${extracted}/native-launcher-readelf.txt"
+  python3 - "${extracted}/native-launcher-readelf.txt" <<'PY'
+import pathlib
+import sys
+
+report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+fields = {}
+for line in report.splitlines():
+    if ":" in line:
+        name, value = line.split(":", 1)
+        fields[name.strip()] = value.strip()
+assert fields.get("Class") == "ELF64"
+assert fields.get("Machine") == "AArch64"
+assert fields.get("Type", "").startswith("DYN")
+assert "INTERP" not in report
+assert "NEEDED" not in report
+PY
   launcher=""
   library_path=""
   musl_container_image="${URPROTECT_MUSL_CONTAINER_IMAGE:-}"
@@ -100,17 +170,14 @@ PY
   packed_wrapper="${extracted}/packed.elf"
   packed_report="${extracted}/packed-report.json"
   if [[ -n "${musl_container_binary}" ]]; then
-    relative_binary="${binary#${extracted}/}"
+    relative_native_launcher="${native_launcher#${extracted}/}"
     docker run --rm --platform linux/arm64 \
       -v "$(realpath "${extracted}"):/smoke" \
       "${musl_container_image}" "${musl_container_binary}" \
-      pack /bin/ls \
+      pack /bin/true \
       --output /smoke/packed.elf \
-      --launcher "/smoke/${relative_binary}" \
+      --launcher "/smoke/${relative_native_launcher}" \
       --json /smoke/packed-report.json
-    docker run --rm --platform linux/arm64 \
-      "${musl_container_image}" /bin/true \
-      > /dev/null
     docker run --rm --platform linux/arm64 \
       -v "$(realpath "${extracted}"):/smoke" \
       "${musl_container_image}" /smoke/packed.elf \
@@ -119,7 +186,7 @@ PY
     /bin/true > /dev/null
     "${binary}" pack /bin/true \
       --output "${packed_wrapper}" \
-      --launcher "${binary}" \
+      --launcher "${native_launcher}" \
       --json "${packed_report}"
     "${packed_wrapper}" > /dev/null
   fi
@@ -152,7 +219,13 @@ report = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert report["schemaVersion"] == 1
 assert report["success"] is True
 assert report["payload"]["compression"] == "deflate"
+assert report["payload"]["launcherAbiVersion"] == 1
+assert report["payload"]["frameVersion"] == 1
+assert report["payload"]["launcherMarker"] == "URPROTECT-AARCH64-LAUNCHER-V1"
+assert len(report["payload"]["launcherSha256"]) == 64
 assert report["output"]["published"] is True
 PY
   printf 'PASS release smoke: %s\n' "$(basename "${archive}")"
+  rm -rf -- "${extracted}"
+  current_extracted=""
 done

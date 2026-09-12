@@ -190,7 +190,7 @@ It must not become an in-process ELF loader, use payload-controlled directory
 paths, encrypt code, or add stealth behavior. `scripts/run-packed-fixture-matrix.sh`
 must run the native ARM64 glibc PR covering set and compare baseline/wrapper
 status and standard streams; `scripts/run-musl-container-smoke.sh` owns the
-pinned ARM64 musl payload smoke using a glibc launcher in the Debian
-container. The recovered fixture must still enter through the musl
-interpreter; the job must not claim that a musl .NET launcher ran when its
-native C++/zlib dependencies are not provisioned.
+pinned ARM64 musl payload smoke using the same static native launcher. The
+recovered fixture must still enter through the musl interpreter, and
+launcher/compiler/provenance evidence must be retained. `pack` requires the
+native launcher explicitly and never falls back to the C# packer executable.

@@ -21,7 +21,10 @@ public sealed record ElfPackResult(
     string? SourceSha256,
     string? EncodedSha256,
     string? WrapperSha256,
-    IReadOnlyList<Diagnostic> Diagnostics)
+    IReadOnlyList<Diagnostic> Diagnostics,
+    string? LauncherSha256 = null,
+    ushort FrameVersion = PayloadFrameCodec.FormatVersion,
+    ushort LauncherAbiVersion = LauncherContract.AbiVersion)
 {
     public bool IsSuccess => OutputPath is not null && Diagnostics.All(diagnostic => !diagnostic.IsError);
 }
@@ -104,6 +107,14 @@ public sealed class ElfPackService
             return Failure(diagnostics, sourceBytes.Length);
         }
 
+        if (!LauncherContract.HasMarker(launcherBytes))
+        {
+            diagnostics.Error(
+                DiagnosticCode.LauncherUnavailable,
+                $"The launcher does not contain the Wrapper 0.2 ABI marker '{LauncherContract.Marker}'.");
+            return Failure(diagnostics, sourceBytes.Length);
+        }
+
         var launcherValidation = pipeline.Validate(launcherBytes, analyzeInstructions: false);
         if (!launcherValidation.IsSuccess || launcherValidation.File is null)
         {
@@ -112,9 +123,15 @@ public sealed class ElfPackService
             return Failure(diagnostics, sourceBytes.Length);
         }
 
-        if (launcherValidation.File.Kind != ElfFileKind.PieExecutable)
+        if (launcherValidation.File.Kind != ElfFileKind.StaticPieExecutable)
         {
-            diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher does not contain a PT_INTERP executable profile.");
+            diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher is not a static ET_DYN PIE executable profile.");
+            return Failure(diagnostics, sourceBytes.Length);
+        }
+
+        if (launcherValidation.File.DynamicEntries.Any(entry => entry.Tag == ElfConstants.DtNeeded))
+        {
+            diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher has an unexpected shared-library dependency.");
             return Failure(diagnostics, sourceBytes.Length);
         }
 
@@ -149,7 +166,7 @@ public sealed class ElfPackService
         Buffer.BlockCopy(trailer, 0, wrapper, launcherBytes.Length + encoding.FrameBytes.Length, trailer.Length);
 
         var wrapperValidation = pipeline.Validate(wrapper, analyzeInstructions: false);
-        if (!wrapperValidation.IsSuccess || wrapperValidation.File?.Kind != ElfFileKind.PieExecutable)
+        if (!wrapperValidation.IsSuccess || wrapperValidation.File?.Kind != ElfFileKind.StaticPieExecutable)
         {
             diagnostics.Error(DiagnosticCode.WrapperMalformed, "The generated wrapper is not a valid AArch64 PIE executable.");
             diagnostics.AddRange(wrapperValidation.Diagnostics);
@@ -227,6 +244,7 @@ public sealed class ElfPackService
         var sourceHash = Convert.ToHexString(encoding.SourceSha256).ToLowerInvariant();
         var encodedHash = Convert.ToHexString(encoding.EncodedSha256).ToLowerInvariant();
         var wrapperHash = Convert.ToHexString(SHA256.HashData(wrapper)).ToLowerInvariant();
+        var launcherHash = Convert.ToHexString(SHA256.HashData(launcherBytes)).ToLowerInvariant();
         return new ElfPackResult(
             outputFullPath,
             (ulong)sourceBytes.Length,
@@ -234,7 +252,8 @@ public sealed class ElfPackService
             sourceHash,
             encodedHash,
             wrapperHash,
-            diagnostics.ToArray());
+            diagnostics.ToArray(),
+            launcherHash);
     }
 
     private static bool IsPackableExecutable(ElfFile file, byte[] source, DiagnosticBag diagnostics)

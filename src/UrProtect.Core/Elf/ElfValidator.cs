@@ -30,7 +30,7 @@ public static class ElfValidator
                 "The supported ET_DYN profile requires a PT_DYNAMIC segment.");
         }
 
-        if (file.Kind == ElfFileKind.PieExecutable
+        if (file.Kind is ElfFileKind.PieExecutable or ElfFileKind.StaticPieExecutable
             && !file.LoadMap.Segments.Any(segment =>
                 segment.IsExecutable && segment.ContainsVirtualAddress(file.Header.Entry, sizeof(uint))))
         {

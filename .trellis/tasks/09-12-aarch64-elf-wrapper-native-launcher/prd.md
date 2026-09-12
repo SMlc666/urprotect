@@ -22,9 +22,9 @@ wrapper input.
 - `src/UrProtect.Core/Pack/ElfPackService.cs` validates the source and wrapper
   through the existing parser, rejects shared objects and `RPATH`/`RUNPATH`,
   and publishes launcher-plus-frame bytes atomically.
-- `src/UrProtect.Cli/CliApplication.cs` currently performs frame discovery,
-  decompression, source validation, temporary extraction, argument/environment
-  reconstruction, and `execve` inside the .NET process.
+- `src/UrProtect.Cli/CliApplication.cs` remains the pack/report boundary, while
+  the Wrapper 0.2 runtime path is implemented by the static launcher under
+  `native/urprotect-launcher/`.
 - The existing ARM64 CI has native glibc fixture coverage and a pinned ARM64
   musl container smoke. Release rehearsal `34681420471` passed package,
   release smoke, fixture, and musl payload checks.
@@ -134,6 +134,10 @@ remains subject to the packer's executable input boundary and must be a
 dynamically linked `ET_DYN` PIE with a supported interpreter. `memfd`/
 `execveat`, custom loading, and separate profile-specific launchers remain
 deferred. All native source, licenses, and checksums must be recorded.
+
+The frozen Wrapper 0.2 launcher marker is
+`URPROTECT-AARCH64-LAUNCHER-V1`; the packer rejects static PIE binaries without
+that marker, and reports the launcher ABI, marker, and digest.
 
 ## Acceptance Criteria
 

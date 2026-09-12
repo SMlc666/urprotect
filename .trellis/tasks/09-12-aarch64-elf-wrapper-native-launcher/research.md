@@ -35,6 +35,33 @@
   `fexecve`, `execveat`, and `memfd_create` need a separate kernel/libc
   compatibility contract.
 
+## Implementation evidence
+
+- The native launcher carries the frozen marker
+  `URPROTECT-AARCH64-LAUNCHER-V1`. `ElfPackService` requires that marker,
+  static-PIE classification, an executable entry mapping, and no `DT_NEEDED`
+  entries before it accepts a launcher; `pack` has no managed-launcher
+  fallback.
+- A reproducible AArch64 build with `SOURCE_DATE_EPOCH=0` produced a
+  669,368-byte static launcher. The retained Wrapper 0.1 self-contained
+  launcher was 75,683,760 bytes in the same workspace, so the native runtime
+  is materially smaller. Two clean native builds compared byte-for-byte.
+- Native self-tests cover SHA-256 vectors and raw-deflate decoding. The
+  integration harness covers valid execution, repeated wrapper bytes,
+  arguments, `argv[0]`, environment, cwd, generated output, non-zero exit,
+  signal status, truncation, digest/tamper, wrong ABI fields, unsafe basename,
+  bounds overflow, trailing deflate data, invalid interpreter, and exec
+  failure. Failure artifacts can be retained under the CI artifact root.
+- Release archives contain the native launcher, self-test, source tree,
+  miniz license/commit material, and provenance. Release smoke verifies the
+  launcher hash from provenance and runs the self-test before packing.
+- Two complete `0.2.0` package runs with the same `SOURCE_DATE_EPOCH=0` and
+  pinned inputs produced byte-identical glibc and musl tarballs after removing
+  the temporary build path from the `file` evidence.
+- CI installs the exact Ubuntu Noble `musl`, `musl-dev`, and `musl-tools`
+  package versions selected for the native ARM64 jobs; provenance records the
+  compiler path/hash/spec hash and installed package versions when available.
+
 ## Known scope
 
 No custom ELF loader, relocation application, shared-object wrapping, Android

@@ -87,7 +87,10 @@ public sealed record ProductPackPayloadReport(
     long EncodedSize,
     string? SourceSha256,
     string? EncodedSha256,
-    int LauncherAbiVersion);
+    int LauncherAbiVersion,
+    int FrameVersion,
+    string? LauncherSha256,
+    string LauncherMarker);
 
 public sealed record ProductPackOutputReport(bool Published, string? Sha256);
 
@@ -163,7 +166,10 @@ public static class ProductReportFactory
                 checked((long)result.EncodedSize),
                 result.SourceSha256,
                 result.EncodedSha256,
-                1),
+                result.LauncherAbiVersion,
+                result.FrameVersion,
+                result.LauncherSha256,
+                LauncherContract.Marker),
             new ProductPackOutputReport(result.OutputPath is not null, result.WrapperSha256),
             result.Diagnostics.Select(ProductDiagnosticReport.From).ToArray());
     }

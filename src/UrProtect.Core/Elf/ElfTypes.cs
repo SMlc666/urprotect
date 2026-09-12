@@ -109,6 +109,7 @@ public enum ElfFileKind
 {
     Unknown,
     PieExecutable,
+    StaticPieExecutable,
     SharedObject,
 }
 
@@ -427,6 +428,12 @@ public sealed class ElfFile
     public ElfFileKind Kind =>
         ProgramHeaders.Any(header => header.Type == ElfConstants.PtInterp)
             ? ElfFileKind.PieExecutable
+            : Header.Entry != 0
+                && ProgramHeaders.Any(header =>
+                    header.IsExecutable
+                    && Header.Entry >= header.VirtualAddress
+                    && Header.Entry - header.VirtualAddress < header.FileSize)
+                ? ElfFileKind.StaticPieExecutable
             : ElfFileKind.SharedObject;
 }
 

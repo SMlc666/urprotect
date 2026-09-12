@@ -82,7 +82,9 @@ The first packer is not a general ELF writer: it validates the source with the
 existing parser, appends a bounded versioned payload frame to a pinned
 AArch64 launcher, and atomically publishes the result. The runtime launcher
 must verify both payload digests and reject invalid source-name metadata before
-constructing a temporary extraction path.
+constructing a temporary extraction path. Wrapper 0.2 accepts only the
+validated static AArch64 PIE launcher and must not silently fall back to the
+C# packer executable.
 
 ## Scenario: ELF validation and byte-preserving output
 
