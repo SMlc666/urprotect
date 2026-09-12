@@ -104,4 +104,32 @@ public sealed class NoOpPipelineTests
             directory.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void CopyPathCanUseTheAlreadyReadInputSnapshot()
+    {
+        var directory = Directory.CreateTempSubdirectory("urprotect-snapshot-");
+        try
+        {
+            var inputPath = Path.Combine(directory.FullName, "input.elf");
+            var outputPath = Path.Combine(directory.FullName, "output.elf");
+            var source = ElfFixture.MinimalPie();
+            File.WriteAllBytes(inputPath, source);
+
+            var invalidSnapshot = new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' };
+            var result = new NoOpPipeline().ValidateAndCopy(
+                inputPath,
+                outputPath,
+                analyzeInstructions: false,
+                inputOverride: invalidSnapshot);
+
+            Assert.False(result.IsSuccess);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.InputTooSmall);
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
 }

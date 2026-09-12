@@ -1,9 +1,9 @@
 # urprotect
 
-`urprotect` is a C#/.NET infrastructure foundation for conservative ELF64
-AArch64 analysis. The current MVP is intentionally read-only: it validates
-supported `ET_DYN` PIE executables and dynamically linked shared objects,
-reports bounded ELF metadata, and can emit a byte-identical copy.
+`urprotect` is **UrProtect Validator 0.1**, a C#/.NET command-line product for
+conservative ELF64 AArch64 validation. It validates supported `ET_DYN` PIE
+executables and dynamically linked shared objects, emits a stable JSON report,
+and can produce a byte-identical no-op copy.
 
 It does not yet implement binary protection transformations, relocation
 rewriting, runtime injection, code encryption, or control-flow virtualization.
@@ -24,6 +24,36 @@ dotnet restore
 dotnet build --configuration Release
 dotnet test --configuration Release
 ```
+
+## Quickstart
+
+Validate an AArch64 ELF and print the human-readable result:
+
+```sh
+urprotect validate ./program
+```
+
+Create a safe no-op copy and a machine-readable report:
+
+```sh
+urprotect validate ./program \
+  --copy ./program.checked \
+  --json ./program.report.json
+```
+
+Stream exactly one JSON document to stdout:
+
+```sh
+urprotect validate ./program --json - --no-analysis > report.json
+```
+
+Exit codes are stable: `0` success, `2` usage, `3` filesystem failure, `4`
+invalid/unsupported ELF, `5` output identity/publication failure, and `10`
+unexpected internal failure. The `--copy` path never serializes the parsed
+model; it publishes only after byte-for-byte identity is proven.
+
+This release does not rewrite code, encrypt code, inject runtime logic,
+virtualize control flow, or claim physical Android-device compatibility.
 
 ## Fixture Matrix
 

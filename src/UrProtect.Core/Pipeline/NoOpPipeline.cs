@@ -61,7 +61,8 @@ public sealed class NoOpPipeline
     public NoOpValidationResult ValidateAndCopy(
         string inputPath,
         string outputPath,
-        bool analyzeInstructions = true)
+        bool analyzeInstructions = true,
+        ReadOnlyMemory<byte>? inputOverride = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(inputPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
@@ -92,14 +93,21 @@ public sealed class NoOpPipeline
         }
 
         byte[] input;
-        try
+        if (inputOverride is { } providedInput)
         {
-            input = File.ReadAllBytes(inputFullPath);
+            input = providedInput.ToArray();
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        else
         {
-            diagnostics.Error(DiagnosticCode.InputIoFailure, exception.Message);
-            return new NoOpValidationResult(null, null, diagnostics.ToArray(), null);
+            try
+            {
+                input = File.ReadAllBytes(inputFullPath);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                diagnostics.Error(DiagnosticCode.InputIoFailure, exception.Message);
+                return new NoOpValidationResult(null, null, diagnostics.ToArray(), null);
+            }
         }
 
         var result = Validate(input, emitOutput: false, analyzeInstructions);

@@ -92,6 +92,11 @@ NoOpValidationResult NoOpPipeline.ValidateAndCopy(
     string inputPath,
     string outputPath,
     bool analyzeInstructions = true);
+NoOpValidationResult NoOpPipeline.ValidateAndCopy(
+    string inputPath,
+    string outputPath,
+    bool analyzeInstructions = true,
+    ReadOnlyMemory<byte>? inputOverride = null);
 ```
 
 ### 3. Contracts
@@ -100,6 +105,9 @@ NoOpValidationResult NoOpPipeline.ValidateAndCopy(
   `PT_LOAD` and `PT_DYNAMIC`; stripped section headers are allowed.
 - Output: optional copy whose bytes are exactly equal to the validated input;
   no parsed model is serialized in the MVP.
+- Product callers that already own a read-only input snapshot may pass it as
+  `inputOverride`; this prevents a second source read from making report hashes
+  disagree with the copied bytes.
 - Environment: no external ELF library; AArch64 decoding is through the pinned
   AsmStone adapter.
 

@@ -159,3 +159,8 @@ dynamic-symbol count and must bound `DT_VERNEED` traversal by
 `DT_VERNEEDNUM`. Version-chain offsets must make forward progress and names
 must resolve through the validated dynamic string table; raw records remain
 available without applying or rewriting them.
+
+The product CLI owns stable exit codes and report schema serialization. JSON
+stream mode (`--json -`) reserves stdout for one document, report files are
+written through a flushed temporary sibling and atomic rename, and copy-mode
+reports must use the same input snapshot passed to the no-op writer.
