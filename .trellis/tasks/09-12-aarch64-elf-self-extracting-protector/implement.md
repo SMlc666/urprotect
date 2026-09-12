@@ -110,7 +110,7 @@ dotnet test --filter Category=PackCli
   files; do not compare ASLR addresses or process timing.
 - [x] Cover representative GCC/Clang, Rust, and Go PIE fixtures in PR/native
   ARM64 glibc.
-- [ ] Verify the musl wrapper path in the pinned ARM64 container smoke.
+- [x] Verify the musl wrapper path in the pinned ARM64 container smoke.
 - [x] Preserve wrapped ELF, recovered payload metadata, logs, and environment
   evidence for every failure.
 
@@ -143,9 +143,9 @@ git diff --check
 
 ## 8. Final review gate
 
-- [ ] Run the PRD convergence pass and ensure no unresolved product decisions
+- [x] Run the PRD convergence pass and ensure no unresolved product decisions
   remain.
-- [ ] Validate `prd.md`, `design.md`, `implement.md`, `implement.jsonl`, and
+- [x] Validate `prd.md`, `design.md`, `implement.md`, `implement.jsonl`, and
   `check.jsonl`.
-- [ ] Confirm the latest final planning summary with the user.
-- [ ] Only after subsequent explicit approval run `task.py start`.
+- [x] Confirm the latest final planning summary with the user.
+- [x] After subsequent explicit approval, run `task.py start`.

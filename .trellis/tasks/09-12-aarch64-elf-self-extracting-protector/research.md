@@ -45,3 +45,7 @@
   `/lib/ld-musl-aarch64.so.1`; publishing the launcher itself as a musl .NET
   single-file binary would require additional musl-compatible C++/zlib runtime
   libraries that are not part of the pinned Debian image.
+- Release rehearsal run `34681420471` passed release packaging and smoke,
+  native glibc/musl fixture coverage, packed wrapper checks, benchmark, and
+  Android capability probing. The slow Android native-bridge job was skipped
+  because the manual input was false.
