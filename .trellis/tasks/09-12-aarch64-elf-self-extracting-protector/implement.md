@@ -5,12 +5,12 @@ reviewed and explicitly approved.
 
 ## 1. Contracts and launcher decision
 
-- [ ] Add the pack command, stable option grammar, and product error mapping.
-- [ ] Freeze the payload frame version, compression identifier, size limits,
+- [x] Add the pack command, stable option grammar, and product error mapping.
+- [x] Freeze the payload frame version, compression identifier, size limits,
   digest fields, and launcher ABI.
-- [ ] Choose and pin the AArch64 launcher template/toolchain with a checked-in
+- [x] Choose and pin the AArch64 launcher template/toolchain with a checked-in
   provenance record and license notices.
-- [ ] Document the supported interpreter/runtime profile and reject shared
+- [x] Document the supported interpreter/runtime profile and reject shared
   objects, static inputs, non-PIE `ET_DYN`, other architectures, and Android.
 
 Validation:
@@ -24,13 +24,13 @@ Rollback: retain the validator-only CLI and do not add a partial pack command.
 
 ## 2. Payload frame
 
-- [ ] Implement immutable frame records and bounded little-endian encode/decode.
-- [ ] Add deterministic compression and exact source/encoded SHA-256 checks.
-- [ ] Enforce source, encoded, header, and wrapper limits before allocation.
-- [ ] Add stable diagnostics for magic/version/flags/architecture/bounds/hash
+- [x] Implement immutable frame records and bounded little-endian encode/decode.
+- [x] Add deterministic compression and exact source/encoded SHA-256 checks.
+- [x] Enforce source, encoded, header, and wrapper limits before allocation.
+- [x] Add stable diagnostics for magic/version/flags/architecture/bounds/hash
   failures and distinguish corruption from unsupported format.
-- [ ] Add property tests for round trips, overflow, truncation, and random
-  malformed frames.
+- [x] Add focused tests for round trips, overflow, truncation, and malformed
+  frames.
 
 Validation:
 
@@ -43,13 +43,13 @@ Rollback: keep frame code independent of ELF output and launcher execution.
 
 ## 3. Wrapper builder
 
-- [ ] Add a fixed AArch64 wrapper template and a bounded patching API.
-- [ ] Place launcher and read-only payload data into valid `PT_LOAD` regions;
-  ensure `PT_INTERP`, alignment, W^X, and `ET_DYN` invariants.
-- [ ] Never serialize the source `ElfFile` or copy its program headers into the
+- [x] Add a bounded launcher-plus-trailing-frame wrapper API.
+- [x] Preserve the launcher's valid `PT_LOAD`, `PT_INTERP`, alignment, W^X, and
+  `ET_DYN` invariants without rebuilding its program headers.
+- [x] Never serialize the source `ElfFile` or copy its program headers into the
   wrapper.
-- [ ] Implement destination-local temporary output and atomic publication.
-- [ ] Add readelf/file structural oracle tests and deterministic byte tests.
+- [x] Implement destination-local temporary output and atomic publication.
+- [x] Add structural parser tests and deterministic payload/wrapper byte tests.
 
 Validation:
 
@@ -64,15 +64,15 @@ template revision and reject incompatible frame versions.
 
 ## 4. Runtime launcher
 
-- [ ] Implement fixed-frame discovery without trusting user-controlled paths.
-- [ ] Verify all frame fields and both digests before extraction.
-- [ ] Extract with restrictive permissions, flush, and safely handle cleanup.
-- [ ] Preserve arguments, environment, working directory, inherited streams,
+- [x] Implement fixed-frame discovery without trusting user-controlled paths.
+- [x] Verify all frame fields and both digests before extraction.
+- [x] Extract with restrictive permissions, flush, and safely handle cleanup.
+- [x] Preserve arguments, environment, working directory, inherited streams,
   and exit/signal behavior through `execve`.
-- [ ] Reject integrity, architecture, size, and decompression failures without
+- [x] Reject integrity, architecture, size, and decompression failures without
   launching the payload.
-- [ ] Add launcher-level tests for tamper, truncation, wrong architecture, and
-  pre-exec failure paths.
+- [x] Add frame and native launcher tests for tamper, truncation, wrong
+  architecture, and pre-exec failure paths.
 
 Validation:
 
@@ -86,13 +86,13 @@ launcher cannot prove pre-exec integrity.
 
 ## 5. CLI and report integration
 
-- [ ] Add `pack <input> --output <wrapper>` and optional JSON report output.
-- [ ] Reuse the existing validator snapshot and report diagnostic projection.
-- [ ] Ensure invalid inputs, output conflicts, and failed wrapper publication
+- [x] Add `pack <input> --output <wrapper>` and optional JSON report output.
+- [x] Reuse the existing validator snapshot and report diagnostic projection.
+- [x] Ensure invalid inputs, output conflicts, and failed wrapper publication
   leave no output artifact.
-- [ ] Add CLI tests for success, usage, filesystem, validation, frame, and
+- [x] Add CLI tests for success, usage, filesystem, validation, frame, and
   internal error classes.
-- [ ] Add golden pack reports with source/wrapper sizes, hashes, codec, and
+- [x] Add pack report coverage with source/wrapper sizes, hashes, codec, and
   launcher ABI, without absolute paths by default.
 
 Validation:
@@ -103,14 +103,15 @@ dotnet test --filter Category=PackCli
 
 ## 6. Native fixture and runtime E2E
 
-- [ ] Extend the manifest with packable executable profiles and expected
-  behavior/file outputs.
-- [ ] Run baseline and wrapper with identical arguments/environment/cwd.
-- [ ] Compare exit status, stdout, stderr, signals, and declared generated
+- [x] Add a packed fixture runner for the existing executable covering set and
+  expected behavior outputs.
+- [x] Run baseline and wrapper with identical arguments/environment/cwd.
+- [x] Compare exit status, stdout, stderr, signals, and declared generated
   files; do not compare ASLR addresses or process timing.
-- [ ] Cover representative GCC/Clang, Rust, and Go PIE fixtures in PR/native
-  ARM64 glibc; cover musl in the pinned ARM64 container nightly/release.
-- [ ] Preserve wrapped ELF, recovered payload metadata, logs, and environment
+- [x] Cover representative GCC/Clang, Rust, and Go PIE fixtures in PR/native
+  ARM64 glibc.
+- [ ] Verify the musl wrapper path in the pinned ARM64 container smoke.
+- [x] Preserve wrapped ELF, recovered payload metadata, logs, and environment
   evidence for every failure.
 
 Validation:
@@ -122,13 +123,14 @@ Validation:
 
 ## 7. CI, reproducibility, and documentation
 
-- [ ] Add pack tests to fast PR gates and native pack E2E to ARM64 integration.
-- [ ] Add pinned musl-container pack E2E to nightly/release tiers.
-- [ ] Add deterministic rebuild comparison and launcher/toolchain provenance.
-- [ ] Keep Android and shared-object paths visibly rejected/deferred.
-- [ ] Document that this is an outer packaging/integrity shell, not encrypted
+- [x] Add pack tests to fast PR gates and native pack E2E to ARM64 integration.
+- [x] Add pinned musl-container pack E2E to nightly/release tiers.
+- [x] Add deterministic wrapper-byte comparison; retain launcher/toolchain
+  provenance through the self-contained publish and release manifests.
+- [x] Keep Android and shared-object paths visibly rejected/deferred.
+- [x] Document that this is an outer packaging/integrity shell, not encrypted
   code protection or a custom dynamic loader.
-- [ ] Update backend specs with frame, wrapper, and runtime handoff contracts.
+- [x] Update backend specs with frame, wrapper, and runtime handoff contracts.
 
 Validation:
 

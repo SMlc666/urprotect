@@ -53,6 +53,9 @@ separate product scope.
   user-space `ET_DYN` PIE executables.
 - Shared objects, `ET_EXEC`, static-only binaries, other architectures, and
   malformed or unsupported inputs fail closed with stable diagnostics.
+- Inputs using `RPATH` or `RUNPATH` are rejected in 0.1 because temporary
+  extraction changes the executable origin directory used by the system
+  loader.
 - The output is a different runnable ELF wrapper; the original input remains
   untouched and is retained byte-for-byte as the payload.
 

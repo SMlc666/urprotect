@@ -88,3 +88,65 @@ fi
 cmp -- "${artifact_root}/baseline.stdout" "${artifact_root}/output.stdout"
 cmp -- "${artifact_root}/baseline.stderr" "${artifact_root}/output.stderr"
 printf '%s\n' "PASS musl-container: baseline/output behavior and byte identity match"
+
+launcher_directory="${artifact_root}/launcher"
+launcher="${launcher_directory}/urprotect"
+packed="${artifact_root}/packed-fixture"
+mkdir -p "${launcher_directory}"
+dotnet publish "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release \
+  --runtime linux-musl-arm64 \
+  --self-contained true \
+  --output "${launcher_directory}" \
+  --no-restore \
+  --nologo \
+  -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:DebugType=None \
+  -p:StripSymbols=true
+if [[ ! -x "${launcher}" ]]; then
+  echo "musl launcher publish did not produce ${launcher}" >&2
+  exit 1
+fi
+
+"${launcher}" pack "${binary}" \
+  --output "${packed}" \
+  --launcher "${launcher}" \
+  --json "${artifact_root}/packed-report.json" \
+  > "${artifact_root}/pack.stdout" \
+  2> "${artifact_root}/pack.stderr"
+if cmp -- "${binary}" "${packed}" >/dev/null 2>&1; then
+  echo "musl packed wrapper is byte-identical to the source" >&2
+  exit 1
+fi
+file "${packed}" > "${artifact_root}/packed-file.txt"
+readelf -hW -lW -dW "${packed}" > "${artifact_root}/packed-readelf.txt"
+python3 - "${artifact_root}/packed-readelf.txt" <<'PY'
+import pathlib
+import sys
+
+report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+fields = {}
+for line in report.splitlines():
+    if ":" in line:
+        name, value = line.split(":", 1)
+        fields[name.strip()] = value.strip()
+assert fields.get("Class") == "ELF64"
+assert fields.get("Machine") == "AArch64"
+assert fields.get("Type", "").startswith("DYN")
+PY
+
+set +e
+timeout "${run_timeout}" "${packed}" \
+  > "${artifact_root}/packed.stdout" \
+  2> "${artifact_root}/packed.stderr"
+packed_status=$?
+set -e
+printf '%s\n' "${packed_status}" > "${artifact_root}/packed.status"
+if [[ "${packed_status}" -ne "${baseline_status}" ]]; then
+  echo "musl packed output status ${packed_status} differs from baseline ${baseline_status}" >&2
+  exit 1
+fi
+cmp -- "${artifact_root}/baseline.stdout" "${artifact_root}/packed.stdout"
+cmp -- "${artifact_root}/baseline.stderr" "${artifact_root}/packed.stderr"
+printf '%s\n' "PASS musl-container: packed wrapper behavior matches baseline"

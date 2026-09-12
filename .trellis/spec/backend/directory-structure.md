@@ -28,6 +28,7 @@ scripts under `scripts/` or `.github/`.
 ```
 src/
 ├── UrProtect.Core/       # binary model, parser, validation, analysis
+│   └── Pack/              # payload framing and outer ELF wrapper service
 └── UrProtect.Cli/        # command-line boundary
 tests/
 └── UrProtect.Core.Tests/
@@ -41,6 +42,7 @@ scripts/
 ├── run-musl-container-smoke.sh
 ├── package-release.sh
 ├── release-smoke.sh
+├── run-packed-fixture-matrix.sh
 ├── install-native-toolchains.sh
 ├── run-android-avd.sh
 └── validate-fixtures.py

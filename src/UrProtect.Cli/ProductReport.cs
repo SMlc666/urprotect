@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Elf;
+using UrProtect.Core.Pack;
 using UrProtect.Core.Pipeline;
 
 namespace UrProtect.Cli;
@@ -69,6 +70,27 @@ public sealed record ProductOutputReport(
     bool ByteIdentical,
     string? Sha256);
 
+public sealed record ProductPackReport(
+    int SchemaVersion,
+    string ToolVersion,
+    bool Success,
+    ProductPackInputReport Input,
+    ProductPackPayloadReport Payload,
+    ProductPackOutputReport Output,
+    IReadOnlyList<ProductDiagnosticReport> Diagnostics);
+
+public sealed record ProductPackInputReport(long? ByteLength, string? Sha256);
+
+public sealed record ProductPackPayloadReport(
+    string Compression,
+    long SourceSize,
+    long EncodedSize,
+    string? SourceSha256,
+    string? EncodedSha256,
+    int LauncherAbiVersion);
+
+public sealed record ProductPackOutputReport(bool Published, string? Sha256);
+
 public static class ProductReportFactory
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -123,6 +145,30 @@ public static class ProductReportFactory
             null);
 
     public static string Serialize(ProductReport report) =>
+        JsonSerializer.Serialize(report, JsonOptions);
+
+    public static ProductPackReport CreatePack(string toolVersion, ElfPackResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return new ProductPackReport(
+            1,
+            toolVersion,
+            result.IsSuccess,
+            new ProductPackInputReport(
+                result.SourceSize > 0 ? checked((long)result.SourceSize) : null,
+                result.SourceSha256),
+            new ProductPackPayloadReport(
+                "deflate",
+                checked((long)result.SourceSize),
+                checked((long)result.EncodedSize),
+                result.SourceSha256,
+                result.EncodedSha256,
+                1),
+            new ProductPackOutputReport(result.OutputPath is not null, result.WrapperSha256),
+            result.Diagnostics.Select(ProductDiagnosticReport.From).ToArray());
+    }
+
+    public static string Serialize(ProductPackReport report) =>
         JsonSerializer.Serialize(report, JsonOptions);
 
     private static ProductElfReport? CreateElfReport(NoOpValidationResult result)

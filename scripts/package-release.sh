@@ -110,7 +110,16 @@ UrProtect Validator ${version} (${profile})
 
 This package validates ELF64 little-endian AArch64 ET_DYN PIE executables and
 dynamically linked shared objects. It can emit a byte-identical no-op copy and
-a schema-versioned JSON report.
+a schema-versioned JSON report. It can also wrap a dynamically linked AArch64
+ET_DYN PIE executable as an outer compressed-payload ELF wrapper:
+
+  ./urprotect pack ./program --output ./program.wrapped
+
+The wrapper validates the payload, extracts it to a private temporary path, and
+uses the normal Linux loader through execve. It is not a custom ELF loader and
+does not encrypt or rewrite code. Use the published self-contained executable
+as the launcher; Android, shared-object wrapping, and memfd execution are
+deferred.
 
 Usage:
   ./urprotect validate ./program
