@@ -35,6 +35,11 @@ Important codes include `TableOutOfBounds`, `InvalidSegment`,
 `DynamicTableMalformed`, `AddressOverflow`, `AddressUnmapped`,
 `SymbolVersionTableMalformed`, `VersionNeedTableMalformed`,
 `AsmStoneUnavailable`, `OutputIdentityMismatch`, and I/O failure codes.
+Pack operations additionally use `UnsupportedPackInput`,
+`UnsupportedInterpreter`, `LauncherUnavailable`, `PayloadMalformed`,
+`PayloadUnsupported`, `PayloadLimitExceeded`, `PayloadIntegrityMismatch`,
+and `WrapperMalformed`. A failed frame or wrapper check must not publish an
+output.
 
 ---
 
@@ -72,6 +77,12 @@ an unmapped dynamic table as an empty table, silently truncate a count, or
 convert an unknown instruction into a guessed opcode. When a future writer is
 added, unsupported relocations and range overflow must reject the planned
 mutation.
+
+The first packer is not a general ELF writer: it validates the source with the
+existing parser, appends a bounded versioned payload frame to a pinned
+AArch64 launcher, and atomically publishes the result. The runtime launcher
+must verify both payload digests and reject invalid source-name metadata before
+constructing a temporary extraction path.
 
 ## Scenario: ELF validation and byte-preserving output
 

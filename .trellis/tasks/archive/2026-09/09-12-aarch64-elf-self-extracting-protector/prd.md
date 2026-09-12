@@ -53,6 +53,9 @@ separate product scope.
   user-space `ET_DYN` PIE executables.
 - Shared objects, `ET_EXEC`, static-only binaries, other architectures, and
   malformed or unsupported inputs fail closed with stable diagnostics.
+- Inputs using `RPATH` or `RUNPATH` are rejected in 0.1 because temporary
+  extraction changes the executable origin directory used by the system
+  loader.
 - The output is a different runnable ELF wrapper; the original input remains
   untouched and is retained byte-for-byte as the payload.
 
@@ -122,21 +125,21 @@ and threat-model decision is made.
 
 ## Acceptance Criteria
 
-- [ ] The approved input boundary and runtime handoff are implemented as
+- [x] The approved input boundary and runtime handoff are implemented as
   explicit validation rules, not implicit best effort.
-- [ ] `pack` emits a runnable AArch64 `ET_DYN` wrapper containing a complete
+- [x] `pack` emits a runnable AArch64 `ET_DYN` wrapper containing a complete
   byte-identical source payload, with deterministic framing and digest metadata.
-- [ ] A tampered, truncated, unsupported, oversized, or wrong-architecture
+- [x] A tampered, truncated, unsupported, oversized, or wrong-architecture
   payload fails closed without launching the payload.
-- [ ] Baseline and wrapped native ARM64 glibc and musl fixtures produce matching
+- [x] Baseline and wrapped native ARM64 glibc and musl fixtures produce matching
   exit status, stdout, stderr, signals, and declared file outputs.
-- [ ] The wrapper's source bytes differ from the input while the embedded
+- [x] The wrapper's source bytes differ from the input while the embedded
   payload bytes recover exactly to the original input.
-- [ ] The CLI reports stable machine-readable errors and never publishes a
+- [x] The CLI reports stable machine-readable errors and never publishes a
   partial output.
-- [ ] CI retains reproducibility metadata, failure artifacts, and the exact
+- [x] CI retains reproducibility metadata, failure artifacts, and the exact
   runtime profile used for each wrapped fixture.
-- [ ] Documentation clearly distinguishes packaging/integrity wrapping from
+- [x] Documentation clearly distinguishes packaging/integrity wrapping from
   future code encryption or protection transformation.
 
 ## Notes

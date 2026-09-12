@@ -96,5 +96,63 @@ assert report["success"] is True
 assert report["output"]["byteIdentical"] is True
 assert report["input"]["sha256"] == report["output"]["sha256"]
 PY
+
+  packed_wrapper="${extracted}/packed.elf"
+  packed_report="${extracted}/packed-report.json"
+  if [[ -n "${musl_container_binary}" ]]; then
+    relative_binary="${binary#${extracted}/}"
+    docker run --rm --platform linux/arm64 \
+      -v "$(realpath "${extracted}"):/smoke" \
+      "${musl_container_image}" "${musl_container_binary}" \
+      pack /bin/ls \
+      --output /smoke/packed.elf \
+      --launcher "/smoke/${relative_binary}" \
+      --json /smoke/packed-report.json
+    docker run --rm --platform linux/arm64 \
+      "${musl_container_image}" /bin/true \
+      > /dev/null
+    docker run --rm --platform linux/arm64 \
+      -v "$(realpath "${extracted}"):/smoke" \
+      "${musl_container_image}" /smoke/packed.elf \
+      > /dev/null
+  else
+    /bin/true > /dev/null
+    "${binary}" pack /bin/true \
+      --output "${packed_wrapper}" \
+      --launcher "${binary}" \
+      --json "${packed_report}"
+    "${packed_wrapper}" > /dev/null
+  fi
+  file "${packed_wrapper}" > "${extracted}/packed-file.txt"
+  readelf -hW -lW -dW "${packed_wrapper}" > "${extracted}/packed-readelf.txt"
+  python3 - "${extracted}/packed-readelf.txt" <<'PY'
+import pathlib
+import sys
+
+report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+fields = {}
+for line in report.splitlines():
+    if ":" in line:
+        name, value = line.split(":", 1)
+        fields[name.strip()] = value.strip()
+assert fields.get("Class") == "ELF64"
+assert fields.get("Machine") == "AArch64"
+assert fields.get("Type", "").startswith("DYN")
+PY
+  if cmp -- "${binary}" "${packed_wrapper}" >/dev/null 2>&1; then
+    echo "release wrapper is byte-identical to its source launcher" >&2
+    exit 1
+  fi
+  python3 - "${packed_report}" <<'PY'
+import json
+import pathlib
+import sys
+
+report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+assert report["schemaVersion"] == 1
+assert report["success"] is True
+assert report["payload"]["compression"] == "deflate"
+assert report["output"]["published"] is True
+PY
   printf 'PASS release smoke: %s\n' "$(basename "${archive}")"
 done

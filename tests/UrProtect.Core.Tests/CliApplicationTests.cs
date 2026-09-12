@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using UrProtect.Cli;
+using UrProtect.Core.Pack;
 
 namespace UrProtect.Core.Tests;
 
@@ -187,6 +188,60 @@ public sealed class CliApplicationTests
 
         Assert.Equal((int)ProductExitCode.Internal, exitCode);
         Assert.Contains("InternalFailure", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "PackCli")]
+    public void PacksWithJsonReportUsingTheExplicitLauncher()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        var reportPath = directory.Path("pack.json");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.MinimalPie());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[]
+            {
+                "pack", inputPath, "--output", outputPath, "--launcher", launcherPath,
+                "--json", reportPath,
+            },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Success, exitCode);
+        Assert.True(File.Exists(outputPath));
+        using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+        Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("deflate", document.RootElement.GetProperty("payload").GetProperty("compression").GetString());
+        Assert.True(document.RootElement.GetProperty("output").GetProperty("published").GetBoolean());
+    }
+
+    [Fact]
+    [Trait("Category", "PackCli")]
+    public void DoesNotPublishWrapperForInvalidPackInput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("invalid.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' });
+        File.WriteAllBytes(launcherPath, ElfFixture.MinimalPie());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[] { "pack", inputPath, "--output", outputPath, "--launcher", launcherPath },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Validation, exitCode);
+        Assert.False(File.Exists(outputPath));
+        Assert.Contains("InputTooSmall", stderr.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

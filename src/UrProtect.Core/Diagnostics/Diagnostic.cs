@@ -43,6 +43,14 @@ public enum DiagnosticCode
     OutputPathConflict,
     InputIoFailure,
     OutputIoFailure,
+    UnsupportedPackInput,
+    UnsupportedInterpreter,
+    LauncherUnavailable,
+    PayloadMalformed,
+    PayloadUnsupported,
+    PayloadLimitExceeded,
+    PayloadIntegrityMismatch,
+    WrapperMalformed,
     AsmStoneUnavailable,
     InvalidArgument,
 }
@@ -73,6 +81,12 @@ public sealed class DiagnosticBag : IReadOnlyList<Diagnostic>
     public Diagnostic this[int index] => items[index];
 
     public void Add(Diagnostic diagnostic) => items.Add(diagnostic);
+
+    public void AddRange(IEnumerable<Diagnostic> diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        items.AddRange(diagnostics);
+    }
 
     public void Info(DiagnosticCode code, string message, ulong? offset = null) =>
         Add(new Diagnostic(DiagnosticSeverity.Info, code, message, offset));

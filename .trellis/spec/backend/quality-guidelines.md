@@ -177,3 +177,20 @@ notices and an SBOM-equivalent inventory, create relative checksum entries, and
 use normalized tar ownership/order/timestamps. Release smoke must execute both
 bundles on native ARM64, using the pinned ARM64 musl container when the host
 does not provide all musl-compatible native dependencies.
+
+The first packer is an outer wrapper only. `PayloadFrameCodec` owns the fixed
+little-endian frame, deterministic deflate payload, source/encoded SHA-256
+digests, bounded source basename, and overflow/size checks. `ElfPackService`
+must reuse the existing parser/validator, accept only executable AArch64
+`ET_DYN` inputs with a supported `PT_INTERP`, and publish a launcher-plus-frame
+wrapper atomically. The launcher verifies the frame, extracts to a private
+directory using the stored basename, preserves the argument/environment
+contract through `execve`, and fails closed before launching on corruption.
+It must not become an in-process ELF loader, use payload-controlled directory
+paths, encrypt code, or add stealth behavior. `scripts/run-packed-fixture-matrix.sh`
+must run the native ARM64 glibc PR covering set and compare baseline/wrapper
+status and standard streams; `scripts/run-musl-container-smoke.sh` owns the
+pinned ARM64 musl payload smoke using a glibc launcher in the Debian
+container. The recovered fixture must still enter through the musl
+interpreter; the job must not claim that a musl .NET launcher ran when its
+native C++/zlib dependencies are not provisioned.

@@ -26,6 +26,8 @@ Initial support is deliberately narrower than the existing validator:
 - dynamically linked input with a supported interpreter;
 - native Linux ARM64 glibc first, pinned ARM64 musl as the next profile;
 - no shared-object packing, Android wrapper execution, or static `ET_EXEC`.
+- no `RPATH`/`RUNPATH` inputs whose loader search origin would change after
+  temporary extraction;
 
 The packer must reject a validated shared object even though the validator can
 inspect one. The first launcher has an executable handoff contract, not a
@@ -53,10 +55,12 @@ Responsibilities:
 | launcher runtime | payload discovery, checks, extraction, argv/env handoff | interpreting source relocations |
 | host loader | source ELF mapping, dependencies, relocations, TLS, constructors | payload integrity policy |
 
-Production C# owns the frame and wrapper contract. The small launcher may be
-implemented as a checked-in AArch64 native template or a separately built
-launcher artifact, but its ABI and source revision must be pinned and recorded.
-It must not become a second ELF parser.
+Production C# owns the frame and wrapper contract. For this first slice, the
+launcher is the published self-contained AArch64 `urprotect` executable itself;
+its existing entrypoint detects the trailing frame before normal CLI parsing.
+This makes the first artifact large but reuses the tested C# runtime and avoids
+introducing a second native build. A smaller checked-in native launcher remains
+a future optimization, with its own ABI/source/license pin.
 
 ## 3. Payload Frame
 
@@ -70,14 +74,19 @@ headerSize:u16
 flags:u32             (compression algorithm, reserved bits must be zero)
 sourceArch:u16        = EM_AARCH64
 sourceType:u16        = ET_DYN
+sourceNameLength:u32
 sourceSize:u64
 encodedSize:u64
-payloadOffset:u64     (wrapper file offset)
+payloadOffset:u64     (wrapper file offset of compressed bytes)
 sourceSha256[32]
 encodedSha256[32]
 ```
 
-The header is followed by compressed source bytes. The initial compression
+The fixed header is followed by a bounded UTF-8 source basename and then the
+compressed source bytes. The basename is used as `argv[0]` and as the final
+component of the temporary extraction path so multi-call binaries that inspect
+`AT_EXECFN` retain their normal invocation name. Separators and NULs are
+rejected; no user-controlled directory is ever used. The initial compression
 algorithm should be a deterministic, already-supported runtime codec such as
 zlib/deflate; the exact codec is a versioned contract and cannot be inferred
 from a filename. If the native launcher would need a third-party decompressor,
@@ -90,25 +99,33 @@ Limits are checked before allocation and decompression:
 - checked `offset + size` and header-size arithmetic;
 - decompressed byte count must equal `sourceSize` exactly;
 - both encoded and source digests must match;
+- source basename length and UTF-8 validity must pass before using it for a
+  filename or argument;
 - reserved flags and unsupported versions fail closed.
 
-The frame is not encrypted. Integrity is not authenticity: a modified wrapper
-can be repacked by an authorized user. Signing/key management is deferred.
+The frame is stored in a deterministic trailing data region after the launcher's
+original program headers. The host loader ignores that trailing region; the
+launcher reads it from its own executable file. The frame is not encrypted.
+Integrity is not authenticity: a modified wrapper can be repacked by an
+authorized user. Signing/key management is deferred.
 
 ## 4. Wrapper ELF Contract
 
 The wrapper is a deterministic AArch64 `ET_DYN` PIE executable with:
 
 - a small executable launcher entrypoint;
-- read-only frame/header/payload bytes;
+- frame/header/payload bytes in a trailing region outside the launcher's mapped
+  program-header ranges;
 - a valid `PT_INTERP` for the target profile;
 - load segments with page alignment and non-overlapping file ranges;
 - no source ELF program headers copied into the wrapper's load model;
 - no writable/executable payload mapping;
 - a fixed launcher ABI version in the frame and provenance.
 
-The wrapper builder uses a fixed template and patches only bounded fields such
-as payload offset, encoded length, source length, digests, and entry metadata.
+The wrapper builder uses the published launcher bytes unchanged and appends
+only bounded frame/trailer data. It never changes the launcher's entrypoint or
+dynamic link model. The launcher ABI is therefore the published CLI's
+`TryRunEmbeddedPayload` contract rather than a separately linked stub.
 It does not serialize `ElfFile`, copy source program headers, or try to make
 the embedded source part of the wrapper's dynamic link map.
 
@@ -135,6 +152,12 @@ The launcher:
    original program;
 8. removes the temporary file on pre-exec failure. Post-`execve` cleanup is
    platform-dependent and documented rather than promised.
+
+Because the first handoff changes `/proc/self/exe` and the extraction
+directory, the packer rejects inputs with `RPATH` or `RUNPATH` metadata. This
+prevents `$ORIGIN`-dependent library resolution from silently changing. A
+future handoff backend must either preserve origin semantics or expand the
+rejection/compatibility contract.
 
 The initial launcher must not silently fall back to shell execution, invoke a
 payload path supplied by an environment variable, or continue after an

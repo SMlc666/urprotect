@@ -4,3 +4,4 @@
 {"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"The packer must reuse the existing validator, diagnostics, address ownership, and no-op snapshot behavior instead of duplicating contracts."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The feature crosses CLI, core payload framing, native launcher, ELF output, fixture execution, and CI evidence boundaries."}
 {"file":".trellis/tasks/archive/2026-09/09-12-first-product-aarch64-elf-validator/design.md","reason":"The first product's CLI, report, release, and native-runtime contracts are the integration baseline for packing."}
+{"file":".trellis/tasks/09-12-aarch64-elf-self-extracting-protector/research.md","reason":"The first launcher, frame, temporary handoff, origin-path restriction, and local ARM64 evidence are recorded here."}

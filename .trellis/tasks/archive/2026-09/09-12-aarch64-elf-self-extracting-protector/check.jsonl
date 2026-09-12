@@ -5,3 +5,4 @@
 {"file":".trellis/tasks/09-12-aarch64-elf-self-extracting-protector/prd.md","reason":"Review implementation against the approved Linux ARM64 executable-only wrapper boundary and explicit non-goals."}
 {"file":".trellis/tasks/09-12-aarch64-elf-self-extracting-protector/design.md","reason":"Review frame, wrapper ELF, runtime handoff, rollback, and custom-loader deferral contracts."}
 {"file":".trellis/tasks/09-12-aarch64-elf-self-extracting-protector/implement.md","reason":"Review ordered execution, validation commands, rollback points, and final approval gate."}
+{"file":".trellis/tasks/09-12-aarch64-elf-self-extracting-protector/research.md","reason":"Review the evidence and explicit compatibility limitations behind the first wrapper implementation."}

@@ -1,12 +1,16 @@
 # urprotect
 
 `urprotect` is **UrProtect Validator 0.1**, a C#/.NET command-line product for
-conservative ELF64 AArch64 validation. It validates supported `ET_DYN` PIE
-executables and dynamically linked shared objects, emits a stable JSON report,
-and can produce a byte-identical no-op copy.
+conservative ELF64 AArch64 validation and the first outer ELF packaging shell.
+It validates supported `ET_DYN` PIE executables and dynamically linked shared
+objects, emits a stable JSON report, can produce a byte-identical no-op copy,
+and can wrap a supported executable in a new self-extracting AArch64 ELF.
 
-It does not yet implement binary protection transformations, relocation
-rewriting, runtime injection, code encryption, or control-flow virtualization.
+The wrapper stores the complete source ELF as a deterministic compressed
+payload, verifies its SHA-256 digest, extracts it to a private temporary path,
+and uses `execve` so the normal Linux kernel/interpreter/dynamic loader starts
+the original program. It is an outer packaging and integrity result, not a
+custom ELF loader or an in-process code protection transformation.
 
 ## Build
 
@@ -53,7 +57,36 @@ unexpected internal failure. The `--copy` path never serializes the parsed
 model; it publishes only after byte-for-byte identity is proven.
 
 This release does not rewrite code, encrypt code, inject runtime logic,
-virtualize control flow, or claim physical Android-device compatibility.
+virtualize control flow, implement a custom in-process loader, or claim
+physical Android-device compatibility.
+
+## First ELF Wrapper
+
+Pack only a Linux ARM64 dynamically linked `ET_DYN` PIE executable with a
+`PT_INTERP` interpreter:
+
+```sh
+urprotect pack ./program \
+  --output ./program.wrapped \
+  --json ./program.pack.json
+```
+
+The default launcher is the published self-contained `urprotect` executable.
+When invoking the command through `dotnet` or a renamed launcher, pass the
+published AArch64 launcher explicitly:
+
+```sh
+urprotect pack ./program \
+  --output ./program.wrapped \
+  --launcher ./urprotect
+```
+
+The first wrapper profile supports native ARM64 Linux glibc and is exercised by
+the PR covering fixture matrix. Shared objects, static `ET_EXEC`, Android
+wrapper execution, `memfd_create`/`execveat`, payload encryption, and custom
+in-process loading are intentionally rejected or deferred. The frame stores a
+source basename for `argv[0]`; path separators are rejected and no payload
+directory is taken from the environment.
 
 Release bundles are produced only for native ARM64 glibc and musl profiles:
 
@@ -78,6 +111,7 @@ claiming a full language/toolchain Cartesian product:
 ```sh
 ./scripts/run-fixture-matrix.sh --profile pr
 ./scripts/run-fixture-matrix.sh --profile nightly
+./scripts/run-packed-fixture-matrix.sh --profile pr
 ```
 
 The native Linux fixture runner builds and executes C/C++ (GCC and LLVM/Clang),
@@ -88,6 +122,11 @@ Each executable is validated and copied through the no-op CLI, then the
 baseline and copied output behavior are compared. A missing required toolchain
 or invalid output fails the job rather than falling back to glibc; only the
 Android profile is handled by the separate Android runtime job.
+
+The packed fixture runner first builds the native PR covering set, publishes a
+self-contained ARM64 launcher, packs each executable, verifies that wrapper
+bytes differ, and compares baseline/wrapped status and standard streams
+through the real loader.
 
 The Android sample is an APK/JNI fixture. The released Android Emulator cannot
 boot an `arm64-v8a` system image on an x86_64 host, even with `-accel off`. On
@@ -137,6 +176,10 @@ this avoids tar permission failures during cache restore.
 ```sh
 dotnet run --project src/UrProtect.Cli -- validate ./program --copy ./program.checked
 ```
+
+`dotnet run` is suitable for validation. For `pack`, use a published
+self-contained ARM64 `urprotect` launcher or pass one with `--launcher`; a
+framework host such as `dotnet` is not used as the wrapper launcher.
 
 The copy path is published only after the output bytes have been compared with
 the input. Unknown or unsupported data is never rebuilt by the no-op pipeline.
