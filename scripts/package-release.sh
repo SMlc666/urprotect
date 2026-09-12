@@ -34,6 +34,7 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
 fi
 
 mkdir -p "${output_root}"
+output_root="$(cd "${output_root}" && pwd)"
 work_root="$(mktemp -d "${output_root}/.package.XXXXXX")"
 cleanup() {
   rm -rf -- "${work_root}"
