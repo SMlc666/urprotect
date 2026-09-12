@@ -373,6 +373,29 @@ public static class PayloadFrameCodec
             && wrapper[^TrailerSize..][..TrailerMagic.Length].SequenceEqual(TrailerMagic);
     }
 
+    public static bool HasFrameHeader(ReadOnlySpan<byte> wrapper)
+    {
+        var searchOffset = 0;
+        while (searchOffset <= wrapper.Length - HeaderMagic.Length)
+        {
+            var relativeOffset = wrapper[searchOffset..].IndexOf(HeaderMagic);
+            if (relativeOffset < 0)
+            {
+                return false;
+            }
+
+            var frameOffset = searchOffset + relativeOffset;
+            if (LooksLikeFrameHeader(wrapper[frameOffset..], (ulong)frameOffset))
+            {
+                return true;
+            }
+
+            searchOffset = frameOffset + 1;
+        }
+
+        return false;
+    }
+
     public static byte[] CreateTrailer(ulong frameOffset, ulong frameLength)
     {
         var trailer = new byte[TrailerSize];
@@ -401,7 +424,8 @@ public static class PayloadFrameCodec
                 break;
             }
 
-            if ((ulong)output.Length > expectedSize - (ulong)read)
+            if ((ulong)read > expectedSize
+                || (ulong)output.Length > expectedSize - (ulong)read)
             {
                 throw new InvalidDataException("The decompressed payload exceeds its declared size.");
             }
@@ -425,6 +449,49 @@ public static class PayloadFrameCodec
         byte[]? sourceHash = null,
         string? sourceName = null) =>
         new(null, sourceSize, encodedSize, sourceHash, encodedHash, sourceName, null, diagnostics.ToArray());
+
+    private static bool LooksLikeFrameHeader(ReadOnlySpan<byte> frame, ulong frameOffset)
+    {
+        if (frame.Length < HeaderSize || !frame[..HeaderMagic.Length].SequenceEqual(HeaderMagic))
+        {
+            return false;
+        }
+
+        var header = frame[..HeaderSize];
+        if (BinaryPrimitives.ReadUInt16LittleEndian(header[8..10]) != FormatVersion
+            || BinaryPrimitives.ReadUInt16LittleEndian(header[10..12]) != HeaderSize
+            || BinaryPrimitives.ReadUInt32LittleEndian(header[12..16]) != DeflateFlag
+            || BinaryPrimitives.ReadUInt16LittleEndian(header[16..18]) != Elf.ElfConstants.MachineAarch64
+            || BinaryPrimitives.ReadUInt16LittleEndian(header[18..20]) != Elf.ElfConstants.TypeDyn)
+        {
+            return false;
+        }
+
+        var sourceNameSize = BinaryPrimitives.ReadUInt32LittleEndian(header[20..24]);
+        var encodedSize = BinaryPrimitives.ReadUInt64LittleEndian(header[32..40]);
+        var payloadOffset = BinaryPrimitives.ReadUInt64LittleEndian(header[40..48]);
+        if (sourceNameSize > 4096
+            || payloadOffset != frameOffset + HeaderSize + sourceNameSize
+            || sourceNameSize > (ulong)(frame.Length - HeaderSize)
+            || encodedSize > (ulong)frame.Length - HeaderSize - sourceNameSize)
+        {
+            return false;
+        }
+
+        var sourceNameBytes = frame.Slice(HeaderSize, checked((int)sourceNameSize));
+        try
+        {
+            var sourceName = new UTF8Encoding(false, true).GetString(sourceNameBytes);
+            return !string.IsNullOrWhiteSpace(sourceName)
+                && !sourceName.Contains('\0')
+                && !sourceName.Contains('/')
+                && !sourceName.Contains('\\');
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
+    }
 
     private static bool TryCheckedAdd(ulong left, ulong right, out ulong result)
     {

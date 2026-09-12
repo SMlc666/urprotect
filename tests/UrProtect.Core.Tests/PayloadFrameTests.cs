@@ -164,4 +164,14 @@ public sealed class PayloadFrameTests
         Assert.Equal(source, result.SourceBytes);
         Assert.True(PayloadFrameCodec.HasWrapperTrailer(wrapper));
     }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void DoesNotTreatAnEmbeddedMagicStringAsAFrameHeader()
+    {
+        var launcher = Enumerable.Repeat((byte)0xA5, 256).ToArray();
+        "URPCK01\0"u8.CopyTo(launcher.AsSpan(32));
+
+        Assert.False(PayloadFrameCodec.HasFrameHeader(launcher));
+    }
 }

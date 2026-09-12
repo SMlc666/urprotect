@@ -102,6 +102,13 @@ public sealed class CliApplication
 
         if (!PayloadFrameCodec.HasWrapperTrailer(wrapper))
         {
+            if (PayloadFrameCodec.HasFrameHeader(wrapper))
+            {
+                Console.Error.WriteLine(
+                    "WrapperMalformed: the embedded payload frame trailer is missing or truncated.");
+                return (int)ProductExitCode.Validation;
+            }
+
             return null;
         }
 
