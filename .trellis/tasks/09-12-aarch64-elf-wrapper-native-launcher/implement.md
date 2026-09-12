@@ -157,6 +157,6 @@ git diff --check
 - [x] Add native ARM64 glibc packed E2E to the integration gate.
 - [x] Add pinned ARM64 musl packed E2E to nightly/release.
 - [x] Preserve Wrapper 0.1 compatibility evidence until 0.2 is promoted.
-- [ ] Run final task-context validation and full quality review.
-- [ ] Update PRD acceptance only after observable evidence is recorded.
+- [x] Run final task-context validation and full quality review.
+- [x] Update PRD acceptance only after observable evidence is recorded.
 - [ ] Archive after commit/push and successful CI verification.

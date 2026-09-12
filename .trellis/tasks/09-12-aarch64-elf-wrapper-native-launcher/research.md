@@ -67,6 +67,10 @@
   fragment (selecting `rcrt1.o`) plus an explicit `--no-dynamic-linker`; signal
   assertions compare the wrapper with a baseline shell because `timeout`
   reports signal exits differently across runner images.
+- CI run `34711783556` passed the native ARM64 glibc packed fixture matrix and
+  the pinned ARM64 musl container smoke after that fix. Release rehearsal
+  `34712246157` additionally passed package generation, native launcher
+  provenance/self-test checks, and release smoke for both ARM64 bundles.
 
 ## Known scope
 
