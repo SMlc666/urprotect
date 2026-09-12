@@ -66,14 +66,14 @@ The first implementation must not change executable semantics or add runtime beh
 
 ## Acceptance Criteria
 
-- [ ] A PRD-approved MVP boundary names the agreed `ET_DYN`/shared-object ELF kinds, required relocations/properties, infrastructure-only behavior, and explicit non-goals.
-- [ ] A technical design separates ELF parsing/modeling, AsmStone adaptation, analysis, fixup/layout planning, writing, and validation.
-- [ ] A prioritized compiler/language/runtime fixture manifest defines PR, nightly, and release coverage without requiring a full Cartesian product.
-- [ ] The CI design has a verified GitHub ARM64 Linux path for glibc and musl and a capability-gated Android container/AVD strategy that does not claim physical-device support.
-- [ ] The correctness contract requires structural validation, byte-identity proof, runtime E2E comparison of baseline and no-op output, and fail-closed behavior for unsupported inputs.
-- [ ] The no-op artifact path proves byte-for-byte identity in addition to structural validation.
-- [ ] Benchmark, coverage, fuzzing, reproducible-build, dependency-pinning, and failure-artifact policies are measurable and reviewable.
-- [ ] `prd.md`, `design.md`, and `implement.md` pass the final planning review before the task is activated for implementation.
+- [x] A PRD-approved MVP boundary names the agreed `ET_DYN`/shared-object ELF kinds, required relocations/properties, infrastructure-only behavior, and explicit non-goals.
+- [x] A technical design separates ELF parsing/modeling, AsmStone adaptation, analysis, fixup/layout planning, writing, and validation.
+- [x] A prioritized compiler/language/runtime fixture manifest defines PR, nightly, and release coverage without requiring a full Cartesian product.
+- [x] The CI design has a verified GitHub ARM64 Linux path for glibc and musl and a capability-gated Android container/AVD strategy that does not claim physical-device support.
+- [x] The correctness contract requires structural validation, byte-identity proof, runtime E2E comparison of baseline and no-op output, and fail-closed behavior for unsupported inputs.
+- [x] The no-op artifact path proves byte-for-byte identity in addition to structural validation.
+- [x] Benchmark, coverage, fuzzing, reproducible-build, dependency-pinning, and failure-artifact policies are measurable and reviewable.
+- [x] `prd.md`, `design.md`, and `implement.md` pass the final planning review before the task is activated for implementation.
 
 ## Out of Scope for the Initial Plan
 

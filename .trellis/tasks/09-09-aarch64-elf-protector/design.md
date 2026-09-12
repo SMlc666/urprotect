@@ -277,8 +277,9 @@ PR-fast:
   byte-identity no-op checks, and static ELF/APK validation
 
 PR-integration:
-  native ARM64 glibc, ARM64 musl container, and Android container/AVD smoke where
-  the capability contract is available
+  native ARM64 glibc fixture/no-op smoke; the independent musl container and
+  Android container/AVD jobs remain scheduled/manual/release because they are
+  slower or capability-gated
 
 Nightly:
   compiler/language matrix, malformed corpus, fuzzing, expanded Android profiles,

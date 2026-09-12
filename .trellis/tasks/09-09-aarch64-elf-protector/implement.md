@@ -169,11 +169,11 @@ dotnet run --project <benchmark-project> --configuration Release
 
 ## 10. Final planning and review gate
 
-- [ ] Run the PRD convergence pass and remove temporary brainstorm wording.
-- [ ] Confirm `design.md` and `implement.md` match the final PRD without contradictory scope.
-- [ ] Curate `implement.jsonl` and `check.jsonl` with real applicable spec/research entries.
-- [ ] Run repository checks for task artifacts and manifest syntax.
-- [ ] Present the final planning summary to the user.
-- [ ] Only after a subsequent explicit approval, run `python3 ./.trellis/scripts/task.py start` and begin implementation.
+- [x] Run the PRD convergence pass and remove temporary brainstorm wording.
+- [x] Confirm `design.md` and `implement.md` match the final PRD without contradictory scope.
+- [x] Curate `implement.jsonl` and `check.jsonl` with real applicable spec/research entries.
+- [x] Run repository checks for task artifacts and manifest syntax.
+- [x] Present the final planning summary to the user.
+- [x] Activate the task only after planning approval; implementation proceeded on the active Trellis task.
 
 Rollback point: if feasibility, fixture scope, or no-op identity cannot be demonstrated, return to planning rather than widening the MVP.
