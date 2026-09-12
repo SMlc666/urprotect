@@ -1,0 +1,14 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"The task adds a native launcher boundary, provenance files, and packed fixture tooling while retaining existing source/test/CI layout."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"The native launcher and packer must fail closed on malformed frames, unsupported profiles, digest failures, and publication errors."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Static PIE, checked arithmetic, deterministic artifacts, native ARM64 claims, and evidence retention follow these project contracts."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"The managed packer must reuse the existing v1 frame, validator, diagnostics, and atomic publication owners."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The change crosses C# packer, native launcher, ELF model, runtime handoff, fixtures, release packaging, and CI evidence."}
+{"file":".trellis/tasks/archive/2026-09/09-12-aarch64-elf-self-extracting-protector/design.md","reason":"Wrapper 0.1 frame, managed runtime handoff, and source boundary are the compatibility baseline for native launcher 0.2."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/research.md","reason":"Native dependency, frame ABI, security, and compatibility research is recorded for implementation."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"The task adds a native launcher boundary, provenance files, and packed fixture tooling while retaining existing source/test/CI layout."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"The native launcher and packer must fail closed on malformed frames, unsupported profiles, digest failures, and publication errors."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Static PIE, checked arithmetic, deterministic artifacts, native ARM64 claims, and evidence retention follow these project contracts."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"The managed packer must reuse the existing v1 frame, validator, diagnostics, and atomic publication owners."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The change crosses C# packer, native launcher, ELF model, runtime handoff, fixtures, release packaging, and CI evidence."}
+{"file":".trellis/tasks/archive/2026-09/09-12-aarch64-elf-self-extracting-protector/design.md","reason":"Wrapper 0.1 frame, managed runtime handoff, and source boundary are the compatibility baseline for native launcher 0.2."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/research.md","reason":"Native dependency, frame ABI, security, and compatibility research is recorded for implementation."}

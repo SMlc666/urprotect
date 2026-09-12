@@ -1,0 +1,16 @@
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review that native and managed failure paths reject malformed/unsupported inputs before execution and publication."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review static launcher dependencies, checked arithmetic, deterministic build claims, and native execution labels."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review that frame, validator, diagnostic, and publication contracts remain single-owner implementations."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review data flow from managed pack command through native frame verification and baseline/wrapper behavior comparison."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/prd.md","reason":"Review the approved static AArch64 launcher boundary, frame compatibility, and explicit non-goals."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/design.md","reason":"Review exact frame ABI, native runtime safety, ELF guard, handoff semantics, and rollback design."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/implement.md","reason":"Review ordered execution, validation commands, CI gates, and final acceptance evidence requirements."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/research.md","reason":"Review the repository evidence and pinned native dependency decisions."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review that native and managed failure paths reject malformed/unsupported inputs before execution and publication."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review static launcher dependencies, checked arithmetic, deterministic build claims, and native execution labels."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review that frame, validator, diagnostic, and publication contracts remain single-owner implementations."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review data flow from managed pack command through native frame verification and baseline/wrapper behavior comparison."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/prd.md","reason":"Review the approved static AArch64 launcher boundary, frame compatibility, and explicit non-goals."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/design.md","reason":"Review exact frame ABI, native runtime safety, ELF guard, handoff semantics, and rollback design."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/implement.md","reason":"Review ordered execution, validation commands, CI gates, and final acceptance evidence requirements."}
+{"file":".trellis/tasks/09-12-aarch64-elf-wrapper-native-launcher/research.md","reason":"Review the repository evidence and pinned native dependency decisions."}
