@@ -98,7 +98,8 @@ native-bridge job records its separate `x86_64` host and explicit translated
 execution mode.
 
 The independent musl-container smoke uses the pinned platform-specific
-`mcr.microsoft.com/dotnet/sdk` ARM64 Debian digest in the workflow, bootstraps
+`mcr.microsoft.com/dotnet/sdk` ARM64 Debian digest matching the pinned .NET SDK
+in the workflow, bootstraps
 the repository without relying on a host checkout, and runs the product CLI
 against a dynamically linked musl PIE. The container must report `aarch64`,
 retain its image digest, and fail on baseline/no-op behavior or byte-identity

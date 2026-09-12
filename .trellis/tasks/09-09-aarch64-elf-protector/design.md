@@ -289,8 +289,9 @@ input remains false by default; release validation is intentionally explicit
 and automatic.
 
 The nightly/release matrix also includes an independent ARM64 Debian/musl
-container smoke. Its platform-specific .NET SDK image digest is pinned in the
-workflow; the job builds a musl PIE, validates it through the product CLI,
+container smoke. Its platform-specific .NET SDK image digest matching
+`global.json` is pinned in the workflow; the job installs pinned musl packages,
+builds a musl PIE, validates it through the product CLI,
 proves byte identity, and compares baseline/no-op behavior. This supplements,
 but does not relabel, the native ARM64 host musl-loader profile.
 

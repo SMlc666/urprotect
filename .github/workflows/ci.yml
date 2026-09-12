@@ -233,10 +233,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     container:
-      image: mcr.microsoft.com/dotnet/sdk@sha256:2a4ce54f70cde53d58db3face36aeb5cf4aa272c2e4676ffc3586021413b14b4
+      image: mcr.microsoft.com/dotnet/sdk@sha256:00c73d766c2c8fea23a9214954a5dec33c022c1a530c09e0f2a5e333fa4578ed
       options: --user root
     env:
-      URPROTECT_CONTAINER_IMAGE: mcr.microsoft.com/dotnet/sdk@sha256:2a4ce54f70cde53d58db3face36aeb5cf4aa272c2e4676ffc3586021413b14b4
+      URPROTECT_CONTAINER_IMAGE: mcr.microsoft.com/dotnet/sdk@sha256:00c73d766c2c8fea23a9214954a5dec33c022c1a530c09e0f2a5e333fa4578ed
     steps:
       - name: Bootstrap source and musl tools
         shell: sh
@@ -246,7 +246,8 @@ jobs:
           set -eu
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            bash binutils ca-certificates coreutils file git musl-dev musl-tools python3
+            bash binutils ca-certificates coreutils file git \
+            musl=1.2.3-1 musl-dev=1.2.3-1 musl-tools=1.2.3-1 python3
           git init .
           git config --global --add safe.directory "$PWD"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
