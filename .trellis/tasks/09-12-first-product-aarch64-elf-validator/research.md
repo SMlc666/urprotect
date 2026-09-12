@@ -37,3 +37,8 @@
   publish script selects one with `-p:RuntimeIdentifier` and emits a normalized
   single-file archive. The ARM64 host can validate the glibc archive directly;
   musl smoke requires the matching musl loader package.
+- The release smoke runs the musl bundle inside the pinned platform-specific
+  ARM64 `mcr.microsoft.com/dotnet/sdk:8.0-alpine` digest
+  `sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243`
+  when Docker is available, because a self-contained .NET musl binary still
+  needs musl-compatible `libstdc++`, zlib, and compiler runtime libraries.

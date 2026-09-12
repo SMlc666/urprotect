@@ -175,4 +175,5 @@ matching pinned runtime identifier (`linux-arm64` or `linux-musl-arm64`). The
 package script must validate ELF class/machine/interpreter, include third-party
 notices and an SBOM-equivalent inventory, create relative checksum entries, and
 use normalized tar ownership/order/timestamps. Release smoke must execute both
-bundles on native ARM64, using the musl loader explicitly for the musl bundle.
+bundles on native ARM64, using the pinned ARM64 musl container when the host
+does not provide all musl-compatible native dependencies.

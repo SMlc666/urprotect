@@ -45,15 +45,25 @@ for archive in "${archives[@]}"; do
   readelf -lW "${binary}" > "${extracted}/program-headers.txt"
   launcher=""
   library_path=""
+  musl_container_image="${URPROTECT_MUSL_CONTAINER_IMAGE:-}"
+  musl_container_binary=""
   if grep -q 'ld-musl-aarch64.so.1' "${extracted}/program-headers.txt"; then
     launcher="/lib/ld-musl-aarch64.so.1"
     library_path="/usr/lib/aarch64-linux-musl:/lib"
-    if [[ ! -x "${launcher}" ]]; then
+    if [[ -n "${musl_container_image}" ]] && command -v docker >/dev/null 2>&1; then
+      relative_binary="${binary#${extracted}/}"
+      musl_container_binary="/smoke/${relative_binary}"
+    elif [[ ! -x "${launcher}" ]]; then
       echo "musl release smoke requires ${launcher}" >&2
       exit 1
     fi
   fi
-  if [[ -n "${launcher}" ]]; then
+  if [[ -n "${musl_container_binary}" ]]; then
+    docker run --rm --platform linux/arm64 \
+      -v "$(realpath "${extracted}"):/smoke" \
+      "${musl_container_image}" "${musl_container_binary}" --help \
+      > "${extracted}/help.txt"
+  elif [[ -n "${launcher}" ]]; then
     env "LD_LIBRARY_PATH=${library_path}" "${launcher}" "${binary}" --help \
       > "${extracted}/help.txt"
   else
@@ -62,7 +72,13 @@ for archive in "${archives[@]}"; do
   input="/bin/ls"
   copy="${extracted}/copy.elf"
   report="${extracted}/report.json"
-  if [[ -n "${launcher}" ]]; then
+  if [[ -n "${musl_container_binary}" ]]; then
+    docker run --rm --platform linux/arm64 \
+      -v "$(realpath "${extracted}"):/smoke" \
+      -v "${input}:/input.elf:ro" \
+      "${musl_container_image}" "${musl_container_binary}" \
+      validate /input.elf --copy "/smoke/copy.elf" --json "/smoke/report.json" --no-analysis
+  elif [[ -n "${launcher}" ]]; then
     env "LD_LIBRARY_PATH=${library_path}" "${launcher}" "${binary}" \
       validate "${input}" --copy "${copy}" --json "${report}" --no-analysis
   else

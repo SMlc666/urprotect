@@ -339,10 +339,6 @@ jobs:
             src/UrProtect.Cli/packages.lock.json
             tests/UrProtect.Core.Tests/packages.lock.json
             benchmarks/UrProtect.Benchmarks/packages.lock.json
-      - name: Install pinned musl runtime
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl=1.2.4-2
       - name: Resolve product version
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == release ]]; then
@@ -360,6 +356,8 @@ jobs:
       - name: Package glibc and musl bundles
         run: ./scripts/package-release.sh "${URPROTECT_VERSION}" .artifacts/release
       - name: Smoke test release bundles
+        env:
+          URPROTECT_MUSL_CONTAINER_IMAGE: mcr.microsoft.com/dotnet/sdk@sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243
         run: ./scripts/release-smoke.sh .artifacts/release
       - name: Publish GitHub release assets
         if: github.event_name == 'release'
