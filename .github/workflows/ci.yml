@@ -228,6 +228,47 @@ jobs:
           path: .artifacts/fixtures/
           if-no-files-found: warn
 
+  musl-container-smoke:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/dotnet/sdk@sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243
+      options: --user root
+    env:
+      URPROTECT_CONTAINER_IMAGE: mcr.microsoft.com/dotnet/sdk@sha256:386b8fd9f78bb9aa7e5fb566656e0903518cb6f81d3b1520e1787a7dce1ef243
+    steps:
+      - name: Bootstrap source and musl tools
+        shell: sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          apk add --no-cache bash binutils ca-certificates coreutils file gcc git musl-dev nodejs python3
+          git init .
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach "${GITHUB_SHA}"
+      - name: Record musl container environment
+        run: |
+          mkdir -p .artifacts/musl-container
+          ./.github/scripts/record-environment.sh \
+            .artifacts/musl-container/environment.txt \
+            aarch64 native-linux-musl-container
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Run musl container smoke
+        run: ./scripts/run-musl-container-smoke.sh
+      - name: Upload musl container evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: musl-container-${{ github.run_id }}
+          path: .artifacts/musl-container/
+          if-no-files-found: warn
+
   benchmark:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     runs-on: ubuntu-24.04-arm

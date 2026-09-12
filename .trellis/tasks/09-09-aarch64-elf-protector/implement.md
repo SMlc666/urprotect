@@ -126,7 +126,7 @@ dotnet test --filter Category=Fixtures
 ## 8. GitHub ARM64 CI
 
 - [x] Add explicit native ARM64 Linux jobs for glibc and musl-loader execution; the current native-host fixture gate uses the pinned Ubuntu musl packages below.
-- [ ] Add a separately pinned ARM64 musl runtime container for an independent libc profile.
+- [x] Add a separately pinned ARM64 musl runtime container for an independent libc profile; the container smoke builds and validates a musl PIE through the CLI.
 - [x] Add pinned checksum-verified native ARM64 musl-gcc and Zig provisioning for the nightly fixture job; do not fall back to QEMU, glibc, or another host architecture.
 - [x] Add a runner/environment probe that records architecture, kernel, libc, page size, toolchain versions, and emulation indicators.
 - [x] Add the Android container capability probe for Binder/BinderFS, namespaces/cgroups, LXC, and headless graphics prerequisites.

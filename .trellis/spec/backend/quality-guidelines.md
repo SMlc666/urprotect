@@ -97,6 +97,13 @@ job rather than being relabeled as native execution. The x86_64 Android
 native-bridge job records its separate `x86_64` host and explicit translated
 execution mode.
 
+The independent musl-container smoke uses the pinned platform-specific
+`mcr.microsoft.com/dotnet/sdk` ARM64 Alpine digest in the workflow, bootstraps
+the repository without relying on a host checkout, and runs the product CLI
+against a dynamically linked musl PIE. The container must report `aarch64`,
+retain its image digest, and fail on baseline/no-op behavior or byte-identity
+mismatch; it is not allowed to silently run the glibc host fixture instead.
+
 The Android script uses an x86_64 API 35 AVD on an x86_64 runner with
 `-accel off` and software graphics. The APK contains only the `arm64-v8a`
 library, and the guest must expose `libndk_translation.so` plus the ARM64 ISA

@@ -38,6 +38,7 @@ fixtures/
 scripts/
 ├── run-fixture-matrix.sh
 ├── run-parser-fuzz.sh
+├── run-musl-container-smoke.sh
 ├── install-native-toolchains.sh
 ├── run-android-avd.sh
 └── validate-fixtures.py

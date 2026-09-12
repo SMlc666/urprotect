@@ -66,6 +66,7 @@ os_version="$(awk -F= '$1 == "VERSION_ID" {gsub(/^\"|\"$/, "", $2); print $2; ex
   printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
   printf 'runner_arch=%s\n' "${RUNNER_ARCH:-unknown}"
   printf 'github_runner_image=%s\n' "${ImageOS:-${ImageVersion:-unknown}}"
+  printf 'container_image=%s\n' "${URPROTECT_CONTAINER_IMAGE:-unknown}"
   printf 'container_environment=%s\n' "$(if [[ -e /.dockerenv || -e /run/.containerenv ]]; then printf '%s' true; else printf '%s' false; fi)"
   printf 'kvm_device=%s\n' "$(has_path /dev/kvm)"
   printf 'cpu_hypervisor_flag=%s\n' "$(if grep -Eqi '(^|[[:space:]])hypervisor([[:space:]]|$)' /proc/cpuinfo 2>/dev/null; then printf '%s' true; else printf '%s' false; fi)"
