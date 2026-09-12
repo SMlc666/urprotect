@@ -194,3 +194,75 @@ pinned ARM64 musl payload smoke using the same static native launcher. The
 recovered fixture must still enter through the musl interpreter, and
 launcher/compiler/provenance evidence must be retained. `pack` requires the
 native launcher explicitly and never falls back to the C# packer executable.
+
+## Scenario: Wrapper 0.2 native launcher build and handoff
+
+### 1. Scope / Trigger
+
+- Trigger: building or packaging the static AArch64 runtime used by `pack`.
+
+### 2. Signatures
+
+```text
+make -C native/urprotect-launcher CC=musl-gcc all self-test
+urprotect pack INPUT --output OUTPUT --launcher NATIVE_LAUNCHER
+```
+
+### 3. Contracts
+
+- `CC=musl-gcc` compiles against the pinned ARM64 musl headers and libraries;
+  the link step uses the checked-in `musl-static-pie.specs` fragment after the
+  distribution specs so `rcrt1.o` is selected.
+- Link flags include `-static-pie`, `--no-dynamic-linker`, no build ID, section
+  garbage collection, RELRO, immediate binding, and stripped symbols.
+- The output is ELF64 little-endian AArch64 `ET_DYN`, has an executable entry
+  `PT_LOAD`, contains `URPROTECT-AARCH64-LAUNCHER-V1`, and has no `PT_INTERP`
+  or `DT_NEEDED` entries.
+- Provenance records ABI/marker, compiler and linker inputs, specs hashes,
+  miniz commit/file hashes, source revision, `SOURCE_DATE_EPOCH`, and the
+  resulting launcher hash.
+
+### 4. Validation & Error Matrix
+
+- missing compiler, base specs, or native ARM64 host -> required job failure;
+- injected interpreter or shared dependency -> `LauncherUnavailable` / build
+  validation failure;
+- missing `--launcher` -> `LauncherUnavailable` and no wrapper output;
+- malformed frame, digest mismatch, unsafe basename, or failed `execve` ->
+  stable non-zero launcher diagnostic and no payload launch.
+
+### 5. Good/Base/Bad Cases
+
+- Good: pinned musl-gcc plus the static-PIE specs fragment produces one
+  launcher that executes on both glibc and musl ARM64 hosts.
+- Base: older musl specs inject a dynamic interpreter unless the fragment and
+  explicit no-dynamic-linker flag are applied.
+- Bad: a dynamic PIE, unrelated static PIE, host-architecture binary, or
+  launcher without the frozen marker is rejected before frame generation.
+
+### 6. Tests Required
+
+- native self-test asserts SHA-256 vectors and raw-deflate output;
+- native integration asserts arguments, `argv[0]`, environment, cwd, files,
+  stdout/stderr, status, signals, truncation, bounds, version, flags, digest,
+  interpreter, and deflate failures;
+- pack tests assert marker/ABI/hash report fields, atomic output, deterministic
+  bytes, and rejection of unmarked or dynamic launchers;
+- ARM64 CI runs the packed glibc matrix and the pinned musl container smoke,
+  retaining launcher, frame, wrapper, environment, and failure logs.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+musl-gcc -static-pie objects.o -o urprotect-launcher
+```
+
+#### Correct
+
+```text
+make -C native/urprotect-launcher CC=musl-gcc \
+  MUSL_STATIC_PIE_SPECS="$PWD/native/urprotect-launcher/musl-static-pie.specs" \
+  all self-test
+```
