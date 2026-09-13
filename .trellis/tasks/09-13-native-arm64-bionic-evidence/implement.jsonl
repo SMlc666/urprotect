@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"The bionic lane needs pinned inputs, native architecture checks, deterministic fixture oracles, and fail-closed evidence handling."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Missing linker, package, page-size, image, or no-fallback evidence must produce stable unknown/rejected outcomes rather than a green fallback."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"The bionic probe, fixture, matrix metadata, CI lane, and evidence artifacts must remain in their established repository boundaries."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Environment and matrix reports must preserve reproducible facts without leaking payload bytes or relying on unstable host output."}
+{"file":".trellis/tasks/archive/2026-09/09-09-aarch64-elf-protector/research.md","reason":"Historical Android, bionic, container, page-size, and hosted ARM64 runner findings define the evidence boundary."}

@@ -1,0 +1,795 @@
+#include "urp/host_context.h"
+#include "urp/host_adapter.h"
+#include "urp/runtime.h"
+#include "sha256.h"
+
+#include <errno.h>
+#include <fcntl.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+_Static_assert(offsetof(urp_host_context_v1, abi_version) == 0, "ABI version must be first");
+_Static_assert(offsetof(urp_host_context_v1, struct_size) == 4, "ABI size must follow version");
+_Static_assert(offsetof(urp_host_context_v1, capabilities) == 8, "Capabilities offset changed");
+_Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset changed");
+
+#define FIXTURE_ELF_PROGRAM_HEADER_SIZE 56U
+#define FIXTURE_ELF_DYNAMIC_ENTRY_SIZE 16U
+#define FIXTURE_PT_DYNAMIC 2U
+#define FIXTURE_DT_RELA 7U
+#define FIXTURE_DT_RELASZ 8U
+#define FIXTURE_DT_RELAENT 9U
+#define FIXTURE_DT_RELR 36U
+#define FIXTURE_DT_RELRSZ 35U
+#define FIXTURE_DT_RELRENT 37U
+#define FIXTURE_DT_FLAGS 30U
+
+static const uint8_t fixture_frame[] = {
+    0x55, 0x52, 0x50, 0x43, 0x4b, 0x30, 0x31, 0x00, 0x01, 0x00, 0x70, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0xb7, 0x00, 0x03, 0x00, 0x1a, 0x00, 0x00, 0x00,
+    0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1d, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x8a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x61, 0x2f, 0x35, 0x55, 0x0d, 0x6c, 0xad, 0x74, 0x5a, 0xc6, 0x7e, 0x9f,
+    0xab, 0xe3, 0x40, 0xb5, 0x06, 0xa5, 0x7b, 0x0a, 0x4f, 0xae, 0xa0, 0x44,
+    0x76, 0xfd, 0xbd, 0x13, 0x00, 0xca, 0xee, 0x1e, 0x8c, 0xe0, 0x3f, 0x9d,
+    0x41, 0xbb, 0x8d, 0x41, 0x42, 0xf6, 0x8e, 0x29, 0xa8, 0xe0, 0xe6, 0xa0,
+    0xe3, 0x55, 0xbd, 0xa0, 0xf9, 0xe6, 0xad, 0xe1, 0x11, 0x5e, 0xa7, 0x49,
+    0x81, 0x36, 0xc6, 0x3f, 0x68, 0x6f, 0x73, 0x74, 0x2d, 0x63, 0x6f, 0x6e,
+    0x74, 0x65, 0x78, 0x74, 0x2d, 0x65, 0x6e, 0x74, 0x72, 0x79, 0x2d, 0x66,
+    0x69, 0x78, 0x74, 0x75, 0x72, 0x65, 0xcb, 0xc8, 0x2f, 0x2e, 0xd1, 0x4d,
+    0xce, 0xcf, 0x2b, 0x49, 0xad, 0x28, 0xd1, 0x4d, 0xcd, 0x2b, 0x29, 0xaa,
+    0xd4, 0x4d, 0xcb, 0xac, 0x28, 0x29, 0x2d, 0x4a, 0xe5, 0x02, 0x00,
+};
+
+typedef struct fixture_state {
+    int loaded;
+    int immutable;
+    int looked_up;
+    int entry_called;
+    int released;
+    int diagnostics;
+} fixture_state;
+
+static int32_t fixture_entry(
+    const urp_host_context_v1 *host,
+    const urp_launch_args_v1 *args)
+{
+    fixture_state *state = (fixture_state *)host->userdata;
+    if (args->argc != 1U || args->argv == NULL || strcmp(args->argv[0], "fixture") != 0) {
+        return 19;
+    }
+    state->entry_called = 1;
+    return 17;
+}
+
+static urp_status fixture_load_image(
+    void *userdata,
+    const void *bytes,
+    size_t size,
+    uint32_t flags,
+    urp_image_handle *out_handle)
+{
+    fixture_state *state = (fixture_state *)userdata;
+    static const uint8_t expected[] = "host-context-entry-fixture\n";
+    if (bytes == NULL || size != sizeof(expected) - 1U || out_handle == NULL
+        || memcmp(bytes, expected, sizeof(expected) - 1U) != 0) {
+        return URP_STATUS_LOAD_FAILED;
+    }
+    state->loaded = 1;
+    state->immutable = flags == URP_LOAD_IMAGE_IMMUTABLE;
+    *out_handle = 1U;
+    return URP_STATUS_OK;
+}
+
+static urp_status fixture_lookup_symbol(
+    void *userdata,
+    urp_image_handle image,
+    const char *name,
+    const char *version,
+    uintptr_t *out_address)
+{
+    fixture_state *state = (fixture_state *)userdata;
+    urp_entry_fn entry = fixture_entry;
+    if (image != 1U || name == NULL || strcmp(name, URP_HOST_ENTRY_SYMBOL) != 0
+        || version != NULL || out_address == NULL
+        || sizeof(*out_address) != sizeof(entry)) {
+        return URP_STATUS_SYMBOL_NOT_FOUND;
+    }
+    state->looked_up = 1;
+    memcpy(out_address, &entry, sizeof(entry));
+    return URP_STATUS_OK;
+}
+
+static urp_status fixture_release_image(void *userdata, urp_image_handle image)
+{
+    fixture_state *state = (fixture_state *)userdata;
+    if (image != 1U) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    state->released = 1;
+    return URP_STATUS_OK;
+}
+
+static urp_status fixture_emit_diagnostic(void *userdata, uint32_t code, const char *message)
+{
+    fixture_state *state = (fixture_state *)userdata;
+    if (code == 0U || message == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    state->diagnostics++;
+    return URP_STATUS_OK;
+}
+
+static int fixture_expect(int condition, const char *message)
+{
+    if (!condition) {
+        fprintf(stderr, "HostContext self-test: %s\n", message);
+        return 0;
+    }
+    return 1;
+}
+
+static void fixture_write_u16_le(uint8_t *destination, uint16_t value)
+{
+    destination[0] = (uint8_t)value;
+    destination[1] = (uint8_t)(value >> 8U);
+}
+
+static void fixture_write_u32_le(uint8_t *destination, uint32_t value)
+{
+    for (size_t index = 0; index < 4U; ++index) {
+        destination[index] = (uint8_t)(value >> (index * 8U));
+    }
+}
+
+static void fixture_write_u64_le(uint8_t *destination, uint64_t value)
+{
+    for (size_t index = 0; index < 8U; ++index) {
+        destination[index] = (uint8_t)(value >> (index * 8U));
+    }
+}
+
+static uint16_t fixture_read_u16_le(const uint8_t *source)
+{
+    return (uint16_t)source[0]
+        | (uint16_t)((uint16_t)source[1] << 8U);
+}
+
+static uint32_t fixture_read_u32_le(const uint8_t *source)
+{
+    return (uint32_t)source[0]
+        | ((uint32_t)source[1] << 8U)
+        | ((uint32_t)source[2] << 16U)
+        | ((uint32_t)source[3] << 24U);
+}
+
+static uint64_t fixture_read_u64_le(const uint8_t *source)
+{
+    uint64_t value = 0U;
+    for (size_t index = 0; index < 8U; ++index) {
+        value |= (uint64_t)source[index] << (index * 8U);
+    }
+    return value;
+}
+
+static int fixture_range_in_file(
+    size_t file_size,
+    uint64_t offset,
+    uint64_t length,
+    size_t *offset_out,
+    size_t *length_out)
+{
+    if (offset > (uint64_t)SIZE_MAX
+        || length > (uint64_t)SIZE_MAX
+        || offset > (uint64_t)file_size
+        || length > (uint64_t)file_size - offset) {
+        return 0;
+    }
+    if (offset_out != NULL) {
+        *offset_out = (size_t)offset;
+    }
+    if (length_out != NULL) {
+        *length_out = (size_t)length;
+    }
+    return 1;
+}
+
+static int fixture_find_dynamic_segment(
+    const uint8_t *source,
+    size_t source_size,
+    size_t *offset_out,
+    size_t *size_out)
+{
+    if (source == NULL || source_size < 64U
+        || fixture_read_u16_le(source + 54U) != FIXTURE_ELF_PROGRAM_HEADER_SIZE) {
+        return 0;
+    }
+
+    uint64_t program_header_offset = fixture_read_u64_le(source + 32U);
+    uint16_t program_header_count = fixture_read_u16_le(source + 56U);
+    for (uint16_t index = 0; index < program_header_count; ++index) {
+        uint64_t index_offset = (uint64_t)index * FIXTURE_ELF_PROGRAM_HEADER_SIZE;
+        if (program_header_offset > UINT64_MAX - index_offset) {
+            return 0;
+        }
+        size_t header_offset;
+        if (!fixture_range_in_file(
+                source_size,
+                program_header_offset + index_offset,
+                FIXTURE_ELF_PROGRAM_HEADER_SIZE,
+                &header_offset,
+                NULL)) {
+            return 0;
+        }
+
+        const uint8_t *header = source + header_offset;
+        if (fixture_read_u32_le(header) != FIXTURE_PT_DYNAMIC) {
+            continue;
+        }
+        return fixture_range_in_file(
+            source_size,
+            fixture_read_u64_le(header + 8U),
+            fixture_read_u64_le(header + 32U),
+            offset_out,
+            size_out);
+    }
+    return 0;
+}
+
+static int fixture_find_dynamic_entry(
+    const uint8_t *source,
+    size_t source_size,
+    uint64_t wanted_tag,
+    size_t *tag_offset_out,
+    size_t *value_offset_out)
+{
+    size_t dynamic_offset;
+    size_t dynamic_size;
+    if (!fixture_find_dynamic_segment(
+            source,
+            source_size,
+            &dynamic_offset,
+            &dynamic_size)
+        || dynamic_size % FIXTURE_ELF_DYNAMIC_ENTRY_SIZE != 0U) {
+        return 0;
+    }
+
+    for (size_t offset = 0; offset < dynamic_size; offset += FIXTURE_ELF_DYNAMIC_ENTRY_SIZE) {
+        const uint8_t *entry = source + dynamic_offset + offset;
+        uint64_t tag = fixture_read_u64_le(entry);
+        if (tag == 0U) {
+            return 0;
+        }
+        if (tag == wanted_tag) {
+            if (tag_offset_out != NULL) {
+                *tag_offset_out = dynamic_offset + offset;
+            }
+            if (value_offset_out != NULL) {
+                *value_offset_out = dynamic_offset + offset + 8U;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int fixture_read_file(const char *path, uint8_t **bytes_out, size_t *size_out)
+{
+    if (path == NULL || bytes_out == NULL || size_out == NULL) {
+        return 0;
+    }
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return 0;
+    }
+    struct stat metadata;
+    if (fstat(fd, &metadata) != 0
+        || metadata.st_size <= 0
+        || (uintmax_t)metadata.st_size > (uintmax_t)SIZE_MAX) {
+        (void)close(fd);
+        return 0;
+    }
+
+    size_t size = (size_t)metadata.st_size;
+    uint8_t *bytes = (uint8_t *)malloc(size);
+    if (bytes == NULL) {
+        (void)close(fd);
+        return 0;
+    }
+
+    size_t offset = 0U;
+    while (offset < size) {
+        ssize_t read_size = read(fd, bytes + offset, size - offset);
+        if (read_size < 0 && errno == EINTR) {
+            continue;
+        }
+        if (read_size <= 0) {
+            free(bytes);
+            (void)close(fd);
+            return 0;
+        }
+        offset += (size_t)read_size;
+    }
+    if (close(fd) != 0) {
+        free(bytes);
+        return 0;
+    }
+
+    *bytes_out = bytes;
+    *size_out = size;
+    return 1;
+}
+
+static int fixture_make_stored_deflate(
+    const uint8_t *source,
+    size_t source_size,
+    uint8_t **encoded_out,
+    size_t *encoded_size_out)
+{
+    if (source == NULL || source_size == 0U || encoded_out == NULL || encoded_size_out == NULL) {
+        return 0;
+    }
+
+    size_t block_count = source_size / UINT16_MAX;
+    if (source_size % UINT16_MAX != 0U) {
+        ++block_count;
+    }
+    if (block_count > (SIZE_MAX - source_size) / 5U) {
+        return 0;
+    }
+    size_t encoded_size = source_size + block_count * 5U;
+    uint8_t *encoded = (uint8_t *)malloc(encoded_size);
+    if (encoded == NULL) {
+        return 0;
+    }
+
+    size_t source_offset = 0U;
+    size_t encoded_offset = 0U;
+    while (source_offset < source_size) {
+        size_t remaining = source_size - source_offset;
+        uint16_t block_size = remaining > UINT16_MAX
+            ? UINT16_MAX
+            : (uint16_t)remaining;
+        uint16_t inverse_size = (uint16_t)~block_size;
+        encoded[encoded_offset++] = remaining <= UINT16_MAX ? 1U : 0U;
+        encoded[encoded_offset++] = (uint8_t)block_size;
+        encoded[encoded_offset++] = (uint8_t)(block_size >> 8U);
+        encoded[encoded_offset++] = (uint8_t)inverse_size;
+        encoded[encoded_offset++] = (uint8_t)(inverse_size >> 8U);
+        memcpy(encoded + encoded_offset, source + source_offset, block_size);
+        encoded_offset += block_size;
+        source_offset += block_size;
+    }
+
+    *encoded_out = encoded;
+    *encoded_size_out = encoded_size;
+    return 1;
+}
+
+static int fixture_make_frame(
+    const uint8_t *source,
+    size_t source_size,
+    const char *source_name,
+    uint8_t **frame_out,
+    size_t *frame_size_out)
+{
+    if (source == NULL || source_size == 0U || source_name == NULL
+        || frame_out == NULL || frame_size_out == NULL) {
+        return 0;
+    }
+
+    size_t source_name_size = strlen(source_name);
+    if (source_name_size == 0U || source_name_size > UINT32_MAX) {
+        return 0;
+    }
+
+    uint8_t *encoded = NULL;
+    size_t encoded_size = 0U;
+    if (!fixture_make_stored_deflate(source, source_size, &encoded, &encoded_size)
+        || source_name_size > UINT64_MAX - 112U
+        || (uint64_t)encoded_size > UINT64_MAX - 112U - (uint64_t)source_name_size
+        || source_name_size > SIZE_MAX - 112U
+        || encoded_size > SIZE_MAX - 112U - source_name_size) {
+        free(encoded);
+        return 0;
+    }
+
+    size_t frame_size = 112U + source_name_size + encoded_size;
+    uint8_t *frame = (uint8_t *)calloc(1U, frame_size);
+    if (frame == NULL) {
+        free(encoded);
+        return 0;
+    }
+
+    static const uint8_t magic[] = {'U', 'R', 'P', 'C', 'K', '0', '1', 0};
+    memcpy(frame, magic, sizeof(magic));
+    fixture_write_u16_le(frame + 8U, 1U);
+    fixture_write_u16_le(frame + 10U, 112U);
+    fixture_write_u32_le(frame + 12U, 1U);
+    fixture_write_u16_le(frame + 16U, 183U);
+    fixture_write_u16_le(frame + 18U, 3U);
+    fixture_write_u32_le(frame + 20U, (uint32_t)source_name_size);
+    fixture_write_u64_le(frame + 24U, (uint64_t)source_size);
+    fixture_write_u64_le(frame + 32U, (uint64_t)encoded_size);
+    fixture_write_u64_le(frame + 40U, (uint64_t)(112U + source_name_size));
+
+    urp_sha256_context source_context;
+    uint8_t source_hash[32];
+    urp_sha256_init(&source_context);
+    urp_sha256_update(&source_context, source, source_size);
+    urp_sha256_final(&source_context, source_hash);
+    memcpy(frame + 48U, source_hash, sizeof(source_hash));
+
+    urp_sha256_context encoded_context;
+    uint8_t encoded_hash[32];
+    urp_sha256_init(&encoded_context);
+    urp_sha256_update(&encoded_context, encoded, encoded_size);
+    urp_sha256_final(&encoded_context, encoded_hash);
+    memcpy(frame + 80U, encoded_hash, sizeof(encoded_hash));
+
+    memcpy(frame + 112U, source_name, source_name_size);
+    memcpy(frame + 112U + source_name_size, encoded, encoded_size);
+    free(encoded);
+    *frame_out = frame;
+    *frame_size_out = frame_size;
+    return 1;
+}
+
+static int fixture_run_real_adapter(const char *fixture_path)
+{
+    uint8_t *source = NULL;
+    size_t source_size = 0U;
+    if (!fixture_read_file(fixture_path, &source, &source_size)) {
+        return fixture_expect(0, "could not read the AArch64 entry fixture");
+    }
+    if (!fixture_expect(source_size >= 64U, "entry fixture ELF header is truncated")) {
+        free(source);
+        return 0;
+    }
+
+    uint8_t *frame = NULL;
+    size_t frame_size = 0U;
+    int made_frame = fixture_make_frame(
+        source,
+        source_size,
+        "host-context-entry-fixture.so",
+        &frame,
+        &frame_size);
+    if (!fixture_expect(made_frame, "could not construct the real adapter frame")) {
+        free(source);
+        return 0;
+    }
+
+    urp_host_adapter_v1 adapter;
+    urp_host_adapter_init(&adapter);
+    const char *launch_argv[] = {"fixture", NULL};
+    const char *launch_envp[] = {NULL};
+    urp_launch_args_v1 args = {
+        .abi_version = URP_HOST_ABI_VERSION,
+        .struct_size = sizeof(urp_launch_args_v1),
+        .argc = 1U,
+        .argv = launch_argv,
+        .envp = launch_envp,
+    };
+    urp_status status = urp_runtime_execute_frame(
+        &adapter.context,
+        frame,
+        frame_size,
+        &args);
+    free(frame);
+    if (!fixture_expect(status == 23, "the real AArch64 HostContext entry was not invoked")) {
+        free(source);
+        return 0;
+    }
+    urp_image_handle rejected_handle = 0U;
+
+    size_t rela_tag_offset;
+    size_t rela_value_offset;
+    size_t rela_size_tag_offset;
+    size_t rela_size_value_offset;
+    size_t rela_ent_tag_offset;
+    size_t rela_ent_value_offset;
+    if (!fixture_expect(
+            fixture_find_dynamic_entry(
+                source,
+                source_size,
+                FIXTURE_DT_RELA,
+                &rela_tag_offset,
+                &rela_value_offset)
+            && fixture_find_dynamic_entry(
+                source,
+                source_size,
+                FIXTURE_DT_RELASZ,
+                &rela_size_tag_offset,
+                &rela_size_value_offset)
+            && fixture_find_dynamic_entry(
+                source,
+                source_size,
+                FIXTURE_DT_RELAENT,
+                &rela_ent_tag_offset,
+                &rela_ent_value_offset),
+            "the entry fixture does not expose the expected RELA metadata")) {
+        free(source);
+        return 0;
+    }
+
+    uint8_t *invalid_rela = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(invalid_rela != NULL, "could not allocate the invalid RELA fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(invalid_rela, source, source_size);
+    uint64_t rela_offset = fixture_read_u64_le(source + rela_value_offset);
+    if (!fixture_expect(
+            fixture_range_in_file(source_size, rela_offset, 24U, NULL, NULL),
+            "the entry fixture RELA range is outside the source")) {
+        free(invalid_rela);
+        free(source);
+        return 0;
+    }
+    fixture_write_u64_le(invalid_rela + (size_t)rela_offset, 0x100U);
+    rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        invalid_rela,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(invalid_rela);
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED,
+            "an invalid RELA target was not rejected before loading")) {
+        free(source);
+        return 0;
+    }
+
+    size_t dynamic_offset;
+    size_t dynamic_size;
+    if (!fixture_expect(
+            fixture_find_dynamic_segment(source, source_size, &dynamic_offset, &dynamic_size)
+                && dynamic_size >= FIXTURE_ELF_DYNAMIC_ENTRY_SIZE,
+            "the entry fixture does not expose a bounded dynamic segment")) {
+        free(source);
+        return 0;
+    }
+    uint8_t *unterminated_dynamic = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            unterminated_dynamic != NULL,
+            "could not allocate the unterminated dynamic fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(unterminated_dynamic, source, source_size);
+    for (size_t offset = 0; offset < dynamic_size; offset += FIXTURE_ELF_DYNAMIC_ENTRY_SIZE) {
+        uint8_t *entry = unterminated_dynamic + dynamic_offset + offset;
+        if (fixture_read_u64_le(entry) == 0U) {
+            fixture_write_u64_le(entry, UINT64_C(0xDEAD) + (uint64_t)offset);
+        }
+    }
+    rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        unterminated_dynamic,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(unterminated_dynamic);
+    if (!fixture_expect(
+            status == URP_STATUS_LOAD_FAILED,
+            "an unterminated dynamic segment was accepted")) {
+        free(source);
+        return 0;
+    }
+
+    uint8_t *relr_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(relr_image != NULL, "could not allocate the RELR fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(relr_image, source, source_size);
+    fixture_write_u64_le(relr_image + rela_tag_offset, FIXTURE_DT_RELR);
+    fixture_write_u64_le(relr_image + rela_size_tag_offset, FIXTURE_DT_RELRSZ);
+    fixture_write_u64_le(relr_image + rela_ent_tag_offset, FIXTURE_DT_RELRENT);
+    fixture_write_u64_le(relr_image + rela_size_value_offset, sizeof(uint64_t));
+    fixture_write_u64_le(relr_image + rela_ent_value_offset, sizeof(uint64_t));
+    uint8_t *relr_frame = NULL;
+    size_t relr_frame_size = 0U;
+    int made_relr_frame = fixture_make_frame(
+        relr_image,
+        source_size,
+        "host-context-relr-fixture.so",
+        &relr_frame,
+        &relr_frame_size);
+    if (!fixture_expect(made_relr_frame, "could not construct the RELR fixture frame")) {
+        free(relr_image);
+        free(source);
+        return 0;
+    }
+    status = urp_runtime_execute_frame(
+        &adapter.context,
+        relr_frame,
+        relr_frame_size,
+        &args);
+    free(relr_frame);
+    free(relr_image);
+    if (!fixture_expect(status == 23, "a valid RELR image was not dispatched")) {
+        free(source);
+        return 0;
+    }
+
+    size_t flags_value_offset;
+    if (!fixture_expect(
+            fixture_find_dynamic_entry(
+                source,
+                source_size,
+                FIXTURE_DT_FLAGS,
+                NULL,
+                &flags_value_offset),
+            "the entry fixture does not expose the expected dynamic flags")) {
+        free(source);
+        return 0;
+    }
+    uint8_t *textrel_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(textrel_image != NULL, "could not allocate the text-relocation fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(textrel_image, source, source_size);
+    fixture_write_u64_le(textrel_image + flags_value_offset, UINT64_C(0x4));
+    rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        textrel_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(textrel_image);
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED,
+            "a text-relocation dynamic flag was accepted")) {
+        free(source);
+        return 0;
+    }
+
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        fixture_frame,
+        sizeof(fixture_frame),
+        0U,
+        &rejected_handle);
+    if (!fixture_expect(status == URP_STATUS_INVALID_ARGUMENT, "mutable adapter load was accepted")
+        || !fixture_expect(rejected_handle == 0U, "failed adapter load returned a handle")) {
+        free(source);
+        return 0;
+    }
+
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        fixture_frame,
+        sizeof(fixture_frame),
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    if (!fixture_expect(status == URP_STATUS_LOAD_FAILED, "non-ELF adapter input was accepted")) {
+        free(source);
+        return 0;
+    }
+
+    uint64_t program_header_offset = fixture_read_u64_le(source + 32U);
+    if (!fixture_expect(
+            program_header_offset <= (uint64_t)(source_size - 4U),
+            "entry fixture program headers are outside the source")) {
+        free(source);
+        return 0;
+    }
+    uint8_t *interpreter_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(interpreter_image != NULL, "could not allocate negative adapter fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(interpreter_image, source, source_size);
+    fixture_write_u32_le(interpreter_image + (size_t)program_header_offset, 3U);
+    rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        interpreter_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(interpreter_image);
+    free(source);
+    return fixture_expect(status == URP_STATUS_UNSUPPORTED, "PT_INTERP adapter input was accepted");
+}
+
+int main(int argc, char **argv)
+{
+    if (!fixture_expect(argc == 2, "the entry fixture path is required")) {
+        return 2;
+    }
+
+    if (!fixture_expect(sizeof(urp_host_context_v1) == 56U, "context size changed")
+        || !fixture_expect(sizeof(urp_launch_args_v1) == 32U, "launch args size changed")
+        || !fixture_expect(URP_HOST_CONTEXT_MIN_SIZE == 56U, "context minimum size changed")
+        || !fixture_expect(URP_LAUNCH_ARGS_MIN_SIZE == 32U, "launch args minimum size changed")) {
+        return 1;
+    }
+
+    fixture_state state = {0};
+    const char *fake_argv[] = {"fixture", NULL};
+    const char *fake_envp[] = {NULL};
+    urp_launch_args_v1 args = {
+        .abi_version = URP_HOST_ABI_VERSION,
+        .struct_size = sizeof(urp_launch_args_v1),
+        .argc = 1U,
+        .argv = fake_argv,
+        .envp = fake_envp,
+    };
+    urp_host_context_v1 host = {
+        .abi_version = URP_HOST_ABI_VERSION,
+        .struct_size = sizeof(urp_host_context_v1),
+        .capabilities = URP_HOST_CAP_LOAD_IMAGE
+            | URP_HOST_CAP_LOOKUP_SYMBOL
+            | URP_HOST_CAP_RELEASE_IMAGE
+            | URP_HOST_CAP_EMIT_DIAGNOSTIC,
+        .userdata = &state,
+        .load_image = fixture_load_image,
+        .lookup_symbol = fixture_lookup_symbol,
+        .release_image = fixture_release_image,
+        .emit_diagnostic = fixture_emit_diagnostic,
+    };
+
+    urp_status status = urp_runtime_execute_frame(
+        &host,
+        fixture_frame,
+        sizeof(fixture_frame),
+        &args);
+    if (!fixture_expect(status == 17, "entry status was not preserved")
+        || !fixture_expect(state.loaded && state.immutable, "immutable image was not loaded")
+        || !fixture_expect(state.looked_up && state.entry_called, "entry was not dispatched")
+        || !fixture_expect(state.released, "image lifetime was not released")
+        || !fixture_expect(state.diagnostics == 0, "unexpected diagnostic on entry result")) {
+        return 1;
+    }
+
+    urp_host_context_v1 invalid_host = host;
+    invalid_host.abi_version = 2U;
+    status = urp_runtime_execute_frame(&invalid_host, fixture_frame, sizeof(fixture_frame), &args);
+    if (!fixture_expect(status == URP_STATUS_HOST_INVALID, "unknown host ABI was accepted")) {
+        return 1;
+    }
+
+    uint8_t tampered_frame[sizeof(fixture_frame)];
+    memcpy(tampered_frame, fixture_frame, sizeof(tampered_frame));
+    tampered_frame[sizeof(tampered_frame) - 1U] ^= 1U;
+    status = urp_runtime_execute_frame(&host, tampered_frame, sizeof(tampered_frame), &args);
+    if (!fixture_expect(status == URP_STATUS_INTEGRITY_FAILURE, "tampered frame was accepted")) {
+        return 1;
+    }
+
+    uint8_t wrong_header_size[sizeof(fixture_frame)];
+    memcpy(wrong_header_size, fixture_frame, sizeof(wrong_header_size));
+    fixture_write_u16_le(wrong_header_size + 10U, 0U);
+    status = urp_runtime_execute_frame(&host, wrong_header_size, sizeof(wrong_header_size), &args);
+    if (!fixture_expect(status == URP_STATUS_FRAME_INVALID, "invalid frame header size was accepted")) {
+        return 1;
+    }
+
+    urp_launch_args_v1 short_args = args;
+    short_args.struct_size = URP_LAUNCH_ARGS_MIN_SIZE - 1U;
+    status = urp_runtime_execute_frame(&host, fixture_frame, sizeof(fixture_frame), &short_args);
+    if (!fixture_expect(status == URP_STATUS_INVALID_ARGUMENT, "truncated launch args were accepted")) {
+        return 1;
+    }
+
+    if (!fixture_run_real_adapter(argv[1])) {
+        return 1;
+    }
+
+    puts("HostContext runtime self-test: PASS");
+    return 0;
+}

@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"The matrix and fixture scripts must remain the source of truth, fail closed on missing evidence, and preserve native/CI truthfulness."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Manifest, scripts, fixtures, CI, reports, and README must keep clear ownership while removing project-owned profile terminology."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Schema and evidence validation must reject contradictory, missing, unknown, or unsupported claims without silently selecting a fallback."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Matrix reports and CI summaries must preserve stable output, evidence paths, and sensitive-data boundaries."}

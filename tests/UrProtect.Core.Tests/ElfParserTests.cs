@@ -23,6 +23,20 @@ public sealed class ElfParserTests
     }
 
     [Fact]
+    public void AcceptsSectionlessPieUsingProgramHeaders()
+    {
+        var result = ElfParser.Parse(ElfFixture.MinimalPie());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Equal(0UL, result.File!.Header.SectionHeaderOffset);
+        Assert.Equal(0, result.File.Header.SectionHeaderCount);
+        Assert.Equal(2, result.File.LoadMap.Segments.Count);
+        Assert.True(result.File.LoadMap.TryVirtualAddressToFileOffset(0x1200, out var fileOffset));
+        Assert.Equal(0x200UL, fileOffset);
+    }
+
+    [Fact]
     public void RejectsUnsupportedElfIdentificationVersion()
     {
         var bytes = ElfFixture.MinimalPie();

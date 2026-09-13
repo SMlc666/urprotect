@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review parser/validator changes for bounded ranges, address-domain correctness, unknown preservation, and paired test coverage."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review stable diagnostics and fail-closed handling for unsupported relocation, metadata, lifecycle, and HostContext cases."}

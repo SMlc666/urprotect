@@ -38,7 +38,7 @@
 - Do not add a dynamic dependency to the static launcher, require a source
   payload path from the environment, or use a shell for payload execution.
 - Do not hide missing toolchains, wrong host architecture, emulator use, or
-  profile failures as successful native coverage.
+  host/runtime failures as successful native coverage.
 
 ## Testing Requirements
 
@@ -54,7 +54,7 @@ tests plus the relevant malformed-input path:
 - `NoOpPipelineTests.cs` and `CliApplicationTests.cs` cover atomic output,
   stable exit codes, JSON stream behavior, and byte identity.
 - `PayloadFrameTests.cs` and `ElfPackServiceTests.cs` cover deterministic
-  frames, limits, digests, launcher profiles, and publication failures.
+  frames, limits, digests, launcher variants, and publication failures.
 - Native `self_test.c` and `test_launcher.sh` cover SHA-256, raw deflate,
   malformed frames, handoff behavior, and signal/status preservation.
 
@@ -67,7 +67,7 @@ ASLR addresses and timing.
 
 - Required native Linux jobs run on `aarch64` and retain an environment report.
 - `fixtures/manifest.json` is the source of truth for fixture IDs, tiers,
-  toolchains, runtimes, and execution profiles.
+  toolchains, runtimes, and execution facts.
 - Required toolchain or runtime failures fail the job. Optional Android native
   bridge capability is reported explicitly and is not relabeled as native
   ARM64 hardware.

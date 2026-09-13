@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review schema drift checks, fixture selection, status semantics, and CI claims against project quality contracts."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Review that manifest/script/CI changes stay in integration boundaries and do not duplicate Core binary ownership."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Review matrix output and retained artifacts for stable streams and no sensitive path/payload leakage."}

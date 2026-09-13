@@ -27,7 +27,7 @@ public static class ElfValidator
         {
             diagnostics.Error(
                 DiagnosticCode.MissingDynamicSegment,
-                "The supported ET_DYN profile requires a PT_DYNAMIC segment.");
+                "The supported ET_DYN contract requires a PT_DYNAMIC segment.");
         }
 
         if (file.Kind is ElfFileKind.PieExecutable or ElfFileKind.StaticPieExecutable

@@ -125,7 +125,7 @@ public sealed class ElfPackService
 
         if (launcherValidation.File.Kind != ElfFileKind.StaticPieExecutable)
         {
-            diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher is not a static ET_DYN PIE executable profile.");
+            diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher is not a static ET_DYN PIE executable.");
             return Failure(diagnostics, sourceBytes.Length);
         }
 
@@ -292,7 +292,7 @@ public sealed class ElfPackService
         {
             diagnostics.Error(
                 DiagnosticCode.UnsupportedInterpreter,
-                $"The interpreter '{path}' is outside the supported Linux ARM64 profiles.");
+                $"The interpreter '{path}' is outside the supported Linux ARM64 runtime set.");
             return false;
         }
 

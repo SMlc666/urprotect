@@ -1,5 +1,162 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "hostContract": {
+    "id": "urp-host-v1",
+    "version": 1
+  },
+  "coverage": {
+    "strategy": "feature-covering",
+    "rules": [
+      "Every proven feature has a model or positive witness.",
+      "Every accepted boundary has a nearest rejected or malformed witness.",
+      "Runtime facts do not imply Android framework or device behavior."
+    ]
+  },
+  "features": [
+    {
+      "id": "elf.identity.aarch64-et-dyn",
+      "status": "proven",
+      "obligation": "ELF64 little-endian AArch64 ET_DYN identity and bounded load map",
+      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/Elf/ElfValidator.cs",
+      "evidence": [
+        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/BinaryPropertyTests.cs"
+      ]
+    },
+    {
+      "id": "elf.dynamic",
+      "status": "proven",
+      "obligation": "PT_DYNAMIC and dynamic metadata are mapped and bounded",
+      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "evidence": [
+        "tests/UrProtect.Core.Tests/ElfParserTests.cs"
+      ]
+    },
+    {
+      "id": "elf.relocation.aarch64-relative",
+      "status": "validated",
+      "obligation": "The narrow HostContext adapter accepts AArch64 RELATIVE/RELR relocation targets in writable load segments and delegates application to the native loader",
+      "witness": "native/urprotect-runtime/host_context_entry_fixture.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "constraints": [
+        "AArch64 RELA entries must be NONE or RELATIVE with symbol index zero",
+        "RELR targets must be aligned and writable",
+        "Dynamic flag entries allow only immediate binding flags; text-relocation flags are rejected",
+        "The system loader remains responsible for applying accepted relocations"
+      ]
+    },
+    {
+      "id": "elf.sectionless-program-headers",
+      "status": "proven",
+      "obligation": "A valid ET_DYN remains parseable when section headers are absent; program headers remain authoritative",
+      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "evidence": [
+        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs"
+      ],
+      "negativeWitness": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs"
+    },
+    {
+      "id": "runtime.glibc",
+      "status": "validated",
+      "obligation": "AArch64 dynamically linked PIE runs on the recorded native glibc host",
+      "witness": "c-gcc-glibc-pie",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": [
+        ".artifacts/fixtures/pr"
+      ]
+    },
+    {
+      "id": "runtime.musl",
+      "status": "validated",
+      "obligation": "AArch64 dynamically linked PIE runs with the recorded musl loader",
+      "witness": "c-musl-gcc-pie",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": [
+        ".artifacts/fixtures/nightly"
+      ]
+    },
+    {
+      "id": "runtime.bionic.linker",
+      "status": "validated",
+      "obligation": "AArch64 PIE is executed by the pinned bionic linker without host-libc fallback",
+      "witness": "c-termux-bionic-pie",
+      "oracle": "scripts/run-bionic-fixture.sh",
+      "evidence": [
+        ".artifacts/bionic"
+      ]
+    },
+    {
+      "id": "runtime.host-context-v1",
+      "status": "validated",
+      "obligation": "Versioned HostContext v1 callbacks provide immutable AArch64 ET_DYN image loading and explicit entry dispatch for the declared adapter slice",
+      "witness": "native/urprotect-runtime/host_context_entry_fixture.c",
+      "oracle": "native/urprotect-runtime/host_context_self_test.c",
+      "evidence": [
+        "src/UrProtect.Core/Pack/HostContextContract.cs",
+        "native/urprotect-runtime/include/urp/host_context.h",
+        "native/urprotect-runtime/include/urp/host_adapter.h",
+        "native/urprotect-runtime/runtime.c",
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "constraints": [
+        "No PT_INTERP, PT_TLS, PT_GNU_PROPERTY, DT_NEEDED, constructor, path-search, or text-relocation semantics",
+        "Dynamic flags are limited to immediate binding flags; other lifecycle or relocation flags are rejected",
+        "Only checked AArch64 RELATIVE/RELR relocation targets are accepted; application and memory protection are delegated to the recorded native system loader"
+      ]
+    },
+    {
+      "id": "handoff.no-executable-path",
+      "status": "validated",
+      "obligation": "Recovered bytes reach the runtime without an executable temporary pathname",
+      "witness": "native/urprotect-launcher/test_launcher.sh",
+      "oracle": "native/urprotect-launcher/launcher_main.c",
+      "evidence": [
+        "src/UrProtect.Cli/CliApplication.cs",
+        "native/urprotect-launcher/launcher_main.c",
+        "native/urprotect-launcher/test_launcher.sh",
+        "native/urprotect-launcher/test_managed_handoff.sh",
+        ".artifacts/packed/pr/handoff.log"
+      ]
+    },
+    {
+      "id": "elf.interpreter.unsupported",
+      "status": "rejected",
+      "obligation": "An interpreter outside the declared AArch64 host runtimes is refused",
+      "witness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+      "oracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "evidence": [
+        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs"
+      ],
+      "reason": "The current no-path contract does not define dependency resolution for arbitrary interpreters.",
+      "negativeWitness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs"
+    },
+    {
+      "id": "android.jni.native-bridge",
+      "status": "validated",
+      "obligation": "arm64-v8a JNI library loads through the recorded x86_64 Android native bridge",
+      "witness": "android-ndk-jni",
+      "oracle": "scripts/run-android-avd.sh",
+      "evidence": [
+        "fixtures/samples/android-jni",
+        ".artifacts/android-arm64-native-bridge-on-x64/logcat.txt"
+      ]
+    }
+  ],
   "android": {
     "apiLevel": 35,
     "systemImage": "system-images;android-35;google_apis;x86_64",
@@ -12,16 +169,21 @@
     "packageName": "com.example.urprotect",
     "avdName": "urprotect-api35-x86-bridge",
     "container": {
-      "profile": "waydroid-arm64-mainline",
+      "environment": "waydroid-arm64-mainline",
       "systemImageUrl": "https://ota.waydro.id/system/lineage/waydroid_arm64/VANILLA.json",
       "systemImageSha256": "c4b45fad36bee7c0db8a1d9315a5be0035520c53d3d005a807735ae9b7ee79cf",
       "vendorImageUrl": "https://ota.waydro.id/vendor/waydroid_arm64/MAINLINE.json",
       "vendorImageSha256": "1e6d33d464277ea3964e4658001c8882f21325616d6bcc66d473bc9ee1e246c7"
     }
   },
-  "profiles": [
+  "cases": [
     {
       "id": "c-gcc-glibc-pie",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.glibc"
+      ],
       "language": "c",
       "toolchain": "gcc",
       "builder": "gcc-c",
@@ -31,10 +193,21 @@
       "source": "fixtures/samples/c/main.c",
       "tier": "pr",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/pr/c-gcc-glibc-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
     },
     {
       "id": "cxx-gcc-glibc-pie",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.glibc"
+      ],
       "language": "c++",
       "toolchain": "gcc-g++",
       "builder": "gcc-cxx",
@@ -44,10 +217,21 @@
       "source": "fixtures/samples/cxx/main.cpp",
       "tier": "pr",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/pr/cxx-gcc-glibc-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
     },
     {
       "id": "c-clang-glibc-pie",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.glibc"
+      ],
       "language": "c",
       "toolchain": "llvm-clang",
       "builder": "clang-c",
@@ -57,10 +241,21 @@
       "source": "fixtures/samples/c/main.c",
       "tier": "pr",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/pr/c-clang-glibc-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
     },
     {
       "id": "cxx-clang-glibc-pie",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.glibc"
+      ],
       "language": "c++",
       "toolchain": "llvm-clang++",
       "builder": "clang-cxx",
@@ -70,10 +265,21 @@
       "source": "fixtures/samples/cxx/main.cpp",
       "tier": "pr",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/pr/cxx-clang-glibc-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
     },
     {
       "id": "rust-gnu",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.glibc"
+      ],
       "language": "rust",
       "toolchain": "rustc",
       "builder": "rust-gnu",
@@ -83,10 +289,20 @@
       "source": "fixtures/samples/rust/src/main.rs",
       "tier": "pr",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/pr/rust-gnu",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
     },
     {
       "id": "go-pie",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "runtime.glibc"
+      ],
       "language": "go",
       "toolchain": "go",
       "builder": "go-pie",
@@ -96,10 +312,21 @@
       "source": "fixtures/samples/go/main.go",
       "tier": "pr",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/pr/go-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
     },
     {
       "id": "c-musl-gcc-pie",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.musl"
+      ],
       "language": "c",
       "toolchain": "musl-gcc",
       "builder": "musl-gcc",
@@ -109,10 +336,21 @@
       "source": "fixtures/samples/c/main.c",
       "tier": "nightly",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/nightly/c-musl-gcc-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "musl"
+      }
     },
     {
       "id": "zig-musl",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.musl"
+      ],
       "language": "zig",
       "toolchain": "zig",
       "builder": "zig-musl",
@@ -122,10 +360,21 @@
       "source": "fixtures/samples/zig/main.zig",
       "tier": "nightly",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/nightly/zig-musl",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "musl"
+      }
     },
     {
       "id": "csharp-nativeaot",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.glibc"
+      ],
       "language": "csharp",
       "toolchain": "dotnet-nativeaot",
       "builder": "nativeaot",
@@ -135,10 +384,20 @@
       "source": "fixtures/samples/nativeaot/NativeAotFixture.csproj",
       "tier": "nightly",
       "required": true,
-      "execution": "native-linux"
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/nightly/csharp-nativeaot",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
     },
     {
       "id": "android-ndk-jni",
+      "features": [
+        "runtime.bionic.linker",
+        "android.jni.native-bridge"
+      ],
       "language": "c",
       "toolchain": "android-ndk-clang",
       "builder": "android-ndk",
@@ -148,7 +407,44 @@
       "source": "fixtures/samples/android-jni",
       "tier": "nightly",
       "required": false,
-      "execution": "android-arm64-native-bridge-on-x64"
+      "execution": "android-arm64-native-bridge-on-x64",
+      "oracle": "scripts/run-android-avd.sh",
+      "evidence": ".artifacts/android-arm64-native-bridge-on-x64/logcat.txt",
+      "host": {
+        "environment": "android-avd",
+        "guestAbi": "x86_64",
+        "nativeBridgeAbi": "arm64-v8a",
+        "androidRuntime": true
+      }
+    },
+    {
+      "id": "c-termux-bionic-pie",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.bionic.linker"
+      ],
+      "language": "c",
+      "toolchain": "termux-clang",
+      "builder": "termux-clang",
+      "runtime": "bionic",
+      "target": "aarch64-linux-android",
+      "artifact": "pie",
+      "source": "fixtures/samples/bionic/main.c",
+      "tier": "nightly",
+      "required": false,
+      "execution": "native-arm64-bionic-container",
+      "oracle": "scripts/run-bionic-fixture.sh",
+      "evidence": ".artifacts/bionic/c-termux-bionic-pie",
+      "host": {
+        "environment": "termux-userspace",
+        "image": "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4",
+        "sourceCommit": "7033c7639eb86107a4fdf8b72bd6388c07b1284a",
+        "compilerPackage": "clang=21.1.8-3",
+        "linker": "/system/bin/linker64",
+        "androidRuntime": false,
+        "pageSize": "recorded"
+      }
     }
   ]
 }

@@ -8,10 +8,11 @@ objects, emits a stable JSON report, can produce a byte-identical no-op copy,
 and can wrap a supported executable in a new self-extracting AArch64 ELF.
 
 The wrapper stores the complete source ELF as a deterministic compressed
-payload, verifies its SHA-256 digest, extracts it to a private temporary path,
-and uses `execve` so the normal Linux kernel/interpreter/dynamic loader starts
-the original program. It is an outer packaging and integrity result, not a
-custom ELF loader or an in-process code protection transformation.
+payload, verifies its SHA-256 digest, writes it to an anonymous Linux memfd,
+and uses `execveat(AT_EMPTY_PATH)` so the normal kernel/interpreter/dynamic
+loader starts the original program. No executable temporary pathname is
+created. It is an outer packaging and integrity result, not a custom ELF
+loader or an in-process code protection transformation.
 
 ## Build
 
@@ -61,6 +62,10 @@ This release does not rewrite code, encrypt code, inject runtime logic,
 virtualize control flow, implement a custom in-process loader, or claim
 physical Android-device compatibility.
 
+The conditional compatibility claim and its proof boundary are documented in
+[`COMPATIBILITY.md`](COMPATIBILITY.md). The machine-readable obligations and
+evidence map live in `fixtures/manifest.json`.
+
 ## First ELF Wrapper
 
 Pack only a Linux ARM64 dynamically linked `ET_DYN` PIE executable with a
@@ -85,14 +90,17 @@ The launcher is a static AArch64 `ET_DYN` PIE with no interpreter or shared
 library dependencies. `pack` requires `--launcher`; it never silently turns
 the C# packer into the runtime wrapper.
 
-The first wrapper profile supports native ARM64 Linux glibc and is exercised by
-the PR covering fixture matrix. Shared objects, static `ET_EXEC`, Android
-wrapper execution, `memfd_create`/`execveat`, payload encryption, and custom
-in-process loading are intentionally rejected or deferred. The frame stores a
-source basename for `argv[0]`; path separators are rejected and no payload
-directory is taken from the environment.
+The current wrapper contract supports native ARM64 Linux glibc and is
+exercised by the PR covering fixture matrix. Shared objects, static `ET_EXEC`,
+Android/bionic packaging, payload encryption, and full custom in-process
+loading remain rejected or deferred. The frame stores a source basename for
+`argv[0]`;
+path separators are rejected and no payload directory is taken from the
+environment. Both the native launcher and the managed self-contained host use
+the same anonymous memfd handoff; the managed handoff has a dedicated ARM64
+integration smoke.
 
-Release bundles are produced only for native ARM64 glibc and musl profiles:
+Release bundles are produced only for native ARM64 glibc and musl runtime variants:
 
 ```sh
 ./scripts/package-release.sh 0.2.0 .artifacts/release
@@ -113,24 +121,48 @@ The fixture manifest covers a small, explicit set of ELF producers instead of
 claiming a full language/toolchain Cartesian product:
 
 ```sh
-./scripts/run-fixture-matrix.sh --profile pr
-./scripts/run-fixture-matrix.sh --profile nightly
-./scripts/run-packed-fixture-matrix.sh --profile pr
+./scripts/run-fixture-matrix.sh --tier pr
+./scripts/run-fixture-matrix.sh --tier nightly
+./scripts/run-packed-fixture-matrix.sh --tier pr
 ```
 
 The native Linux fixture runner builds and executes C/C++ (GCC and LLVM/Clang),
 Rust, Go, musl-gcc, Zig, and NativeAOT samples. Nightly ARM64 CI installs
 Ubuntu Noble musl packages at the pinned `1.2.4-2` version and Zig 0.13.0 from
-the official checksum-verified archive before running the required profiles.
+the official checksum-verified archive before running the required tiers.
 Each executable is validated and copied through the no-op CLI, then the
 baseline and copied output behavior are compared. A missing required toolchain
-or invalid output fails the job rather than falling back to glibc; only the
-Android profile is handled by the separate Android runtime job.
+or invalid output fails the job rather than falling back to glibc; Android and
+bionic lanes are handled by their separate runtime jobs.
 
 The packed fixture runner first builds the native PR covering set and the
 static native ARM64 launcher, runs the native codec/integration checks, packs
 each executable, verifies that wrapper bytes differ, and compares
 baseline/wrapped status and standard streams through the real loader.
+
+The native bionic lane is separate from Android framework testing:
+
+```sh
+./scripts/run-bionic-fixture.sh
+```
+
+It runs the pinned `termux/termux-docker` ARM64 image, installs the exact
+recorded Termux `clang` package, builds an AArch64 PIE with
+`/system/bin/linker64`, and verifies both normal execution and the linker's
+direct identity probe; ELF `DT_NEEDED` output records the fixture's bionic
+dependencies. It records image digest, Termux source revision,
+package versions, linker identity, and page size. The lane refuses AVD, Waydroid, QEMU, and
+non-ARM fallback; it proves bionic userspace behavior without claiming the
+Android framework or physical-device behavior. HostContext/package handoff
+evidence remains explicitly unknown until the bionic lane runs; the narrow
+HostContext adapter slice is recorded separately as validated evidence.
+
+Render the same manifest into a reviewable matrix report:
+
+```sh
+python3 scripts/render-compatibility-matrix.py \
+  fixtures/manifest.json --output .artifacts/compatibility-matrix.md
+```
 
 The Android sample is an APK/JNI fixture. The released Android Emulator cannot
 boot an `arm64-v8a` system image on an x86_64 host, even with `-accel off`. On

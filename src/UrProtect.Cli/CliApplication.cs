@@ -23,6 +23,7 @@ public enum ProductExitCode
 public sealed class CliApplication
 {
     private const int MaxCommandLineArguments = 4096;
+    private const uint MemfdCloexec = 1;
 
     public static string ToolVersion =>
         typeof(CliApplication).Assembly
@@ -138,31 +139,47 @@ public sealed class CliApplication
             return (int)ProductExitCode.Validation;
         }
 
-        string temporaryDirectory;
-        string temporaryPath;
+        int payloadFd;
+        Microsoft.Win32.SafeHandles.SafeFileHandle? payloadHandle = null;
+        FileStream? payloadStream = null;
         try
         {
-            temporaryDirectory = Path.Combine(
-                Path.GetTempPath(),
-                $"urprotect-payload-{Environment.ProcessId}-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(temporaryDirectory);
-            File.SetUnixFileMode(
-                temporaryDirectory,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            temporaryPath = Path.Combine(temporaryDirectory, payload.Frame!.SourceName!);
-            File.WriteAllBytes(temporaryPath, payload.SourceBytes);
-            File.SetUnixFileMode(
-                temporaryPath,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            Console.Error.WriteLine($"OutputIoFailure: could not materialize the payload: {exception.Message}");
-            return (int)ProductExitCode.FileSystem;
-        }
+            try
+            {
+                var payloadName = Marshal.StringToCoTaskMemUTF8("urprotect-payload");
+                try
+                {
+                    payloadFd = MemfdCreate(payloadName, MemfdCloexec);
+                }
+                finally
+                {
+                    Marshal.FreeCoTaskMem(payloadName);
+                }
 
-        try
-        {
+                if (payloadFd < 0)
+                {
+                    Console.Error.WriteLine("OutputIoFailure: could not create an anonymous payload image.");
+                    return (int)ProductExitCode.FileSystem;
+                }
+
+                payloadHandle = new Microsoft.Win32.SafeHandles.SafeFileHandle(
+                    (IntPtr)payloadFd,
+                    ownsHandle: true);
+                payloadStream = new FileStream(payloadHandle, FileAccess.Write);
+                payloadStream.Write(payload.SourceBytes);
+                payloadStream.Flush(flushToDisk: true);
+                if (Fchmod(payloadFd, 0x1C0) != 0)
+                {
+                    Console.Error.WriteLine("OutputIoFailure: could not make the anonymous payload executable.");
+                    return (int)ProductExitCode.FileSystem;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                Console.Error.WriteLine($"OutputIoFailure: could not write the anonymous payload image: {exception.Message}");
+                return (int)ProductExitCode.FileSystem;
+            }
+
             var commandLine = Environment.GetCommandLineArgs();
             if (commandLine.Length == 0 || commandLine.Length > MaxCommandLineArguments)
             {
@@ -176,65 +193,65 @@ public sealed class CliApplication
                 .Cast<System.Collections.DictionaryEntry>()
                 .Select(entry => $"{entry.Key}={entry.Value}")
                 .ToArray();
-            var nativePath = Marshal.StringToCoTaskMemUTF8(temporaryPath);
             using var nativeArguments = NativeStringArray.Create(commandLine);
             using var nativeEnvironment = NativeStringArray.Create(environment);
+            var emptyPath = Marshal.StringToCoTaskMemUTF8(string.Empty);
             try
             {
-                var execResult = Execve(nativePath, nativeArguments.Pointer, nativeEnvironment.Pointer);
+                var execResult = Execveat(
+                    payloadFd,
+                    emptyPath,
+                    nativeArguments.Pointer,
+                    nativeEnvironment.Pointer,
+                    AtEmptyPath);
                 if (execResult == 0)
                 {
-                    Console.Error.WriteLine("InternalFailure: execve returned success without replacing the process.");
+                    Console.Error.WriteLine("InternalFailure: execveat returned success without replacing the process.");
                     return (int)ProductExitCode.Internal;
                 }
 
                 var error = Marshal.GetLastWin32Error();
-                Console.Error.WriteLine($"OutputIoFailure: execve failed for the recovered payload (errno {error}).");
+                Console.Error.WriteLine($"OutputIoFailure: execveat failed for the anonymous payload image (errno {error}).");
                 return (int)ProductExitCode.FileSystem;
             }
             finally
             {
-                Marshal.FreeCoTaskMem(nativePath);
+                Marshal.FreeCoTaskMem(emptyPath);
             }
+        }
+        catch (Exception exception) when (
+            exception is DllNotFoundException
+                or EntryPointNotFoundException
+                or BadImageFormatException)
+        {
+            Console.Error.WriteLine(
+                $"OutputIoFailure: the anonymous payload handoff is unavailable: {exception.Message}");
+            return (int)ProductExitCode.FileSystem;
         }
         finally
         {
-            try
-            {
-                if (File.Exists(temporaryPath))
-                {
-                    File.Delete(temporaryPath);
-                }
-            }
-            catch (IOException)
-            {
-                // The payload path is best-effort cleanup after execve failure.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // The payload path is best-effort cleanup after execve failure.
-            }
-
-            try
-            {
-                if (Directory.Exists(temporaryDirectory))
-                {
-                    Directory.Delete(temporaryDirectory, recursive: true);
-                }
-            }
-            catch (IOException)
-            {
-                // The payload directory is best-effort cleanup after execve failure.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // The payload directory is best-effort cleanup after execve failure.
-            }
+            payloadStream?.Dispose();
+            payloadHandle?.Dispose();
         }
     }
 
-    [DllImport("libc", EntryPoint = "execve", SetLastError = true)]
-    private static extern int Execve(IntPtr path, IntPtr argv, IntPtr environment);
+    private const int AtEmptyPath = 0x1000;
+
+    [DllImport("libc", EntryPoint = "memfd_create", SetLastError = true)]
+    private static extern int MemfdCreate(
+        IntPtr name,
+        uint flags);
+
+    [DllImport("libc", EntryPoint = "fchmod", SetLastError = true)]
+    private static extern int Fchmod(int fileDescriptor, uint mode);
+
+    [DllImport("libc", EntryPoint = "execveat", SetLastError = true)]
+    private static extern int Execveat(
+        int directoryFileDescriptor,
+        IntPtr path,
+        IntPtr argv,
+        IntPtr environment,
+        int flags);
 
     private sealed class NativeStringArray : IDisposable
     {

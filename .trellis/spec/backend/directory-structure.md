@@ -20,7 +20,7 @@ tests/
 benchmarks/
 └── UrProtect.Benchmarks/        # native ARM64 parser/copy measurements
 fixtures/
-├── manifest.json                # fixture profiles and runtime contracts
+├── manifest.json                # fixture matrix cases and runtime contracts
 └── samples/                     # C, C++, Rust, Go, Zig, NativeAOT, Android
 scripts/                         # fixture, fuzz, release, and CI helpers
 .github/scripts/                 # CI environment and Android probes

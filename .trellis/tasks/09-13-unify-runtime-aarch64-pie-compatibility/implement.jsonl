@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"The unified runtime, ELF expansion, and matrix must preserve bounded binary reads, explicit address domains, byte identity, pinned native inputs, and required test/CI contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Runtime handoff, ABI validation, matrix claims, and ELF feature expansion must fail closed with stable structured diagnostics."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"The design must place Core, native runtime, fixtures, scripts, CI, and matrix ownership in the repository's existing boundaries."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Host/runtime diagnostics, matrix evidence, and CLI output must preserve stdout/stderr and artifact evidence rules."}
+{"file":".trellis/tasks/archive/2026-09/09-12-aarch64-elf-wrapper-native-launcher/research.md","reason":"Historical wrapper constraints, native launcher evidence, and intentionally deferred handoff choices inform the migration and rollback plan."}

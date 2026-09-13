@@ -10,12 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
 
 #define URP_TRAILER_SIZE 24U
 #define URP_HEADER_SIZE 112U
@@ -39,6 +36,7 @@
 #define URP_EXIT_INTEGRITY 5
 #define URP_MAX_ARGUMENTS 4096U
 #define URP_LAUNCHER_ABI_MARKER "URPROTECT-AARCH64-LAUNCHER-V1"
+#define URP_MEMFD_CLOEXEC 1U
 
 static const uint8_t urp_header_magic[8] = {'U', 'R', 'P', 'C', 'K', '0', '1', 0};
 static const uint8_t urp_trailer_magic[8] = {'U', 'R', 'T', 'R', 'A', 'I', 'L', '1'};
@@ -568,27 +566,6 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
     return has_load && has_executable_entry && has_interpreter;
 }
 
-static void urp_cleanup_payload(const char *directory, const char *payload_path)
-{
-    if (payload_path != NULL) {
-        (void)unlink(payload_path);
-    }
-    if (directory != NULL) {
-        (void)rmdir(directory);
-    }
-}
-
-static void urp_cleanup_payload_at(int directory_fd, const char *directory, const char *source_name)
-{
-    if (directory_fd >= 0) {
-        (void)unlinkat(directory_fd, source_name, 0);
-        (void)close(directory_fd);
-    }
-    if (directory != NULL) {
-        (void)rmdir(directory);
-    }
-}
-
 static int urp_write_payload_and_exec(
     const urp_frame_view *frame,
     const uint8_t *source,
@@ -605,39 +582,11 @@ static int urp_write_payload_and_exec(
     memcpy(source_name, frame->source_name, frame->source_name_size);
     source_name[frame->source_name_size] = '\0';
 
-    char directory[] = "/tmp/urprotect-payload-XXXXXX";
-    if (mkdtemp(directory) == NULL) {
-        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not create a private payload directory");
+    long memfd_result = syscall(SYS_memfd_create, "urprotect-payload", URP_MEMFD_CLOEXEC);
+    if (memfd_result < 0L || memfd_result > (long)INT_MAX) {
+        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not create an anonymous payload image");
     }
-    if (chmod(directory, 0700) != 0) {
-        urp_cleanup_payload(directory, NULL);
-        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not create a private payload directory");
-    }
-
-    size_t directory_size = strlen(directory);
-    if (directory_size + 1U + frame->source_name_size + 1U > PATH_MAX) {
-        urp_cleanup_payload(directory, NULL);
-        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "the recovered payload path is too long");
-    }
-    char payload_path[PATH_MAX];
-    memcpy(payload_path, directory, directory_size);
-    payload_path[directory_size] = '/';
-    memcpy(payload_path + directory_size + 1U, source_name, frame->source_name_size + 1U);
-
-    int directory_fd = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (directory_fd < 0) {
-        urp_cleanup_payload(directory, NULL);
-        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not open the private payload directory");
-    }
-    int payload_fd = openat(
-        directory_fd,
-        source_name,
-        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-        0700);
-    if (payload_fd < 0) {
-        urp_cleanup_payload_at(directory_fd, directory, source_name);
-        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not create the private payload file");
-    }
+    int payload_fd = (int)memfd_result;
 
     size_t offset = 0;
     int write_ok = 1;
@@ -652,28 +601,25 @@ static int urp_write_payload_and_exec(
         }
         offset += (size_t)written;
     }
-    if (write_ok && (fchmod(payload_fd, 0700) != 0 || fsync(payload_fd) != 0)) {
+    if (write_ok && fchmod(payload_fd, 0700) != 0) {
         write_ok = 0;
     }
-    if (close(payload_fd) != 0) {
-        write_ok = 0;
-    }
-    if (fsync(directory_fd) != 0) {
+    if (write_ok && fsync(payload_fd) != 0) {
         write_ok = 0;
     }
     if (!write_ok) {
-        urp_cleanup_payload_at(directory_fd, directory, source_name);
-        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not persist the recovered payload");
+        (void)close(payload_fd);
+        return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not persist the anonymous payload image");
     }
 
     size_t argument_count = (size_t)argc;
     if (argument_count > (SIZE_MAX / sizeof(char *)) - 1U) {
-        urp_cleanup_payload_at(directory_fd, directory, source_name);
+        (void)close(payload_fd);
         return urp_report(URP_EXIT_VALIDATION, "InvalidArgument", "the command line size overflows the launcher bounds");
     }
     char **exec_argv = (char **)malloc((argument_count + 1U) * sizeof(char *));
     if (exec_argv == NULL) {
-        urp_cleanup_payload_at(directory_fd, directory, source_name);
+        (void)close(payload_fd);
         return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "could not allocate the recovered argument vector");
     }
     exec_argv[0] = source_name;
@@ -682,10 +628,10 @@ static int urp_write_payload_and_exec(
     }
     exec_argv[argument_count] = NULL;
 
-    execve(payload_path, exec_argv, envp);
+    (void)syscall(SYS_execveat, payload_fd, "", exec_argv, envp, AT_EMPTY_PATH);
     free(exec_argv);
-    urp_cleanup_payload_at(directory_fd, directory, source_name);
-    return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "execve failed for the recovered payload");
+    (void)close(payload_fd);
+    return urp_report(URP_EXIT_FILE_SYSTEM, "OutputIoFailure", "execveat failed for the recovered payload");
 }
 
 int main(int argc, char **argv, char **envp)
