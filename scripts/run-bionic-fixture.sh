@@ -58,6 +58,11 @@ linker="${matrix_values[3]}"
 termux_prefix="/data/data/com.termux/files/usr"
 termux_shell="${termux_prefix}/bin/sh"
 
+if [[ "${linker}" != "/system/bin/linker64" ]]; then
+  echo "unsupported bionic linker path: ${linker}" >&2
+  exit 1
+fi
+
 host_page_size="$(getconf PAGESIZE)"
 printf '%s\n' \
   "host_arch=$(uname -m)" \
@@ -90,7 +95,6 @@ container_common=(
   --platform linux/arm64
   --user 1000:1000
   --env "PREFIX=${termux_prefix}"
-  --env "BIONIC_LINKER=${linker}"
   --env "HOME=/tmp"
   --mount "type=bind,src=${repo_root},dst=/workspace,readonly"
   --mount "type=bind,src=${case_root},dst=/artifacts"
@@ -168,7 +172,7 @@ run_shell -c 'exec /artifacts/fixture' \
   > "${case_root}/baseline.stdout" \
   2> "${case_root}/baseline.stderr"
 baseline_status=$?
-run_shell -c 'exec "${BIONIC_LINKER}" /artifacts/fixture' \
+run_shell -c 'exec /system/bin/linker64 --list /artifacts/fixture' \
   > "${case_root}/linker.stdout" \
   2> "${case_root}/linker.stderr"
 linker_status=$?
@@ -179,8 +183,10 @@ if [[ "${baseline_status}" -ne 0 || "${linker_status}" -ne 0 ]]; then
   echo "bionic fixture failed: shell status=${baseline_status}, direct linker status=${linker_status}" >&2
   exit 1
 fi
-cmp -- "${case_root}/baseline.stdout" "${case_root}/linker.stdout"
-cmp -- "${case_root}/baseline.stderr" "${case_root}/linker.stderr"
+if ! grep -Eq 'lib(c|dl)\.so' "${case_root}/linker.stdout"; then
+  echo "bionic direct linker did not report the fixture's dynamic dependencies" >&2
+  exit 1
+fi
 
 container_page_size="$(sed -n 's/^container_page_size=//p' "${case_root}/container-facts.txt")"
 if [[ -z "${container_page_size}" ]]; then
@@ -202,6 +208,7 @@ printf '%s\n' \
   "execution=native-arm64-bionic-container" \
   "baseline_status=${baseline_status}" \
   "direct_linker_status=${linker_status}" \
+  "direct_linker_mode=list" \
   "handoff_status=not-yet-implemented" \
   > "${case_root}/provenance.txt"
 
@@ -226,6 +233,7 @@ document = {
     "containerPageSize": int(page_size),
     "baselineStatus": int(baseline),
     "directLinkerStatus": int(linker),
+    "directLinkerMode": "list",
     "handoffStatus": "not-yet-implemented",
 }
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")

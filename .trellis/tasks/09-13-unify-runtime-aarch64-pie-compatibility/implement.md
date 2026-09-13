@@ -30,7 +30,8 @@
       and positive/negative cases.
 - [ ] Backfill the existing compiler, runtime, Android, and wrapper cases.
 - [ ] Add the pinned native ARM64 Termux/bionic case as a peer runtime fact,
-      with direct linker, page-size, kernel, and no-fallback evidence.
+      with direct linker dependency-list, page-size, kernel, and no-fallback
+      evidence.
 - [ ] Generate or validate human-readable matrix documentation.
 
 Rollback: retain a read-only legacy-manifest adapter while all CI callers are

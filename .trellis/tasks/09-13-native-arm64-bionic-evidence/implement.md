@@ -16,7 +16,8 @@
 3. [ ] Add the smallest bionic-linked PIE fixture and lock its compiler/package
        inputs, or record a separately pinned artifact with equivalent proof.
 4. [ ] Add the baseline and HostContext/packaged execution oracle, including
-       ELF metadata, output, status, diagnostics, and digest evidence.
+       ELF metadata, output, status, direct-linker dependency-list, diagnostics,
+       and digest evidence.
 5. [ ] Add the matrix case and connect it to bionic linker, ET_DYN, dynamic
        dependency, page-size, and runtime handoff feature IDs.
 6. [ ] Add the ARM64 CI lane using the pinned OCI image, least-privilege

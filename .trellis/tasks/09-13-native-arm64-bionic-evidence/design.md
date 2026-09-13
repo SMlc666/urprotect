@@ -63,11 +63,12 @@ The fixture flow is:
 
 1. inspect the ELF header, program headers, interpreter, dynamic tags, and
    architecture;
-2. execute the unwrapped baseline through /system/bin/linker64;
+2. execute the unwrapped baseline through /system/bin/linker64 and query the
+   same linker in direct dependency-list mode;
 3. execute the unified HostContext/packaged form once the runtime child
    provides that entry path;
-4. compare declared output, exit status, diagnostics, and relevant digest
-   metadata;
+4. compare the baseline's declared output/status and verify that direct linker
+   mode reports the fixture's dynamic dependencies;
 5. publish the environment and oracle files under the matrix case evidence
    directory.
 

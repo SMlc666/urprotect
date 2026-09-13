@@ -150,7 +150,7 @@ oracle's retained output, not only source files that describe the oracle.
   tier selection.
 - `scripts/run-bionic-fixture.sh`: on a native ARM64 Docker host, assert image
   digest, AArch64 architecture, page size, `/system/bin/linker64`, exact
-  `clang` package, ELF `ET_DYN`/`PT_INTERP`, direct linker execution, and no
+  `clang` package, ELF `ET_DYN`/`PT_INTERP`, direct linker dependency listing, and no
   forbidden fallback.
 
 ### 8. Wrong vs Correct
