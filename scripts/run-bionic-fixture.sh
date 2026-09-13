@@ -9,6 +9,7 @@ case_root="${artifact_root}/${case_id}"
 container_runtime="${BIONIC_CONTAINER_RUNTIME:-docker}"
 
 mkdir -p "${case_root}"
+chmod a+rwx "${case_root}"
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "bionic fixture requires a native aarch64 host; got $(uname -m)" >&2
@@ -55,7 +56,6 @@ termux_source_commit="${matrix_values[1]}"
 clang_package="${matrix_values[2]}"
 linker="${matrix_values[3]}"
 termux_prefix="/data/data/com.termux/files/usr"
-termux_shell="${termux_prefix}/bin/sh"
 
 host_page_size="$(getconf PAGESIZE)"
 printf '%s\n' \
@@ -87,7 +87,7 @@ container_common=(
   run
   --rm
   --platform linux/arm64
-  --user 0:0
+  --user 1000:1000
   --env "PREFIX=${termux_prefix}"
   --env "HOME=/tmp"
   --mount "type=bind,src=${repo_root},dst=/workspace,readonly"
@@ -96,20 +96,20 @@ container_common=(
 
 run_shell() {
   "${container_runtime}" "${container_common[@]}" \
-    --entrypoint "${termux_shell}" "${image}" "$@"
+    "${image}" "$@"
 }
 
 run_entrypoint() {
-  local entrypoint="$1"
-  shift
   "${container_runtime}" "${container_common[@]}" \
-    --entrypoint "${entrypoint}" "${image}" "$@"
+    "${image}" "$@"
 }
 
 run_shell -c '
   set -eu
   printf "container_arch=%s\n" "$(uname -m)"
-  printf "container_page_size=%s\n" "$(getconf PAGESIZE)"
+  container_page_size_kb="$(sed -n 's/^KernelPageSize:[[:space:]]*\([0-9][0-9]*\) kB$/\1/p' /proc/self/smaps | sed -n '1p')"
+  test -n "${container_page_size_kb}"
+  printf "container_page_size=%s\n" "$((container_page_size_kb * 1024))"
   test -x /system/bin/linker64
   test ! -e /system/bin/app_process
   test ! -e /system/bin/app_process64
