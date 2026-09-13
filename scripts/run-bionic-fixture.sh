@@ -100,11 +100,6 @@ run_shell() {
     "${image}" "${termux_shell}" "$@"
 }
 
-run_entrypoint() {
-  "${container_runtime}" "${container_common[@]}" \
-    "${image}" "$@"
-}
-
 run_shell -c '
   set -eu
   printf "container_arch=%s\n" "$(uname -m)"
@@ -172,7 +167,7 @@ run_shell -c 'exec /artifacts/fixture' \
   > "${case_root}/baseline.stdout" \
   2> "${case_root}/baseline.stderr"
 baseline_status=$?
-run_entrypoint "${linker}" /artifacts/fixture \
+run_shell -c 'exec "$1" /artifacts/fixture' -- "${linker}" \
   > "${case_root}/linker.stdout" \
   2> "${case_root}/linker.stderr"
 linker_status=$?
