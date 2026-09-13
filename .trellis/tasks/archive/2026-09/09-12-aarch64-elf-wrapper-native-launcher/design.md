@@ -59,6 +59,7 @@ The launcher must be:
 - AArch64 ELF64 little-endian;
 - `ET_DYN` static PIE with no required interpreter;
 - entry point inside an executable `PT_LOAD`;
+- contain the exact `URPROTECT-AARCH64-LAUNCHER-V1` ABI marker;
 - free of dynamic dependencies on glibc, musl, zlib, libcrypto, .NET, or the
   host loader;
 - built with pinned native tools and deterministic flags.
@@ -152,10 +153,11 @@ optional heap, and zlib-header APIs. If trimming miniz changes source files,
 record the patch and checksums.
 
 Build with the pinned native ARM64 musl/static toolchain using static-PIE
-flags, hidden build paths, no build ID, and stripped symbols. The build
-manifest records compiler/linker versions, flags, miniz commit/file hashes,
-SHA-256 source revision, and resulting launcher hash. Release notices include
-the native source and applicable MIT notice.
+flags, the checked-in `musl-static-pie.specs` fragment (selecting `rcrt1.o`
+and suppressing `PT_INTERP` for older musl specs), hidden build paths, no build
+ID, and stripped symbols. The build manifest records compiler/linker versions,
+flags, miniz commit/file hashes, SHA-256 source revision, and resulting launcher
+hash. Release notices include the native source and applicable MIT notice.
 
 ## 5. Launcher Runtime
 
@@ -218,7 +220,9 @@ existing managed runtime path.
 
 Pack reports include wrapper/frame version, launcher ABI and hash, codec/flags,
 source/encoded/wrapper sizes and hashes, launcher provenance, publication
-status, and ordered diagnostics. Absolute paths and temporary names are
+status, and ordered diagnostics. The report includes the frozen launcher
+marker and ABI version; release-side provenance additionally records the
+compiler and miniz/source hashes. Absolute paths and temporary names are
 excluded by default.
 
 ## 7. Test and CI Architecture

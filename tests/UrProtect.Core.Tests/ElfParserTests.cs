@@ -39,12 +39,23 @@ public sealed class ElfParserTests
     {
         var bytes = ElfFixture.MinimalPie();
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(232), ElfConstants.PtNull);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(24), 0);
 
         var result = ElfParser.Parse(bytes);
 
         Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.NotNull(result.File);
         Assert.Equal(ElfFileKind.SharedObject, result.File!.Kind);
+    }
+
+    [Fact]
+    public void ClassifiesAStaticPieLauncherWithoutAnInterpreter()
+    {
+        var result = ElfParser.Parse(ElfFixture.StaticPieLauncher());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Equal(ElfFileKind.StaticPieExecutable, result.File!.Kind);
     }
 
     [Fact]

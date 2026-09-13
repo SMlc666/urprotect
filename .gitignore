@@ -9,3 +9,6 @@
 
 **/TestResults/
 coverage.cobertura.xml
+
+# Native launcher build outputs
+native/**/build/

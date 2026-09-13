@@ -19,7 +19,7 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
   exit 2
 fi
 
-for required_command in cmp dotnet file readelf timeout python3; do
+for required_command in cmp dotnet file grep head make mktemp readelf timeout python3; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "${required_command} is required to run packed fixture profile ${requested_profile}" >&2
     exit 127
@@ -31,6 +31,7 @@ manifest="${repo_root}/fixtures/manifest.json"
 artifact_root="${PACKED_FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/packed/${requested_profile}}"
 fixture_root="${FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/fixtures/${requested_profile}}"
 run_timeout="${PACKED_FIXTURE_TIMEOUT_SECONDS:-45}"
+dotnet_cli=(dotnet run --project "${repo_root}/src/UrProtect.Cli" --configuration Release --no-build --no-restore --)
 mkdir -p "${artifact_root}"
 
 if [[ "${requested_profile}" != "pr" ]]; then
@@ -40,24 +41,30 @@ fi
 
 "${repo_root}/scripts/run-fixture-matrix.sh" --profile "${requested_profile}"
 
-launcher_root="${artifact_root}/launcher"
-mkdir -p "${launcher_root}"
-dotnet publish "${repo_root}/src/UrProtect.Cli" \
-  --configuration Release \
-  --runtime linux-arm64 \
-  --self-contained true \
-  --output "${launcher_root}" \
-  --no-restore \
-  --nologo \
-  -p:PublishSingleFile=true \
-  -p:IncludeNativeLibrariesForSelfExtract=true \
-  -p:DebugType=None \
-  -p:StripSymbols=true
-launcher="${launcher_root}/urprotect"
+launcher_root="${artifact_root}/native-launcher"
+native_launcher_compiler="${NATIVE_LAUNCHER_CC:-musl-gcc}"
+if ! command -v "${native_launcher_compiler%% *}" >/dev/null 2>&1; then
+  echo "${native_launcher_compiler} is required to build the native launcher" >&2
+  exit 127
+fi
+make -C "${repo_root}/native/urprotect-launcher" \
+  BUILD_DIR="${launcher_root}" \
+  CC="${native_launcher_compiler}" \
+  SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}" all self-test
+launcher="${launcher_root}/urprotect-launcher"
+native_launcher_self_test="${launcher_root}/urprotect-launcher-self-test"
 if [[ ! -x "${launcher}" ]]; then
-  echo "the native AArch64 launcher was not published: ${launcher}" >&2
+  echo "the native AArch64 launcher was not built: ${launcher}" >&2
   exit 1
 fi
+if [[ ! -x "${native_launcher_self_test}" ]]; then
+  echo "the native AArch64 launcher self-test was not built: ${native_launcher_self_test}" >&2
+  exit 1
+fi
+"${native_launcher_self_test}"
+NATIVE_LAUNCHER_TEST_ARTIFACT_ROOT="${artifact_root}/launcher-tests" \
+  DOTNET="$(command -v dotnet)" \
+  "${repo_root}/native/urprotect-launcher/test_launcher.sh" "${launcher}"
 
 profile_stream="$(python3 "${repo_root}/scripts/validate-fixtures.py" "${manifest}" "${requested_profile}" --emit)"
 mapfile -t profiles <<< "${profile_stream}"
@@ -116,7 +123,7 @@ PY
   baseline_status=$?
   set -e
 
-  "${launcher}" pack "${binary}" \
+  "${dotnet_cli[@]}" pack "${binary}" \
     --output "${wrapper}" \
     --launcher "${launcher}" \
     --json "${case_root}/pack.json" \

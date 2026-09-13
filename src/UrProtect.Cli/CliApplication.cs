@@ -376,8 +376,7 @@ public sealed class CliApplication
             return (int)ProductExitCode.Usage;
         }
 
-        var launcherPath = options.LauncherPath ?? Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(launcherPath))
+        if (string.IsNullOrWhiteSpace(options.LauncherPath))
         {
             return WritePackFailure(
                 options,
@@ -393,33 +392,7 @@ public sealed class CliApplication
                         new Diagnostic(
                             DiagnosticSeverity.Error,
                             DiagnosticCode.LauncherUnavailable,
-                            "The current process path is unavailable; pass --launcher explicitly."),
-                    }),
-                stdout,
-                stderr);
-        }
-
-        if (options.LauncherPath is null
-            && !string.Equals(
-                Path.GetFileNameWithoutExtension(launcherPath),
-                "urprotect",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return WritePackFailure(
-                options,
-                new ElfPackResult(
-                    null,
-                    0,
-                    0,
-                    null,
-                    null,
-                    null,
-                    new[]
-                    {
-                        new Diagnostic(
-                            DiagnosticSeverity.Error,
-                            DiagnosticCode.LauncherUnavailable,
-                            "The default pack launcher must be the self-contained urprotect executable; pass --launcher explicitly otherwise."),
+                            "pack requires --launcher <native-launcher>; the C# packer cannot be used as a native wrapper."),
                     }),
                 stdout,
                 stderr);
@@ -428,7 +401,7 @@ public sealed class CliApplication
         var result = new ElfPackService().Pack(
             options.InputPath,
             options.OutputPath,
-            launcherPath);
+            options.LauncherPath);
         return WritePackResult(options, result, stdout, stderr);
     }
 

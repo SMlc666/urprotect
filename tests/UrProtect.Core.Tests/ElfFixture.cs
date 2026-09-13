@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using UrProtect.Core.Elf;
+using UrProtect.Core.Pack;
 
 namespace UrProtect.Core.Tests;
 
@@ -56,6 +57,18 @@ internal static class ElfFixture
         // NOP at the ET_DYN entry point.
         WriteUInt32(span, 0x200, 0xD503201F);
         return bytes;
+    }
+
+    public static byte[] StaticPieLauncher(bool includeMarker = true)
+    {
+        var bytes = MinimalPie();
+        bytes.AsSpan(232, 56).Clear();
+        if (!includeMarker)
+        {
+            return bytes;
+        }
+
+        return bytes.Concat(Encoding.ASCII.GetBytes(LauncherContract.Marker)).ToArray();
     }
 
     private static void WriteProgramHeader(

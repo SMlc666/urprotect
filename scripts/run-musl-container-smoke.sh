@@ -6,7 +6,7 @@ artifact_root="${MUSL_CONTAINER_ARTIFACT_ROOT:-${repo_root}/.artifacts/musl-cont
 run_timeout="${MUSL_CONTAINER_TIMEOUT_SECONDS:-45}"
 mkdir -p "${artifact_root}"
 
-for required_command in cmp dotnet file musl-gcc python3 readelf timeout; do
+for required_command in cmp dotnet file make musl-gcc python3 readelf timeout; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "${required_command} is required for the musl container smoke" >&2
     exit 127
@@ -89,27 +89,26 @@ cmp -- "${artifact_root}/baseline.stdout" "${artifact_root}/output.stdout"
 cmp -- "${artifact_root}/baseline.stderr" "${artifact_root}/output.stderr"
 printf '%s\n' "PASS musl-container: baseline/output behavior and byte identity match"
 
-launcher_directory="${artifact_root}/launcher"
-launcher="${launcher_directory}/urprotect"
+launcher_directory="${artifact_root}/native-launcher"
+launcher="${launcher_directory}/urprotect-launcher"
 packed="${artifact_root}/packed-fixture"
 mkdir -p "${launcher_directory}"
-dotnet publish "${repo_root}/src/UrProtect.Cli" \
-  --configuration Release \
-  --runtime linux-arm64 \
-  --self-contained true \
-  --output "${launcher_directory}" \
-  --no-restore \
-  --nologo \
-  -p:PublishSingleFile=true \
-  -p:IncludeNativeLibrariesForSelfExtract=true \
-  -p:DebugType=None \
-  -p:StripSymbols=true
+make -C "${repo_root}/native/urprotect-launcher" \
+  BUILD_DIR="${launcher_directory}" \
+  CC="${NATIVE_LAUNCHER_CC:-musl-gcc}" \
+  SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}" all self-test
 if [[ ! -x "${launcher}" ]]; then
-  echo "musl launcher publish did not produce ${launcher}" >&2
+  echo "musl launcher build did not produce ${launcher}" >&2
   exit 1
 fi
+"${launcher_directory}/urprotect-launcher-self-test"
+NATIVE_LAUNCHER_TEST_ARTIFACT_ROOT="${artifact_root}/launcher-tests" \
+  DOTNET="$(command -v dotnet)" \
+  "${repo_root}/native/urprotect-launcher/test_launcher.sh" "${launcher}"
 
-"${launcher}" pack "${binary}" \
+dotnet run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${binary}" \
   --output "${packed}" \
   --launcher "${launcher}" \
   --json "${artifact_root}/packed-report.json" \

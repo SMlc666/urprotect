@@ -111,6 +111,40 @@ public sealed class PayloadFrameTests
 
     [Fact]
     [Trait("Category", "PackMalformed")]
+    public void RejectsDotDotAsSourceBasename()
+    {
+        var encoded = PayloadFrameCodec.TryEncode(
+            ElfFixture.MinimalPie(),
+            0,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "..",
+            out _,
+            out var diagnostics);
+
+        Assert.False(encoded);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.PayloadMalformed);
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsUnpairedUtf16SourceName()
+    {
+        var encoded = PayloadFrameCodec.TryEncode(
+            ElfFixture.MinimalPie(),
+            0,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "bad\uD800",
+            out _,
+            out var diagnostics);
+
+        Assert.False(encoded);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.PayloadMalformed);
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
     public void RejectsFrameOffsetOverflowBeforeAllocation()
     {
         var encoded = PayloadFrameCodec.TryEncode(

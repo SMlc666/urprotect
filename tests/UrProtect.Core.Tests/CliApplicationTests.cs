@@ -200,7 +200,7 @@ public sealed class CliApplicationTests
         var outputPath = directory.Path("wrapped.elf");
         var reportPath = directory.Path("pack.json");
         File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
-        File.WriteAllBytes(launcherPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
@@ -219,6 +219,31 @@ public sealed class CliApplicationTests
         Assert.True(document.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal("deflate", document.RootElement.GetProperty("payload").GetProperty("compression").GetString());
         Assert.True(document.RootElement.GetProperty("output").GetProperty("published").GetBoolean());
+        Assert.Equal(1, document.RootElement.GetProperty("payload").GetProperty("launcherAbiVersion").GetInt32());
+        Assert.Equal(1, document.RootElement.GetProperty("payload").GetProperty("frameVersion").GetInt32());
+        Assert.Equal(LauncherContract.Marker, document.RootElement.GetProperty("payload").GetProperty("launcherMarker").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("payload").GetProperty("launcherSha256").GetString()));
+    }
+
+    [Fact]
+    [Trait("Category", "PackCli")]
+    public void RequiresTheNativeLauncherForPack()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[] { "pack", inputPath, "--output", outputPath },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Validation, exitCode);
+        Assert.Contains("LauncherUnavailable", stderr.ToString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(outputPath));
     }
 
     [Fact]
@@ -230,7 +255,7 @@ public sealed class CliApplicationTests
         var launcherPath = directory.Path("launcher.elf");
         var outputPath = directory.Path("wrapped.elf");
         File.WriteAllBytes(inputPath, new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' });
-        File.WriteAllBytes(launcherPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 

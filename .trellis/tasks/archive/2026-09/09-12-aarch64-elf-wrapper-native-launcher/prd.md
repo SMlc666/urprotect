@@ -22,9 +22,9 @@ wrapper input.
 - `src/UrProtect.Core/Pack/ElfPackService.cs` validates the source and wrapper
   through the existing parser, rejects shared objects and `RPATH`/`RUNPATH`,
   and publishes launcher-plus-frame bytes atomically.
-- `src/UrProtect.Cli/CliApplication.cs` currently performs frame discovery,
-  decompression, source validation, temporary extraction, argument/environment
-  reconstruction, and `execve` inside the .NET process.
+- `src/UrProtect.Cli/CliApplication.cs` remains the pack/report boundary, while
+  the Wrapper 0.2 runtime path is implemented by the static launcher under
+  `native/urprotect-launcher/`.
 - The existing ARM64 CI has native glibc fixture coverage and a pinned ARM64
   musl container smoke. Release rehearsal `34681420471` passed package,
   release smoke, fixture, and musl payload checks.
@@ -135,20 +135,24 @@ dynamically linked `ET_DYN` PIE with a supported interpreter. `memfd`/
 `execveat`, custom loading, and separate profile-specific launchers remain
 deferred. All native source, licenses, and checksums must be recorded.
 
+The frozen Wrapper 0.2 launcher marker is
+`URPROTECT-AARCH64-LAUNCHER-V1`; the packer rejects static PIE binaries without
+that marker, and reports the launcher ABI, marker, and digest.
+
 ## Acceptance Criteria
 
-- [ ] Native launcher size is materially smaller than the Wrapper 0.1 .NET
+- [x] Native launcher size is materially smaller than the Wrapper 0.1 .NET
   launcher and its exact build inputs are recorded.
-- [ ] Existing Wrapper 0.1 frames either execute through a documented
+- [x] Existing Wrapper 0.1 frames either execute through a documented
   compatibility path or are rejected with a stable version diagnostic.
-- [ ] Wrapper 0.2 packs and runs the native ARM64 glibc PR fixture covering set.
-- [ ] Pinned ARM64 musl container payload smoke passes with the native launcher
+- [x] Wrapper 0.2 packs and runs the native ARM64 glibc PR fixture covering set.
+- [x] Pinned ARM64 musl container payload smoke passes with the native launcher
   strategy claimed by CI.
-- [ ] Valid arguments, environment, cwd, stdout/stderr, exit status, signals,
+- [x] Valid arguments, environment, cwd, stdout/stderr, exit status, signals,
   and declared files match baseline behavior.
-- [ ] Tamper, truncation, malformed bounds, decompression-limit, wrong ABI,
+- [x] Tamper, truncation, malformed bounds, decompression-limit, wrong ABI,
   digest, and exec failures fail closed without launching the payload.
-- [ ] Repeated builds with pinned inputs produce identical launcher and wrapper
+- [x] Repeated builds with pinned inputs produce identical launcher and wrapper
   bytes, or any intentional nondeterminism is explicitly excluded and tested.
-- [ ] Release artifacts include native launcher provenance, notices, SBOM data,
+- [x] Release artifacts include native launcher provenance, notices, SBOM data,
   and environment evidence.
