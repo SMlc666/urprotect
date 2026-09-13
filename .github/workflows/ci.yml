@@ -122,7 +122,11 @@ jobs:
       - name: Run native ARM64 bionic fixture
         run: ./scripts/run-bionic-fixture.sh
       - name: Check native ARM64 bionic evidence
-        run: python3 scripts/check-evidence.py fixtures/manifest.json --execution native-arm64-bionic-container
+        run: |
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --execution native-arm64-bionic-container
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --feature runtime.bionic.linker
       - name: Upload bionic evidence
         if: always()
         uses: actions/upload-artifact@v4

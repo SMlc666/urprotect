@@ -88,14 +88,13 @@
     },
     {
       "id": "runtime.bionic.linker",
-      "status": "unknown",
+      "status": "validated",
       "obligation": "AArch64 PIE is executed by the pinned bionic linker without host-libc fallback",
       "witness": "c-termux-bionic-pie",
       "oracle": "scripts/run-bionic-fixture.sh",
       "evidence": [
         ".artifacts/bionic"
-      ],
-      "nextEvidence": "Run the pinned native-arm64-bionic-container case and publish linker/page-size evidence."
+      ]
     },
     {
       "id": "runtime.host-context-v1",
