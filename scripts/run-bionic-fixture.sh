@@ -56,6 +56,7 @@ termux_source_commit="${matrix_values[1]}"
 clang_package="${matrix_values[2]}"
 linker="${matrix_values[3]}"
 termux_prefix="/data/data/com.termux/files/usr"
+termux_shell="${termux_prefix}/bin/sh"
 
 host_page_size="$(getconf PAGESIZE)"
 printf '%s\n' \
@@ -96,7 +97,7 @@ container_common=(
 
 run_shell() {
   "${container_runtime}" "${container_common[@]}" \
-    "${image}" "$@"
+    "${image}" "${termux_shell}" "$@"
 }
 
 run_entrypoint() {
