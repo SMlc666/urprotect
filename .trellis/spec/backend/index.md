@@ -13,6 +13,7 @@ no database-backed application layer.
 | [Database Guidelines](./database-guidelines.md) | Database scope and persistence boundary | Not applicable: no database |
 | [Error Handling](./error-handling.md) | Diagnostics, failure propagation, and CLI exit codes | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | .NET, binary-safety, testing, and CI contracts | Filled |
+| [Runtime Compatibility](./runtime-compatibility.md) | HostContext, no-path handoff, and matrix evidence contracts | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Diagnostics and stdout/stderr behavior | Filled; no logging framework |
 
 ## Package Boundaries

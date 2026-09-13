@@ -60,14 +60,35 @@ jobs:
       - name: Check coverage floor
         run: python3 scripts/check-coverage.py
       - name: Fixture smoke
-        run: ./scripts/run-fixture-matrix.sh --profile pr
+        run: ./scripts/run-fixture-matrix.sh --tier pr
+      - name: Check PR fixture evidence
+        run: python3 scripts/check-evidence.py fixtures/manifest.json --tier pr --execution native-linux
       - name: Install pinned native launcher toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             make musl=1.2.4-2 musl-dev=1.2.4-2 musl-tools=1.2.4-2
       - name: Packed fixture smoke
-        run: ./scripts/run-packed-fixture-matrix.sh --profile pr
+        run: |
+          mkdir -p .artifacts/packed/pr
+          ./scripts/run-packed-fixture-matrix.sh --tier pr \
+            2>&1 | tee .artifacts/packed/pr/handoff.log
+      - name: Check PR handoff evidence
+        run: python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
+      - name: HostContext runtime contract smoke
+        run: |
+          mkdir -p .artifacts/host-context/pr
+          make -C native/urprotect-runtime test \
+            2>&1 | tee .artifacts/host-context/pr/self-test.log
+      - name: Check PR HostContext evidence
+        run: |
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v1
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
+      - name: Render compatibility matrix
+        run: |
+          python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
+          python3 scripts/render-compatibility-matrix.py \
+            fixtures/manifest.json --output .artifacts/compatibility-matrix.md
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -77,9 +98,37 @@ jobs:
             tests/**/TestResults/**
             .artifacts/fixtures/pr/
             .artifacts/packed/pr/
+            .artifacts/host-context/
             .artifacts/environment/
+            .artifacts/compatibility-matrix.md
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
+          if-no-files-found: warn
+
+  bionic-native-arm64:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record native bionic runner environment
+        run: |
+          mkdir -p .artifacts/bionic
+          ./.github/scripts/record-environment.sh \
+            .artifacts/bionic/runner-environment.txt \
+            aarch64 native-arm64-bionic-container
+      - name: Verify Docker runtime
+        run: docker version
+      - name: Run native ARM64 bionic fixture
+        run: ./scripts/run-bionic-fixture.sh
+      - name: Check native ARM64 bionic evidence
+        run: python3 scripts/check-evidence.py fixtures/manifest.json --execution native-arm64-bionic-container
+      - name: Upload bionic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bionic-native-arm64-${{ github.run_id }}
+          path: .artifacts/bionic/
           if-no-files-found: warn
 
   android-container-probe:
@@ -168,6 +217,18 @@ jobs:
           gradle-version: '8.9'
       - name: Run arm64-v8a native-bridge E2E on x86_64 AVD
         run: ./scripts/run-android-avd.sh
+      - name: Check Android native-bridge evidence
+        run: |
+          evidence_root=.artifacts/android-arm64-native-bridge-on-x64
+          if [[ -f "${evidence_root}/logcat.txt" ]]; then
+            python3 scripts/check-evidence.py fixtures/manifest.json \
+              --execution android-arm64-native-bridge-on-x64
+          elif grep -Fq 'ANDROID_AVD_UNAVAILABLE ' "${evidence_root}/run.log" 2>/dev/null; then
+            echo 'Android native-bridge evidence is unavailable; the optional case is not claimed.'
+          else
+            echo 'Android native-bridge evidence is missing its execution witness.' >&2
+            exit 1
+          fi
       - name: Upload Android AVD evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -236,7 +297,10 @@ jobs:
       - name: Run bounded parser fuzz target
         run: FUZZ_RESULTS_DIRECTORY=".artifacts/fixtures/${FIXTURE_TIER}/fuzz" ./scripts/run-parser-fuzz.sh
       - name: Run compiler and language fixture matrix
-        run: ./scripts/run-fixture-matrix.sh --profile "${FIXTURE_TIER}"
+        run: ./scripts/run-fixture-matrix.sh --tier "${FIXTURE_TIER}"
+      - name: Check nightly native Linux evidence
+        if: env.FIXTURE_TIER == 'nightly'
+        run: python3 scripts/check-evidence.py fixtures/manifest.json --tier nightly --execution native-linux
       - name: Upload fixture evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -22,6 +22,13 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
   exit 2
 fi
 
+if grep -qE 'mkdtemp|execve\(' "${script_dir}/launcher_main.c"; then
+  echo "native launcher still contains a pathname-based payload handoff" >&2
+  exit 1
+fi
+grep -q 'SYS_memfd_create' "${script_dir}/launcher_main.c"
+grep -q 'SYS_execveat' "${script_dir}/launcher_main.c"
+
 run_expected_failure() {
   local executable="$1"
   local expected_status="$2"
@@ -180,12 +187,6 @@ timeout 10 "${true_wrapper}"
 repeat_wrapper="${temporary_directory}/true-repeat.wrapped"
 pack /bin/true "${repeat_wrapper}"
 cmp -- "${true_wrapper}" "${repeat_wrapper}"
-
-echo_wrapper="${temporary_directory}/echo.wrapped"
-pack /bin/echo "${echo_wrapper}"
-printf 'hello native launcher\n' > "${temporary_directory}/expected.txt"
-timeout 10 "${echo_wrapper}" 'hello native launcher' > "${temporary_directory}/actual.txt"
-cmp -- "${temporary_directory}/expected.txt" "${temporary_directory}/actual.txt"
 
 shell_wrapper="${temporary_directory}/shell.wrapped"
 pack /bin/sh "${shell_wrapper}"

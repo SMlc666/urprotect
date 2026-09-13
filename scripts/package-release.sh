@@ -67,8 +67,8 @@ native_launcher_sha256="$(sha256sum "${native_launcher}" | awk '{print $1}')"
 "${native_launcher_build}/urprotect-launcher-self-test"
 
 export GZIP=-n
-for profile in glibc musl; do
-  if [[ "${profile}" == glibc ]]; then
+for libc_variant in glibc musl; do
+  if [[ "${libc_variant}" == glibc ]]; then
     rid="linux-arm64"
     expected_loader="ld-linux-aarch64.so.1"
   else
@@ -76,7 +76,7 @@ for profile in glibc musl; do
     expected_loader="ld-musl-aarch64.so.1"
   fi
 
-  package_name="urprotect-linux-arm64-${profile}-${version}"
+  package_name="urprotect-linux-arm64-${libc_variant}-${version}"
   publish_directory="${work_root}/${package_name}/publish"
   package_directory="${work_root}/${package_name}"
   archive="${output_root}/${package_name}.tar.gz"
@@ -150,7 +150,7 @@ PY
   mv -- "${binary}" "${package_directory}/urprotect"
   rm -rf -- "${publish_directory}"
   cat > "${package_directory}/README.md" <<EOF
-UrProtect Validator ${version} (${profile})
+UrProtect Validator ${version} (${libc_variant})
 
 This package validates ELF64 little-endian AArch64 ET_DYN PIE executables and
 dynamically linked shared objects. It can emit a byte-identical no-op copy and
@@ -159,21 +159,28 @@ ET_DYN PIE executable as an outer compressed-payload ELF wrapper:
 
   ./urprotect pack ./program --output ./program.wrapped --launcher ./urprotect-launcher
 
-The wrapper validates the payload, extracts it to a private temporary path, and
-uses the normal Linux loader through execve. It is not a custom ELF loader and
-does not encrypt or rewrite code. The bundled static native launcher is
-included as ./urprotect-launcher.
+The wrapper validates the payload, writes it to an anonymous memfd, and uses
+the normal Linux loader through execveat(AT_EMPTY_PATH). It is not a custom ELF
+loader and does not encrypt or rewrite code. The bundled static native launcher
+is included as ./urprotect-launcher.
 
-Android, shared-object wrapping, and memfd execution are deferred.
+The repository also contains a separately gated native ARM64 bionic evidence
+lane and a narrow in-process HostContext runtime slice. Those evidence paths
+are not enabled by the standalone validator package.
 
 Usage:
   ./urprotect validate ./program
   ./urprotect validate ./program --copy ./program.checked --json ./report.json
 
 This release does not rewrite code, encrypt code, inject runtime behavior, or
-claim physical Android-device compatibility. The ${profile} package must run
-on a native ARM64 ${profile} environment.
+claim physical Android-device compatibility. The ${libc_variant} package must run
+on a native ARM64 ${libc_variant} environment.
 EOF
+  cp "${repo_root}/COMPATIBILITY.md" "${package_directory}/COMPATIBILITY.md"
+  cp "${repo_root}/fixtures/manifest.json" "${package_directory}/fixture-manifest.json"
+  python3 "${repo_root}/scripts/render-compatibility-matrix.py" \
+    "${repo_root}/fixtures/manifest.json" \
+    --output "${package_directory}/compatibility-matrix.md"
   mkdir -p "${package_directory}/THIRD_PARTY_NOTICES"
   cp "${repo_root}/third_party/AsmStone/LICENSE" "${package_directory}/THIRD_PARTY_NOTICES/AsmStone-LICENSE"
   cp "${repo_root}/third_party/AsmStone/COMMIT" "${package_directory}/THIRD_PARTY_NOTICES/AsmStone-COMMIT"
@@ -192,6 +199,7 @@ EOF
     "${repo_root}/native/urprotect-launcher/build.sh" \
     "${repo_root}/native/urprotect-launcher/provenance.sh" \
     "${repo_root}/native/urprotect-launcher/test_launcher.sh" \
+    "${repo_root}/native/urprotect-launcher/test_managed_handoff.sh" \
     "${package_directory}/NATIVE_LAUNCHER_SOURCE/native/urprotect-launcher/"
   cp "${repo_root}/third_party/miniz/"* \
     "${package_directory}/NATIVE_LAUNCHER_SOURCE/third_party/miniz/"

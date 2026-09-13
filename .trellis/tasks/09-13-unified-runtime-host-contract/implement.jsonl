@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"The native HostContext runtime must use bounded binary handling, explicit address ownership, pinned inputs, and focused malformed/runtime tests."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"ABI negotiation, immutable image handoff, digest failures, and entry failures must propagate as stable fail-closed diagnostics."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Runtime code, public ABI, Core frame ownership, native integration, and tests must remain in their established repository boundaries."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"The runtime must emit only stable boundary diagnostics and retain evidence without exposing payloads, paths, or environments."}
+{"file":".trellis/tasks/archive/2026-09/09-12-aarch64-elf-wrapper-native-launcher/research.md","reason":"The previous native launcher research records frame, toolchain, loader, and deferred memfd/custom-loader constraints that this child revisits."}

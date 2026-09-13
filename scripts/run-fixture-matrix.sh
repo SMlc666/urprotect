@@ -1,57 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-requested_profile="${1:---profile}"
-if [[ "${requested_profile}" == "--profile" ]]; then
-  requested_profile="${2:-pr}"
+requested_tier="${1:---tier}"
+if [[ "${requested_tier}" == "--tier" ]]; then
+  requested_tier="${2:-pr}"
 fi
 
-case "${requested_profile}" in
+case "${requested_tier}" in
   pr|nightly|release) ;;
   *)
-    echo "unsupported fixture profile: ${requested_profile}" >&2
+    echo "unsupported fixture tier: ${requested_tier}" >&2
     exit 2
     ;;
 esac
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  echo "dotnet is required to run fixture profile ${requested_profile}" >&2
+  echo "dotnet is required to run fixture tier ${requested_tier}" >&2
   exit 127
 fi
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
-  echo "native fixture profiles require an aarch64 runner; got $(uname -m)" >&2
+  echo "native fixture tiers require an aarch64 runner; got $(uname -m)" >&2
   exit 2
 fi
 
 for required_command in cmp file readelf timeout python3; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
-    echo "${required_command} is required to run fixture profile ${requested_profile}" >&2
+    echo "${required_command} is required to run fixture tier ${requested_tier}" >&2
     exit 127
   fi
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 manifest="${repo_root}/fixtures/manifest.json"
-artifact_root="${FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/fixtures/${requested_profile}}"
+artifact_root="${FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/fixtures/${requested_tier}}"
 mkdir -p "${artifact_root}"
+artifact_root="$(cd "${artifact_root}" && pwd)"
 
-profile_stream="$(python3 "${repo_root}/scripts/validate-fixtures.py" "${manifest}" "${requested_profile}" --emit)"
-mapfile -t profiles <<< "${profile_stream}"
+case_stream="$(python3 "${repo_root}/scripts/validate-fixtures.py" "${manifest}" --tier "${requested_tier}" --emit)"
+mapfile -t cases <<< "${case_stream}"
 
 run_timeout="${FIXTURE_TIMEOUT_SECONDS:-45}"
 dotnet_cli=(dotnet run --project "${repo_root}/src/UrProtect.Cli" --configuration Release --no-restore --)
 
-profile_value() {
-  local profile_json="$1"
+case_value() {
+  local case_json="$1"
   local field="$2"
-  python3 - "${profile_json}" "${field}" <<'PY'
+  python3 - "${case_json}" "${field}" <<'PY'
 import json
 import sys
 
-profile = json.loads(sys.argv[1])
+case = json.loads(sys.argv[1])
 field = sys.argv[2]
-value = profile.get(field, "")
+value = case.get(field, "")
 if isinstance(value, bool):
     print("true" if value else "false")
 else:
@@ -63,16 +64,16 @@ has_tool() {
   command -v "$1" >/dev/null 2>&1
 }
 
-required_profile() {
-  [[ "$(profile_value "$1" required)" == "true" ]]
+required_case() {
+  [[ "$(case_value "$1" required)" == "true" ]]
 }
 
 skip_or_fail() {
-  local profile_json="$1"
+  local case_json="$1"
   local reason="$2"
   local id
-  id="$(profile_value "${profile_json}" id)"
-  if required_profile "${profile_json}"; then
+  id="$(case_value "${case_json}" id)"
+  if required_case "${case_json}"; then
     echo "FAIL ${id}: ${reason}" >&2
     return 1
   fi
@@ -105,7 +106,7 @@ import pathlib
 import sys
 
 report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
-profile_id = sys.argv[2]
+case_id = sys.argv[2]
 required = (
     ("Class", "ELF64"),
     ("Data", "2's complement, little endian"),
@@ -123,13 +124,13 @@ if "There is no dynamic section in this file." in report:
     missing.append("dynamic section")
 if missing:
     print(
-        f"{profile_id}: readelf oracle mismatch; missing {', '.join(missing)}",
+        f"{case_id}: readelf oracle mismatch; missing {', '.join(missing)}",
         file=sys.stderr,
     )
     raise SystemExit(1)
 PY
   then
-    echo "FAIL ${id}: readelf structural oracle rejected the supported ELF profile" >&2
+    echo "FAIL ${id}: readelf structural oracle rejected the supported ELF case" >&2
     return 1
   fi
 
@@ -172,69 +173,69 @@ PY
   echo "PASS ${id}: baseline/output behavior and byte identity match"
 }
 
-build_profile() {
-  local profile_json="$1"
+build_case() {
+  local case_json="$1"
   local id language builder source output_dir binary launcher library_path musl_root
-  id="$(profile_value "${profile_json}" id)"
-  language="$(profile_value "${profile_json}" language)"
-  builder="$(profile_value "${profile_json}" builder)"
-  source="${repo_root}/$(profile_value "${profile_json}" source)"
+  id="$(case_value "${case_json}" id)"
+  language="$(case_value "${case_json}" language)"
+  builder="$(case_value "${case_json}" builder)"
+  source="${repo_root}/$(case_value "${case_json}" source)"
   output_dir="${artifact_root}/${id}/build"
   mkdir -p "${output_dir}"
 
   case "${builder}" in
     gcc-c)
-      has_tool gcc || { skip_or_fail "${profile_json}" "gcc is unavailable"; return; }
+      has_tool gcc || { skip_or_fail "${case_json}" "gcc is unavailable"; return; }
       gcc -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     gcc-cxx)
-      has_tool g++ || { skip_or_fail "${profile_json}" "g++ is unavailable"; return; }
+      has_tool g++ || { skip_or_fail "${case_json}" "g++ is unavailable"; return; }
       g++ -std=c++17 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     clang-c)
-      has_tool clang || { skip_or_fail "${profile_json}" "clang is unavailable"; return; }
+      has_tool clang || { skip_or_fail "${case_json}" "clang is unavailable"; return; }
       clang -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     clang-cxx)
-      has_tool clang++ || { skip_or_fail "${profile_json}" "clang++ is unavailable"; return; }
+      has_tool clang++ || { skip_or_fail "${case_json}" "clang++ is unavailable"; return; }
       clang++ -std=c++17 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     musl-gcc)
-      has_tool musl-gcc || { skip_or_fail "${profile_json}" "musl-gcc is unavailable"; return; }
+      has_tool musl-gcc || { skip_or_fail "${case_json}" "musl-gcc is unavailable"; return; }
       musl_root="${MUSL_TOOLCHAIN_ROOT:-$(cd "$(dirname "$(command -v musl-gcc)")/.." && pwd)}"
       launcher="${MUSL_TOOLCHAIN_LOADER:-${musl_root}/lib/ld-musl-aarch64.so.1}"
       library_path="${MUSL_TOOLCHAIN_LIBRARY_PATH:-${musl_root}/lib}"
       if [[ ! -x "${launcher}" ]]; then
-        skip_or_fail "${profile_json}" "musl loader is unavailable: ${launcher}"
+        skip_or_fail "${case_json}" "musl loader is unavailable: ${launcher}"
         return
       fi
       musl-gcc -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     rust-gnu)
-      has_tool rustc || { skip_or_fail "${profile_json}" "rustc is unavailable"; return; }
+      has_tool rustc || { skip_or_fail "${case_json}" "rustc is unavailable"; return; }
       rustc --target=aarch64-unknown-linux-gnu -C opt-level=2 -C debuginfo=0 \
         -C strip=symbols -C relocation-model=pie "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     go-pie)
-      has_tool go || { skip_or_fail "${profile_json}" "go is unavailable"; return; }
+      has_tool go || { skip_or_fail "${case_json}" "go is unavailable"; return; }
       (cd "$(dirname "${source}")" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
         go build -trimpath -buildvcs=false -buildmode=pie -ldflags='-s -w' \
         -o "${output_dir}/fixture" .)
       binary="${output_dir}/fixture"
       ;;
     zig-musl)
-      has_tool zig || { skip_or_fail "${profile_json}" "zig is unavailable"; return; }
+      has_tool zig || { skip_or_fail "${case_json}" "zig is unavailable"; return; }
       musl_root="${MUSL_TOOLCHAIN_ROOT:-}"
       launcher="${MUSL_TOOLCHAIN_LOADER:-${musl_root}/lib/ld-musl-aarch64.so.1}"
       library_path="${MUSL_TOOLCHAIN_LIBRARY_PATH:-${musl_root}/lib}"
       if [[ -z "${musl_root}" || ! -x "${launcher}" ]]; then
-        skip_or_fail "${profile_json}" "musl loader is unavailable for Zig: ${launcher}"
+        skip_or_fail "${case_json}" "musl loader is unavailable for Zig: ${launcher}"
         return
       fi
       zig build-exe "${source}" -target aarch64-linux-musl -dynamic -fPIE -lc \
@@ -243,7 +244,7 @@ build_profile() {
       binary="${output_dir}/fixture"
       ;;
     nativeaot)
-      has_tool dotnet || { skip_or_fail "${profile_json}" "dotnet is unavailable"; return; }
+      has_tool dotnet || { skip_or_fail "${case_json}" "dotnet is unavailable"; return; }
       set +e
       timeout 300 dotnet publish "${source}" --configuration Release --runtime linux-arm64 \
         --self-contained true --output "${output_dir}/publish" --nologo \
@@ -252,18 +253,22 @@ build_profile() {
       nativeaot_status=$?
       set -e
       if [[ "${nativeaot_status}" -ne 0 ]]; then
-        skip_or_fail "${profile_json}" \
+        skip_or_fail "${case_json}" \
           "NativeAOT publish unavailable or failed (status ${nativeaot_status}); see nativeaot-build.log"
         return
       fi
       binary="${output_dir}/publish/urprotect-fixture-nativeaot"
       ;;
+    termux-clang)
+      skip_or_fail "${case_json}" "bionic case is executed by run-bionic-fixture.sh"
+      return
+      ;;
     android-ndk)
-      skip_or_fail "${profile_json}" "Android APK fixture is executed by run-android-avd.sh"
+      skip_or_fail "${case_json}" "Android APK fixture is executed by run-android-avd.sh"
       return
       ;;
     *)
-      skip_or_fail "${profile_json}" "unknown fixture builder ${builder}"
+      skip_or_fail "${case_json}" "unknown fixture builder ${builder}"
       return
       ;;
   esac
@@ -275,10 +280,10 @@ build_profile() {
   run_binary_case "${id}" "${binary}" "${launcher:-}" "${library_path:-}"
 }
 
-echo "Running fixture tier ${requested_profile} on $(uname -m)"
+echo "Running fixture tier ${requested_tier} on $(uname -m)"
 echo "Artifacts: ${artifact_root}"
-for profile_json in "${profiles[@]}"; do
-  build_profile "${profile_json}"
+for case_json in "${cases[@]}"; do
+  build_case "${case_json}"
 done
 
-echo "Fixture tier ${requested_profile} completed"
+echo "Fixture tier ${requested_tier} completed"

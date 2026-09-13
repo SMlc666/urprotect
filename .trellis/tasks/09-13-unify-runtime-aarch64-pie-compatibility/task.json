@@ -1,0 +1,31 @@
+{
+  "id": "unify-runtime-aarch64-pie-compatibility",
+  "name": "unify-runtime-aarch64-pie-compatibility",
+  "title": "Unify runtime and expand AArch64 PIE compatibility",
+  "description": "Unify the runtime loading model, remove temporary-file dependence, broaden provable AArch64 PIE compatibility, and establish a machine-readable compatibility matrix.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "SMlc666",
+  "assignee": "SMlc666",
+  "createdAt": "2026-09-13",
+  "completedAt": null,
+  "branch": "codex/unify-runtime-aarch64-pie-compatibility",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-13-unified-runtime-host-contract",
+    "09-13-expand-aarch64-pie-compatibility",
+    "09-13-compatibility-matrix-evidence",
+    "09-13-native-arm64-bionic-evidence"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

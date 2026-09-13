@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"ELF feature expansion must reuse BoundedReader/LoadMap, preserve unknown data, and add the required valid/malformed/property/fuzz tests."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"The parser and validator must distinguish malformed, unknown, rejected, and runtime-incompatible AArch64 cases without guessing."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Feature parsing belongs in Core ELF/AArch64 owners while compiler fixture construction remains in fixtures and scripts."}
+{"file":".trellis/tasks/archive/2026-09/09-09-aarch64-elf-protector/research.md","reason":"Historical AArch64, compiler, Android, relocation, page-size, and fixture findings guide the expanded feature inventory."}

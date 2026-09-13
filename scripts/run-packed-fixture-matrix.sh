@@ -1,45 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-requested_profile="${1:---profile}"
-if [[ "${requested_profile}" == "--profile" ]]; then
-  requested_profile="${2:-pr}"
+requested_tier="${1:---tier}"
+if [[ "${requested_tier}" == "--tier" ]]; then
+  requested_tier="${2:-pr}"
 fi
 
-case "${requested_profile}" in
+case "${requested_tier}" in
   pr|nightly|release) ;;
   *)
-    echo "unsupported packed fixture profile: ${requested_profile}" >&2
+    echo "unsupported packed fixture tier: ${requested_tier}" >&2
     exit 2
     ;;
 esac
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
-  echo "packed fixture profiles require an aarch64 runner; got $(uname -m)" >&2
+  echo "packed fixture tiers require an aarch64 runner; got $(uname -m)" >&2
   exit 2
 fi
 
 for required_command in cmp dotnet file grep head make mktemp readelf timeout python3; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
-    echo "${required_command} is required to run packed fixture profile ${requested_profile}" >&2
+    echo "${required_command} is required to run packed fixture tier ${requested_tier}" >&2
     exit 127
   fi
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 manifest="${repo_root}/fixtures/manifest.json"
-artifact_root="${PACKED_FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/packed/${requested_profile}}"
-fixture_root="${FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/fixtures/${requested_profile}}"
+artifact_root="${PACKED_FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/packed/${requested_tier}}"
+fixture_root="${FIXTURE_ARTIFACT_ROOT:-${repo_root}/.artifacts/fixtures/${requested_tier}}"
 run_timeout="${PACKED_FIXTURE_TIMEOUT_SECONDS:-45}"
 dotnet_cli=(dotnet run --project "${repo_root}/src/UrProtect.Cli" --configuration Release --no-build --no-restore --)
 mkdir -p "${artifact_root}"
 
-if [[ "${requested_profile}" != "pr" ]]; then
-  echo "packed fixture profiles currently support only the native glibc PR covering set" >&2
+if [[ "${requested_tier}" != "pr" ]]; then
+  echo "packed fixture tiers currently support only the native glibc PR covering set" >&2
   exit 2
 fi
 
-"${repo_root}/scripts/run-fixture-matrix.sh" --profile "${requested_profile}"
+"${repo_root}/scripts/run-fixture-matrix.sh" --tier "${requested_tier}"
 
 launcher_root="${artifact_root}/native-launcher"
 native_launcher_compiler="${NATIVE_LAUNCHER_CC:-musl-gcc}"
@@ -65,25 +65,28 @@ fi
 NATIVE_LAUNCHER_TEST_ARTIFACT_ROOT="${artifact_root}/launcher-tests" \
   DOTNET="$(command -v dotnet)" \
   "${repo_root}/native/urprotect-launcher/test_launcher.sh" "${launcher}"
+MANAGED_HANDOFF_ARTIFACT_ROOT="${artifact_root}/managed-handoff" \
+  DOTNET="$(command -v dotnet)" \
+  "${repo_root}/native/urprotect-launcher/test_managed_handoff.sh" "${launcher}"
 
-profile_stream="$(python3 "${repo_root}/scripts/validate-fixtures.py" "${manifest}" "${requested_profile}" --emit)"
-mapfile -t profiles <<< "${profile_stream}"
+case_stream="$(python3 "${repo_root}/scripts/validate-fixtures.py" "${manifest}" --tier "${requested_tier}" --emit)"
+mapfile -t cases <<< "${case_stream}"
 
-profile_value() {
-  local profile_json="$1"
+case_value() {
+  local case_json="$1"
   local field="$2"
-  python3 - "${profile_json}" "${field}" <<'PY'
+  python3 - "${case_json}" "${field}" <<'PY'
 import json
 import sys
 
-profile = json.loads(sys.argv[1])
-value = profile.get(sys.argv[2], "")
+case = json.loads(sys.argv[1])
+value = case.get(sys.argv[2], "")
 print("true" if value is True else "false" if value is False else value)
 PY
 }
 
-for profile_json in "${profiles[@]}"; do
-  id="$(profile_value "${profile_json}" id)"
+for case_json in "${cases[@]}"; do
+  id="$(case_value "${case_json}" id)"
   binary="${fixture_root}/${id}/build/fixture"
   case_root="${artifact_root}/${id}"
   wrapper="${case_root}/wrapped"
@@ -177,4 +180,4 @@ PY
   echo "PASS ${id}: packed wrapper preserved native baseline behavior"
 done
 
-echo "Packed fixture profile ${requested_profile} completed"
+echo "Packed fixture tier ${requested_tier} completed"
