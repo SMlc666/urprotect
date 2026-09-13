@@ -107,7 +107,7 @@ run_entrypoint() {
 run_shell -c '
   set -eu
   printf "container_arch=%s\n" "$(uname -m)"
-  container_page_size_kb="$(sed -n 's/^KernelPageSize:[[:space:]]*\([0-9][0-9]*\) kB$/\1/p' /proc/self/smaps | sed -n '1p')"
+  container_page_size_kb="$(sed -n "s/^KernelPageSize:[[:space:]]*\\([0-9][0-9]*\\) kB$/\\1/p" /proc/self/smaps | sed -n "1p")"
   test -n "${container_page_size_kb}"
   printf "container_page_size=%s\n" "$((container_page_size_kb * 1024))"
   test -x /system/bin/linker64
