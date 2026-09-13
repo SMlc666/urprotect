@@ -1,38 +1,30 @@
 # Backend Development Guidelines
 
-> Best practices for backend development in this project.
-
----
-
-## Overview
-
-This directory contains guidelines for backend development. Fill in each file with your project's specific conventions.
-
----
+This repository is a .NET 8 command-line and binary-analysis product. The
+backend layer is the production C# code under `src/UrProtect.Core/` plus the
+CLI boundary under `src/UrProtect.Cli/`. It is not an HTTP service and it has
+no database-backed application layer.
 
 ## Guidelines Index
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | Filled |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | Filled |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | Filled |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [Directory Structure](./directory-structure.md) | Repository and namespace boundaries | Filled |
+| [Database Guidelines](./database-guidelines.md) | Database scope and persistence boundary | Not applicable: no database |
+| [Error Handling](./error-handling.md) | Diagnostics, failure propagation, and CLI exit codes | Filled |
+| [Quality Guidelines](./quality-guidelines.md) | .NET, binary-safety, testing, and CI contracts | Filled |
+| [Logging Guidelines](./logging-guidelines.md) | Diagnostics and stdout/stderr behavior | Filled; no logging framework |
 
----
+## Package Boundaries
 
-## How to Fill These Guidelines
+- `UrProtect.Core` owns binary reads, ELF models, AArch64 analysis, payload
+  frames, pack validation, and the byte-preserving pipeline.
+- `UrProtect.Cli` owns command parsing, stable product exit codes, human output,
+  JSON report serialization, and the native `execve` handoff entry point.
+- `tests/UrProtect.Core.Tests` owns unit, malformed-input, property, golden
+  report, and pack integration tests.
+- `native/`, `scripts/`, `fixtures/`, and `third_party/` are integration and
+  supply-chain boundaries, not C# production namespaces.
 
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+All documents in this directory are written in English because they are loaded
+by coding agents and reviewers as repository contracts.

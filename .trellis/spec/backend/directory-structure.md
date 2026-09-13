@@ -1,92 +1,71 @@
 # Directory Structure
 
-> How backend code is organized in this project.
+## Repository Layout
 
----
+UrProtect is a single .NET repository. Production code, tests, fixtures, CI
+helpers, native runtime code, and vendored sources have separate ownership:
 
-## Overview
-
-<!--
-Document your project's backend directory structure here.
-
-Questions to answer:
-- How are modules/packages organized?
-- Where does business logic live?
-- Where are API endpoints defined?
-- How are utilities and helpers organized?
--->
-
-The repository is a .NET single-repository project. Production code is kept
-under `src/`, tests under `tests/`, benchmark harnesses under `benchmarks/`,
-small source fixtures and their manifest under `fixtures/`, and CI/helper
-scripts under `scripts/` or `.github/`.
-
----
-
-## Directory Layout
-
-```
+```text
 src/
-├── UrProtect.Core/       # binary model, parser, validation, analysis
-│   └── Pack/              # payload framing and outer ELF wrapper service
-└── UrProtect.Cli/        # command-line boundary
+├── UrProtect.Core/              # parser, ELF model, analysis, pack pipeline
+│   ├── Aarch64/                 # decoder abstraction and analysis
+│   ├── Binary/                  # bounded binary readers
+│   ├── Diagnostics/             # stable diagnostic types and codes
+│   ├── Elf/                     # ELF model, parser, load/address mapping
+│   ├── Pack/                    # frame codec and wrapper pack service
+│   └── Pipeline/                # validation and byte-preserving copy flow
+└── UrProtect.Cli/               # command-line boundary and reports
 tests/
-└── UrProtect.Core.Tests/
+└── UrProtect.Core.Tests/        # xUnit tests and synthetic ELF fixtures
 benchmarks/
-└── UrProtect.Benchmarks/
+└── UrProtect.Benchmarks/        # native ARM64 parser/copy measurements
 fixtures/
-└── samples/             # deterministic source programs and Android fixture
-scripts/
-├── run-fixture-matrix.sh
-├── run-parser-fuzz.sh
-├── run-musl-container-smoke.sh
-├── package-release.sh
-├── release-smoke.sh
-├── measure-launcher.sh
-├── run-packed-fixture-matrix.sh
-├── install-native-toolchains.sh
-├── run-android-avd.sh
-└── validate-fixtures.py
-.github/scripts/
-├── check-android-container.sh
-└── record-environment.sh
-third_party/
-├── AsmStone/             # pinned upstream source and attribution
-└── miniz/                # pinned raw-deflate inflater and notice
-native/
-└── urprotect-launcher/   # static AArch64 Wrapper 0.2 runtime launcher
+├── manifest.json                # fixture profiles and runtime contracts
+└── samples/                     # C, C++, Rust, Go, Zig, NativeAOT, Android
+scripts/                         # fixture, fuzz, release, and CI helpers
+.github/scripts/                 # CI environment and Android probes
+native/urprotect-launcher/       # static AArch64 Wrapper 0.2 runtime
+third_party/                     # pinned AsmStone and miniz source/notices
 ```
 
----
+There is currently no web frontend, HTTP endpoint, database, ORM, or service
+host. Do not create those directories as part of a parser or packer change.
 
-## Module Organization
+## Module Boundaries
 
-<!-- How should new features/modules be organized? -->
+- Keep untrusted byte access in `Binary/` and `Elf/`. `ElfParser.Parse` returns
+  an `ElfParseResult`; it does not throw to report malformed input.
+- Keep address arithmetic in `Elf/LoadMap.cs` and use the explicit
+  `FileOffset`, `VirtualAddress`, and `RuntimeAddress` types from
+  `Elf/AddressTypes.cs`.
+- Keep AArch64 backend details behind `Aarch64/IAarch64Decoder`; production
+  code uses the project adapter rather than AsmStone types directly.
+- Keep orchestration in `Pipeline/NoOpPipeline.cs` and `Pack/ElfPackService.cs`.
+  These services coordinate existing models instead of duplicating parser
+  logic.
+- Keep CLI formatting and exit-code mapping in `UrProtect.Cli`; Core must not
+  write to stdout or stderr.
+- Keep fixture generation and external tool invocation in `scripts/` and
+  `fixtures/`, never in parser or model code.
 
-Keep binary primitives, ELF parsing/modeling, architecture adapters, analysis,
-and pipeline orchestration in separate namespaces/directories. Fixture
-generation and external-tool invocation belong outside production parsing code.
-The production project may reference the pinned AsmStone project, but the rest
-of the codebase must depend on the project-owned AArch64 adapter rather than on
-AsmStone types directly.
+## Naming
 
----
-
-## Naming Conventions
-
-<!-- File and folder naming rules -->
-
-Use PascalCase for C# types and public members, camelCase for private fields and
-locals, and names that identify address domains explicitly (`FileOffset`,
-`VirtualAddress`, `RuntimeAddress`). Keep stable diagnostic codes in the
-diagnostics module. Use one owner for shared range and mapping logic.
-
----
+- Use file-scoped namespaces, PascalCase types and public members, and camelCase
+  private fields and locals. The repository enforces four-space indentation and
+  LF endings through `.editorconfig`.
+- Name address values by domain (`FileOffset`, `VirtualAddress`,
+  `RuntimeAddress`) rather than using an unqualified `long` or `ulong`.
+- Keep machine-readable failure categories in `DiagnosticCode`. Do not encode a
+  new stable error category only in human-readable text.
+- Use immutable records for parse, validation, frame, and report results where a
+  result crosses a package boundary.
 
 ## Examples
 
-<!-- Link to well-organized modules as examples -->
-
-Use `src/UrProtect.Core/Elf/` for ELF models and parsing, and
-`src/UrProtect.Core/Pipeline/NoOpPipeline.cs` for the current byte-preserving
-orchestration boundary.
+- `src/UrProtect.Core/Binary/BoundedReader.cs` is the shared checked-read owner.
+- `src/UrProtect.Core/Elf/LoadMap.cs` is the shared address-conversion owner.
+- `src/UrProtect.Core/Pipeline/NoOpPipeline.cs` is the orchestration example for
+  snapshot validation, atomic copy, and byte identity verification.
+- `src/UrProtect.Core/Pack/PayloadFrame.cs` owns the fixed frame ABI rather than
+  spreading frame offsets across the CLI and native launcher.
+- `src/UrProtect.Cli/ProductReport.cs` is the report projection boundary.

@@ -1,51 +1,31 @@
 # Database Guidelines
 
-> Database patterns and conventions for this project.
+## Current Scope
 
----
+This project has no database. It is a local binary validator and packer that
+reads ELF files, emits reports, and publishes files atomically. There are no
+ORM packages, `DbContext` types, migrations, connection strings, repository
+interfaces, or database integration tests in the repository.
 
-## Overview
+The absence of a database is intentional, not an unfinished implementation.
+Do not add an ORM or database layer to store parser models, frame metadata, CI
+evidence, or release provenance. Those values are represented by immutable
+records, JSON reports, plain-text provenance files, and retained CI artifacts.
 
-<!--
-Document your project's database conventions here.
+## Persistence Boundary
 
-Questions to answer:
-- What ORM/query library do you use?
-- How are migrations managed?
-- What are the naming conventions for tables/columns?
-- How do you handle transactions?
--->
+- `src/UrProtect.Core/Pipeline/NoOpPipeline.cs` reads a source snapshot and
+  publishes a byte-identical output through a destination-local temporary file.
+- `src/UrProtect.Core/Pack/ElfPackService.cs` reads source and launcher bytes,
+  verifies the generated wrapper, then atomically moves the temporary output.
+- `src/UrProtect.Cli/ProductReport.cs` serializes report records as JSON; it does
+  not persist them through a data-access abstraction.
+- `scripts/package-release.sh` and CI upload release/provenance files as build
+  artifacts rather than inserting them into a store.
 
-(To be filled by the team)
+## Future Changes
 
----
-
-## Query Patterns
-
-<!-- How should queries be written? Batch operations? -->
-
-(To be filled by the team)
-
----
-
-## Migrations
-
-<!-- How to create and run migrations -->
-
-(To be filled by the team)
-
----
-
-## Naming Conventions
-
-<!-- Table names, column names, index names -->
-
-(To be filled by the team)
-
----
-
-## Common Mistakes
-
-<!-- Database-related mistakes your team has made -->
-
-(To be filled by the team)
+If a future product requirement introduces a database, create a separate task
+before adding it. That task must define the storage owner, schema and migration
+tool, transaction behavior, retention policy, offline/CI behavior, and tests.
+Until then, a database-specific guideline is not applicable to production code.

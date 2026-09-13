@@ -1,170 +1,102 @@
 # Error Handling
 
-> How errors are handled in this project.
+## Fail-Closed Binary Boundary
 
----
-
-## Overview
-
-<!--
-Document your project's error handling conventions here.
-
-Questions to answer:
-- What error types do you define?
-- How are errors propagated?
-- How are errors logged?
-- How are errors returned to clients?
--->
-
-The binary parser is a hostile-input boundary. It must fail closed: no unchecked
-count, offset, multiplication, address conversion, or dynamic pointer may be
-used to read or allocate. The parser returns structured diagnostics instead of
-repairing input or guessing code/data boundaries.
-
----
+ELF files, payload frames, launchers, and fixture outputs are treated as
+hostile or malformed byte inputs. Every offset, size, count, multiplication,
+address conversion, and dynamic-table traversal must be checked before a read,
+allocation, or conversion. The parser reports structured diagnostics instead
+of repairing bytes or guessing code/data boundaries.
 
 ## Error Types
 
-<!-- Custom error classes/types -->
+Use `DiagnosticCode` for stable machine-readable categories and `Diagnostic` for
+severity, code, message, and an optional file offset. `DiagnosticBag` owns
+ordered aggregation while result records carry diagnostics to the caller.
 
-Use `DiagnosticCode` for stable machine-readable categories and `Diagnostic`
-for severity, code, message, and optional file offset. Aggregate diagnostics in
-`DiagnosticBag`; callers decide whether errors make a pipeline unsuccessful.
+Important parser categories include `InputTooSmall`, `InvalidHeader`,
+`TableOutOfBounds`, `InvalidProgramHeader`, `InvalidSegment`,
+`DynamicTableMalformed`, `DynamicPointerUnmapped`, `AddressOverflow`,
+`AddressUnmapped`, `SymbolVersionTableMalformed`, and
+`VersionNeedTableMalformed`.
 
-Important codes include `TableOutOfBounds`, `InvalidSegment`,
-`DynamicTableMalformed`, `AddressOverflow`, `AddressUnmapped`,
-`SymbolVersionTableMalformed`, `VersionNeedTableMalformed`,
-`AsmStoneUnavailable`, `OutputIdentityMismatch`, and I/O failure codes.
-Pack operations additionally use `UnsupportedPackInput`,
-`UnsupportedInterpreter`, `LauncherUnavailable`, `PayloadMalformed`,
-`PayloadUnsupported`, `PayloadLimitExceeded`, `PayloadIntegrityMismatch`,
-and `WrapperMalformed`. A failed frame or wrapper check must not publish an
-output.
+Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
+`LauncherUnavailable`, `PayloadMalformed`, `PayloadUnsupported`,
+`PayloadLimitExceeded`, `PayloadIntegrityMismatch`, `WrapperMalformed`,
+`OutputIdentityMismatch`, and `OutputIoFailure`.
 
----
+## Propagation Rules
 
-## Error Handling Patterns
+- `ElfParser.Parse(ReadOnlyMemory<byte>)` returns `ElfParseResult`; malformed
+  input becomes diagnostics and a missing `File`, not an exception.
+- `NoOpPipeline.Validate` preserves the parsed file when safe, appends analysis
+  diagnostics, and creates output bytes only after all errors are absent and
+  byte identity is proven.
+- `NoOpPipeline.ValidateAndCopy` accepts an optional `inputOverride` snapshot so
+  report hashes and copied bytes describe the same source. It writes a flushed
+  temporary sibling and removes it on every failure path.
+- `PayloadFrameCodec` validates version, flags, architecture, names, bounds,
+  encoded digest, exact decompressed size, and source digest before returning
+  source bytes.
+- `ElfPackService` validates source and launcher independently, validates the
+  assembled wrapper and recovered payload, and publishes only after a final
+  byte comparison.
+- Catch only expected I/O, argument, and codec exceptions at boundaries. Do not
+  catch all exceptions and continue with a partial model. The CLI top level
+  maps an unexpected exception to `Internal` and includes a correlation id.
 
-<!-- Try-catch patterns, error propagation -->
+## CLI Contract
 
-Parsing and validation should return result records containing the model (when
-safe) and diagnostics. Warnings such as an unknown instruction may be reported
-for analysis, but a missing decoder backend is an error. The no-op pipeline must
-not emit an artifact when validation has errors.
+`src/UrProtect.Cli/CliApplication.cs` owns product exit codes:
 
-All conversions between file offsets, ELF virtual addresses, and runtime
-addresses go through `LoadMap`; callers must not reproduce address arithmetic.
+| Code | Meaning |
+|------|---------|
+| `0` | success |
+| `2` | usage or argument error |
+| `3` | input/output or filesystem failure |
+| `4` | invalid or unsupported ELF, launcher, frame, or wrapper |
+| `5` | output identity or payload integrity failure |
+| `10` | unexpected internal failure |
 
----
+When `--json -` is selected, emit one report to stdout and keep stderr empty
+for normal validation diagnostics. A report file is written atomically only on
+successful validation/pack operations.
 
-## API Error Responses
+## Address and Range Safety
 
-<!-- Standard error response format -->
+All file/virtual/runtime address conversion goes through `LoadMap`; callers do
+not reproduce arithmetic. `BoundedReader` performs little-endian reads only
+after checked range validation. Unknown program headers, dynamic tags, and
+relocation kinds are preserved or warned about rather than guessed.
 
-The CLI prints diagnostics to stdout for non-errors and stderr for errors, then
-returns a non-zero exit code when `NoOpValidationResult.IsSuccess` is false.
-Machine consumers should use the stable diagnostic code rather than matching
-human-readable text.
+## Examples
 
----
-
-## Common Mistakes
-
-<!-- Error handling mistakes your team has made -->
-
-Do not catch all exceptions and continue with a partial ELF model. Do not treat
-an unmapped dynamic table as an empty table, silently truncate a count, or
-convert an unknown instruction into a guessed opcode. When a future writer is
-added, unsupported relocations and range overflow must reject the planned
-mutation.
-
-The first packer is not a general ELF writer: it validates the source with the
-existing parser, appends a bounded versioned payload frame to a pinned
-AArch64 launcher, and atomically publishes the result. The runtime launcher
-must verify both payload digests and reject invalid source-name metadata before
-constructing a temporary extraction path. Wrapper 0.2 accepts only the
-validated static AArch64 PIE launcher and must not silently fall back to the
-C# packer executable.
-
-## Scenario: ELF validation and byte-preserving output
-
-### 1. Scope / Trigger
-
-- Trigger: parsing ELF64 AArch64 `ET_DYN` PIE/shared-object inputs and optionally
-  emitting a no-op artifact.
-
-### 2. Signatures
-
-```csharp
-ElfParseResult ElfParser.Parse(ReadOnlyMemory<byte> bytes);
-NoOpValidationResult NoOpPipeline.Validate(
-    ReadOnlyMemory<byte> input,
-    bool emitOutput = false,
-    bool analyzeInstructions = true);
-NoOpValidationResult NoOpPipeline.ValidateAndCopy(
-    string inputPath,
-    string outputPath,
-    bool analyzeInstructions = true);
-NoOpValidationResult NoOpPipeline.ValidateAndCopy(
-    string inputPath,
-    string outputPath,
-    bool analyzeInstructions = true,
-    ReadOnlyMemory<byte>? inputOverride = null);
-```
-
-### 3. Contracts
-
-- Input: ELF64, little-endian, `EM_AARCH64`, `ET_DYN`, user-space, with
-  `PT_LOAD` and `PT_DYNAMIC`; stripped section headers are allowed.
-- Output: optional copy whose bytes are exactly equal to the validated input;
-  no parsed model is serialized in the MVP.
-- Product callers that already own a read-only input snapshot may pass it as
-  `inputOverride`; this prevents a second source read from making report hashes
-  disagree with the copied bytes.
-- Environment: no external ELF library; AArch64 decoding is through the pinned
-  AsmStone adapter.
-
-### 4. Validation & Error Matrix
-
-| Condition | Result |
-| --- | --- |
-| bad magic/class/endianness/version | error diagnostic; no model/output |
-| table or segment range overflow | error diagnostic; no output |
-| unsupported file type/machine | error diagnostic; no output |
-| unknown instruction | warning and analysis boundary |
-| missing decoder backend | `AsmStoneUnavailable` error |
-| copied bytes differ | `OutputIdentityMismatch`; temporary output removed |
-| baseline and no-op runtime behavior differ | E2E failure |
-
-### 5. Good/Base/Bad Cases
-
-- Good: a GCC/Clang AArch64 PIE or dynamic `.so` with valid program headers;
-  parse, validate, and byte-copy successfully.
-- Base: stripped ELF with no usable section table; program-header-based parsing
-  still works.
-- Bad: a truncated dynamic table or overflowed `p_offset + p_filesz`; reject
-  before reading the table.
-
-### 6. Tests Required
-
-- Unit tests assert stable diagnostics for truncation, wrong machine, overflow,
-  invalid segments, and entry-point mapping.
-- Property tests assert range arithmetic and LoadMap round trips.
-- Integration tests assert no-op byte identity and atomic output behavior.
-- Runtime tests compare baseline and no-op exit status/output on native ARM64
-  glibc/musl profiles and Android APK/JNI profiles where available.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```csharp
-var fileOffset = (int)(virtualAddress - segment.VirtualAddress + segment.FileOffset);
-```
-
-#### Correct
+Correct range handling:
 
 ```csharp
 if (!loadMap.TryVirtualAddressToFileOffset(address, size, out var fileOffset))
     return failure.With(DiagnosticCode.AddressUnmapped);
 ```
+
+Correct snapshot reuse:
+
+```csharp
+pipeline.ValidateAndCopy(
+    options.InputPath,
+    options.CopyPath,
+    options.Analyze,
+    inputOverride: input);
+```
+
+Relevant regressions live in `ElfMalformedCorpusTests.cs`,
+`ElfParserFuzzTests.cs`, `BinaryPropertyTests.cs`, `NoOpPipelineTests.cs`,
+`CliApplicationTests.cs`, `PayloadFrameTests.cs`, and
+`ElfPackServiceTests.cs`.
+
+## Forbidden Recovery Behavior
+
+Do not treat an unmapped table as empty, truncate a declared count to fit a
+buffer, use an unchecked cast from an ELF field as an array length, execute a
+payload after an integrity failure, use a payload-controlled directory path,
+or silently fall back from a required native ARM64 job to QEMU, another host
+architecture, or the C# packer as a wrapper launcher.

@@ -1,51 +1,11 @@
 # Hook Guidelines
 
-> How hooks are used in this project.
+## Scope
 
----
+There are no frontend hooks, data-fetching hooks, browser APIs, or reactive
+client lifecycle code in this repository. `NoOpPipeline` is a synchronous C#
+pipeline, not a frontend hook.
 
-## Overview
-
-<!--
-Document your project's hook conventions here.
-
-Questions to answer:
-- What custom hooks do you have?
-- How do you handle data fetching?
-- What are the naming conventions?
-- How do you share stateful logic?
--->
-
-(To be filled by the team)
-
----
-
-## Custom Hook Patterns
-
-<!-- How to create and structure custom hooks -->
-
-(To be filled by the team)
-
----
-
-## Data Fetching
-
-<!-- How data fetching is handled (React Query, SWR, etc.) -->
-
-(To be filled by the team)
-
----
-
-## Naming Conventions
-
-<!-- Hook naming rules (use*, etc.) -->
-
-(To be filled by the team)
-
----
-
-## Common Mistakes
-
-<!-- Hook-related mistakes your team has made -->
-
-(To be filled by the team)
+If a frontend is added, document hook ownership and naming in a dedicated task.
+Hooks should consume a typed report/event boundary rather than re-parsing JSON
+fields independently in every component.

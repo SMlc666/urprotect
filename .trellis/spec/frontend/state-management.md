@@ -1,51 +1,12 @@
 # State Management
 
-> How state is managed in this project.
+## Scope
 
----
+There is no frontend state-management library or browser state in the current
+repository. Validation and pack results are immutable C# records returned from
+Core services, and `ProductReportFactory` projects them into JSON for CLI
+consumers.
 
-## Overview
-
-<!--
-Document your project's state management conventions here.
-
-Questions to answer:
-- What state management solution do you use?
-- How is local vs global state decided?
-- How do you handle server state?
-- What are the patterns for derived state?
--->
-
-(To be filled by the team)
-
----
-
-## State Categories
-
-<!-- Local state, global state, server state, URL state -->
-
-(To be filled by the team)
-
----
-
-## When to Use Global State
-
-<!-- Criteria for promoting state to global -->
-
-(To be filled by the team)
-
----
-
-## Server State
-
-<!-- How server data is cached and synchronized -->
-
-(To be filled by the team)
-
----
-
-## Common Mistakes
-
-<!-- State management mistakes your team has made -->
-
-(To be filled by the team)
+Do not add a client store to represent parser state. If a UI is introduced,
+create a task defining local, URL, server/report, and shared application state,
+plus the single decoder/reducer that owns each event or report contract.

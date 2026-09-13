@@ -1,39 +1,26 @@
 # Frontend Development Guidelines
 
-> Best practices for frontend development in this project.
+## Current Scope
 
----
+This repository has no frontend application. It contains a native ARM64
+command-line product and CI tooling; there are no React/Vue components, pages,
+browser hooks, client-side state stores, or frontend build configuration.
 
-## Overview
-
-This directory contains guidelines for frontend development. Fill in each file with your project's specific conventions.
-
----
+The frontend spec directory is retained because Trellis initializes a fullstack
+spec layout. Its files document the current non-applicability rather than
+inventing conventions for a technology the repository does not use.
 
 ## Guidelines Index
 
 | Guide | Description | Status |
 |-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
-| [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
+| [Directory Structure](./directory-structure.md) | Frontend scope boundary | Not applicable |
+| [Component Guidelines](./component-guidelines.md) | UI component scope boundary | Not applicable |
+| [Hook Guidelines](./hook-guidelines.md) | Client hook scope boundary | Not applicable |
+| [State Management](./state-management.md) | Client state scope boundary | Not applicable |
+| [Quality Guidelines](./quality-guidelines.md) | Frontend tooling scope boundary | Not applicable |
+| [Type Safety](./type-safety.md) | Frontend type scope boundary | Not applicable |
 
----
-
-## How to Fill These Guidelines
-
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+If a frontend is added, create a dedicated task to choose its framework,
+directory layout, runtime validation, state model, accessibility requirements,
+and test tooling before filling these documents.
