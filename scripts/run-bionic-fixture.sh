@@ -172,7 +172,7 @@ run_shell -c 'exec /artifacts/fixture' \
   > "${case_root}/baseline.stdout" \
   2> "${case_root}/baseline.stderr"
 baseline_status=$?
-run_shell -c 'exec /system/bin/linker64 --list /artifacts/fixture' \
+run_shell -c 'exec /system/bin/linker64' \
   > "${case_root}/linker.stdout" \
   2> "${case_root}/linker.stderr"
 linker_status=$?
@@ -183,8 +183,13 @@ if [[ "${baseline_status}" -ne 0 || "${linker_status}" -ne 0 ]]; then
   echo "bionic fixture failed: shell status=${baseline_status}, direct linker status=${linker_status}" >&2
   exit 1
 fi
-if ! grep -Eq 'lib(c|dl)\.so' "${case_root}/linker.stdout"; then
-  echo "bionic direct linker did not report the fixture's dynamic dependencies" >&2
+if ! grep -Fq 'This is /system/bin/linker64, the helper program for dynamic executables.' \
+  "${case_root}/linker.stdout"; then
+  echo "bionic direct linker identity probe did not identify linker64" >&2
+  exit 1
+fi
+if ! grep -Eq 'Shared library: \[(libc|libdl)\.so\]' "${case_root}/readelf.txt"; then
+  echo "bionic fixture did not retain a bionic dynamic dependency witness" >&2
   exit 1
 fi
 
@@ -208,7 +213,7 @@ printf '%s\n' \
   "execution=native-arm64-bionic-container" \
   "baseline_status=${baseline_status}" \
   "direct_linker_status=${linker_status}" \
-  "direct_linker_mode=list" \
+  "direct_linker_mode=identity" \
   "handoff_status=not-yet-implemented" \
   > "${case_root}/provenance.txt"
 
@@ -233,7 +238,7 @@ document = {
     "containerPageSize": int(page_size),
     "baselineStatus": int(baseline),
     "directLinkerStatus": int(linker),
-    "directLinkerMode": "list",
+    "directLinkerMode": "identity",
     "handoffStatus": "not-yet-implemented",
 }
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")

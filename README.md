@@ -149,7 +149,8 @@ The native bionic lane is separate from Android framework testing:
 It runs the pinned `termux/termux-docker` ARM64 image, installs the exact
 recorded Termux `clang` package, builds an AArch64 PIE with
 `/system/bin/linker64`, and verifies both normal execution and the linker's
-direct dependency-list mode. It records image digest, Termux source revision,
+direct identity probe; ELF `DT_NEEDED` output records the fixture's bionic
+dependencies. It records image digest, Termux source revision,
 package versions, linker identity, and page size. The lane refuses AVD, Waydroid, QEMU, and
 non-ARM fallback; it proves bionic userspace behavior without claiming the
 Android framework or physical-device behavior. HostContext/package handoff
