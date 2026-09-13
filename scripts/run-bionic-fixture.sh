@@ -90,6 +90,7 @@ container_common=(
   --platform linux/arm64
   --user 1000:1000
   --env "PREFIX=${termux_prefix}"
+  --env "BIONIC_LINKER=${linker}"
   --env "HOME=/tmp"
   --mount "type=bind,src=${repo_root},dst=/workspace,readonly"
   --mount "type=bind,src=${case_root},dst=/artifacts"
@@ -167,7 +168,7 @@ run_shell -c 'exec /artifacts/fixture' \
   > "${case_root}/baseline.stdout" \
   2> "${case_root}/baseline.stderr"
 baseline_status=$?
-run_shell -c 'exec "$1" /artifacts/fixture' -- "${linker}" \
+run_shell -c 'exec "${BIONIC_LINKER}" /artifacts/fixture' \
   > "${case_root}/linker.stdout" \
   2> "${case_root}/linker.stderr"
 linker_status=$?
