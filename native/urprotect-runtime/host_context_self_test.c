@@ -18,11 +18,13 @@ _Static_assert(offsetof(urp_host_context_v1, struct_size) == 4, "ABI size must f
 _Static_assert(offsetof(urp_host_context_v1, capabilities) == 8, "Capabilities offset changed");
 _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset changed");
 
+#define FIXTURE_ELF_HEADER_SIZE 64U
 #define FIXTURE_ELF_PROGRAM_HEADER_SIZE 56U
 #define FIXTURE_ELF_DYNAMIC_ENTRY_SIZE 16U
 #define FIXTURE_PT_DYNAMIC 2U
 #define FIXTURE_PT_TLS 7U
 #define FIXTURE_PT_GNU_PROPERTY 0x6474e553U
+#define FIXTURE_PT_GNU_RELRO 0x6474e552U
 #define FIXTURE_DT_NEEDED 1U
 #define FIXTURE_DT_INIT 12U
 #define FIXTURE_DT_FINI 13U
@@ -221,13 +223,31 @@ static int fixture_range_in_file(
     return 1;
 }
 
-static int fixture_find_dynamic_segment(
+static int fixture_checked_add_u64(uint64_t left, uint64_t right, uint64_t *result)
+{
+    if (result == NULL || right > UINT64_MAX - left) {
+        return 0;
+    }
+    *result = left + right;
+    return 1;
+}
+
+static int fixture_checked_mul_u64(uint64_t left, uint64_t right, uint64_t *result)
+{
+    if (result == NULL || (left != 0U && right > UINT64_MAX / left)) {
+        return 0;
+    }
+    *result = left * right;
+    return 1;
+}
+
+static int fixture_find_program_header(
     const uint8_t *source,
     size_t source_size,
-    size_t *offset_out,
-    size_t *size_out)
+    uint32_t wanted_type,
+    const uint8_t **header_out)
 {
-    if (source == NULL || source_size < 64U
+    if (source == NULL || header_out == NULL || source_size < FIXTURE_ELF_HEADER_SIZE
         || fixture_read_u16_le(source + 54U) != FIXTURE_ELF_PROGRAM_HEADER_SIZE) {
         return 0;
     }
@@ -235,14 +255,23 @@ static int fixture_find_dynamic_segment(
     uint64_t program_header_offset = fixture_read_u64_le(source + 32U);
     uint16_t program_header_count = fixture_read_u16_le(source + 56U);
     for (uint16_t index = 0; index < program_header_count; ++index) {
-        uint64_t index_offset = (uint64_t)index * FIXTURE_ELF_PROGRAM_HEADER_SIZE;
-        if (program_header_offset > UINT64_MAX - index_offset) {
+        uint64_t index_offset;
+        uint64_t header_offset_value;
+        if (!fixture_checked_mul_u64(
+                (uint64_t)index,
+                FIXTURE_ELF_PROGRAM_HEADER_SIZE,
+                &index_offset)
+            || !fixture_checked_add_u64(
+                program_header_offset,
+                index_offset,
+                &header_offset_value)) {
             return 0;
         }
+
         size_t header_offset;
         if (!fixture_range_in_file(
                 source_size,
-                program_header_offset + index_offset,
+                header_offset_value,
                 FIXTURE_ELF_PROGRAM_HEADER_SIZE,
                 &header_offset,
                 NULL)) {
@@ -250,17 +279,34 @@ static int fixture_find_dynamic_segment(
         }
 
         const uint8_t *header = source + header_offset;
-        if (fixture_read_u32_le(header) != FIXTURE_PT_DYNAMIC) {
-            continue;
+        if (fixture_read_u32_le(header) == wanted_type) {
+            *header_out = header;
+            return 1;
         }
-        return fixture_range_in_file(
-            source_size,
-            fixture_read_u64_le(header + 8U),
-            fixture_read_u64_le(header + 32U),
-            offset_out,
-            size_out);
     }
     return 0;
+}
+
+static int fixture_find_dynamic_segment(
+    const uint8_t *source,
+    size_t source_size,
+    size_t *offset_out,
+    size_t *size_out)
+{
+    const uint8_t *header;
+    if (!fixture_find_program_header(
+            source,
+            source_size,
+            FIXTURE_PT_DYNAMIC,
+            &header)) {
+        return 0;
+    }
+    return fixture_range_in_file(
+        source_size,
+        fixture_read_u64_le(header + 8U),
+        fixture_read_u64_le(header + 32U),
+        offset_out,
+        size_out);
 }
 
 static int fixture_find_dynamic_entry(
@@ -567,6 +613,46 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
+    const uint8_t *relro_header;
+    if (!fixture_expect(
+            fixture_find_program_header(
+                source,
+                source_size,
+                FIXTURE_PT_GNU_RELRO,
+                &relro_header),
+            "entry fixture has no bounded PT_GNU_RELRO program header")) {
+        free(source);
+        return 0;
+    }
+    uint64_t relro_file_offset = fixture_read_u64_le(relro_header + 8U);
+    uint64_t relro_file_size = fixture_read_u64_le(relro_header + 32U);
+    uint64_t relro_memory_size = fixture_read_u64_le(relro_header + 40U);
+    if (!fixture_expect(
+            relro_file_size > 0U,
+            "entry fixture PT_GNU_RELRO has an empty file-backed range")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            relro_memory_size >= relro_file_size,
+            "entry fixture PT_GNU_RELRO has p_memsz smaller than p_filesz")) {
+        free(source);
+        return 0;
+    }
+    size_t relro_file_offset_as_size;
+    size_t relro_file_size_as_size;
+    if (!fixture_expect(
+            fixture_range_in_file(
+                source_size,
+                relro_file_offset,
+                relro_file_size,
+                &relro_file_offset_as_size,
+                &relro_file_size_as_size),
+            "entry fixture PT_GNU_RELRO file-backed range is outside the image")) {
+        free(source);
+        return 0;
+    }
+
     uint8_t *frame = NULL;
     size_t frame_size = 0U;
     int made_frame = fixture_make_frame(
@@ -597,7 +683,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
         frame_size,
         &args);
     free(frame);
-    if (!fixture_expect(status == 23, "the real AArch64 HostContext entry was not invoked")) {
+    if (!fixture_expect(
+            status == 23,
+            "the PT_GNU_RELRO AArch64 HostContext entry was not invoked with status 23")) {
         free(source);
         return 0;
     }
