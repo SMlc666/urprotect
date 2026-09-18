@@ -84,6 +84,7 @@ jobs:
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v1
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v2
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-image-boundaries
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
       - name: Render compatibility matrix
         run: |

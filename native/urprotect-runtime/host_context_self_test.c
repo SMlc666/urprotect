@@ -21,6 +21,9 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_ELF_PROGRAM_HEADER_SIZE 56U
 #define FIXTURE_ELF_DYNAMIC_ENTRY_SIZE 16U
 #define FIXTURE_PT_DYNAMIC 2U
+#define FIXTURE_PT_TLS 7U
+#define FIXTURE_PT_GNU_PROPERTY 0x6474e553U
+#define FIXTURE_DT_NEEDED 1U
 #define FIXTURE_DT_RELA 7U
 #define FIXTURE_DT_RELASZ 8U
 #define FIXTURE_DT_RELAENT 9U
@@ -275,6 +278,34 @@ static int fixture_find_dynamic_entry(
             }
             if (value_offset_out != NULL) {
                 *value_offset_out = dynamic_offset + offset + 8U;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int fixture_find_dynamic_terminator(
+    const uint8_t *source,
+    size_t source_size,
+    size_t *tag_offset_out)
+{
+    size_t dynamic_offset;
+    size_t dynamic_size;
+    if (!fixture_find_dynamic_segment(
+            source,
+            source_size,
+            &dynamic_offset,
+            &dynamic_size)
+        || dynamic_size % FIXTURE_ELF_DYNAMIC_ENTRY_SIZE != 0U) {
+        return 0;
+    }
+
+    for (size_t offset = 0; offset < dynamic_size; offset += FIXTURE_ELF_DYNAMIC_ENTRY_SIZE) {
+        size_t tag_offset = dynamic_offset + offset;
+        if (fixture_read_u64_le(source + tag_offset) == 0U) {
+            if (tag_offset_out != NULL) {
+                *tag_offset_out = tag_offset;
             }
             return 1;
         }
@@ -692,14 +723,19 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
 
     size_t flags_value_offset;
+    size_t dynamic_terminator_offset;
     if (!fixture_expect(
             fixture_find_dynamic_entry(
                 source,
                 source_size,
                 FIXTURE_DT_FLAGS,
                 NULL,
-                &flags_value_offset),
-            "the entry fixture does not expose the expected dynamic flags")) {
+                &flags_value_offset)
+            && fixture_find_dynamic_terminator(
+                source,
+                source_size,
+                &dynamic_terminator_offset),
+            "the entry fixture does not expose the expected dynamic metadata")) {
         free(source);
         return 0;
     }
@@ -721,6 +757,30 @@ static int fixture_run_real_adapter(const char *fixture_path)
     if (!fixture_expect(
             status == URP_STATUS_UNSUPPORTED,
             "a text-relocation dynamic flag was accepted")) {
+        free(source);
+        return 0;
+    }
+
+    uint8_t *dependency_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            dependency_image != NULL,
+            "could not allocate the dynamic dependency fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(dependency_image, source, source_size);
+    fixture_write_u64_le(dependency_image + dynamic_terminator_offset, FIXTURE_DT_NEEDED);
+    rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        dependency_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(dependency_image);
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+            "a DT_NEEDED dynamic entry was accepted or returned a handle")) {
         free(source);
         return 0;
     }
@@ -755,6 +815,55 @@ static int fixture_run_real_adapter(const char *fixture_path)
         free(source);
         return 0;
     }
+
+    uint8_t *tls_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(tls_image != NULL, "could not allocate the PT_TLS fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(tls_image, source, source_size);
+    fixture_write_u32_le(tls_image + (size_t)program_header_offset, FIXTURE_PT_TLS);
+    rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        tls_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(tls_image);
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+            "a PT_TLS program header was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+
+    uint8_t *gnu_property_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            gnu_property_image != NULL,
+            "could not allocate the PT_GNU_PROPERTY fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(gnu_property_image, source, source_size);
+    fixture_write_u32_le(
+        gnu_property_image + (size_t)program_header_offset,
+        FIXTURE_PT_GNU_PROPERTY);
+    rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        gnu_property_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(gnu_property_image);
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+            "a PT_GNU_PROPERTY program header was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+
     uint8_t *interpreter_image = (uint8_t *)malloc(source_size);
     if (!fixture_expect(interpreter_image != NULL, "could not allocate negative adapter fixture")) {
         free(source);
