@@ -216,6 +216,22 @@
       "negativeOracle": "native/urprotect-runtime/host_adapter.c"
     },
     {
+      "id": "runtime.host-context.unsupported-lifecycle-path-search",
+      "status": "rejected",
+      "obligation": "The narrow HostContext adapter rejects DT_INIT, DT_FINI, DT_RPATH, DT_RUNPATH, DT_INIT_ARRAY, DT_FINI_ARRAY, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAY, and DT_PREINIT_ARRAYSZ before creating an image handle",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "The first HostContext entry adapter has no defined constructor, destructor, or dynamic path-search semantics for in-process images, so these lifecycle and search tags remain rejected.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c"
+    },
+    {
       "id": "android.jni.native-bridge",
       "status": "validated",
       "obligation": "arm64-v8a JNI library loads through the recorded x86_64 Android native bridge",

@@ -81,6 +81,12 @@ memfd_create(name, MFD_CLOEXEC)
   slice accepts only checked `RELATIVE`/`RELR` targets, permits only immediate
   binding dynamic flags, and delegates relocation application to the system
   loader.
+- The first native adapter rejects `DT_INIT`, `DT_FINI`, `DT_RPATH`,
+  `DT_RUNPATH`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`,
+  `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` with
+  `URP_STATUS_UNSUPPORTED` before creating an image handle. The native
+  self-test mutates a bounded `DT_NULL` tag one case at a time, verifies that
+  no other image bytes changed, and requires a zero output handle.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid
