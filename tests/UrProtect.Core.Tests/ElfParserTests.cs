@@ -37,6 +37,34 @@ public sealed class ElfParserTests
     }
 
     [Fact]
+    public void AcceptsCongruentNonPageSizedPtLoadAlignment()
+    {
+        var result = ElfParser.Parse(ElfFixture.CongruentNonPageSizedLoadAlignmentPie());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Equal(2, result.File!.LoadMap.Segments.Count);
+        Assert.All(result.File.LoadMap.Segments, segment => Assert.Equal(0x200UL, segment.Alignment));
+        Assert.Equal(0UL, result.File.LoadMap.Segments[0].FileOffset);
+        Assert.Equal(0UL, result.File.LoadMap.Segments[0].VirtualAddress);
+        Assert.Equal(0x200UL, result.File.LoadMap.Segments[1].FileOffset);
+        Assert.Equal(0x1200UL, result.File.LoadMap.Segments[1].VirtualAddress);
+    }
+
+    [Fact]
+    public void RejectsNonCongruentNonPageSizedPtLoadAlignment()
+    {
+        var bytes = ElfFixture.CongruentNonPageSizedLoadAlignmentPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(24), 0x1201);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(120 + 16), 0x1201);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.InvalidAlignment);
+    }
+
+    [Fact]
     public void RejectsUnsupportedElfIdentificationVersion()
     {
         var bytes = ElfFixture.MinimalPie();

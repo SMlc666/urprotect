@@ -81,6 +81,10 @@ memfd_create(name, MFD_CLOEXEC)
   slice accepts only checked `RELATIVE`/`RELR` targets, permits only immediate
   binding dynamic flags, and delegates relocation application to the system
   loader.
+- Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
+  `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
+  alignment requirement, and a non-page-sized power-of-two alignment is valid
+  when the congruence holds.
 - The matrix is sourced from `fixtures/manifest.json`, uses tiers (`pr`,
   `nightly`, `release`), and records `proven`, `validated`, `rejected`, or
   `unknown` for each feature.
