@@ -81,6 +81,23 @@
       "negativeOracle": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs"
     },
     {
+      "id": "runtime.host-context.sectionless-image",
+      "status": "validated",
+      "obligation": "A HostContext AArch64 ET_DYN remains loadable when section headers are absent; program headers and dynamic metadata remain authoritative",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "constraints": [
+        "The image must still provide bounded AArch64 PT_LOAD and PT_DYNAMIC program headers",
+        "This validates the native adapter slice and does not claim broader loader behavior"
+      ]
+    },
+    {
       "id": "runtime.glibc",
       "status": "validated",
       "obligation": "AArch64 dynamically linked PIE runs on the recorded native glibc host",
