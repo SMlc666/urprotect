@@ -59,6 +59,14 @@ internal static class ElfFixture
         return bytes;
     }
 
+    public static byte[] CongruentNonPageSizedLoadAlignmentPie()
+    {
+        var bytes = MinimalPie();
+        WriteUInt64(bytes.AsSpan(), 64 + 48, 0x200);
+        WriteUInt64(bytes.AsSpan(), 120 + 48, 0x200);
+        return bytes;
+    }
+
     public static byte[] StaticPieLauncher(bool includeMarker = true)
     {
         var bytes = MinimalPie();

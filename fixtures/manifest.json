@@ -25,6 +25,20 @@
       ]
     },
     {
+      "id": "elf.load-layout.alignment-congruence",
+      "status": "proven",
+      "obligation": "Each AArch64 ET_DYN PT_LOAD with p_align greater than one uses a power-of-two alignment and congruent p_offset and p_vaddr residues, including non-page-sized alignment",
+      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "evidence": [
+        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/ElfFixture.cs",
+        "src/UrProtect.Core/Elf/ElfParser.cs"
+      ],
+      "negativeWitness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/ElfParserTests.cs"
+    },
+    {
       "id": "elf.dynamic",
       "status": "proven",
       "obligation": "PT_DYNAMIC and dynamic metadata are mapped and bounded",
