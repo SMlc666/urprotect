@@ -116,6 +116,26 @@
       ]
     },
     {
+      "id": "runtime.host-context.gnu-stack",
+      "status": "validated",
+      "obligation": "The HostContext adapter accepts a PT_GNU_STACK program header when PF_X is clear and rejects an executable PT_GNU_STACK before creating an image handle",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The real fixture must contain PT_GNU_STACK with PF_X clear and must complete HostContext dispatch through the unchanged adapter path",
+        "The self-test sets only the PT_GNU_STACK p_flags PF_X bit in one bounded image copy and requires URP_STATUS_UNSUPPORTED with a zero image handle before loading",
+        "Memory protection remains delegated to the native system loader for the accepted non-executable GNU_STACK case; this is validated implementation evidence, not proof of custom stack-protection semantics"
+      ]
+    },
+    {
       "id": "runtime.glibc",
       "status": "validated",
       "obligation": "AArch64 dynamically linked PIE runs on the recorded native glibc host",

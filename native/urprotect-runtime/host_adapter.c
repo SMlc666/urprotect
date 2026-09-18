@@ -26,6 +26,7 @@
 #define URP_PT_INTERP 3U
 #define URP_PT_TLS 7U
 #define URP_PT_GNU_PROPERTY 0x6474e553U
+#define URP_PT_GNU_STACK 0x6474e551U
 #define URP_PF_W 2U
 #define URP_PF_X 1U
 #define URP_DT_NEEDED 1U
@@ -633,6 +634,11 @@ static urp_status urp_validate_image(const void *bytes, size_t image_size)
         case URP_PT_TLS:
         case URP_PT_GNU_PROPERTY:
             return URP_STATUS_UNSUPPORTED;
+        case URP_PT_GNU_STACK:
+            if ((flags & URP_PF_X) != 0U) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            break;
         default:
             break;
         }

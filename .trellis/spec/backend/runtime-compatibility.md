@@ -92,6 +92,10 @@ memfd_create(name, MFD_CLOEXEC)
   adapter must still dispatch the entry. The native system loader owns the
   resulting memory protection semantics, so this row is implementation
   evidence rather than proof of a custom RELRO loader.
+- The first native adapter accepts `PT_GNU_STACK` only when `PF_X` is clear;
+  an executable-stack request returns `URP_STATUS_UNSUPPORTED` before an
+  image handle is created. Protection semantics for the accepted
+  non-executable case remain delegated to the native system loader.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid

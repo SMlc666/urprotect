@@ -24,7 +24,9 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_PT_DYNAMIC 2U
 #define FIXTURE_PT_TLS 7U
 #define FIXTURE_PT_GNU_PROPERTY 0x6474e553U
+#define FIXTURE_PT_GNU_STACK 0x6474e551U
 #define FIXTURE_PT_GNU_RELRO 0x6474e552U
+#define FIXTURE_PF_X 1U
 #define FIXTURE_DT_NEEDED 1U
 #define FIXTURE_DT_INIT 12U
 #define FIXTURE_DT_FINI 13U
@@ -613,6 +615,25 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
+    const uint8_t *gnu_stack_header;
+    if (!fixture_expect(
+            fixture_find_program_header(
+                source,
+                source_size,
+                FIXTURE_PT_GNU_STACK,
+                &gnu_stack_header),
+            "entry fixture has no PT_GNU_STACK program header")) {
+        free(source);
+        return 0;
+    }
+    uint32_t gnu_stack_flags = fixture_read_u32_le(gnu_stack_header + 4U);
+    if (!fixture_expect(
+            (gnu_stack_flags & FIXTURE_PF_X) == 0U,
+            "entry fixture PT_GNU_STACK is executable")) {
+        free(source);
+        return 0;
+    }
+
     const uint8_t *relro_header;
     if (!fixture_expect(
             fixture_find_program_header(
@@ -690,6 +711,33 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
+    size_t gnu_stack_header_offset = (size_t)(gnu_stack_header - source);
+    uint8_t *executable_stack_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            executable_stack_image != NULL,
+            "could not allocate the executable-stack HostContext fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(executable_stack_image, source, source_size);
+    fixture_write_u32_le(
+        executable_stack_image + gnu_stack_header_offset + 4U,
+        gnu_stack_flags | FIXTURE_PF_X);
+    urp_image_handle rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        executable_stack_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(executable_stack_image);
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+            "an executable PT_GNU_STACK was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+
     uint8_t *sectionless_image = (uint8_t *)malloc(source_size);
     if (!fixture_expect(
             sectionless_image != NULL,
@@ -730,8 +778,6 @@ static int fixture_run_real_adapter(const char *fixture_path)
         free(source);
         return 0;
     }
-    urp_image_handle rejected_handle = 0U;
-
     size_t rela_tag_offset;
     size_t rela_value_offset;
     size_t rela_size_tag_offset;

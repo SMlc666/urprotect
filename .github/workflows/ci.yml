@@ -88,6 +88,7 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-lifecycle-path-search
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.sectionless-image
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-relro
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-stack
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
       - name: Render compatibility matrix
         run: |
