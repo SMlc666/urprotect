@@ -17,7 +17,9 @@ system loader remains the authority for applying relocation and memory
 protection. This adapter accepts only AArch64 `RELATIVE`/`RELR` relocation
 forms with checked writable targets, and permits only immediate-binding
 dynamic flags; other relocation or lifecycle forms remain outside the
-declared slice.
+declared slice. Section headers are not consulted by this adapter; bounded
+program headers and mapped dynamic metadata are authoritative for the
+sectionless image slice.
 
 The self-test includes both the deterministic fake host contract oracle and a
 real AArch64 `urp_entry` shared-object fixture loaded in-process. It therefore

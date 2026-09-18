@@ -586,6 +586,47 @@ static int fixture_run_real_adapter(const char *fixture_path)
         free(source);
         return 0;
     }
+
+    uint8_t *sectionless_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            sectionless_image != NULL,
+            "could not allocate the sectionless HostContext fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(sectionless_image, source, source_size);
+    fixture_write_u64_le(sectionless_image + 40U, 0U);
+    fixture_write_u16_le(sectionless_image + 58U, 0U);
+    fixture_write_u16_le(sectionless_image + 60U, 0U);
+    fixture_write_u16_le(sectionless_image + 62U, 0U);
+    uint8_t *sectionless_frame = NULL;
+    size_t sectionless_frame_size = 0U;
+    int made_sectionless_frame = fixture_make_frame(
+        sectionless_image,
+        source_size,
+        "host-context-sectionless-fixture.so",
+        &sectionless_frame,
+        &sectionless_frame_size);
+    if (!fixture_expect(
+            made_sectionless_frame,
+            "could not construct the sectionless HostContext frame")) {
+        free(sectionless_image);
+        free(source);
+        return 0;
+    }
+    status = urp_runtime_execute_frame(
+        &adapter.context,
+        sectionless_frame,
+        sectionless_frame_size,
+        &args);
+    free(sectionless_frame);
+    free(sectionless_image);
+    if (!fixture_expect(
+            status == 23,
+            "a sectionless HostContext image was not dispatched")) {
+        free(source);
+        return 0;
+    }
     urp_image_handle rejected_handle = 0U;
 
     size_t rela_tag_offset;
