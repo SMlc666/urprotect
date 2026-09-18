@@ -87,6 +87,11 @@ memfd_create(name, MFD_CLOEXEC)
   `URP_STATUS_UNSUPPORTED` before creating an image handle. The native
   self-test mutates a bounded `DT_NULL` tag one case at a time, verifies that
   no other image bytes changed, and requires a zero output handle.
+- A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
+  when that range is inside the image and `p_memsz >= p_filesz`; the real
+  adapter must still dispatch the entry. The native system loader owns the
+  resulting memory protection semantics, so this row is implementation
+  evidence rather than proof of a custom RELRO loader.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid

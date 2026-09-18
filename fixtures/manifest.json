@@ -98,6 +98,24 @@
       ]
     },
     {
+      "id": "runtime.host-context.gnu-relro",
+      "status": "validated",
+      "obligation": "A bounded PT_GNU_RELRO program header has a file-backed range inside the AArch64 image with p_memsz >= p_filesz, and the retained image completes HostContext entry dispatch",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/host_adapter.c",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "constraints": [
+        "The self-test covers only a bounded PT_GNU_RELRO program-header file range and p_memsz >= p_filesz",
+        "The unmodified image retaining PT_GNU_RELRO must dispatch through the real adapter with status 23",
+        "Memory protection semantics remain delegated to the native system loader; this is validated implementation evidence, not proof of a custom RELRO implementation"
+      ]
+    },
+    {
       "id": "runtime.glibc",
       "status": "validated",
       "obligation": "AArch64 dynamically linked PIE runs on the recorded native glibc host",
