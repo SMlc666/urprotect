@@ -99,7 +99,7 @@
     {
       "id": "runtime.host-context-v1",
       "status": "validated",
-      "obligation": "Versioned HostContext v1 callbacks provide immutable AArch64 ET_DYN image loading and explicit entry dispatch for the declared adapter slice",
+      "obligation": "Versioned HostContext v1 callbacks and the legacy frame provide immutable AArch64 ET_DYN image loading and explicit entry dispatch for the declared adapter slice",
       "witness": "native/urprotect-runtime/host_context_entry_fixture.c",
       "oracle": "native/urprotect-runtime/host_context_self_test.c",
       "evidence": [
@@ -116,6 +116,29 @@
         "No PT_INTERP, PT_TLS, PT_GNU_PROPERTY, DT_NEEDED, constructor, path-search, or text-relocation semantics",
         "Dynamic flags are limited to immediate binding flags; other lifecycle or relocation flags are rejected",
         "Only checked AArch64 RELATIVE/RELR relocation targets are accepted; application and memory protection are delegated to the recorded native system loader"
+      ]
+    },
+    {
+      "id": "runtime.host-context-v2",
+      "status": "validated",
+      "obligation": "HostContext frame v2 carries the ABI, required capabilities, and bounded entry symbol through one frame-relative layout and dispatches the declared entry without a temporary executable path",
+      "witness": "tests/UrProtect.Core.Tests/PayloadFrameTests.cs",
+      "oracle": "native/urprotect-runtime/host_context_self_test.c",
+      "evidence": [
+        "src/UrProtect.Core/Pack/HostContextContract.cs",
+        "src/UrProtect.Core/Pack/PayloadFrame.cs",
+        "tests/UrProtect.Core.Tests/HostContextContractTests.cs",
+        "tests/UrProtect.Core.Tests/PayloadFrameTests.cs",
+        "native/urprotect-runtime/include/urp/runtime.h",
+        "native/urprotect-runtime/runtime.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/README.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "constraints": [
+        "The legacy v1 wrapper-absolute offset remains unchanged",
+        "v2 reserved fields must be zero and unknown ABI or capability bits are rejected before image loading",
+        "Entry and source names are bounded strict UTF-8 values without path components; ordinary standalone PIE inputs are not implicitly HostContext images"
       ]
     },
     {

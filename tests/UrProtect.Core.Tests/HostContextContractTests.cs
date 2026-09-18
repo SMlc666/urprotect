@@ -65,4 +65,17 @@ public sealed class HostContextContractTests
         Assert.False(metadata.IsValid(out var error));
         Assert.Contains("mandatory", error, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void RejectsUnknownCapabilityBits()
+    {
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities | (HostContextCapability)(1UL << 63),
+            HostContextContract.EntrySymbol);
+
+        Assert.False(metadata.IsValid(out var error));
+        Assert.Contains("unsupported", error, StringComparison.OrdinalIgnoreCase);
+        Assert.False(HostContextContract.HasOnlySupportedCapabilities(metadata.RequiredCapabilities));
+    }
 }
