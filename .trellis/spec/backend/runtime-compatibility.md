@@ -38,7 +38,12 @@ int32_t urp_entry(
 `urp_host_context_v1` is version `1`, requires a declared size of at least
 `56` bytes, and requires `load_image`, `lookup_symbol`, and
 `release_image` capabilities. `urp_launch_args_v1` is version `1` with a
-minimum declared size of `32` bytes.
+minimum declared size of `32` bytes. The legacy payload frame is v1; the
+HostContext frame is v2 and adds the ABI version, required capability bits,
+and a bounded UTF-8 entry-symbol name to the common 112-byte header. The v2
+header is 136 bytes and uses a frame-relative encoded offset because the
+standalone runtime receives the frame slice directly. Legacy v1 retains its
+wrapper-absolute encoded offset for the existing launcher.
 
 The managed and native standalone handoff uses the same sequence:
 
@@ -57,7 +62,9 @@ memfd_create(name, MFD_CLOEXEC)
   image handle whose lifetime ends at `release_image`.
 - The runtime requests `URP_LOAD_IMAGE_IMMUTABLE`; the host must not mutate
   the supplied image bytes after the load operation accepts them.
-- `lookup_symbol` resolves the exact `urp_entry` symbol for the loaded image.
+- `lookup_symbol` resolves the exact declared entry symbol for the loaded
+  image; legacy v1 defaults to `urp_entry` and HostContext v2 carries the
+  bounded symbol name explicitly.
 - `urp_entry` is called at most once per successful frame execution.
 - The runtime releases the image after entry dispatch, including a nonzero
   entry status. Host callbacks must not be invoked after release returns.
@@ -106,13 +113,14 @@ oracle's retained output, not only source files that describe the oracle.
 
 | Condition | Required result |
 |---|---|
-| Unsupported HostContext version or short table | `URP_STATUS_HOST_INVALID`; no callback beyond validation |
+| Unsupported host ABI version or short table | `URP_STATUS_HOST_INVALID`; no callback beyond validation |
 | Missing mandatory host capability/callback | `URP_STATUS_HOST_INVALID`; no entry call |
 | Invalid launch args | `URP_STATUS_INVALID_ARGUMENT`; no image load |
-| Invalid frame, bounds, or decompression | `URP_STATUS_FRAME_INVALID`; no image load |
+| Invalid frame, bounds, metadata, or decompression | `URP_STATUS_FRAME_INVALID`; no image load |
+| Unsupported frame version, HostContext ABI, or capability bits | `URP_STATUS_UNSUPPORTED`; no image load |
 | Encoded or source digest mismatch | `URP_STATUS_INTEGRITY_FAILURE`; no image load |
 | Host image load failure | propagate host status; no lookup or entry call |
-| Missing `urp_entry` | `URP_STATUS_SYMBOL_NOT_FOUND`; release any loaded image |
+| Missing declared entry symbol | `URP_STATUS_SYMBOL_NOT_FOUND`; release any loaded image |
 | Entry returns a negative status | return it and emit a diagnostic when available |
 | Entry returns a nonzero positive status | preserve and return it; do not treat it as a runtime failure |
 | Bionic runtime/toolchain/architecture unavailable | fail the required lane; never substitute another runtime |
@@ -122,8 +130,8 @@ oracle's retained output, not only source files that describe the oracle.
 ### 6. Good/Base/Bad Cases
 
 - Good: a valid AArch64 `ET_DYN` frame reaches an immutable host image,
-  resolves `urp_entry`, invokes it once, releases the image, and preserves
-  its status and declared output.
+  resolves its declared entry symbol, invokes it once, releases the image,
+  and preserves its status and declared output.
 - Base: a standalone PIE passes parser and legacy wrapper checks but lacks the
   HostContext entry contract; report it as parser/legacy evidence, not as an
   in-process runtime claim.
@@ -172,7 +180,7 @@ turns a path-dependent smoke result into a compatibility claim.
 ```text
 verify(frame, ELF invariants)
 -> call one HostContext.load_image(bytes, immutable)
--> resolve exact urp_entry
+-> resolve exact declared entry symbol
 -> invoke once
 -> release image
 -> record the feature row and evidence tier

@@ -24,6 +24,10 @@ public static class HostContextContract
     public const string EntrySymbol = "urp_entry";
     public const int MaximumEntryNameBytes = 4096;
     public const uint LoadImageImmutable = 1;
+    public const HostContextCapability SupportedCapabilities = HostContextCapability.LoadImage
+        | HostContextCapability.LookupSymbol
+        | HostContextCapability.EmitDiagnostic
+        | HostContextCapability.ReleaseImage;
     public const HostContextCapability MandatoryCapabilities = HostContextCapability.LoadImage
         | HostContextCapability.LookupSymbol
         | HostContextCapability.ReleaseImage;
@@ -34,6 +38,9 @@ public static class HostContextContract
         HostContextCapability available,
         HostContextCapability required) =>
         (available & required) == required;
+
+    public static bool HasOnlySupportedCapabilities(HostContextCapability capabilities) =>
+        (capabilities & ~SupportedCapabilities) == HostContextCapability.None;
 
     public static bool TryValidateEntryName(string entryName, out string? error)
     {
@@ -84,6 +91,12 @@ public sealed record HostContextFrameMetadata(
                 HostContextContract.MandatoryCapabilities))
         {
             error = "The HostContext frame does not request the mandatory image lifecycle capabilities.";
+            return false;
+        }
+
+        if (!HostContextContract.HasOnlySupportedCapabilities(RequiredCapabilities))
+        {
+            error = "The HostContext frame requests unsupported capability bits.";
             return false;
         }
 

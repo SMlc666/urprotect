@@ -35,6 +35,142 @@ public sealed class PayloadFrameTests
         Assert.Equal(Convert.ToHexString(SHA256.HashData(source)).ToLowerInvariant(), frame.SourceSha256Hex);
         Assert.Equal(frame.SourceSha256, decoded.SourceSha256);
         Assert.Equal(frame.EncodedSha256, decoded.EncodedSha256);
+        Assert.Equal(PayloadFrameCodec.FormatVersion, frame.FrameVersion);
+        Assert.Equal(PayloadFrameCodec.FormatVersion, decoded.FrameVersion);
+        Assert.Null(decoded.HostContextMetadata);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void RoundTripsHostContextFrameWithExplicitEntrySymbol()
+    {
+        var source = ElfFixture.MinimalPie();
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities,
+            "custom_entry");
+
+        Assert.True(PayloadFrameCodec.TryEncodeHostContext(
+            source,
+            frameOffset: 1234,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "fixture",
+            metadata,
+            out var frame,
+            out var diagnostics), string.Join(Environment.NewLine, diagnostics));
+        Assert.NotNull(frame);
+        Assert.Equal(PayloadFrameCodec.HostContextFormatVersion, frame!.FrameVersion);
+        Assert.Equal(PayloadFrameCodec.HostContextHeaderSize, BinaryPrimitives.ReadUInt16LittleEndian(frame.FrameBytes.AsSpan(10, 2)));
+        Assert.Equal(
+            (ulong)PayloadFrameCodec.HostContextHeaderSize
+                + (ulong)"fixture"u8.Length
+                + (ulong)"custom_entry"u8.Length,
+            BinaryPrimitives.ReadUInt64LittleEndian(frame.FrameBytes.AsSpan(40, 8)));
+
+        var decoded = PayloadFrameCodec.Decode(
+            frame.FrameBytes,
+            frameOffset: 1234,
+            new PayloadFrameLimits());
+
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        Assert.Equal(source, decoded.SourceBytes);
+        Assert.Equal(PayloadFrameCodec.HostContextFormatVersion, decoded.FrameVersion);
+        Assert.Equal(metadata, decoded.HostContextMetadata);
+
+        var wrapperPrefix = Enumerable.Repeat((byte)0xA5, 64).ToArray();
+        var wrapperWithoutTrailer = wrapperPrefix.Concat(frame.FrameBytes).ToArray();
+        Assert.True(PayloadFrameCodec.HasFrameHeader(wrapperWithoutTrailer));
+        var wrapper = wrapperWithoutTrailer
+            .Concat(PayloadFrameCodec.CreateTrailer(
+                (ulong)wrapperPrefix.Length,
+                (ulong)frame.FrameBytes.Length))
+            .ToArray();
+        var wrapperResult = PayloadFrameCodec.ReadWrapper(wrapper, new PayloadFrameLimits());
+        Assert.True(wrapperResult.IsSuccess, string.Join(Environment.NewLine, wrapperResult.Diagnostics));
+        Assert.Equal(source, wrapperResult.SourceBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void RejectsHostContextReservedFields()
+    {
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities,
+            "custom_entry");
+        Assert.True(PayloadFrameCodec.TryEncodeHostContext(
+            ElfFixture.MinimalPie(),
+            0,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "fixture",
+            metadata,
+            out var frame,
+            out _));
+
+        var tampered = frame!.FrameBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            tampered.AsSpan(PayloadFrameCodec.HostContextReservedBeforeCapabilitiesOffset, 4),
+            1);
+        var decoded = PayloadFrameCodec.Decode(tampered, 0, new PayloadFrameLimits());
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Contains(decoded.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.PayloadMalformed);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void RejectsHostContextUnsupportedCapabilities()
+    {
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities,
+            "custom_entry");
+        Assert.True(PayloadFrameCodec.TryEncodeHostContext(
+            ElfFixture.MinimalPie(),
+            0,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "fixture",
+            metadata,
+            out var frame,
+            out _));
+
+        var tampered = frame!.FrameBytes.ToArray();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            tampered.AsSpan(PayloadFrameCodec.HostContextRequiredCapabilitiesOffset, 8),
+            (ulong)HostContextContract.MandatoryCapabilities | (1UL << 63));
+        var decoded = PayloadFrameCodec.Decode(tampered, 0, new PayloadFrameLimits());
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Contains(decoded.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.PayloadUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void RejectsHostContextInvalidUtf8EntryName()
+    {
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities,
+            "custom_entry");
+        Assert.True(PayloadFrameCodec.TryEncodeHostContext(
+            ElfFixture.MinimalPie(),
+            0,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "fixture",
+            metadata,
+            out var frame,
+            out _));
+
+        var tampered = frame!.FrameBytes.ToArray();
+        tampered[PayloadFrameCodec.HostContextHeaderSize + "fixture"u8.Length] = 0xFF;
+        var decoded = PayloadFrameCodec.Decode(tampered, 0, new PayloadFrameLimits());
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Contains(decoded.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.PayloadMalformed);
     }
 
     [Fact]
@@ -67,6 +203,27 @@ public sealed class PayloadFrameTests
 
         Assert.False(decoded.IsSuccess);
         Assert.Contains(decoded.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.PayloadMalformed);
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsUnknownFrameVersion()
+    {
+        Assert.True(PayloadFrameCodec.TryEncode(
+            ElfFixture.MinimalPie(),
+            0,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "fixture",
+            out var frame,
+            out _));
+
+        var unsupported = frame!.FrameBytes.ToArray();
+        BinaryPrimitives.WriteUInt16LittleEndian(unsupported.AsSpan(8, 2), 99);
+        var decoded = PayloadFrameCodec.Decode(unsupported, 0, new PayloadFrameLimits());
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Contains(decoded.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.PayloadUnsupported);
     }
 
     [Fact]
