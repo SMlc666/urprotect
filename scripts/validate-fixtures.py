@@ -141,11 +141,12 @@ def validate_android(android: object) -> None:
             fail(f"fixture manifest android.container.{field} must be a lowercase SHA-256")
 
 
-def validate_features(data: dict[str, object]) -> set[str]:
+def validate_features(data: dict[str, object]) -> dict[str, str]:
     features = data.get("features")
     if not isinstance(features, list) or not features:
         fail("fixture manifest must contain a non-empty features array")
 
+    statuses: dict[str, str] = {}
     ids: set[str] = set()
     for feature in features:
         if not isinstance(feature, dict):
@@ -167,12 +168,13 @@ def validate_features(data: dict[str, object]) -> set[str]:
             require_text(feature, "reason", feature_id)
             require_text(feature, "negativeWitness", feature_id)
             require_text(feature, "negativeOracle", feature_id)
-    return ids
+        statuses[feature_id] = status
+    return statuses
 
 
 def validate_case(
     case: object,
-    feature_ids: set[str],
+    feature_statuses: dict[str, str],
     repo_root: Path,
     ids: set[str],
     requested: str,
@@ -191,7 +193,9 @@ def validate_case(
         or any(not isinstance(feature, str) for feature in features)
     ):
         fail(f"{case_id}.features must be a non-empty string array")
-    missing_features = set(features) - feature_ids
+    if len(set(features)) != len(features):
+        fail(f"{case_id}.features must not contain duplicate feature identifiers")
+    missing_features = set(features) - feature_statuses.keys()
     if missing_features:
         fail(f"{case_id} references unknown features: {sorted(missing_features)}")
 
@@ -200,6 +204,17 @@ def validate_case(
         fail(f"{case_id} has unsupported tier {tier!r}")
     if not isinstance(case["required"], bool):
         fail(f"{case_id}.required must be boolean")
+    if case["required"]:
+        unsupported_features = {
+            feature: feature_statuses[feature]
+            for feature in features
+            if feature_statuses[feature] in {"rejected", "unknown"}
+        }
+        if unsupported_features:
+            fail(
+                f"{case_id} is required but references non-supporting features: "
+                f"{unsupported_features}"
+            )
     execution = require_text(case, "execution", case_id)
     if execution not in EXECUTIONS:
         fail(f"{case_id} has unsupported execution {execution!r}")
@@ -236,6 +251,10 @@ def validate_case(
             fail(f"{case_id}.host must identify a non-Android Termux userspace")
         if host.get("pageSize") != "recorded":
             fail(f"{case_id}.host.pageSize must be recorded")
+        if host.get("architecture") != "aarch64":
+            fail(f"{case_id}.host.architecture must be aarch64")
+        if host.get("kernel") != "recorded":
+            fail(f"{case_id}.host.kernel must be recorded")
     elif execution == "native-linux":
         if host.get("environment") != "native-arm64-linux":
             fail(f"{case_id}.host.environment must identify native ARM64 Linux")
@@ -255,13 +274,21 @@ def main() -> int:
         fail("fixture manifest root must be an object")
     if data.get("schemaVersion") != 3:
         fail("fixture manifest schemaVersion must be 3")
+    coverage = data.get("coverage")
+    if not isinstance(coverage, dict) or coverage.get("strategy") != "feature-covering":
+        fail("fixture manifest coverage.strategy must be feature-covering")
+    rules = coverage.get("rules")
+    if not isinstance(rules, list) or not rules or any(
+        not isinstance(rule, str) or not rule for rule in rules
+    ):
+        fail("fixture manifest coverage.rules must be a non-empty string array")
     host_contract = data.get("hostContract")
     if not isinstance(host_contract, dict) or host_contract.get("id") != "urp-host-v1":
         fail("fixture manifest hostContract must identify urp-host-v1")
     if host_contract.get("version") != 1:
         fail("fixture manifest hostContract version must be 1")
     validate_android(data.get("android"))
-    feature_ids = validate_features(data)
+    feature_statuses = validate_features(data)
     cases = data.get("cases")
     if not isinstance(cases, list) or not cases:
         fail("fixture manifest must contain a non-empty cases array")
@@ -272,7 +299,7 @@ def main() -> int:
     for case in cases:
         selected_case = validate_case(
             case,
-            feature_ids,
+            feature_statuses,
             repo_root,
             ids,
             requested,
@@ -291,6 +318,13 @@ def main() -> int:
             validate_reference(
                 feature["negativeWitness"],
                 f"{feature_id}.negativeWitness",
+                repo_root,
+                case_ids,
+            )
+        if "negativeOracle" in feature:
+            validate_reference(
+                feature["negativeOracle"],
+                f"{feature_id}.negativeOracle",
                 repo_root,
                 case_ids,
             )

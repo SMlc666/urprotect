@@ -70,10 +70,12 @@ witness and the malformed corpus keeps a paired alignment rejection; this
 proves the parser boundary, not arbitrary loader behavior.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
-records native ARM64 container execution, `/system/bin/linker64`, page size,
-and pinned image/source/package provenance. It intentionally excludes Android
-framework, OEM, SELinux, device-kernel, AVD, Waydroid, QEMU, and native-bridge
-claims.
+records native ARM64 container execution, `/system/bin/linker64`, kernel and
+page-size facts, and pinned image/source/package provenance. It intentionally
+excludes Android framework, OEM, SELinux, device-kernel, AVD, Waydroid, QEMU,
+and native-bridge claims. The matrix row `runtime.host-context.bionic-handoff`
+remains `unknown` until that userspace runs the HostContext/package oracle and
+retains its no-path evidence; the ordinary bionic PIE pass does not upgrade it.
 
 The claim therefore applies to every correctly implemented host satisfying the
 contract, not to an unqualified statistical majority of phone vendors.

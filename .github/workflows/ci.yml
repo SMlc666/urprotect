@@ -59,6 +59,8 @@ jobs:
         run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
       - name: Check coverage floor
         run: python3 scripts/check-coverage.py
+      - name: Check compatibility matrix contract
+        run: python3 tests/test_fixture_matrix.py
       - name: Fixture smoke
         run: ./scripts/run-fixture-matrix.sh --tier pr
       - name: Check PR fixture evidence
@@ -95,6 +97,18 @@ jobs:
           python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
           python3 scripts/render-compatibility-matrix.py \
             fixtures/manifest.json --output .artifacts/compatibility-matrix.md
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("fixtures/manifest.json").read_text())
+          feature = next(
+              item for item in manifest["features"]
+              if item["id"] == "runtime.host-context.bionic-handoff"
+          )
+          if feature["status"] != "unknown":
+              raise SystemExit("bionic HostContext handoff must remain unknown until its oracle is retained")
+          PY
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4

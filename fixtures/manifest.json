@@ -9,7 +9,8 @@
     "rules": [
       "Every proven feature has a model or positive witness.",
       "Every accepted boundary has a nearest rejected or malformed witness.",
-      "Runtime facts do not imply Android framework or device behavior."
+      "Runtime facts do not imply Android framework or device behavior.",
+      "Unknown features never count as a support claim."
     ]
   },
   "features": [
@@ -209,6 +210,18 @@
         "v2 reserved fields must be zero and unknown ABI or capability bits are rejected before image loading",
         "Entry and source names are bounded strict UTF-8 values without path components; ordinary standalone PIE inputs are not implicitly HostContext images"
       ]
+    },
+    {
+      "id": "runtime.host-context.bionic-handoff",
+      "status": "unknown",
+      "obligation": "The pinned native ARM64 Termux userspace can exercise HostContext v2 immutable image loading and entry dispatch without an executable temporary pathname",
+      "witness": "c-termux-bionic-pie",
+      "oracle": "scripts/run-bionic-fixture.sh",
+      "evidence": [
+        "scripts/run-bionic-fixture.sh",
+        "COMPATIBILITY.md"
+      ],
+      "nextEvidence": "Run the bionic HostContext/package oracle and retain .artifacts/bionic/c-termux-bionic-pie/host-context evidence with linker, kernel, page-size, and no-fallback facts."
     },
     {
       "id": "handoff.no-executable-path",
@@ -546,7 +559,8 @@
       "features": [
         "elf.identity.aarch64-et-dyn",
         "elf.dynamic",
-        "runtime.bionic.linker"
+        "runtime.bionic.linker",
+        "runtime.host-context.bionic-handoff"
       ],
       "language": "c",
       "toolchain": "termux-clang",
@@ -567,7 +581,9 @@
         "compilerPackage": "clang=21.1.8-3",
         "linker": "/system/bin/linker64",
         "androidRuntime": false,
-        "pageSize": "recorded"
+        "pageSize": "recorded",
+        "architecture": "aarch64",
+        "kernel": "recorded"
       }
     }
   ]

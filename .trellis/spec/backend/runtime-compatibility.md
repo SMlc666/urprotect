@@ -113,8 +113,10 @@ memfd_create(name, MFD_CLOEXEC)
 - `NATIVE_LAUNCHER_CC` selects the native launcher compiler in tests.
 
 The bionic lane must use the pinned Termux image and exact compiler/linker
-facts from the manifest. It must refuse AVD, Waydroid, QEMU, native bridge,
-and non-ARM execution rather than silently falling back.
+facts from the manifest. It must record both host and container kernel/page-size
+facts, refuse AVD, Waydroid, QEMU, native bridge, and non-ARM execution rather
+than silently falling back, and keep the bionic HostContext handoff row
+`unknown` until its dedicated oracle is retained.
 
 ### 4. CI Evidence Postconditions
 
