@@ -42,7 +42,13 @@ state obligations, so an adapter must reject a bounded property-header
 mutation with `URP_STATUS_UNSUPPORTED` and a zero image handle even if a
 system loader would accept its note. The self-test changes only the bounded
 program-header type and retains the unmodified entry image as the positive
-baseline; the dependency rejection remains a separate DT_NEEDED boundary.
+baseline. DT_NEEDED dependency resolution is the separately evidenced
+`runtime.host-context.dependency-resolution` boundary: HostContext v1 defines
+no dependency-resolution, search-path, symbol-scope, or dependency-lifetime
+semantics, so loader resolution alone is not support. Its bounded dynamic-table
+mutation preserves surrounding bytes, uses a sentinel output handle, and must
+return `URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff;
+lifecycle and path-search rejections remain separate.
 
 The runtime accepts the legacy frame v1 and HostContext frame v2. Both use the
 same 112-byte common header. A v2 header is 136 bytes and appends, in order,

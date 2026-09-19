@@ -92,8 +92,16 @@ baseline, then changes only the type of a bounded PT_LOAD-covered metadata
 program header to PT_GNU_PROPERTY and requires `URP_STATUS_UNSUPPORTED` with a
 zero image handle before loader handoff. No positive property-bearing
 HostContext fixture or support claim is made until those semantics are part of
-the Host Contract. The remaining `runtime.host-context.unsupported-image-boundaries`
-row covers only the separate DT_NEEDED dependency-resolution boundary.
+the Host Contract. DT_NEEDED dependency resolution is a separate rejected
+boundary recorded as `runtime.host-context.dependency-resolution`. HostContext
+v1 and the current system-loader adapter define no dependency-resolution,
+search-path, symbol-scope, or dependency-lifetime semantics, so a loader that
+can resolve a library does not establish support. Its self-test mutates only a
+bounded dynamic-table tag, preserves surrounding bytes, initializes a sentinel
+handle, and requires `URP_STATUS_UNSUPPORTED` with a zero handle before loader
+handoff. The unchanged non-dependency entry fixture remains the positive
+HostContext baseline; lifecycle and path-search tags remain in their separate
+rejected row.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and

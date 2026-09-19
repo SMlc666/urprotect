@@ -47,6 +47,7 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_DT_RELRSZ 35U
 #define FIXTURE_DT_RELRENT 37U
 #define FIXTURE_DT_FLAGS 30U
+#define FIXTURE_REJECTION_SENTINEL UINT64_C(0xfeedface)
 
 static const uint8_t fixture_frame[] = {
     0x55, 0x52, 0x50, 0x43, 0x4b, 0x30, 0x31, 0x00, 0x01, 0x00, 0x70, 0x00,
@@ -986,7 +987,28 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(dependency_image, source, source_size);
     fixture_write_u64_le(dependency_image + dynamic_terminator_offset, FIXTURE_DT_NEEDED);
-    rejected_handle = 0U;
+    size_t dependency_tag_tail_offset = dynamic_terminator_offset + sizeof(uint64_t);
+    size_t dependency_tag_tail_size = source_size - dependency_tag_tail_offset;
+    int dependency_mutation_preserved = (dynamic_terminator_offset == 0U
+            || memcmp(
+                dependency_image,
+                source,
+                dynamic_terminator_offset) == 0)
+        && (dependency_tag_tail_size == 0U
+            || memcmp(
+                dependency_image + dependency_tag_tail_offset,
+                source + dependency_tag_tail_offset,
+                dependency_tag_tail_size) == 0);
+    if (!fixture_expect(
+            dependency_mutation_preserved
+                && fixture_read_u64_le(
+                    dependency_image + dynamic_terminator_offset) == FIXTURE_DT_NEEDED,
+            "DT_NEEDED mutation changed bytes outside the bounded dynamic tag")) {
+        free(dependency_image);
+        free(source);
+        return 0;
+    }
+    rejected_handle = FIXTURE_REJECTION_SENTINEL;
     status = adapter.context.load_image(
         adapter.context.userdata,
         dependency_image,

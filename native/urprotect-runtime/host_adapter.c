@@ -443,6 +443,9 @@ static urp_status urp_validate_dynamic_segment(
 
         switch (tag) {
         case URP_DT_NEEDED:
+            /* HostContext v1 has no dependency-resolution or lifetime contract. */
+            return URP_STATUS_UNSUPPORTED;
+        /* Lifecycle and path-search tags use a separate rejection boundary. */
         case URP_DT_INIT:
         case URP_DT_FINI:
         case URP_DT_RPATH:

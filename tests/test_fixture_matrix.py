@@ -126,16 +126,31 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertTrue(any("zero image handle" in item for item in feature["constraints"]))
 
-    def test_unsupported_image_boundary_covers_only_dependencies(self) -> None:
+    def test_dependency_resolution_is_an_explicit_rejected_boundary(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
             item
             for item in self.data["features"]
-            if item["id"] == "runtime.host-context.unsupported-image-boundaries"
+            if item["id"] == "runtime.host-context.dependency-resolution"
         )
+        self.assertEqual(feature["status"], "rejected")
         self.assertIn("DT_NEEDED", feature["obligation"])
-        self.assertNotIn("PT_GNU_PROPERTY", feature["obligation"])
         self.assertIn("dependency-resolution", feature["reason"])
-        self.assertNotIn("GNU property", feature["reason"])
+        self.assertIn("search-path", feature["reason"])
+        self.assertIn("symbol-scope", feature["reason"])
+        self.assertIn("dependency-lifetime", feature["reason"])
+        self.assertIn("COMPATIBILITY.md", feature["evidence"])
+        self.assertTrue(any("surrounding byte" in item for item in feature["constraints"]))
+        self.assertTrue(any("positive" in item for item in feature["constraints"]))
+
+        lifecycle = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.unsupported-lifecycle-path-search"
+        )
+        self.assertNotIn("DT_NEEDED", lifecycle["obligation"])
+        self.assertNotIn("DT_NEEDED", lifecycle["reason"])
 
     def test_feature_covering_strategy_is_required(self) -> None:
         data = copy.deepcopy(self.data)
@@ -181,7 +196,7 @@ class FixtureMatrixTests(unittest.TestCase):
         feature = next(
             item
             for item in data["features"]
-            if item["id"] == "runtime.host-context.unsupported-image-boundaries"
+            if item["id"] == "runtime.host-context.dependency-resolution"
         )
         feature["negativeOracle"] = "fixtures/missing-negative-oracle"
 
@@ -212,6 +227,7 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.bionic-handoff | unknown", rendered)
             self.assertIn("runtime.host-context.gnu-property | rejected", rendered)
             self.assertIn("runtime.host-context.pt-tls | rejected", rendered)
+            self.assertIn("runtime.host-context.dependency-resolution | rejected", rendered)
 
 
 if __name__ == "__main__":

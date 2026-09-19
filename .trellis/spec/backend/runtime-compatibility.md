@@ -115,9 +115,14 @@ memfd_create(name, MFD_CLOEXEC)
   not establish support. The self-test keeps the unchanged entry image as the
   positive baseline, changes only a bounded PT_LOAD-covered metadata program
   header type to `PT_GNU_PROPERTY`, and requires `URP_STATUS_UNSUPPORTED` with
-  a zero image handle before loader handoff. The remaining
-  `runtime.host-context.unsupported-image-boundaries` row covers only the
-  separate `DT_NEEDED` dependency-resolution boundary.
+  a zero image handle before loader handoff.
+  `runtime.host-context.dependency-resolution` is a separate rejected
+  boundary for `DT_NEEDED`: HostContext v1 and the current system-loader
+  adapter define no dependency-resolution, search-path, symbol-scope, or
+  dependency-lifetime semantics, so a loader that can resolve a library does
+  not establish support. The bounded mutation keeps the unchanged
+  non-dependency entry fixture as the positive baseline and requires a zero
+  image handle before loader handoff.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid

@@ -294,23 +294,25 @@
       ]
     },
     {
-      "id": "runtime.host-context.unsupported-image-boundaries",
+      "id": "runtime.host-context.dependency-resolution",
       "status": "rejected",
-      "obligation": "The narrow HostContext adapter rejects DT_NEEDED dependency metadata before creating an image handle",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_NEEDED dependency metadata before dependency resolution or image creation",
       "witness": "native/urprotect-runtime/host_context_self_test.c",
       "oracle": "native/urprotect-runtime/host_adapter.c",
       "evidence": [
         "native/urprotect-runtime/host_adapter.c",
         "native/urprotect-runtime/host_context_self_test.c",
         "native/urprotect-runtime/host_context_entry_fixture.c",
+        "COMPATIBILITY.md",
         ".artifacts/host-context/pr/self-test.log"
       ],
-      "reason": "The first HostContext adapter has no defined dependency-resolution semantics for in-process images.",
+      "reason": "HostContext v1 and the current system-loader adapter define no dependency-resolution, search-path, symbol-scope, or dependency-lifetime semantics; a loader resolving a library is not a compatibility proof.",
       "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
       "negativeOracle": "native/urprotect-runtime/host_adapter.c",
       "constraints": [
-        "A bounded DT_NEEDED mutation is rejected with URP_STATUS_UNSUPPORTED and a zero image handle before loader handoff.",
-        "No positive dependency-bearing HostContext fixture or support claim exists until the Host Contract defines dependency-resolution semantics."
+        "The unchanged non-dependency entry fixture remains the positive HostContext dispatch baseline.",
+        "A bounded dynamic-table mutation changes only a DT_NEEDED tag, is rejected with URP_STATUS_UNSUPPORTED and a zero image handle before loader handoff, and preserves every surrounding byte.",
+        "No positive dependency-bearing HostContext fixture or support claim exists until the Host Contract defines dependency resolution, search paths, symbol scope, and dependency lifetime."
       ]
     },
     {
