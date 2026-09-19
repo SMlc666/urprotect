@@ -36,6 +36,13 @@ the compatibility matrix. The real fixture is the positive HostContext
 baseline; bounded copies that turn a PT_LOAD-covered metadata segment into a
 structurally valid PT_TLS segment, and a malformed PT_TLS segment with
 `p_filesz > p_memsz`, must both be rejected before an image handle is created.
+PT_GNU_PROPERTY is a separate rejected boundary: HostContext v1 and this
+system-loader adapter define no property negotiation or BTI/PAC/instruction-
+state obligations, so an adapter must reject a bounded property-header
+mutation with `URP_STATUS_UNSUPPORTED` and a zero image handle even if a
+system loader would accept its note. The self-test changes only the bounded
+program-header type and retains the unmodified entry image as the positive
+baseline; the dependency rejection remains a separate DT_NEEDED boundary.
 
 The runtime accepts the legacy frame v1 and HostContext frame v2. Both use the
 same 112-byte common header. A v2 header is 136 bytes and appends, in order,

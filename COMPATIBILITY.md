@@ -83,6 +83,18 @@ congruence checks protect these rejection boundaries, but no positive TLS
 fixture or compatibility claim is made until
 the Host Contract defines the missing semantics.
 
+PT_GNU_PROPERTY is a separate rejected HostContext v1 feature, recorded as
+`runtime.host-context.gnu-property`. The current system-loader adapter does not
+negotiate GNU properties or define BTI/PAC/instruction-state obligations, so a
+loader that accepts a property note does not establish compatibility. The
+self-test preserves the unchanged entry image as its positive HostContext
+baseline, then changes only the type of a bounded PT_LOAD-covered metadata
+program header to PT_GNU_PROPERTY and requires `URP_STATUS_UNSUPPORTED` with a
+zero image handle before loader handoff. No positive property-bearing
+HostContext fixture or support claim is made until those semantics are part of
+the Host Contract. The remaining `runtime.host-context.unsupported-image-boundaries`
+row covers only the separate DT_NEEDED dependency-resolution boundary.
+
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and
 page-size facts, and pinned image/source/package provenance. It intentionally

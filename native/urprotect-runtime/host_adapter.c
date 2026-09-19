@@ -634,7 +634,9 @@ static urp_status urp_validate_image(const void *bytes, size_t image_size)
             /* HostContext v1 has no TLS/thread lifetime contract; keep this boundary fail-closed. */
             return URP_STATUS_UNSUPPORTED;
         case URP_PT_INTERP:
+            return URP_STATUS_UNSUPPORTED;
         case URP_PT_GNU_PROPERTY:
+            /* HostContext v1 has no property negotiation or instruction-state contract. */
             return URP_STATUS_UNSUPPORTED;
         case URP_PT_GNU_STACK:
             if ((flags & URP_PF_X) != 0U) {

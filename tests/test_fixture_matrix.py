@@ -99,6 +99,44 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("nextEvidence", result.stderr or result.stdout)
 
+    def test_gnu_property_is_an_explicit_rejected_host_context_boundary(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.gnu-property"
+        )
+        self.assertEqual(feature["status"], "rejected")
+        self.assertEqual(
+            feature["witness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertIn("property negotiation", feature["reason"])
+        self.assertIn("BTI/PAC", feature["reason"])
+        self.assertEqual(
+            feature["negativeWitness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertIn(
+            ".artifacts/host-context/pr/self-test.log",
+            feature["evidence"],
+        )
+        self.assertTrue(any("zero image handle" in item for item in feature["constraints"]))
+
+    def test_unsupported_image_boundary_covers_only_dependencies(self) -> None:
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.unsupported-image-boundaries"
+        )
+        self.assertIn("DT_NEEDED", feature["obligation"])
+        self.assertNotIn("PT_GNU_PROPERTY", feature["obligation"])
+        self.assertIn("dependency-resolution", feature["reason"])
+        self.assertNotIn("GNU property", feature["reason"])
+
     def test_feature_covering_strategy_is_required(self) -> None:
         data = copy.deepcopy(self.data)
         data["coverage"]["strategy"] = "cartesian"
@@ -172,6 +210,7 @@ class FixtureMatrixTests(unittest.TestCase):
             rendered = output.read_text()
             self.assertIn("unknown` rows never count as support", rendered)
             self.assertIn("runtime.host-context.bionic-handoff | unknown", rendered)
+            self.assertIn("runtime.host-context.gnu-property | rejected", rendered)
             self.assertIn("runtime.host-context.pt-tls | rejected", rendered)
 
 

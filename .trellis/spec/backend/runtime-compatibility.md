@@ -108,6 +108,16 @@ memfd_create(name, MFD_CLOEXEC)
   failure path. The self-test's
   unchanged entry fixture is only the positive non-TLS HostContext baseline; no
   positive TLS fixture or support claim exists.
+- `PT_GNU_PROPERTY` is a separate rejected feature row
+  (`runtime.host-context.gnu-property`). HostContext v1 and the current
+  system-loader adapter define no property negotiation or BTI/PAC/instruction-
+  state obligations, so acceptance of a property note by `dlopen` alone does
+  not establish support. The self-test keeps the unchanged entry image as the
+  positive baseline, changes only a bounded PT_LOAD-covered metadata program
+  header type to `PT_GNU_PROPERTY`, and requires `URP_STATUS_UNSUPPORTED` with
+  a zero image handle before loader handoff. The remaining
+  `runtime.host-context.unsupported-image-boundaries` row covers only the
+  separate `DT_NEEDED` dependency-resolution boundary.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid

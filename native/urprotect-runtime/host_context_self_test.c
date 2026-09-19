@@ -1127,31 +1127,31 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
-    const uint8_t *tls_header;
+    const uint8_t *metadata_header;
     if (!fixture_expect(
             fixture_find_program_header(
                 source,
                 source_size,
                 FIXTURE_PT_GNU_EH_FRAME,
-                &tls_header),
-            "entry fixture has no bounded metadata segment for the PT_TLS boundary")) {
+                &metadata_header),
+            "entry fixture has no bounded metadata segment for the PT_TLS and PT_GNU_PROPERTY boundaries")) {
         free(source);
         return 0;
     }
-    size_t tls_header_offset = (size_t)(tls_header - source);
-    uint64_t tls_file_offset = fixture_read_u64_le(tls_header + 8U);
-    uint64_t tls_virtual_address = fixture_read_u64_le(tls_header + 16U);
-    uint64_t tls_file_size = fixture_read_u64_le(tls_header + 32U);
-    uint64_t tls_memory_size = fixture_read_u64_le(tls_header + 40U);
+    size_t metadata_header_offset = (size_t)(metadata_header - source);
+    uint64_t metadata_file_offset = fixture_read_u64_le(metadata_header + 8U);
+    uint64_t metadata_virtual_address = fixture_read_u64_le(metadata_header + 16U);
+    uint64_t metadata_file_size = fixture_read_u64_le(metadata_header + 32U);
+    uint64_t metadata_memory_size = fixture_read_u64_le(metadata_header + 40U);
     if (!fixture_expect(
-            tls_file_size > 0U && tls_memory_size >= tls_file_size,
-            "entry fixture PT_TLS source range is empty or invalid")) {
+            metadata_file_size > 0U && metadata_memory_size >= metadata_file_size,
+            "entry fixture metadata source range is empty or invalid")) {
         free(source);
         return 0;
     }
     if (!fixture_expect(
-            fixture_range_in_file(source_size, tls_file_offset, tls_file_size, NULL, NULL),
-            "entry fixture PT_TLS file-backed range is outside the source")) {
+            fixture_range_in_file(source_size, metadata_file_offset, metadata_file_size, NULL, NULL),
+            "entry fixture metadata file-backed range is outside the source")) {
         free(source);
         return 0;
     }
@@ -1159,14 +1159,14 @@ static int fixture_run_real_adapter(const char *fixture_path)
             fixture_range_within(
                 load_file_offset,
                 load_file_size,
-                tls_file_offset,
-                tls_file_size)
+                metadata_file_offset,
+                metadata_file_size)
                 && fixture_range_within(
                     load_virtual_address,
                     load_memory_size,
-                    tls_virtual_address,
-                    tls_memory_size),
-            "entry fixture PT_TLS source range is not inside a PT_LOAD range")) {
+                    metadata_virtual_address,
+                    metadata_memory_size),
+            "entry fixture metadata source range is not inside a PT_LOAD range")) {
         free(source);
         return 0;
     }
@@ -1177,7 +1177,7 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
     memcpy(tls_image, source, source_size);
-    fixture_write_u32_le(tls_image + tls_header_offset, FIXTURE_PT_TLS);
+    fixture_write_u32_le(tls_image + metadata_header_offset, FIXTURE_PT_TLS);
     rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
@@ -1201,8 +1201,8 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
     memcpy(malformed_tls_image, source, source_size);
-    fixture_write_u32_le(malformed_tls_image + tls_header_offset, FIXTURE_PT_TLS);
-    fixture_write_u64_le(malformed_tls_image + tls_header_offset + 40U, tls_file_size - 1U);
+    fixture_write_u32_le(malformed_tls_image + metadata_header_offset, FIXTURE_PT_TLS);
+    fixture_write_u64_le(malformed_tls_image + metadata_header_offset + 40U, metadata_file_size - 1U);
     rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
@@ -1227,9 +1227,27 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(gnu_property_image, source, source_size);
     fixture_write_u32_le(
-        gnu_property_image + program_header_offset_as_size,
+        gnu_property_image + metadata_header_offset,
         FIXTURE_PT_GNU_PROPERTY);
-    rejected_handle = 0U;
+    size_t property_tail_offset = metadata_header_offset + sizeof(uint32_t);
+    size_t property_tail_size = source_size - property_tail_offset;
+    if (!fixture_expect(
+            (metadata_header_offset == 0U
+                || memcmp(
+                    gnu_property_image,
+                    source,
+                    metadata_header_offset) == 0)
+                && (property_tail_size == 0U
+                    || memcmp(
+                        gnu_property_image + property_tail_offset,
+                        source + property_tail_offset,
+                        property_tail_size) == 0),
+            "PT_GNU_PROPERTY mutation changed bytes outside the bounded program-header type")) {
+        free(gnu_property_image);
+        free(source);
+        return 0;
+    }
+    rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
         gnu_property_image,
@@ -1251,7 +1269,7 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(interpreter_image, source, source_size);
     fixture_write_u32_le(interpreter_image + program_header_offset_as_size, 3U);
-    rejected_handle = 0U;
+    rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
         interpreter_image,
@@ -1260,7 +1278,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
         &rejected_handle);
     free(interpreter_image);
     free(source);
-    return fixture_expect(status == URP_STATUS_UNSUPPORTED, "PT_INTERP adapter input was accepted");
+    return fixture_expect(
+        status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+        "PT_INTERP adapter input was accepted or returned a handle");
 }
 
 int main(int argc, char **argv)
