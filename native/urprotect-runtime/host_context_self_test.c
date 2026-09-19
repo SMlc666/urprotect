@@ -21,10 +21,14 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_ELF_HEADER_SIZE 64U
 #define FIXTURE_ELF_PROGRAM_HEADER_SIZE 56U
 #define FIXTURE_ELF_DYNAMIC_ENTRY_SIZE 16U
+#define FIXTURE_PT_LOAD 1U
 #define FIXTURE_PT_DYNAMIC 2U
 #define FIXTURE_PT_TLS 7U
+#define FIXTURE_PT_GNU_EH_FRAME 0x6474e550U
 #define FIXTURE_PT_GNU_PROPERTY 0x6474e553U
+#define FIXTURE_PT_GNU_STACK 0x6474e551U
 #define FIXTURE_PT_GNU_RELRO 0x6474e552U
+#define FIXTURE_PF_X 1U
 #define FIXTURE_DT_NEEDED 1U
 #define FIXTURE_DT_INIT 12U
 #define FIXTURE_DT_FINI 13U
@@ -42,7 +46,8 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_DT_RELR 36U
 #define FIXTURE_DT_RELRSZ 35U
 #define FIXTURE_DT_RELRENT 37U
-#define FIXTURE_DT_FLAGS 30U
+#define FIXTURE_DT_TEXTREL 22U
+#define FIXTURE_REJECTION_SENTINEL UINT64_C(0xfeedface)
 
 static const uint8_t fixture_frame[] = {
     0x55, 0x52, 0x50, 0x43, 0x4b, 0x30, 0x31, 0x00, 0x01, 0x00, 0x70, 0x00,
@@ -223,6 +228,22 @@ static int fixture_range_in_file(
     return 1;
 }
 
+static int fixture_range_within(
+    uint64_t outer_offset,
+    uint64_t outer_size,
+    uint64_t inner_offset,
+    uint64_t inner_size)
+{
+    if (outer_offset > UINT64_MAX - outer_size
+        || inner_offset > UINT64_MAX - inner_size
+        || inner_offset < outer_offset) {
+        return 0;
+    }
+
+    uint64_t delta = inner_offset - outer_offset;
+    return delta <= outer_size && inner_size <= outer_size - delta;
+}
+
 static int fixture_checked_add_u64(uint64_t left, uint64_t right, uint64_t *result)
 {
     if (result == NULL || right > UINT64_MAX - left) {
@@ -372,6 +393,84 @@ static int fixture_find_dynamic_terminator(
         }
     }
     return 0;
+}
+
+static int fixture_reject_dynamic_tags(
+    const urp_host_adapter_v1 *adapter,
+    const uint8_t *source,
+    size_t source_size,
+    size_t dynamic_terminator_offset,
+    const fixture_dynamic_rejection *rejections,
+    size_t rejection_count)
+{
+    size_t dynamic_offset;
+    size_t dynamic_size;
+    if (adapter == NULL
+        || source == NULL
+        || (rejection_count != 0U && rejections == NULL)
+        || adapter->context.load_image == NULL
+        || !fixture_find_dynamic_segment(
+            source,
+            source_size,
+            &dynamic_offset,
+            &dynamic_size)
+        || dynamic_size % FIXTURE_ELF_DYNAMIC_ENTRY_SIZE != 0U
+        || dynamic_terminator_offset < dynamic_offset
+        || dynamic_terminator_offset > source_size
+        || dynamic_terminator_offset - dynamic_offset >= dynamic_size
+        || (dynamic_terminator_offset - dynamic_offset)
+            % FIXTURE_ELF_DYNAMIC_ENTRY_SIZE != 0U
+        || sizeof(uint64_t) > source_size - dynamic_terminator_offset
+        || sizeof(uint64_t)
+            > dynamic_size - (dynamic_terminator_offset - dynamic_offset)
+        || fixture_read_u64_le(source + dynamic_terminator_offset) != 0U) {
+        return fixture_expect(0, "dynamic rejection mutation range is not owned by PT_DYNAMIC");
+    }
+
+    size_t tail_offset = dynamic_terminator_offset + sizeof(uint64_t);
+    size_t tail_size = source_size - tail_offset;
+    for (size_t index = 0; index < rejection_count; ++index) {
+        if (rejections[index].tag == 0U || rejections[index].message == NULL) {
+            return fixture_expect(0, "dynamic rejection metadata is invalid");
+        }
+        uint8_t *image = (uint8_t *)malloc(source_size);
+        if (!fixture_expect(
+                image != NULL,
+                "could not allocate an unsupported dynamic-tag fixture")) {
+            return 0;
+        }
+        memcpy(image, source, source_size);
+        fixture_write_u64_le(
+            image + dynamic_terminator_offset,
+            rejections[index].tag);
+        int preserved = (dynamic_terminator_offset == 0U
+                || memcmp(image, source, dynamic_terminator_offset) == 0)
+            && (tail_size == 0U
+                || memcmp(image + tail_offset, source + tail_offset, tail_size) == 0);
+        if (!fixture_expect(
+                preserved
+                    && fixture_read_u64_le(image + dynamic_terminator_offset)
+                        == rejections[index].tag,
+                "unsupported dynamic-tag mutation changed bytes outside the bounded tag")) {
+            free(image);
+            return 0;
+        }
+
+        urp_image_handle rejected_handle = FIXTURE_REJECTION_SENTINEL;
+        urp_status status = adapter->context.load_image(
+            adapter->context.userdata,
+            image,
+            source_size,
+            URP_LOAD_IMAGE_IMMUTABLE,
+            &rejected_handle);
+        free(image);
+        if (!fixture_expect(
+                status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+                rejections[index].message)) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int fixture_read_file(const char *path, uint8_t **bytes_out, size_t *size_out)
@@ -613,6 +712,25 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
+    const uint8_t *gnu_stack_header;
+    if (!fixture_expect(
+            fixture_find_program_header(
+                source,
+                source_size,
+                FIXTURE_PT_GNU_STACK,
+                &gnu_stack_header),
+            "entry fixture has no PT_GNU_STACK program header")) {
+        free(source);
+        return 0;
+    }
+    uint32_t gnu_stack_flags = fixture_read_u32_le(gnu_stack_header + 4U);
+    if (!fixture_expect(
+            (gnu_stack_flags & FIXTURE_PF_X) == 0U,
+            "entry fixture PT_GNU_STACK is executable")) {
+        free(source);
+        return 0;
+    }
+
     const uint8_t *relro_header;
     if (!fixture_expect(
             fixture_find_program_header(
@@ -690,6 +808,33 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
+    size_t gnu_stack_header_offset = (size_t)(gnu_stack_header - source);
+    uint8_t *executable_stack_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            executable_stack_image != NULL,
+            "could not allocate the executable-stack HostContext fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(executable_stack_image, source, source_size);
+    fixture_write_u32_le(
+        executable_stack_image + gnu_stack_header_offset + 4U,
+        gnu_stack_flags | FIXTURE_PF_X);
+    urp_image_handle rejected_handle = 0U;
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        executable_stack_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(executable_stack_image);
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+            "an executable PT_GNU_STACK was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+
     uint8_t *sectionless_image = (uint8_t *)malloc(source_size);
     if (!fixture_expect(
             sectionless_image != NULL,
@@ -730,8 +875,6 @@ static int fixture_run_real_adapter(const char *fixture_path)
         free(source);
         return 0;
     }
-    urp_image_handle rejected_handle = 0U;
-
     size_t rela_tag_offset;
     size_t rela_value_offset;
     size_t rela_size_tag_offset;
@@ -866,16 +1009,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
-    size_t flags_value_offset;
     size_t dynamic_terminator_offset;
     if (!fixture_expect(
-            fixture_find_dynamic_entry(
-                source,
-                source_size,
-                FIXTURE_DT_FLAGS,
-                NULL,
-                &flags_value_offset)
-            && fixture_find_dynamic_terminator(
+            fixture_find_dynamic_terminator(
                 source,
                 source_size,
                 &dynamic_terminator_offset),
@@ -891,24 +1027,14 @@ static int fixture_run_real_adapter(const char *fixture_path)
         free(source);
         return 0;
     }
-    uint8_t *textrel_image = (uint8_t *)malloc(source_size);
-    if (!fixture_expect(textrel_image != NULL, "could not allocate the text-relocation fixture")) {
-        free(source);
-        return 0;
-    }
-    memcpy(textrel_image, source, source_size);
-    fixture_write_u64_le(textrel_image + flags_value_offset, UINT64_C(0x4));
-    rejected_handle = 0U;
-    status = adapter.context.load_image(
-        adapter.context.userdata,
-        textrel_image,
-        source_size,
-        URP_LOAD_IMAGE_IMMUTABLE,
-        &rejected_handle);
-    free(textrel_image);
     if (!fixture_expect(
-            status == URP_STATUS_UNSUPPORTED,
-            "a text-relocation dynamic flag was accepted")) {
+            !fixture_find_dynamic_entry(
+                source,
+                source_size,
+                FIXTURE_DT_TEXTREL,
+                NULL,
+                NULL),
+            "the positive entry fixture unexpectedly contains DT_TEXTREL")) {
         free(source);
         return 0;
     }
@@ -922,7 +1048,28 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(dependency_image, source, source_size);
     fixture_write_u64_le(dependency_image + dynamic_terminator_offset, FIXTURE_DT_NEEDED);
-    rejected_handle = 0U;
+    size_t dependency_tag_tail_offset = dynamic_terminator_offset + sizeof(uint64_t);
+    size_t dependency_tag_tail_size = source_size - dependency_tag_tail_offset;
+    int dependency_mutation_preserved = (dynamic_terminator_offset == 0U
+            || memcmp(
+                dependency_image,
+                source,
+                dynamic_terminator_offset) == 0)
+        && (dependency_tag_tail_size == 0U
+            || memcmp(
+                dependency_image + dependency_tag_tail_offset,
+                source + dependency_tag_tail_offset,
+                dependency_tag_tail_size) == 0);
+    if (!fixture_expect(
+            dependency_mutation_preserved
+                && fixture_read_u64_le(
+                    dependency_image + dynamic_terminator_offset) == FIXTURE_DT_NEEDED,
+            "DT_NEEDED mutation changed bytes outside the bounded dynamic tag")) {
+        free(dependency_image);
+        free(source);
+        return 0;
+    }
+    rejected_handle = FIXTURE_REJECTION_SENTINEL;
     status = adapter.context.load_image(
         adapter.context.userdata,
         dependency_image,
@@ -937,11 +1084,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
-    static const fixture_dynamic_rejection unsupported_dynamic_tags[] = {
+    static const fixture_dynamic_rejection lifecycle_dynamic_tags[] = {
         {FIXTURE_DT_INIT, "a DT_INIT lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_FINI, "a DT_FINI lifecycle entry was accepted or returned a handle"},
-        {FIXTURE_DT_RPATH, "a DT_RPATH path-search entry was accepted or returned a handle"},
-        {FIXTURE_DT_RUNPATH, "a DT_RUNPATH path-search entry was accepted or returned a handle"},
         {FIXTURE_DT_INIT_ARRAY, "a DT_INIT_ARRAY lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_FINI_ARRAY, "a DT_FINI_ARRAY lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_INIT_ARRAYSZ, "a DT_INIT_ARRAYSZ lifecycle entry was accepted or returned a handle"},
@@ -949,57 +1094,44 @@ static int fixture_run_real_adapter(const char *fixture_path)
         {FIXTURE_DT_PREINIT_ARRAY, "a DT_PREINIT_ARRAY lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_PREINIT_ARRAYSZ, "a DT_PREINIT_ARRAYSZ lifecycle entry was accepted or returned a handle"},
     };
-    for (size_t index = 0;
-         index < sizeof(unsupported_dynamic_tags) / sizeof(unsupported_dynamic_tags[0]);
-         ++index) {
-        uint8_t *unsupported_dynamic_image = (uint8_t *)malloc(source_size);
-        if (!fixture_expect(
-                unsupported_dynamic_image != NULL,
-                "could not allocate an unsupported dynamic-tag fixture")) {
-            free(source);
-            return 0;
-        }
-        memcpy(unsupported_dynamic_image, source, source_size);
-        fixture_write_u64_le(
-            unsupported_dynamic_image + dynamic_terminator_offset,
-            unsupported_dynamic_tags[index].tag);
-        size_t dynamic_terminator_tail_offset =
-            dynamic_terminator_offset + sizeof(uint64_t);
-        size_t dynamic_terminator_tail_size = source_size - dynamic_terminator_tail_offset;
-        int preserved = (dynamic_terminator_offset == 0U
-                || memcmp(
-                    unsupported_dynamic_image,
-                    source,
-                    dynamic_terminator_offset) == 0)
-            && (dynamic_terminator_tail_size == 0U
-                || memcmp(
-                    unsupported_dynamic_image + dynamic_terminator_tail_offset,
-                    source + dynamic_terminator_tail_offset,
-                    dynamic_terminator_tail_size) == 0);
-        if (!fixture_expect(
-                preserved
-                    && fixture_read_u64_le(
-                        unsupported_dynamic_image + dynamic_terminator_offset)
-                        == unsupported_dynamic_tags[index].tag,
-                "unsupported dynamic-tag mutation changed bytes outside the terminator tag")) {
-            free(unsupported_dynamic_image);
-            free(source);
-            return 0;
-        }
-        rejected_handle = 0U;
-        status = adapter.context.load_image(
-            adapter.context.userdata,
-            unsupported_dynamic_image,
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
             source_size,
-            URP_LOAD_IMAGE_IMMUTABLE,
-            &rejected_handle);
-        free(unsupported_dynamic_image);
-        if (!fixture_expect(
-                status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
-                unsupported_dynamic_tags[index].message)) {
-            free(source);
-            return 0;
-        }
+            dynamic_terminator_offset,
+            lifecycle_dynamic_tags,
+            sizeof(lifecycle_dynamic_tags) / sizeof(lifecycle_dynamic_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
+    static const fixture_dynamic_rejection text_relocation_dynamic_tags[] = {
+        {FIXTURE_DT_TEXTREL, "a DT_TEXTREL text-relocation entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            text_relocation_dynamic_tags,
+            sizeof(text_relocation_dynamic_tags) / sizeof(text_relocation_dynamic_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
+    static const fixture_dynamic_rejection path_search_dynamic_tags[] = {
+        {FIXTURE_DT_RPATH, "a DT_RPATH path-search entry was accepted or returned a handle"},
+        {FIXTURE_DT_RUNPATH, "a DT_RUNPATH path-search entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            path_search_dynamic_tags,
+            sizeof(path_search_dynamic_tags) / sizeof(path_search_dynamic_tags[0]))) {
+        free(source);
+        return 0;
     }
 
     status = adapter.context.load_image(
@@ -1026,9 +1158,83 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
 
     uint64_t program_header_offset = fixture_read_u64_le(source + 32U);
+    size_t program_header_offset_as_size;
     if (!fixture_expect(
-            program_header_offset <= (uint64_t)(source_size - 4U),
+            fixture_range_in_file(
+                source_size,
+                program_header_offset,
+                FIXTURE_ELF_PROGRAM_HEADER_SIZE,
+                &program_header_offset_as_size,
+                NULL),
             "entry fixture program headers are outside the source")) {
+        free(source);
+        return 0;
+    }
+
+    const uint8_t *load_header;
+    if (!fixture_expect(
+            fixture_find_program_header(source, source_size, FIXTURE_PT_LOAD, &load_header),
+            "entry fixture has no PT_LOAD header for the PT_TLS boundary")) {
+        free(source);
+        return 0;
+    }
+    uint64_t load_file_offset = fixture_read_u64_le(load_header + 8U);
+    uint64_t load_virtual_address = fixture_read_u64_le(load_header + 16U);
+    uint64_t load_file_size = fixture_read_u64_le(load_header + 32U);
+    uint64_t load_memory_size = fixture_read_u64_le(load_header + 40U);
+    if (!fixture_expect(
+            load_file_size > 0U && load_memory_size >= load_file_size,
+            "entry fixture PT_LOAD has an empty or invalid range")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            fixture_range_in_file(source_size, load_file_offset, load_file_size, NULL, NULL),
+            "entry fixture PT_LOAD file-backed range is outside the source")) {
+        free(source);
+        return 0;
+    }
+
+    const uint8_t *metadata_header;
+    if (!fixture_expect(
+            fixture_find_program_header(
+                source,
+                source_size,
+                FIXTURE_PT_GNU_EH_FRAME,
+                &metadata_header),
+            "entry fixture has no bounded metadata segment for the PT_TLS and PT_GNU_PROPERTY boundaries")) {
+        free(source);
+        return 0;
+    }
+    size_t metadata_header_offset = (size_t)(metadata_header - source);
+    uint64_t metadata_file_offset = fixture_read_u64_le(metadata_header + 8U);
+    uint64_t metadata_virtual_address = fixture_read_u64_le(metadata_header + 16U);
+    uint64_t metadata_file_size = fixture_read_u64_le(metadata_header + 32U);
+    uint64_t metadata_memory_size = fixture_read_u64_le(metadata_header + 40U);
+    if (!fixture_expect(
+            metadata_file_size > 0U && metadata_memory_size >= metadata_file_size,
+            "entry fixture metadata source range is empty or invalid")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            fixture_range_in_file(source_size, metadata_file_offset, metadata_file_size, NULL, NULL),
+            "entry fixture metadata file-backed range is outside the source")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            fixture_range_within(
+                load_file_offset,
+                load_file_size,
+                metadata_file_offset,
+                metadata_file_size)
+                && fixture_range_within(
+                    load_virtual_address,
+                    load_memory_size,
+                    metadata_virtual_address,
+                    metadata_memory_size),
+            "entry fixture metadata source range is not inside a PT_LOAD range")) {
         free(source);
         return 0;
     }
@@ -1039,8 +1245,8 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
     memcpy(tls_image, source, source_size);
-    fixture_write_u32_le(tls_image + (size_t)program_header_offset, FIXTURE_PT_TLS);
-    rejected_handle = 0U;
+    fixture_write_u32_le(tls_image + metadata_header_offset, FIXTURE_PT_TLS);
+    rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
         tls_image,
@@ -1050,7 +1256,32 @@ static int fixture_run_real_adapter(const char *fixture_path)
     free(tls_image);
     if (!fixture_expect(
             status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
-            "a PT_TLS program header was accepted or returned a handle")) {
+            "a structurally bounded PT_TLS image was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+
+    uint8_t *malformed_tls_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            malformed_tls_image != NULL,
+            "could not allocate the malformed PT_TLS fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(malformed_tls_image, source, source_size);
+    fixture_write_u32_le(malformed_tls_image + metadata_header_offset, FIXTURE_PT_TLS);
+    fixture_write_u64_le(malformed_tls_image + metadata_header_offset + 40U, metadata_file_size - 1U);
+    rejected_handle = UINT64_C(0xfeedface);
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        malformed_tls_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(malformed_tls_image);
+    if (!fixture_expect(
+            status == URP_STATUS_LOAD_FAILED && rejected_handle == 0U,
+            "a PT_TLS file-size/memory-size violation was not rejected")) {
         free(source);
         return 0;
     }
@@ -1064,9 +1295,27 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(gnu_property_image, source, source_size);
     fixture_write_u32_le(
-        gnu_property_image + (size_t)program_header_offset,
+        gnu_property_image + metadata_header_offset,
         FIXTURE_PT_GNU_PROPERTY);
-    rejected_handle = 0U;
+    size_t property_tail_offset = metadata_header_offset + sizeof(uint32_t);
+    size_t property_tail_size = source_size - property_tail_offset;
+    if (!fixture_expect(
+            (metadata_header_offset == 0U
+                || memcmp(
+                    gnu_property_image,
+                    source,
+                    metadata_header_offset) == 0)
+                && (property_tail_size == 0U
+                    || memcmp(
+                        gnu_property_image + property_tail_offset,
+                        source + property_tail_offset,
+                        property_tail_size) == 0),
+            "PT_GNU_PROPERTY mutation changed bytes outside the bounded program-header type")) {
+        free(gnu_property_image);
+        free(source);
+        return 0;
+    }
+    rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
         gnu_property_image,
@@ -1087,8 +1336,8 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
     memcpy(interpreter_image, source, source_size);
-    fixture_write_u32_le(interpreter_image + (size_t)program_header_offset, 3U);
-    rejected_handle = 0U;
+    fixture_write_u32_le(interpreter_image + program_header_offset_as_size, 3U);
+    rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
         interpreter_image,
@@ -1097,7 +1346,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
         &rejected_handle);
     free(interpreter_image);
     free(source);
-    return fixture_expect(status == URP_STATUS_UNSUPPORTED, "PT_INTERP adapter input was accepted");
+    return fixture_expect(
+        status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+        "PT_INTERP adapter input was accepted or returned a handle");
 }
 
 int main(int argc, char **argv)

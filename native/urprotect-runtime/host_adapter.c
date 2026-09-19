@@ -26,6 +26,7 @@
 #define URP_PT_INTERP 3U
 #define URP_PT_TLS 7U
 #define URP_PT_GNU_PROPERTY 0x6474e553U
+#define URP_PT_GNU_STACK 0x6474e551U
 #define URP_PF_W 2U
 #define URP_PF_X 1U
 #define URP_DT_NEEDED 1U
@@ -442,17 +443,26 @@ static urp_status urp_validate_dynamic_segment(
 
         switch (tag) {
         case URP_DT_NEEDED:
+            /* HostContext v1 has no dependency-resolution or lifetime contract. */
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no constructor/destructor ordering, callback/reentrancy, teardown, or lifecycle ownership. */
         case URP_DT_INIT:
         case URP_DT_FINI:
-        case URP_DT_RPATH:
-        case URP_DT_TEXTREL:
         case URP_DT_INIT_ARRAY:
         case URP_DT_FINI_ARRAY:
-        case URP_DT_RUNPATH:
-        case URP_DT_PREINIT_ARRAY:
         case URP_DT_INIT_ARRAYSZ:
         case URP_DT_FINI_ARRAYSZ:
+        case URP_DT_PREINIT_ARRAY:
         case URP_DT_PREINIT_ARRAYSZ:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no RPATH/RUNPATH search roots, ordering, or precedence. */
+        case URP_DT_RPATH:
+        case URP_DT_RUNPATH:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no writable-text relocation or W^X semantics. */
+        case URP_DT_TEXTREL:
+            return URP_STATUS_UNSUPPORTED;
+        /* Unsupported relocation-table metadata remains a separate boundary. */
         case URP_DT_AUXILIARY:
         case URP_DT_FILTER:
         case URP_DT_REL:
@@ -629,10 +639,19 @@ static urp_status urp_validate_image(const void *bytes, size_t image_size)
             }
             break;
         }
-        case URP_PT_INTERP:
         case URP_PT_TLS:
-        case URP_PT_GNU_PROPERTY:
+            /* HostContext v1 has no TLS/thread lifetime contract; keep this boundary fail-closed. */
             return URP_STATUS_UNSUPPORTED;
+        case URP_PT_INTERP:
+            return URP_STATUS_UNSUPPORTED;
+        case URP_PT_GNU_PROPERTY:
+            /* HostContext v1 has no property negotiation or instruction-state contract. */
+            return URP_STATUS_UNSUPPORTED;
+        case URP_PT_GNU_STACK:
+            if ((flags & URP_PF_X) != 0U) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            break;
         default:
             break;
         }
@@ -669,7 +688,11 @@ static urp_status urp_adapter_load_image(
     urp_image_handle *out_handle)
 {
     (void)userdata;
-    if (out_handle == NULL || (flags & URP_LOAD_IMAGE_IMMUTABLE) == 0U) {
+    if (out_handle == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    *out_handle = 0U;
+    if ((flags & URP_LOAD_IMAGE_IMMUTABLE) == 0U) {
         return URP_STATUS_INVALID_ARGUMENT;
     }
 

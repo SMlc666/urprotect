@@ -24,10 +24,17 @@ def cell(value: object) -> str:
 def render(data: dict[str, object]) -> str:
     features = data["features"]
     cases = data["cases"]
+    coverage = data.get("coverage", {})
+    strategy = coverage.get("strategy", "unknown") if isinstance(coverage, dict) else "unknown"
     lines = [
         "# UrProtect Compatibility Matrix",
         "",
         f"Host contract: `{data['hostContract']['id']}` v{data['hostContract']['version']}",
+        f"Coverage strategy: `{strategy}`; `unknown` rows never count as support.",
+        "",
+        "Status vocabulary: `proven` closes a model obligation, `validated` records",
+        "deterministic implementation evidence, `rejected` records a fail-closed",
+        "boundary, and `unknown` records an unresolved obligation.",
         "",
         "## Features",
         "",

@@ -61,7 +61,7 @@ then verifies entry dispatch and release ordering without an executable
 temporary pathname. This upgrades only the narrow adapter slice to
 `validated`; it accepts checked AArch64 `RELATIVE`/`RELR` targets while the
 system loader applies them. Dependencies, TLS, constructors, GNU properties,
-text relocations, and broader relocation behavior remain outside that claim.
+and broader relocation behavior remain outside that claim.
 
 The first expanded ELF slice is sectionless `ET_DYN`: section headers are
 optional metadata, so the parser and validator use bounded program headers and
@@ -69,11 +69,78 @@ the load map as the runtime authority. `ElfParserTests` provides the positive
 witness and the malformed corpus keeps a paired alignment rejection; this
 proves the parser boundary, not arbitrary loader behavior.
 
+PT_TLS is an explicit rejected HostContext v1 boundary, recorded as
+`runtime.host-context.pt-tls` in the matrix. The current system-loader adapter
+has no contract for TLS module allocation, per-thread initialization, TLS
+relocation models, thread creation/reentrancy, or teardown relative to
+`release_image`; a successful `dlopen` therefore does not establish support.
+The native self-test keeps the unchanged entry fixture as the positive
+HostContext baseline, then mutates a bounded PT_LOAD-covered metadata segment
+into a structurally valid PT_TLS and requires `URP_STATUS_UNSUPPORTED` with no
+handle. A paired mutation with `p_filesz > p_memsz` requires
+`URP_STATUS_LOAD_FAILED`. Generic bounds, file/memory-size, alignment, and
+congruence checks protect these rejection boundaries, but no positive TLS
+fixture or compatibility claim is made until
+the Host Contract defines the missing semantics.
+
+PT_GNU_PROPERTY is a separate rejected HostContext v1 feature, recorded as
+`runtime.host-context.gnu-property`. The current system-loader adapter does not
+negotiate GNU properties or define BTI/PAC/instruction-state obligations, so a
+loader that accepts a property note does not establish compatibility. The
+self-test preserves the unchanged entry image as its positive HostContext
+baseline, then changes only the type of a bounded PT_LOAD-covered metadata
+program header to PT_GNU_PROPERTY and requires `URP_STATUS_UNSUPPORTED` with a
+zero image handle before loader handoff. No positive property-bearing
+HostContext fixture or support claim is made until those semantics are part of
+the Host Contract. DT_NEEDED dependency resolution is a separate rejected
+boundary recorded as `runtime.host-context.dependency-resolution`. HostContext
+v1 and the current system-loader adapter define no dependency-resolution,
+search-path, symbol-scope, or dependency-lifetime semantics, so a loader that
+can resolve a library does not establish support. Its self-test mutates only a
+bounded dynamic-table tag, preserves surrounding bytes, initializes a sentinel
+handle, and requires `URP_STATUS_UNSUPPORTED` with a zero handle before loader
+handoff. The unchanged non-dependency entry fixture remains the positive
+HostContext baseline.
+
+Constructor/destructor metadata is a separate rejected boundary recorded as
+`runtime.host-context.constructor-destructor`. It covers `DT_INIT`, `DT_FINI`,
+`DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`,
+`DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ`. HostContext v1 and the current
+system-loader adapter define no constructor/destructor ordering, callback or
+reentrancy behavior, teardown, or lifecycle ownership semantics. The self-test
+mutates one bounded `DT_NULL` tag at a time, preserves all surrounding bytes,
+initializes a nonzero output-handle sentinel, and requires
+`URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff. The
+unchanged non-lifecycle entry fixture remains the positive HostContext
+baseline.
+
+RPATH/RUNPATH metadata is a separate rejected boundary recorded as
+`runtime.host-context.path-search`. HostContext v1 and the current
+system-loader adapter define no dynamic path-search roots, ordering, or
+precedence semantics, so the same bounded mutation must fail closed before
+loader handoff. Unsupported relocation-table forms remain a separate later
+relocation boundary and are not included in either row.
+
+DT_TEXTREL writable-text relocation metadata is a separate rejected boundary
+recorded as `runtime.host-context.text-relocation`. HostContext v1 and the
+current system-loader adapter define no writable-text relocation or
+W^X/protection semantics for in-process images, so loader acceptance alone does
+not establish support. The self-test mutates one bounded `DT_NULL` tag to
+`DT_TEXTREL`, preserves all surrounding bytes, initializes a nonzero
+output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero
+handle before loader handoff. The unchanged non-text-relocation entry fixture
+remains the positive HostContext baseline. Unsupported relocation-table tags
+such as `DT_REL` and `DT_JMPREL` remain a separate later rejection boundary;
+checked AArch64 `RELATIVE`/`RELR` acceptance and system-loader application
+remain the validated `elf.relocation.aarch64-relative` feature.
+
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
-records native ARM64 container execution, `/system/bin/linker64`, page size,
-and pinned image/source/package provenance. It intentionally excludes Android
-framework, OEM, SELinux, device-kernel, AVD, Waydroid, QEMU, and native-bridge
-claims.
+records native ARM64 container execution, `/system/bin/linker64`, kernel and
+page-size facts, and pinned image/source/package provenance. It intentionally
+excludes Android framework, OEM, SELinux, device-kernel, AVD, Waydroid, QEMU,
+and native-bridge claims. The matrix row `runtime.host-context.bionic-handoff`
+remains `unknown` until that userspace runs the HostContext/package oracle and
+retains its no-path evidence; the ordinary bionic PIE pass does not upgrade it.
 
 The claim therefore applies to every correctly implemented host satisfying the
 contract, not to an unqualified statistical majority of phone vendors.

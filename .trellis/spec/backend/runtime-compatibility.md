@@ -81,17 +81,72 @@ memfd_create(name, MFD_CLOEXEC)
   slice accepts only checked `RELATIVE`/`RELR` targets, permits only immediate
   binding dynamic flags, and delegates relocation application to the system
   loader.
-- The first native adapter rejects `DT_INIT`, `DT_FINI`, `DT_RPATH`,
-  `DT_RUNPATH`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`,
-  `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` with
-  `URP_STATUS_UNSUPPORTED` before creating an image handle. The native
-  self-test mutates a bounded `DT_NULL` tag one case at a time, verifies that
-  no other image bytes changed, and requires a zero output handle.
+- The constructor/destructor lifecycle boundary is the rejected feature row
+  `runtime.host-context.constructor-destructor`. The first native adapter
+  rejects `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`,
+  `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and
+  `DT_PREINIT_ARRAYSZ` with `URP_STATUS_UNSUPPORTED` before constructor or
+  destructor execution and image-handle creation. HostContext v1 and the
+  current system-loader adapter define no constructor/destructor ordering,
+  callback or reentrancy behavior, teardown, or lifecycle ownership semantics.
+  The native self-test mutates one bounded `DT_NULL` tag at a time, preserves
+  surrounding bytes, initializes a nonzero sentinel, and requires a zero
+  output handle.
+- RPATH/RUNPATH are the separate rejected feature row
+  `runtime.host-context.path-search`. HostContext v1 and the current
+  system-loader adapter define no dynamic path-search roots, ordering, or
+  precedence semantics, so each bounded tag mutation fails closed before
+  loader handoff. Unsupported relocation-table forms remain a separate later
+  relocation boundary and are not included in either row.
+- `DT_TEXTREL` writable-text relocation metadata is the separate rejected
+  feature row `runtime.host-context.text-relocation`. HostContext v1 and the
+  current system-loader adapter define no writable-text relocation or
+  W^X/protection semantics for in-process images, so loader acceptance alone
+  does not establish support. The native self-test mutates one bounded
+  `DT_NULL` tag to `DT_TEXTREL`, preserves surrounding bytes, initializes a
+  nonzero output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a
+  zero handle before loader handoff. The unchanged non-text-relocation entry
+  fixture remains the positive HostContext baseline. Unsupported relocation-
+  table tags such as `DT_REL` and `DT_JMPREL` remain a separate later
+  rejection boundary; checked AArch64 `RELATIVE`/`RELR` acceptance and
+  system-loader application remain the validated `elf.relocation.aarch64-relative`
+  feature.
 - A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
   when that range is inside the image and `p_memsz >= p_filesz`; the real
   adapter must still dispatch the entry. The native system loader owns the
   resulting memory protection semantics, so this row is implementation
   evidence rather than proof of a custom RELRO loader.
+- The first native adapter accepts `PT_GNU_STACK` only when `PF_X` is clear;
+  an executable-stack request returns `URP_STATUS_UNSUPPORTED` before an
+  image handle is created. Protection semantics for the accepted
+  non-executable case remain delegated to the native system loader.
+- `PT_TLS` is an explicit rejected feature row
+  (`runtime.host-context.pt-tls`). HostContext v1 does not define TLS module
+  allocation, per-thread initialization, TLS relocation models, thread
+  creation/reentrancy, or TLS teardown relative to `release_image`. The adapter
+  therefore returns `URP_STATUS_UNSUPPORTED` before `dlopen` for a structurally
+  bounded PT_TLS mutation; a paired mutation with `p_filesz > p_memsz` returns
+  `URP_STATUS_LOAD_FAILED`. Generic program-header range, file/memory-size,
+  alignment, and congruence checks still run before rejection. The adapter
+  clears the output handle before validation and leaves it zero on every
+  failure path. The self-test's
+  unchanged entry fixture is only the positive non-TLS HostContext baseline; no
+  positive TLS fixture or support claim exists.
+- `PT_GNU_PROPERTY` is a separate rejected feature row
+  (`runtime.host-context.gnu-property`). HostContext v1 and the current
+  system-loader adapter define no property negotiation or BTI/PAC/instruction-
+  state obligations, so acceptance of a property note by `dlopen` alone does
+  not establish support. The self-test keeps the unchanged entry image as the
+  positive baseline, changes only a bounded PT_LOAD-covered metadata program
+  header type to `PT_GNU_PROPERTY`, and requires `URP_STATUS_UNSUPPORTED` with
+  a zero image handle before loader handoff.
+  `runtime.host-context.dependency-resolution` is a separate rejected
+  boundary for `DT_NEEDED`: HostContext v1 and the current system-loader
+  adapter define no dependency-resolution, search-path, symbol-scope, or
+  dependency-lifetime semantics, so a loader that can resolve a library does
+  not establish support. The bounded mutation keeps the unchanged
+  non-dependency entry fixture as the positive baseline and requires a zero
+  image handle before loader handoff.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid
@@ -109,8 +164,10 @@ memfd_create(name, MFD_CLOEXEC)
 - `NATIVE_LAUNCHER_CC` selects the native launcher compiler in tests.
 
 The bionic lane must use the pinned Termux image and exact compiler/linker
-facts from the manifest. It must refuse AVD, Waydroid, QEMU, native bridge,
-and non-ARM execution rather than silently falling back.
+facts from the manifest. It must record both host and container kernel/page-size
+facts, refuse AVD, Waydroid, QEMU, native bridge, and non-ARM execution rather
+than silently falling back, and keep the bionic HostContext handoff row
+`unknown` until its dedicated oracle is retained.
 
 ### 4. CI Evidence Postconditions
 

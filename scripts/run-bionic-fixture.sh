@@ -64,8 +64,14 @@ if [[ "${linker}" != "/system/bin/linker64" ]]; then
 fi
 
 host_page_size="$(getconf PAGESIZE)"
+host_kernel="$(uname -r)"
+if ! [[ "${host_page_size}" =~ ^[0-9]+$ ]] || [[ -z "${host_kernel}" ]]; then
+  echo "native bionic kernel and page-size facts were not recorded" >&2
+  exit 1
+fi
 printf '%s\n' \
   "host_arch=$(uname -m)" \
+  "host_kernel=${host_kernel}" \
   "host_page_size=${host_page_size}" \
   "container_runtime=${container_runtime}" \
   "execution=native-arm64-bionic-container" \
@@ -108,6 +114,9 @@ run_shell() {
 run_shell -c '
   set -eu
   printf "container_arch=%s\n" "$(uname -m)"
+  container_kernel="$(uname -r)"
+  test -n "${container_kernel}"
+  printf "container_kernel=%s\n" "${container_kernel}"
   container_page_size_kb="$(sed -n "s/^KernelPageSize:[[:space:]]*\\([0-9][0-9]*\\) kB$/\\1/p" /proc/self/smaps | sed -n "1p")"
   test -n "${container_page_size_kb}"
   printf "container_page_size=%s\n" "$((container_page_size_kb * 1024))"
@@ -194,8 +203,9 @@ if ! grep -Eq 'Shared library: \[(libc|libdl)\.so\]' "${case_root}/readelf.txt";
 fi
 
 container_page_size="$(sed -n 's/^container_page_size=//p' "${case_root}/container-facts.txt")"
-if [[ -z "${container_page_size}" ]]; then
-  echo "container page size was not recorded" >&2
+container_kernel="$(sed -n 's/^container_kernel=//p' "${case_root}/container-facts.txt")"
+if ! [[ "${container_page_size}" =~ ^[0-9]+$ ]] || [[ -z "${container_kernel}" ]]; then
+  echo "container kernel and page-size facts were not recorded" >&2
   exit 1
 fi
 printf '%s\n' \
@@ -206,8 +216,10 @@ printf '%s\n' \
   "clang_package=${clang_package}" \
   "linker=${linker}" \
   "host_arch=$(uname -m)" \
+  "host_kernel=${host_kernel}" \
   "host_page_size=${host_page_size}" \
   "container_arch=aarch64" \
+  "container_kernel=${container_kernel}" \
   "container_page_size=${container_page_size}" \
   "android_runtime=false" \
   "execution=native-arm64-bionic-container" \
@@ -218,12 +230,24 @@ printf '%s\n' \
   > "${case_root}/provenance.txt"
 
 python3 - "${case_root}/result.json" "${image}" "${termux_source_commit}" \
-  "${clang_package}" "${container_page_size}" "${baseline_status}" "${linker_status}" <<'PY'
+  "${clang_package}" "${host_kernel}" "${container_kernel}" "${host_page_size}" \
+  "${container_page_size}" "${baseline_status}" "${linker_status}" <<'PY'
 import json
 import pathlib
 import sys
 
-path, image, source_commit, compiler, page_size, baseline, linker = sys.argv[1:]
+(
+    path,
+    image,
+    source_commit,
+    compiler,
+    host_kernel,
+    container_kernel,
+    host_page_size,
+    container_page_size,
+    baseline,
+    linker,
+) = sys.argv[1:]
 document = {
     "schemaVersion": 1,
     "case": "c-termux-bionic-pie",
@@ -235,7 +259,10 @@ document = {
     "termuxSourceCommit": source_commit,
     "compilerPackage": compiler,
     "linker": "/system/bin/linker64",
-    "containerPageSize": int(page_size),
+    "hostKernel": host_kernel,
+    "containerKernel": container_kernel,
+    "hostPageSize": int(host_page_size),
+    "containerPageSize": int(container_page_size),
     "baselineStatus": int(baseline),
     "directLinkerStatus": int(linker),
     "directLinkerMode": "identity",
