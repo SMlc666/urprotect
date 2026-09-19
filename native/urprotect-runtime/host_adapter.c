@@ -459,7 +459,7 @@ static urp_status urp_validate_dynamic_segment(
         case URP_DT_RPATH:
         case URP_DT_RUNPATH:
             return URP_STATUS_UNSUPPORTED;
-        /* DT_TEXTREL remains separate from lifecycle and path-search metadata. */
+        /* HostContext v1 defines no writable-text relocation or W^X semantics. */
         case URP_DT_TEXTREL:
             return URP_STATUS_UNSUPPORTED;
         /* Unsupported relocation-table metadata remains a separate boundary. */

@@ -61,7 +61,7 @@ then verifies entry dispatch and release ordering without an executable
 temporary pathname. This upgrades only the narrow adapter slice to
 `validated`; it accepts checked AArch64 `RELATIVE`/`RELR` targets while the
 system loader applies them. Dependencies, TLS, constructors, GNU properties,
-text relocations, and broader relocation behavior remain outside that claim.
+and broader relocation behavior remain outside that claim.
 
 The first expanded ELF slice is sectionless `ET_DYN`: section headers are
 optional metadata, so the parser and validator use bounded program headers and
@@ -118,8 +118,21 @@ RPATH/RUNPATH metadata is a separate rejected boundary recorded as
 `runtime.host-context.path-search`. HostContext v1 and the current
 system-loader adapter define no dynamic path-search roots, ordering, or
 precedence semantics, so the same bounded mutation must fail closed before
-loader handoff. `DT_TEXTREL` and unsupported relocation-table forms remain
-separate relocation boundaries and are not included in either row.
+loader handoff. Unsupported relocation-table forms remain a separate later
+relocation boundary and are not included in either row.
+
+DT_TEXTREL writable-text relocation metadata is a separate rejected boundary
+recorded as `runtime.host-context.text-relocation`. HostContext v1 and the
+current system-loader adapter define no writable-text relocation or
+W^X/protection semantics for in-process images, so loader acceptance alone does
+not establish support. The self-test mutates one bounded `DT_NULL` tag to
+`DT_TEXTREL`, preserves all surrounding bytes, initializes a nonzero
+output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero
+handle before loader handoff. The unchanged non-text-relocation entry fixture
+remains the positive HostContext baseline. Unsupported relocation-table tags
+such as `DT_REL` and `DT_JMPREL` remain a separate later rejection boundary;
+checked AArch64 `RELATIVE`/`RELR` acceptance and system-loader application
+remain the validated `elf.relocation.aarch64-relative` feature.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and

@@ -46,7 +46,7 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_DT_RELR 36U
 #define FIXTURE_DT_RELRSZ 35U
 #define FIXTURE_DT_RELRENT 37U
-#define FIXTURE_DT_FLAGS 30U
+#define FIXTURE_DT_TEXTREL 22U
 #define FIXTURE_REJECTION_SENTINEL UINT64_C(0xfeedface)
 
 static const uint8_t fixture_frame[] = {
@@ -1009,16 +1009,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
-    size_t flags_value_offset;
     size_t dynamic_terminator_offset;
     if (!fixture_expect(
-            fixture_find_dynamic_entry(
-                source,
-                source_size,
-                FIXTURE_DT_FLAGS,
-                NULL,
-                &flags_value_offset)
-            && fixture_find_dynamic_terminator(
+            fixture_find_dynamic_terminator(
                 source,
                 source_size,
                 &dynamic_terminator_offset),
@@ -1034,24 +1027,14 @@ static int fixture_run_real_adapter(const char *fixture_path)
         free(source);
         return 0;
     }
-    uint8_t *textrel_image = (uint8_t *)malloc(source_size);
-    if (!fixture_expect(textrel_image != NULL, "could not allocate the text-relocation fixture")) {
-        free(source);
-        return 0;
-    }
-    memcpy(textrel_image, source, source_size);
-    fixture_write_u64_le(textrel_image + flags_value_offset, UINT64_C(0x4));
-    rejected_handle = FIXTURE_REJECTION_SENTINEL;
-    status = adapter.context.load_image(
-        adapter.context.userdata,
-        textrel_image,
-        source_size,
-        URP_LOAD_IMAGE_IMMUTABLE,
-        &rejected_handle);
-    free(textrel_image);
     if (!fixture_expect(
-            status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
-            "a text-relocation dynamic flag was accepted or returned a handle")) {
+            !fixture_find_dynamic_entry(
+                source,
+                source_size,
+                FIXTURE_DT_TEXTREL,
+                NULL,
+                NULL),
+            "the positive entry fixture unexpectedly contains DT_TEXTREL")) {
         free(source);
         return 0;
     }
@@ -1118,6 +1101,20 @@ static int fixture_run_real_adapter(const char *fixture_path)
             dynamic_terminator_offset,
             lifecycle_dynamic_tags,
             sizeof(lifecycle_dynamic_tags) / sizeof(lifecycle_dynamic_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
+    static const fixture_dynamic_rejection text_relocation_dynamic_tags[] = {
+        {FIXTURE_DT_TEXTREL, "a DT_TEXTREL text-relocation entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            text_relocation_dynamic_tags,
+            sizeof(text_relocation_dynamic_tags) / sizeof(text_relocation_dynamic_tags[0]))) {
         free(source);
         return 0;
     }

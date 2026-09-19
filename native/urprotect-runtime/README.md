@@ -63,9 +63,22 @@ non-lifecycle entry fixture remains the positive HostContext baseline.
 RPATH/RUNPATH metadata is the separate rejected boundary
 `runtime.host-context.path-search`. HostContext v1 and this adapter define no
 dynamic path-search roots, ordering, or precedence semantics, so each bounded
-mutation also fails closed before image creation. `DT_TEXTREL` and unsupported
-relocation-table forms remain separate relocation boundaries, rather than being
-included in either lifecycle or path-search row.
+mutation also fails closed before image creation. Unsupported relocation-table
+forms remain a separate later relocation boundary, rather than being included
+in either lifecycle or path-search row.
+
+Writable-text relocation metadata is the separate rejected boundary
+`runtime.host-context.text-relocation`. HostContext v1 and this adapter define
+no writable-text relocation or W^X/protection semantics for in-process images,
+so loader acceptance alone is not a compatibility proof. The self-test mutates
+one bounded `DT_NULL` slot to `DT_TEXTREL`, preserves all surrounding bytes,
+initializes a nonzero output-handle sentinel, and requires
+`URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff. The
+unchanged non-text-relocation entry fixture remains the positive HostContext
+baseline. Unsupported relocation-table tags such as `DT_REL` and `DT_JMPREL`
+remain a separate later rejection boundary; checked AArch64 `RELATIVE`/`RELR`
+acceptance and system-loader application remain the validated relocation
+feature.
 
 The runtime accepts the legacy frame v1 and HostContext frame v2. Both use the
 same 112-byte common header. A v2 header is 136 bytes and appends, in order,

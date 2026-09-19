@@ -254,6 +254,81 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertIn("path-search", path_search["reason"])
         self.assertTrue(any("zero handle" in item for item in path_search["constraints"]))
 
+    def test_text_relocation_is_an_explicit_rejected_host_context_boundary(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.text-relocation"
+        )
+        self.assertEqual(feature["status"], "rejected")
+        self.assertEqual(
+            feature["witness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(
+            feature["oracle"],
+            "native/urprotect-runtime/host_adapter.c",
+        )
+        self.assertIn("DT_TEXTREL", feature["obligation"])
+        self.assertIn("writable-text relocation", feature["reason"])
+        self.assertIn("W^X", feature["reason"])
+        self.assertEqual(
+            feature["negativeWitness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(
+            feature["negativeOracle"],
+            "native/urprotect-runtime/host_adapter.c",
+        )
+        self.assertIn("COMPATIBILITY.md", feature["evidence"])
+        self.assertIn(
+            ".trellis/spec/backend/runtime-compatibility.md",
+            feature["evidence"],
+        )
+        self.assertTrue(
+            any(
+                "DT_NULL" in item and "DT_TEXTREL" in item
+                for item in feature["constraints"]
+            )
+        )
+        self.assertTrue(
+            any("surrounding bytes" in item for item in feature["constraints"])
+        )
+        self.assertTrue(
+            any(
+                "nonzero sentinel" in item and "zero handle" in item
+                for item in feature["constraints"]
+            )
+        )
+        self.assertTrue(any("positive" in item for item in feature["constraints"]))
+        self.assertTrue(any("RELATIVE/RELR" in item for item in feature["constraints"]))
+        self.assertTrue(
+            any(
+                "DT_REL" in item and "DT_JMPREL" in item
+                for item in feature["constraints"]
+            )
+        )
+
+        feature_ids = [item["id"] for item in self.data["features"]]
+        self.assertEqual(feature_ids.count("runtime.host-context.text-relocation"), 1)
+        relative = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "elf.relocation.aarch64-relative"
+        )
+        self.assertEqual(relative["status"], "validated")
+        relative_description = " ".join(
+            [
+                relative["obligation"],
+                *relative["constraints"],
+            ]
+        ).lower()
+        self.assertNotIn("dt_textrel", relative_description)
+        self.assertNotIn("text-relocation", relative_description)
+
     def test_feature_covering_strategy_is_required(self) -> None:
         data = copy.deepcopy(self.data)
         data["coverage"]["strategy"] = "cartesian"
@@ -332,6 +407,7 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.dependency-resolution | rejected", rendered)
             self.assertIn("runtime.host-context.constructor-destructor | rejected", rendered)
             self.assertIn("runtime.host-context.path-search | rejected", rendered)
+            self.assertIn("runtime.host-context.text-relocation | rejected", rendered)
 
 
 if __name__ == "__main__":
