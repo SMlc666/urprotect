@@ -55,6 +55,36 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertEqual(feature["status"], "unknown")
         self.assertTrue(feature["nextEvidence"])
 
+    def test_pt_tls_is_an_explicit_rejected_host_context_boundary(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.pt-tls"
+        )
+        self.assertEqual(feature["status"], "rejected")
+        self.assertEqual(
+            feature["witness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertIn("dlopen", feature["reason"])
+        self.assertEqual(
+            feature["negativeWitness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertIn(
+            "native/urprotect-runtime/host_context_self_test.c",
+            feature["evidence"],
+        )
+        self.assertIn(
+            ".artifacts/host-context/pr/self-test.log",
+            feature["evidence"],
+        )
+        self.assertTrue(any("p_filesz" in item for item in feature["constraints"]))
+
     def test_unknown_feature_requires_next_evidence(self) -> None:
         data = copy.deepcopy(self.data)
         feature = next(
@@ -142,6 +172,7 @@ class FixtureMatrixTests(unittest.TestCase):
             rendered = output.read_text()
             self.assertIn("unknown` rows never count as support", rendered)
             self.assertIn("runtime.host-context.bionic-handoff | unknown", rendered)
+            self.assertIn("runtime.host-context.pt-tls | rejected", rendered)
 
 
 if __name__ == "__main__":

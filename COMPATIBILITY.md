@@ -69,6 +69,20 @@ the load map as the runtime authority. `ElfParserTests` provides the positive
 witness and the malformed corpus keeps a paired alignment rejection; this
 proves the parser boundary, not arbitrary loader behavior.
 
+PT_TLS is an explicit rejected HostContext v1 boundary, recorded as
+`runtime.host-context.pt-tls` in the matrix. The current system-loader adapter
+has no contract for TLS module allocation, per-thread initialization, TLS
+relocation models, thread creation/reentrancy, or teardown relative to
+`release_image`; a successful `dlopen` therefore does not establish support.
+The native self-test keeps the unchanged entry fixture as the positive
+HostContext baseline, then mutates a bounded PT_LOAD-covered metadata segment
+into a structurally valid PT_TLS and requires `URP_STATUS_UNSUPPORTED` with no
+handle. A paired mutation with `p_filesz > p_memsz` requires
+`URP_STATUS_LOAD_FAILED`. Generic bounds, file/memory-size, alignment, and
+congruence checks protect these rejection boundaries, but no positive TLS
+fixture or compatibility claim is made until
+the Host Contract defines the missing semantics.
+
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and
 page-size facts, and pinned image/source/package provenance. It intentionally

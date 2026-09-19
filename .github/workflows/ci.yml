@@ -86,6 +86,7 @@ jobs:
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v1
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v2
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.pt-tls
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-image-boundaries
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-lifecycle-path-search
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.sectionless-image

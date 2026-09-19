@@ -96,6 +96,18 @@ memfd_create(name, MFD_CLOEXEC)
   an executable-stack request returns `URP_STATUS_UNSUPPORTED` before an
   image handle is created. Protection semantics for the accepted
   non-executable case remain delegated to the native system loader.
+- `PT_TLS` is an explicit rejected feature row
+  (`runtime.host-context.pt-tls`). HostContext v1 does not define TLS module
+  allocation, per-thread initialization, TLS relocation models, thread
+  creation/reentrancy, or TLS teardown relative to `release_image`. The adapter
+  therefore returns `URP_STATUS_UNSUPPORTED` before `dlopen` for a structurally
+  bounded PT_TLS mutation; a paired mutation with `p_filesz > p_memsz` returns
+  `URP_STATUS_LOAD_FAILED`. Generic program-header range, file/memory-size,
+  alignment, and congruence checks still run before rejection. The adapter
+  clears the output handle before validation and leaves it zero on every
+  failure path. The self-test's
+  unchanged entry fixture is only the positive non-TLS HostContext baseline; no
+  positive TLS fixture or support claim exists.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid

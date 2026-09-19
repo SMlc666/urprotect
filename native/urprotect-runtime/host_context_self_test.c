@@ -21,8 +21,10 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_ELF_HEADER_SIZE 64U
 #define FIXTURE_ELF_PROGRAM_HEADER_SIZE 56U
 #define FIXTURE_ELF_DYNAMIC_ENTRY_SIZE 16U
+#define FIXTURE_PT_LOAD 1U
 #define FIXTURE_PT_DYNAMIC 2U
 #define FIXTURE_PT_TLS 7U
+#define FIXTURE_PT_GNU_EH_FRAME 0x6474e550U
 #define FIXTURE_PT_GNU_PROPERTY 0x6474e553U
 #define FIXTURE_PT_GNU_STACK 0x6474e551U
 #define FIXTURE_PT_GNU_RELRO 0x6474e552U
@@ -223,6 +225,22 @@ static int fixture_range_in_file(
         *length_out = (size_t)length;
     }
     return 1;
+}
+
+static int fixture_range_within(
+    uint64_t outer_offset,
+    uint64_t outer_size,
+    uint64_t inner_offset,
+    uint64_t inner_size)
+{
+    if (outer_offset > UINT64_MAX - outer_size
+        || inner_offset > UINT64_MAX - inner_size
+        || inner_offset < outer_offset) {
+        return 0;
+    }
+
+    uint64_t delta = inner_offset - outer_offset;
+    return delta <= outer_size && inner_size <= outer_size - delta;
 }
 
 static int fixture_checked_add_u64(uint64_t left, uint64_t right, uint64_t *result)
@@ -1072,9 +1090,83 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
 
     uint64_t program_header_offset = fixture_read_u64_le(source + 32U);
+    size_t program_header_offset_as_size;
     if (!fixture_expect(
-            program_header_offset <= (uint64_t)(source_size - 4U),
+            fixture_range_in_file(
+                source_size,
+                program_header_offset,
+                FIXTURE_ELF_PROGRAM_HEADER_SIZE,
+                &program_header_offset_as_size,
+                NULL),
             "entry fixture program headers are outside the source")) {
+        free(source);
+        return 0;
+    }
+
+    const uint8_t *load_header;
+    if (!fixture_expect(
+            fixture_find_program_header(source, source_size, FIXTURE_PT_LOAD, &load_header),
+            "entry fixture has no PT_LOAD header for the PT_TLS boundary")) {
+        free(source);
+        return 0;
+    }
+    uint64_t load_file_offset = fixture_read_u64_le(load_header + 8U);
+    uint64_t load_virtual_address = fixture_read_u64_le(load_header + 16U);
+    uint64_t load_file_size = fixture_read_u64_le(load_header + 32U);
+    uint64_t load_memory_size = fixture_read_u64_le(load_header + 40U);
+    if (!fixture_expect(
+            load_file_size > 0U && load_memory_size >= load_file_size,
+            "entry fixture PT_LOAD has an empty or invalid range")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            fixture_range_in_file(source_size, load_file_offset, load_file_size, NULL, NULL),
+            "entry fixture PT_LOAD file-backed range is outside the source")) {
+        free(source);
+        return 0;
+    }
+
+    const uint8_t *tls_header;
+    if (!fixture_expect(
+            fixture_find_program_header(
+                source,
+                source_size,
+                FIXTURE_PT_GNU_EH_FRAME,
+                &tls_header),
+            "entry fixture has no bounded metadata segment for the PT_TLS boundary")) {
+        free(source);
+        return 0;
+    }
+    size_t tls_header_offset = (size_t)(tls_header - source);
+    uint64_t tls_file_offset = fixture_read_u64_le(tls_header + 8U);
+    uint64_t tls_virtual_address = fixture_read_u64_le(tls_header + 16U);
+    uint64_t tls_file_size = fixture_read_u64_le(tls_header + 32U);
+    uint64_t tls_memory_size = fixture_read_u64_le(tls_header + 40U);
+    if (!fixture_expect(
+            tls_file_size > 0U && tls_memory_size >= tls_file_size,
+            "entry fixture PT_TLS source range is empty or invalid")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            fixture_range_in_file(source_size, tls_file_offset, tls_file_size, NULL, NULL),
+            "entry fixture PT_TLS file-backed range is outside the source")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            fixture_range_within(
+                load_file_offset,
+                load_file_size,
+                tls_file_offset,
+                tls_file_size)
+                && fixture_range_within(
+                    load_virtual_address,
+                    load_memory_size,
+                    tls_virtual_address,
+                    tls_memory_size),
+            "entry fixture PT_TLS source range is not inside a PT_LOAD range")) {
         free(source);
         return 0;
     }
@@ -1085,8 +1177,8 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
     memcpy(tls_image, source, source_size);
-    fixture_write_u32_le(tls_image + (size_t)program_header_offset, FIXTURE_PT_TLS);
-    rejected_handle = 0U;
+    fixture_write_u32_le(tls_image + tls_header_offset, FIXTURE_PT_TLS);
+    rejected_handle = UINT64_C(0xfeedface);
     status = adapter.context.load_image(
         adapter.context.userdata,
         tls_image,
@@ -1096,7 +1188,32 @@ static int fixture_run_real_adapter(const char *fixture_path)
     free(tls_image);
     if (!fixture_expect(
             status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
-            "a PT_TLS program header was accepted or returned a handle")) {
+            "a structurally bounded PT_TLS image was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+
+    uint8_t *malformed_tls_image = (uint8_t *)malloc(source_size);
+    if (!fixture_expect(
+            malformed_tls_image != NULL,
+            "could not allocate the malformed PT_TLS fixture")) {
+        free(source);
+        return 0;
+    }
+    memcpy(malformed_tls_image, source, source_size);
+    fixture_write_u32_le(malformed_tls_image + tls_header_offset, FIXTURE_PT_TLS);
+    fixture_write_u64_le(malformed_tls_image + tls_header_offset + 40U, tls_file_size - 1U);
+    rejected_handle = UINT64_C(0xfeedface);
+    status = adapter.context.load_image(
+        adapter.context.userdata,
+        malformed_tls_image,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &rejected_handle);
+    free(malformed_tls_image);
+    if (!fixture_expect(
+            status == URP_STATUS_LOAD_FAILED && rejected_handle == 0U,
+            "a PT_TLS file-size/memory-size violation was not rejected")) {
         free(source);
         return 0;
     }
@@ -1110,7 +1227,7 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(gnu_property_image, source, source_size);
     fixture_write_u32_le(
-        gnu_property_image + (size_t)program_header_offset,
+        gnu_property_image + program_header_offset_as_size,
         FIXTURE_PT_GNU_PROPERTY);
     rejected_handle = 0U;
     status = adapter.context.load_image(
@@ -1133,7 +1250,7 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
     memcpy(interpreter_image, source, source_size);
-    fixture_write_u32_le(interpreter_image + (size_t)program_header_offset, 3U);
+    fixture_write_u32_le(interpreter_image + program_header_offset_as_size, 3U);
     rejected_handle = 0U;
     status = adapter.context.load_image(
         adapter.context.userdata,

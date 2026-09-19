@@ -630,8 +630,10 @@ static urp_status urp_validate_image(const void *bytes, size_t image_size)
             }
             break;
         }
-        case URP_PT_INTERP:
         case URP_PT_TLS:
+            /* HostContext v1 has no TLS/thread lifetime contract; keep this boundary fail-closed. */
+            return URP_STATUS_UNSUPPORTED;
+        case URP_PT_INTERP:
         case URP_PT_GNU_PROPERTY:
             return URP_STATUS_UNSUPPORTED;
         case URP_PT_GNU_STACK:
@@ -675,7 +677,11 @@ static urp_status urp_adapter_load_image(
     urp_image_handle *out_handle)
 {
     (void)userdata;
-    if (out_handle == NULL || (flags & URP_LOAD_IMAGE_IMMUTABLE) == 0U) {
+    if (out_handle == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    *out_handle = 0U;
+    if ((flags & URP_LOAD_IMAGE_IMMUTABLE) == 0U) {
         return URP_STATUS_INVALID_ARGUMENT;
     }
 
