@@ -89,7 +89,8 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.pt-tls
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-property
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.dependency-resolution
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-lifecycle-path-search
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.constructor-destructor
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.path-search
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.sectionless-image
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-relro
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-stack

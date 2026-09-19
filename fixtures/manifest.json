@@ -183,8 +183,9 @@
         ".artifacts/host-context/pr/self-test.log"
       ],
       "constraints": [
-        "No PT_INTERP, DT_NEEDED, constructor, path-search, or text-relocation semantics",
-        "Dynamic flags are limited to immediate binding flags; other lifecycle or relocation flags are rejected",
+        "No PT_INTERP or DT_NEEDED semantics; constructor/destructor tags use the separate runtime.host-context.constructor-destructor rejection boundary",
+        "RPATH/RUNPATH tags use the separate runtime.host-context.path-search rejection boundary; DT_TEXTREL remains separate from both",
+        "Dynamic flags are limited to immediate binding flags; unsupported relocation tables remain a separate rejection boundary",
         "Only checked AArch64 RELATIVE/RELR relocation targets are accepted; application and memory protection are delegated to the recorded native system loader"
       ]
     },
@@ -316,20 +317,53 @@
       ]
     },
     {
-      "id": "runtime.host-context.unsupported-lifecycle-path-search",
+      "id": "runtime.host-context.constructor-destructor",
       "status": "rejected",
-      "obligation": "The narrow HostContext adapter rejects DT_INIT, DT_FINI, DT_RPATH, DT_RUNPATH, DT_INIT_ARRAY, DT_FINI_ARRAY, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAY, and DT_PREINIT_ARRAYSZ before creating an image handle",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_INIT, DT_FINI, DT_INIT_ARRAY, DT_FINI_ARRAY, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAY, and DT_PREINIT_ARRAYSZ before constructor or destructor execution and image-handle creation",
       "witness": "native/urprotect-runtime/host_context_self_test.c",
       "oracle": "native/urprotect-runtime/host_adapter.c",
       "evidence": [
         "native/urprotect-runtime/host_adapter.c",
         "native/urprotect-runtime/host_context_self_test.c",
         "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
         ".artifacts/host-context/pr/self-test.log"
       ],
-      "reason": "The first HostContext entry adapter has no defined constructor, destructor, or dynamic path-search semantics for in-process images, so these lifecycle and search tags remain rejected.",
+      "reason": "HostContext v1 and the current system-loader adapter define no constructor/destructor ordering, callback or reentrancy behavior, teardown, or lifecycle ownership semantics for in-process images; loader execution alone is not a compatibility proof.",
       "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
-      "negativeOracle": "native/urprotect-runtime/host_adapter.c"
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged non-lifecycle entry fixture remains the positive HostContext dispatch baseline.",
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "DT_TEXTREL and unsupported relocation-table forms remain separate rejection boundaries and are not part of this feature.",
+        "No positive constructor/destructor HostContext fixture or support claim exists until ordering, callback/reentrancy, teardown, and lifecycle ownership semantics are defined by the Host Contract."
+      ]
+    },
+    {
+      "id": "runtime.host-context.path-search",
+      "status": "rejected",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_RPATH and DT_RUNPATH dynamic path-search metadata before path search or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 and the current system-loader adapter define no dynamic path-search roots, ordering, or precedence semantics for in-process images; loader path resolution alone is not a compatibility proof.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged non-path-search entry fixture remains the positive HostContext dispatch baseline.",
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "Constructor/destructor lifecycle metadata, DT_TEXTREL, and unsupported relocation-table forms remain separate rejection boundaries."
+      ]
     },
     {
       "id": "android.jni.native-bridge",

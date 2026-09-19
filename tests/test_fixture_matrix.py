@@ -147,10 +147,112 @@ class FixtureMatrixTests(unittest.TestCase):
         lifecycle = next(
             item
             for item in self.data["features"]
-            if item["id"] == "runtime.host-context.unsupported-lifecycle-path-search"
+            if item["id"] == "runtime.host-context.constructor-destructor"
         )
         self.assertNotIn("DT_NEEDED", lifecycle["obligation"])
         self.assertNotIn("DT_NEEDED", lifecycle["reason"])
+
+    def test_constructor_destructor_lifecycle_is_separate_from_path_search(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+        feature_ids = [item["id"] for item in self.data["features"]]
+        self.assertFalse(
+            any(
+                feature_id.startswith("runtime.host-context.")
+                and "lifecycle" in feature_id
+                and "path-search" in feature_id
+                for feature_id in feature_ids
+            )
+        )
+        self.assertEqual(
+            feature_ids.count("runtime.host-context.constructor-destructor"),
+            1,
+        )
+        self.assertEqual(feature_ids.count("runtime.host-context.path-search"), 1)
+
+        lifecycle = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.constructor-destructor"
+        )
+        self.assertEqual(lifecycle["status"], "rejected")
+        for tag in (
+            "DT_INIT",
+            "DT_FINI",
+            "DT_INIT_ARRAY",
+            "DT_FINI_ARRAY",
+            "DT_INIT_ARRAYSZ",
+            "DT_FINI_ARRAYSZ",
+            "DT_PREINIT_ARRAY",
+            "DT_PREINIT_ARRAYSZ",
+        ):
+            self.assertIn(tag, lifecycle["obligation"])
+        self.assertNotIn("DT_RPATH", lifecycle["obligation"])
+        self.assertNotIn("DT_RUNPATH", lifecycle["obligation"])
+        self.assertNotIn("DT_TEXTREL", lifecycle["obligation"])
+        for relocation_tag in (
+            "DT_REL",
+            "DT_RELSZ",
+            "DT_RELENT",
+            "DT_RELA",
+            "DT_RELASZ",
+            "DT_RELAENT",
+            "DT_RELR",
+            "DT_RELRSZ",
+            "DT_RELRENT",
+            "DT_JMPREL",
+            "DT_PLTRELSZ",
+            "DT_PLTREL",
+        ):
+            self.assertNotIn(relocation_tag, lifecycle["obligation"])
+        self.assertIn("constructor/destructor ordering", lifecycle["reason"])
+        self.assertIn("reentrancy", lifecycle["reason"])
+        self.assertIn("teardown", lifecycle["reason"])
+        self.assertIn("lifecycle ownership", lifecycle["reason"])
+        self.assertIn("COMPATIBILITY.md", lifecycle["evidence"])
+        self.assertTrue(any("nonzero sentinel" in item for item in lifecycle["constraints"]))
+        self.assertTrue(any("surrounding bytes" in item for item in lifecycle["constraints"]))
+        self.assertTrue(any("positive" in item for item in lifecycle["constraints"]))
+
+        path_search = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.path-search"
+        )
+        self.assertEqual(path_search["status"], "rejected")
+        self.assertIn("DT_RPATH", path_search["obligation"])
+        self.assertIn("DT_RUNPATH", path_search["obligation"])
+        for lifecycle_tag in (
+            "DT_INIT",
+            "DT_FINI",
+            "DT_INIT_ARRAY",
+            "DT_FINI_ARRAY",
+            "DT_INIT_ARRAYSZ",
+            "DT_FINI_ARRAYSZ",
+            "DT_PREINIT_ARRAY",
+            "DT_PREINIT_ARRAYSZ",
+        ):
+            self.assertNotIn(lifecycle_tag, path_search["obligation"])
+        self.assertNotIn("DT_NEEDED", path_search["obligation"])
+        self.assertNotIn("DT_TEXTREL", path_search["obligation"])
+        for relocation_tag in (
+            "DT_REL",
+            "DT_RELSZ",
+            "DT_RELENT",
+            "DT_RELA",
+            "DT_RELASZ",
+            "DT_RELAENT",
+            "DT_RELR",
+            "DT_RELRSZ",
+            "DT_RELRENT",
+            "DT_JMPREL",
+            "DT_PLTRELSZ",
+            "DT_PLTREL",
+        ):
+            self.assertNotIn(relocation_tag, path_search["obligation"])
+        self.assertIn("path-search", path_search["reason"])
+        self.assertTrue(any("zero handle" in item for item in path_search["constraints"]))
 
     def test_feature_covering_strategy_is_required(self) -> None:
         data = copy.deepcopy(self.data)
@@ -228,6 +330,8 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.gnu-property | rejected", rendered)
             self.assertIn("runtime.host-context.pt-tls | rejected", rendered)
             self.assertIn("runtime.host-context.dependency-resolution | rejected", rendered)
+            self.assertIn("runtime.host-context.constructor-destructor | rejected", rendered)
+            self.assertIn("runtime.host-context.path-search | rejected", rendered)
 
 
 if __name__ == "__main__":

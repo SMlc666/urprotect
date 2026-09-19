@@ -81,12 +81,23 @@ memfd_create(name, MFD_CLOEXEC)
   slice accepts only checked `RELATIVE`/`RELR` targets, permits only immediate
   binding dynamic flags, and delegates relocation application to the system
   loader.
-- The first native adapter rejects `DT_INIT`, `DT_FINI`, `DT_RPATH`,
-  `DT_RUNPATH`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`,
-  `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` with
-  `URP_STATUS_UNSUPPORTED` before creating an image handle. The native
-  self-test mutates a bounded `DT_NULL` tag one case at a time, verifies that
-  no other image bytes changed, and requires a zero output handle.
+- The constructor/destructor lifecycle boundary is the rejected feature row
+  `runtime.host-context.constructor-destructor`. The first native adapter
+  rejects `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`,
+  `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and
+  `DT_PREINIT_ARRAYSZ` with `URP_STATUS_UNSUPPORTED` before constructor or
+  destructor execution and image-handle creation. HostContext v1 and the
+  current system-loader adapter define no constructor/destructor ordering,
+  callback or reentrancy behavior, teardown, or lifecycle ownership semantics.
+  The native self-test mutates one bounded `DT_NULL` tag at a time, preserves
+  surrounding bytes, initializes a nonzero sentinel, and requires a zero
+  output handle.
+- RPATH/RUNPATH are the separate rejected feature row
+  `runtime.host-context.path-search`. HostContext v1 and the current
+  system-loader adapter define no dynamic path-search roots, ordering, or
+  precedence semantics, so each bounded tag mutation fails closed before
+  loader handoff. `DT_TEXTREL` and unsupported relocation-table forms remain
+  separate relocation boundaries and are not included in either row.
 - A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
   when that range is inside the image and `p_memsz >= p_filesz`; the real
   adapter must still dispatch the entry. The native system loader owns the

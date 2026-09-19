@@ -395,6 +395,84 @@ static int fixture_find_dynamic_terminator(
     return 0;
 }
 
+static int fixture_reject_dynamic_tags(
+    const urp_host_adapter_v1 *adapter,
+    const uint8_t *source,
+    size_t source_size,
+    size_t dynamic_terminator_offset,
+    const fixture_dynamic_rejection *rejections,
+    size_t rejection_count)
+{
+    size_t dynamic_offset;
+    size_t dynamic_size;
+    if (adapter == NULL
+        || source == NULL
+        || (rejection_count != 0U && rejections == NULL)
+        || adapter->context.load_image == NULL
+        || !fixture_find_dynamic_segment(
+            source,
+            source_size,
+            &dynamic_offset,
+            &dynamic_size)
+        || dynamic_size % FIXTURE_ELF_DYNAMIC_ENTRY_SIZE != 0U
+        || dynamic_terminator_offset < dynamic_offset
+        || dynamic_terminator_offset > source_size
+        || dynamic_terminator_offset - dynamic_offset >= dynamic_size
+        || (dynamic_terminator_offset - dynamic_offset)
+            % FIXTURE_ELF_DYNAMIC_ENTRY_SIZE != 0U
+        || sizeof(uint64_t) > source_size - dynamic_terminator_offset
+        || sizeof(uint64_t)
+            > dynamic_size - (dynamic_terminator_offset - dynamic_offset)
+        || fixture_read_u64_le(source + dynamic_terminator_offset) != 0U) {
+        return fixture_expect(0, "dynamic rejection mutation range is not owned by PT_DYNAMIC");
+    }
+
+    size_t tail_offset = dynamic_terminator_offset + sizeof(uint64_t);
+    size_t tail_size = source_size - tail_offset;
+    for (size_t index = 0; index < rejection_count; ++index) {
+        if (rejections[index].tag == 0U || rejections[index].message == NULL) {
+            return fixture_expect(0, "dynamic rejection metadata is invalid");
+        }
+        uint8_t *image = (uint8_t *)malloc(source_size);
+        if (!fixture_expect(
+                image != NULL,
+                "could not allocate an unsupported dynamic-tag fixture")) {
+            return 0;
+        }
+        memcpy(image, source, source_size);
+        fixture_write_u64_le(
+            image + dynamic_terminator_offset,
+            rejections[index].tag);
+        int preserved = (dynamic_terminator_offset == 0U
+                || memcmp(image, source, dynamic_terminator_offset) == 0)
+            && (tail_size == 0U
+                || memcmp(image + tail_offset, source + tail_offset, tail_size) == 0);
+        if (!fixture_expect(
+                preserved
+                    && fixture_read_u64_le(image + dynamic_terminator_offset)
+                        == rejections[index].tag,
+                "unsupported dynamic-tag mutation changed bytes outside the bounded tag")) {
+            free(image);
+            return 0;
+        }
+
+        urp_image_handle rejected_handle = FIXTURE_REJECTION_SENTINEL;
+        urp_status status = adapter->context.load_image(
+            adapter->context.userdata,
+            image,
+            source_size,
+            URP_LOAD_IMAGE_IMMUTABLE,
+            &rejected_handle);
+        free(image);
+        if (!fixture_expect(
+                status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+                rejections[index].message)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int fixture_read_file(const char *path, uint8_t **bytes_out, size_t *size_out)
 {
     if (path == NULL || bytes_out == NULL || size_out == NULL) {
@@ -963,7 +1041,7 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(textrel_image, source, source_size);
     fixture_write_u64_le(textrel_image + flags_value_offset, UINT64_C(0x4));
-    rejected_handle = 0U;
+    rejected_handle = FIXTURE_REJECTION_SENTINEL;
     status = adapter.context.load_image(
         adapter.context.userdata,
         textrel_image,
@@ -972,8 +1050,8 @@ static int fixture_run_real_adapter(const char *fixture_path)
         &rejected_handle);
     free(textrel_image);
     if (!fixture_expect(
-            status == URP_STATUS_UNSUPPORTED,
-            "a text-relocation dynamic flag was accepted")) {
+            status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
+            "a text-relocation dynamic flag was accepted or returned a handle")) {
         free(source);
         return 0;
     }
@@ -1023,11 +1101,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
-    static const fixture_dynamic_rejection unsupported_dynamic_tags[] = {
+    static const fixture_dynamic_rejection lifecycle_dynamic_tags[] = {
         {FIXTURE_DT_INIT, "a DT_INIT lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_FINI, "a DT_FINI lifecycle entry was accepted or returned a handle"},
-        {FIXTURE_DT_RPATH, "a DT_RPATH path-search entry was accepted or returned a handle"},
-        {FIXTURE_DT_RUNPATH, "a DT_RUNPATH path-search entry was accepted or returned a handle"},
         {FIXTURE_DT_INIT_ARRAY, "a DT_INIT_ARRAY lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_FINI_ARRAY, "a DT_FINI_ARRAY lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_INIT_ARRAYSZ, "a DT_INIT_ARRAYSZ lifecycle entry was accepted or returned a handle"},
@@ -1035,57 +1111,30 @@ static int fixture_run_real_adapter(const char *fixture_path)
         {FIXTURE_DT_PREINIT_ARRAY, "a DT_PREINIT_ARRAY lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_PREINIT_ARRAYSZ, "a DT_PREINIT_ARRAYSZ lifecycle entry was accepted or returned a handle"},
     };
-    for (size_t index = 0;
-         index < sizeof(unsupported_dynamic_tags) / sizeof(unsupported_dynamic_tags[0]);
-         ++index) {
-        uint8_t *unsupported_dynamic_image = (uint8_t *)malloc(source_size);
-        if (!fixture_expect(
-                unsupported_dynamic_image != NULL,
-                "could not allocate an unsupported dynamic-tag fixture")) {
-            free(source);
-            return 0;
-        }
-        memcpy(unsupported_dynamic_image, source, source_size);
-        fixture_write_u64_le(
-            unsupported_dynamic_image + dynamic_terminator_offset,
-            unsupported_dynamic_tags[index].tag);
-        size_t dynamic_terminator_tail_offset =
-            dynamic_terminator_offset + sizeof(uint64_t);
-        size_t dynamic_terminator_tail_size = source_size - dynamic_terminator_tail_offset;
-        int preserved = (dynamic_terminator_offset == 0U
-                || memcmp(
-                    unsupported_dynamic_image,
-                    source,
-                    dynamic_terminator_offset) == 0)
-            && (dynamic_terminator_tail_size == 0U
-                || memcmp(
-                    unsupported_dynamic_image + dynamic_terminator_tail_offset,
-                    source + dynamic_terminator_tail_offset,
-                    dynamic_terminator_tail_size) == 0);
-        if (!fixture_expect(
-                preserved
-                    && fixture_read_u64_le(
-                        unsupported_dynamic_image + dynamic_terminator_offset)
-                        == unsupported_dynamic_tags[index].tag,
-                "unsupported dynamic-tag mutation changed bytes outside the terminator tag")) {
-            free(unsupported_dynamic_image);
-            free(source);
-            return 0;
-        }
-        rejected_handle = 0U;
-        status = adapter.context.load_image(
-            adapter.context.userdata,
-            unsupported_dynamic_image,
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
             source_size,
-            URP_LOAD_IMAGE_IMMUTABLE,
-            &rejected_handle);
-        free(unsupported_dynamic_image);
-        if (!fixture_expect(
-                status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
-                unsupported_dynamic_tags[index].message)) {
-            free(source);
-            return 0;
-        }
+            dynamic_terminator_offset,
+            lifecycle_dynamic_tags,
+            sizeof(lifecycle_dynamic_tags) / sizeof(lifecycle_dynamic_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
+    static const fixture_dynamic_rejection path_search_dynamic_tags[] = {
+        {FIXTURE_DT_RPATH, "a DT_RPATH path-search entry was accepted or returned a handle"},
+        {FIXTURE_DT_RUNPATH, "a DT_RUNPATH path-search entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            path_search_dynamic_tags,
+            sizeof(path_search_dynamic_tags) / sizeof(path_search_dynamic_tags[0]))) {
+        free(source);
+        return 0;
     }
 
     status = adapter.context.load_image(

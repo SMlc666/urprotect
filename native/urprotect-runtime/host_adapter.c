@@ -445,18 +445,24 @@ static urp_status urp_validate_dynamic_segment(
         case URP_DT_NEEDED:
             /* HostContext v1 has no dependency-resolution or lifetime contract. */
             return URP_STATUS_UNSUPPORTED;
-        /* Lifecycle and path-search tags use a separate rejection boundary. */
+        /* HostContext v1 defines no constructor/destructor ordering, callback/reentrancy, teardown, or lifecycle ownership. */
         case URP_DT_INIT:
         case URP_DT_FINI:
-        case URP_DT_RPATH:
-        case URP_DT_TEXTREL:
         case URP_DT_INIT_ARRAY:
         case URP_DT_FINI_ARRAY:
-        case URP_DT_RUNPATH:
-        case URP_DT_PREINIT_ARRAY:
         case URP_DT_INIT_ARRAYSZ:
         case URP_DT_FINI_ARRAYSZ:
+        case URP_DT_PREINIT_ARRAY:
         case URP_DT_PREINIT_ARRAYSZ:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no RPATH/RUNPATH search roots, ordering, or precedence. */
+        case URP_DT_RPATH:
+        case URP_DT_RUNPATH:
+            return URP_STATUS_UNSUPPORTED;
+        /* DT_TEXTREL remains separate from lifecycle and path-search metadata. */
+        case URP_DT_TEXTREL:
+            return URP_STATUS_UNSUPPORTED;
+        /* Unsupported relocation-table metadata remains a separate boundary. */
         case URP_DT_AUXILIARY:
         case URP_DT_FILTER:
         case URP_DT_REL:

@@ -100,8 +100,26 @@ can resolve a library does not establish support. Its self-test mutates only a
 bounded dynamic-table tag, preserves surrounding bytes, initializes a sentinel
 handle, and requires `URP_STATUS_UNSUPPORTED` with a zero handle before loader
 handoff. The unchanged non-dependency entry fixture remains the positive
-HostContext baseline; lifecycle and path-search tags remain in their separate
-rejected row.
+HostContext baseline.
+
+Constructor/destructor metadata is a separate rejected boundary recorded as
+`runtime.host-context.constructor-destructor`. It covers `DT_INIT`, `DT_FINI`,
+`DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`,
+`DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ`. HostContext v1 and the current
+system-loader adapter define no constructor/destructor ordering, callback or
+reentrancy behavior, teardown, or lifecycle ownership semantics. The self-test
+mutates one bounded `DT_NULL` tag at a time, preserves all surrounding bytes,
+initializes a nonzero output-handle sentinel, and requires
+`URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff. The
+unchanged non-lifecycle entry fixture remains the positive HostContext
+baseline.
+
+RPATH/RUNPATH metadata is a separate rejected boundary recorded as
+`runtime.host-context.path-search`. HostContext v1 and the current
+system-loader adapter define no dynamic path-search roots, ordering, or
+precedence semantics, so the same bounded mutation must fail closed before
+loader handoff. `DT_TEXTREL` and unsupported relocation-table forms remain
+separate relocation boundaries and are not included in either row.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and
