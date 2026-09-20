@@ -30,6 +30,9 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_PT_GNU_RELRO 0x6474e552U
 #define FIXTURE_PF_X 1U
 #define FIXTURE_DT_NEEDED 1U
+#define FIXTURE_DT_PLTRELSZ 2U
+#define FIXTURE_DT_AUXILIARY UINT64_C(0x7ffffffd)
+#define FIXTURE_DT_FILTER UINT64_C(0x7fffffff)
 #define FIXTURE_DT_INIT 12U
 #define FIXTURE_DT_FINI 13U
 #define FIXTURE_DT_RPATH 15U
@@ -43,6 +46,11 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_DT_RELA 7U
 #define FIXTURE_DT_RELASZ 8U
 #define FIXTURE_DT_RELAENT 9U
+#define FIXTURE_DT_REL 17U
+#define FIXTURE_DT_RELSZ 18U
+#define FIXTURE_DT_RELENT 19U
+#define FIXTURE_DT_PLTREL 20U
+#define FIXTURE_DT_JMPREL 23U
 #define FIXTURE_DT_RELR 36U
 #define FIXTURE_DT_RELRSZ 35U
 #define FIXTURE_DT_RELRENT 37U
@@ -1084,6 +1092,22 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
+    static const fixture_dynamic_rejection auxiliary_filter_dynamic_tags[] = {
+        {FIXTURE_DT_AUXILIARY, "a DT_AUXILIARY dependency entry was accepted or returned a handle"},
+        {FIXTURE_DT_FILTER, "a DT_FILTER dependency entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            auxiliary_filter_dynamic_tags,
+            sizeof(auxiliary_filter_dynamic_tags)
+                / sizeof(auxiliary_filter_dynamic_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
     static const fixture_dynamic_rejection lifecycle_dynamic_tags[] = {
         {FIXTURE_DT_INIT, "a DT_INIT lifecycle entry was accepted or returned a handle"},
         {FIXTURE_DT_FINI, "a DT_FINI lifecycle entry was accepted or returned a handle"},
@@ -1115,6 +1139,26 @@ static int fixture_run_real_adapter(const char *fixture_path)
             dynamic_terminator_offset,
             text_relocation_dynamic_tags,
             sizeof(text_relocation_dynamic_tags) / sizeof(text_relocation_dynamic_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
+    static const fixture_dynamic_rejection unsupported_relocation_table_tags[] = {
+        {FIXTURE_DT_REL, "a DT_REL relocation-table entry was accepted or returned a handle"},
+        {FIXTURE_DT_RELSZ, "a DT_RELSZ relocation-table entry was accepted or returned a handle"},
+        {FIXTURE_DT_RELENT, "a DT_RELENT relocation-table entry was accepted or returned a handle"},
+        {FIXTURE_DT_JMPREL, "a DT_JMPREL relocation-table entry was accepted or returned a handle"},
+        {FIXTURE_DT_PLTRELSZ, "a DT_PLTRELSZ relocation-table entry was accepted or returned a handle"},
+        {FIXTURE_DT_PLTREL, "a DT_PLTREL relocation-table entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            unsupported_relocation_table_tags,
+            sizeof(unsupported_relocation_table_tags)
+                / sizeof(unsupported_relocation_table_tags[0]))) {
         free(source);
         return 0;
     }

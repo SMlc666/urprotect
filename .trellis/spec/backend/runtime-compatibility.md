@@ -96,8 +96,9 @@ memfd_create(name, MFD_CLOEXEC)
   `runtime.host-context.path-search`. HostContext v1 and the current
   system-loader adapter define no dynamic path-search roots, ordering, or
   precedence semantics, so each bounded tag mutation fails closed before
-  loader handoff. Unsupported relocation-table forms remain a separate later
-  relocation boundary and are not included in either row.
+  loader handoff. Unsupported relocation-table tags use the separate
+  `runtime.host-context.unsupported-relocation-table` rejection boundary and
+  are not included in this row.
 - `DT_TEXTREL` writable-text relocation metadata is the separate rejected
   feature row `runtime.host-context.text-relocation`. HostContext v1 and the
   current system-loader adapter define no writable-text relocation or
@@ -107,10 +108,21 @@ memfd_create(name, MFD_CLOEXEC)
   nonzero output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a
   zero handle before loader handoff. The unchanged non-text-relocation entry
   fixture remains the positive HostContext baseline. Unsupported relocation-
-  table tags such as `DT_REL` and `DT_JMPREL` remain a separate later
+  table tags use the separate `runtime.host-context.unsupported-relocation-table`
   rejection boundary; checked AArch64 `RELATIVE`/`RELR` acceptance and
   system-loader application remain the validated `elf.relocation.aarch64-relative`
   feature.
+- Unsupported dynamic relocation-table tags are an independently rejected
+  HostContext v1 feature recorded as
+  `runtime.host-context.unsupported-relocation-table`. It covers `DT_REL`,
+  `DT_RELSZ`, `DT_RELENT`, `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL`; the
+  current system-loader contract defines only the checked AArch64
+  `RELATIVE`/`RELR` path, so these forms are rejected before relocation
+  processing or image-handle creation. The native self-test mutates one
+  bounded `DT_NULL` tag at a time, preserves surrounding bytes, initializes a
+  nonzero sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero output
+  handle. The unchanged `RELATIVE`/`RELR` fixture remains the positive
+  baseline; no broader relocation-table support is claimed.
 - A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
   when that range is inside the image and `p_memsz >= p_filesz`; the real
   adapter must still dispatch the entry. The native system loader owns the
@@ -141,12 +153,12 @@ memfd_create(name, MFD_CLOEXEC)
   header type to `PT_GNU_PROPERTY`, and requires `URP_STATUS_UNSUPPORTED` with
   a zero image handle before loader handoff.
   `runtime.host-context.dependency-resolution` is a separate rejected
-  boundary for `DT_NEEDED`: HostContext v1 and the current system-loader
-  adapter define no dependency-resolution, search-path, symbol-scope, or
-  dependency-lifetime semantics, so a loader that can resolve a library does
-  not establish support. The bounded mutation keeps the unchanged
-  non-dependency entry fixture as the positive baseline and requires a zero
-  image handle before loader handoff.
+  boundary for `DT_NEEDED`, `DT_AUXILIARY`, and `DT_FILTER`: HostContext v1
+  and the current system-loader adapter define no dependency-resolution,
+  search-path, symbol-scope, or dependency-lifetime semantics, so a loader
+  that can resolve a library does not establish support. The bounded mutations
+  keep the unchanged non-dependency entry fixture as the positive baseline and
+  require a zero image handle before loader handoff.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid

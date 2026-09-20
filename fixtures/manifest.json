@@ -185,7 +185,7 @@
       "constraints": [
         "No PT_INTERP or DT_NEEDED semantics; constructor/destructor tags use the separate runtime.host-context.constructor-destructor rejection boundary",
         "RPATH/RUNPATH tags use the separate runtime.host-context.path-search rejection boundary",
-        "Dynamic flags are limited to immediate binding flags; unsupported relocation tables remain a separate rejection boundary",
+        "Dynamic flags are limited to immediate binding flags; runtime.host-context.unsupported-relocation-table is the dedicated rejection boundary for unsupported relocation-table tags",
         "Only checked AArch64 RELATIVE/RELR relocation targets are accepted; application and memory protection are delegated to the recorded native system loader"
       ]
     },
@@ -297,7 +297,7 @@
     {
       "id": "runtime.host-context.dependency-resolution",
       "status": "rejected",
-      "obligation": "The HostContext v1 system-loader adapter rejects DT_NEEDED dependency metadata before dependency resolution or image creation",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_NEEDED, DT_AUXILIARY, and DT_FILTER dependency metadata before dependency resolution or image creation",
       "witness": "native/urprotect-runtime/host_context_self_test.c",
       "oracle": "native/urprotect-runtime/host_adapter.c",
       "evidence": [
@@ -312,7 +312,7 @@
       "negativeOracle": "native/urprotect-runtime/host_adapter.c",
       "constraints": [
         "The unchanged non-dependency entry fixture remains the positive HostContext dispatch baseline.",
-        "A bounded dynamic-table mutation changes only a DT_NEEDED tag, is rejected with URP_STATUS_UNSUPPORTED and a zero image handle before loader handoff, and preserves every surrounding byte.",
+        "Each bounded dynamic-table mutation changes only one of DT_NEEDED, DT_AUXILIARY, or DT_FILTER, is rejected with URP_STATUS_UNSUPPORTED and a zero image handle before loader handoff, and preserves every surrounding byte.",
         "No positive dependency-bearing HostContext fixture or support claim exists until the Host Contract defines dependency resolution, search paths, symbol scope, and dependency lifetime."
       ]
     },
@@ -337,7 +337,7 @@
       "constraints": [
         "The unchanged non-lifecycle entry fixture remains the positive HostContext dispatch baseline.",
         "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
-        "Unsupported relocation-table forms remain a separate rejection boundary and are not part of this feature.",
+        "Unsupported relocation-table tags use the separate runtime.host-context.unsupported-relocation-table rejection boundary and are not part of this feature.",
         "No positive constructor/destructor HostContext fixture or support claim exists until ordering, callback/reentrancy, teardown, and lifecycle ownership semantics are defined by the Host Contract."
       ]
     },
@@ -362,7 +362,7 @@
       "constraints": [
         "The unchanged non-path-search entry fixture remains the positive HostContext dispatch baseline.",
         "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
-        "Constructor/destructor lifecycle metadata and unsupported relocation-table forms remain separate rejection boundaries."
+        "Constructor/destructor lifecycle metadata and runtime.host-context.unsupported-relocation-table remain separate rejection boundaries."
       ]
     },
     {
@@ -387,8 +387,33 @@
         "The unchanged non-text-relocation entry fixture remains the positive HostContext dispatch baseline.",
         "A bounded dynamic-table mutation changes only one DT_NULL tag to DT_TEXTREL, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
         "AArch64 RELATIVE/RELR relocation acceptance and application delegation remain the separate validated elf.relocation.aarch64-relative feature.",
-        "Unsupported relocation-table forms such as DT_REL and DT_JMPREL remain a separate later rejection boundary.",
+        "Unsupported relocation-table tags use the separate runtime.host-context.unsupported-relocation-table rejection boundary.",
         "No positive text-relocation HostContext fixture or support claim exists until writable-text relocation and W^X/protection semantics are defined by the Host Contract."
+      ]
+    },
+    {
+      "id": "runtime.host-context.unsupported-relocation-table",
+      "status": "rejected",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_REL, DT_RELSZ, DT_RELENT, DT_JMPREL, DT_PLTRELSZ, and DT_PLTREL relocation-table metadata before relocation processing or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 and the current system-loader adapter define only the checked AArch64 RELATIVE/RELR relocation path; legacy REL and PLT relocation-table semantics are not defined, so loader acceptance alone is not a compatibility proof.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged RELATIVE/RELR entry fixture remains the positive HostContext dispatch baseline.",
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "The validated elf.relocation.aarch64-relative feature covers only checked AArch64 RELATIVE/RELR relocation targets; no broader relocation-table support is claimed.",
+        "No positive unsupported-relocation-table HostContext fixture or support claim exists until the Host Contract defines the required relocation-table semantics."
       ]
     },
     {

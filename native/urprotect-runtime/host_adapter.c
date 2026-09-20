@@ -65,7 +65,7 @@
 #define URP_DT_RELR 36U
 #define URP_DT_RELRENT 37U
 #define URP_DT_FLAGS_1 UINT64_C(0x6ffffffb)
-#define URP_DT_AUXILIARY UINT64_C(0x7ffffffe)
+#define URP_DT_AUXILIARY UINT64_C(0x7ffffffd)
 #define URP_DT_FILTER UINT64_C(0x7fffffff)
 #define URP_DF_BIND_NOW UINT64_C(0x8)
 #define URP_DF_1_NOW UINT64_C(0x1)
@@ -462,9 +462,11 @@ static urp_status urp_validate_dynamic_segment(
         /* HostContext v1 defines no writable-text relocation or W^X semantics. */
         case URP_DT_TEXTREL:
             return URP_STATUS_UNSUPPORTED;
-        /* Unsupported relocation-table metadata remains a separate boundary. */
+        /* HostContext v1 defines no auxiliary or filter dependency semantics. */
         case URP_DT_AUXILIARY:
         case URP_DT_FILTER:
+            return URP_STATUS_UNSUPPORTED;
+        /* runtime.host-context.unsupported-relocation-table: v1 defines only the checked AArch64 RELATIVE/RELR path. */
         case URP_DT_REL:
         case URP_DT_RELSZ:
         case URP_DT_RELENT:

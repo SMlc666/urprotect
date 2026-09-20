@@ -135,7 +135,8 @@ class FixtureMatrixTests(unittest.TestCase):
             if item["id"] == "runtime.host-context.dependency-resolution"
         )
         self.assertEqual(feature["status"], "rejected")
-        self.assertIn("DT_NEEDED", feature["obligation"])
+        for dependency_tag in ("DT_NEEDED", "DT_AUXILIARY", "DT_FILTER"):
+            self.assertIn(dependency_tag, feature["obligation"])
         self.assertIn("dependency-resolution", feature["reason"])
         self.assertIn("search-path", feature["reason"])
         self.assertIn("symbol-scope", feature["reason"])
@@ -305,11 +306,12 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertTrue(any("positive" in item for item in feature["constraints"]))
         self.assertTrue(any("RELATIVE/RELR" in item for item in feature["constraints"]))
-        self.assertTrue(
-            any(
-                "DT_REL" in item and "DT_JMPREL" in item
-                for item in feature["constraints"]
-            )
+        text_constraints = " ".join(feature["constraints"])
+        self.assertNotIn("DT_REL", text_constraints)
+        self.assertNotIn("DT_JMPREL", text_constraints)
+        self.assertIn(
+            "runtime.host-context.unsupported-relocation-table",
+            text_constraints,
         )
 
         feature_ids = [item["id"] for item in self.data["features"]]
@@ -328,6 +330,73 @@ class FixtureMatrixTests(unittest.TestCase):
         ).lower()
         self.assertNotIn("dt_textrel", relative_description)
         self.assertNotIn("text-relocation", relative_description)
+
+    def test_unsupported_relocation_table_is_an_explicit_rejected_host_context_boundary(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.unsupported-relocation-table"
+        )
+        self.assertEqual(feature["status"], "rejected")
+        self.assertEqual(
+            feature["witness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        for relocation_tag in (
+            "DT_REL",
+            "DT_RELSZ",
+            "DT_RELENT",
+            "DT_JMPREL",
+            "DT_PLTRELSZ",
+            "DT_PLTREL",
+        ):
+            self.assertIn(relocation_tag, feature["obligation"])
+        for dependency_tag in ("DT_NEEDED", "DT_AUXILIARY", "DT_FILTER"):
+            self.assertNotIn(dependency_tag, feature["obligation"])
+        self.assertIn("RELATIVE/RELR", feature["reason"])
+        self.assertIn("system-loader", feature["reason"])
+        self.assertEqual(
+            feature["negativeWitness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertIn("COMPATIBILITY.md", feature["evidence"])
+        self.assertIn(
+            ".trellis/spec/backend/runtime-compatibility.md",
+            feature["evidence"],
+        )
+        self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
+        self.assertTrue(any("surrounding bytes" in item for item in feature["constraints"]))
+        self.assertTrue(
+            any(
+                "nonzero sentinel" in item and "zero handle" in item
+                for item in feature["constraints"]
+            )
+        )
+        self.assertTrue(any("RELATIVE/RELR" in item for item in feature["constraints"]))
+        self.assertTrue(any("positive" in item for item in feature["constraints"]))
+
+        feature_ids = [item["id"] for item in self.data["features"]]
+        self.assertEqual(
+            feature_ids.count("runtime.host-context.unsupported-relocation-table"),
+            1,
+        )
+        relative = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "elf.relocation.aarch64-relative"
+        )
+        self.assertEqual(relative["status"], "validated")
+        relative_description = " ".join(
+            [relative["obligation"], *relative["constraints"]]
+        )
+        self.assertIn("RELATIVE/RELR", relative_description)
+        self.assertNotIn("DT_REL", relative_description)
+        self.assertNotIn("DT_JMPREL", relative_description)
 
     def test_feature_covering_strategy_is_required(self) -> None:
         data = copy.deepcopy(self.data)
@@ -408,6 +477,7 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.constructor-destructor | rejected", rendered)
             self.assertIn("runtime.host-context.path-search | rejected", rendered)
             self.assertIn("runtime.host-context.text-relocation | rejected", rendered)
+            self.assertIn("runtime.host-context.unsupported-relocation-table | rejected", rendered)
 
 
 if __name__ == "__main__":

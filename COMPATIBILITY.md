@@ -61,7 +61,7 @@ then verifies entry dispatch and release ordering without an executable
 temporary pathname. This upgrades only the narrow adapter slice to
 `validated`; it accepts checked AArch64 `RELATIVE`/`RELR` targets while the
 system loader applies them. Dependencies, TLS, constructors, GNU properties,
-and broader relocation behavior remain outside that claim.
+and the rejected unsupported-relocation-table feature remains outside that claim.
 
 The first expanded ELF slice is sectionless `ET_DYN`: section headers are
 optional metadata, so the parser and validator use bounded program headers and
@@ -92,15 +92,16 @@ baseline, then changes only the type of a bounded PT_LOAD-covered metadata
 program header to PT_GNU_PROPERTY and requires `URP_STATUS_UNSUPPORTED` with a
 zero image handle before loader handoff. No positive property-bearing
 HostContext fixture or support claim is made until those semantics are part of
-the Host Contract. DT_NEEDED dependency resolution is a separate rejected
-boundary recorded as `runtime.host-context.dependency-resolution`. HostContext
-v1 and the current system-loader adapter define no dependency-resolution,
-search-path, symbol-scope, or dependency-lifetime semantics, so a loader that
-can resolve a library does not establish support. Its self-test mutates only a
-bounded dynamic-table tag, preserves surrounding bytes, initializes a sentinel
-handle, and requires `URP_STATUS_UNSUPPORTED` with a zero handle before loader
-handoff. The unchanged non-dependency entry fixture remains the positive
-HostContext baseline.
+the Host Contract. DT_NEEDED, DT_AUXILIARY, and DT_FILTER dependency metadata form a
+separate rejected boundary recorded as `runtime.host-context.dependency-resolution`.
+HostContext v1 and the current system-loader adapter define no
+dependency-resolution, search-path, symbol-scope, or dependency-lifetime
+semantics, so a loader that can resolve a library does not establish support.
+Its self-test mutates one bounded dynamic-table tag at a time, preserves
+surrounding bytes, initializes a sentinel handle, and requires
+`URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff. The
+unchanged non-dependency entry fixture remains the positive HostContext
+baseline.
 
 Constructor/destructor metadata is a separate rejected boundary recorded as
 `runtime.host-context.constructor-destructor`. It covers `DT_INIT`, `DT_FINI`,
@@ -118,8 +119,9 @@ RPATH/RUNPATH metadata is a separate rejected boundary recorded as
 `runtime.host-context.path-search`. HostContext v1 and the current
 system-loader adapter define no dynamic path-search roots, ordering, or
 precedence semantics, so the same bounded mutation must fail closed before
-loader handoff. Unsupported relocation-table forms remain a separate later
-relocation boundary and are not included in either row.
+loader handoff. Unsupported relocation-table tags use the separate
+`runtime.host-context.unsupported-relocation-table` rejection boundary and are
+not included in this row.
 
 DT_TEXTREL writable-text relocation metadata is a separate rejected boundary
 recorded as `runtime.host-context.text-relocation`. HostContext v1 and the
@@ -130,9 +132,21 @@ not establish support. The self-test mutates one bounded `DT_NULL` tag to
 output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero
 handle before loader handoff. The unchanged non-text-relocation entry fixture
 remains the positive HostContext baseline. Unsupported relocation-table tags
-such as `DT_REL` and `DT_JMPREL` remain a separate later rejection boundary;
-checked AArch64 `RELATIVE`/`RELR` acceptance and system-loader application
-remain the validated `elf.relocation.aarch64-relative` feature.
+use the separate `runtime.host-context.unsupported-relocation-table` rejection
+boundary; checked AArch64 `RELATIVE`/`RELR` acceptance and system-loader
+application remain the validated `elf.relocation.aarch64-relative` feature.
+
+Unsupported dynamic relocation-table tags are an independently rejected
+HostContext v1 feature recorded as
+`runtime.host-context.unsupported-relocation-table`. It covers `DT_REL`,
+`DT_RELSZ`, `DT_RELENT`, `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL`; the
+current system-loader contract defines only the checked AArch64
+`RELATIVE`/`RELR` path, so these forms are rejected before relocation
+processing or image-handle creation. The self-test mutates one bounded
+`DT_NULL` tag at a time, preserves surrounding bytes, initializes a nonzero
+output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero
+handle. The unchanged `RELATIVE`/`RELR` fixture remains the positive baseline;
+no broader relocation-table support is claimed.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and

@@ -44,12 +44,13 @@ state obligations, so an adapter must reject a bounded property-header
 mutation with `URP_STATUS_UNSUPPORTED` and a zero image handle even if a
 system loader would accept its note. The self-test changes only the bounded
 program-header type and retains the unmodified entry image as the positive
-baseline. DT_NEEDED dependency resolution is the separately evidenced
-`runtime.host-context.dependency-resolution` boundary: HostContext v1 defines
-no dependency-resolution, search-path, symbol-scope, or dependency-lifetime
-semantics, so loader resolution alone is not support. Its bounded dynamic-table
-mutation preserves surrounding bytes, uses a sentinel output handle, and must
-return `URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff.
+baseline. DT_NEEDED, DT_AUXILIARY, and DT_FILTER dependency metadata
+form the separately evidenced `runtime.host-context.dependency-resolution`
+boundary: HostContext v1 defines no dependency-resolution, search-path,
+symbol-scope, or dependency-lifetime semantics, so loader resolution alone is
+not support. Its bounded dynamic-table mutations preserve surrounding bytes,
+use a sentinel output handle, and must return `URP_STATUS_UNSUPPORTED` with a
+zero handle before loader handoff.
 Constructor/destructor metadata is the separate rejected boundary
 `runtime.host-context.constructor-destructor`. HostContext v1 and this adapter
 define no constructor/destructor ordering, callback or reentrancy behavior,
@@ -64,8 +65,9 @@ RPATH/RUNPATH metadata is the separate rejected boundary
 `runtime.host-context.path-search`. HostContext v1 and this adapter define no
 dynamic path-search roots, ordering, or precedence semantics, so each bounded
 mutation also fails closed before image creation. Unsupported relocation-table
-forms remain a separate later relocation boundary, rather than being included
-in either lifecycle or path-search row.
+tags use the separate
+`runtime.host-context.unsupported-relocation-table` rejection boundary, rather
+than being included in either lifecycle or path-search row.
 
 Writable-text relocation metadata is the separate rejected boundary
 `runtime.host-context.text-relocation`. HostContext v1 and this adapter define
@@ -75,10 +77,22 @@ one bounded `DT_NULL` slot to `DT_TEXTREL`, preserves all surrounding bytes,
 initializes a nonzero output-handle sentinel, and requires
 `URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff. The
 unchanged non-text-relocation entry fixture remains the positive HostContext
-baseline. Unsupported relocation-table tags such as `DT_REL` and `DT_JMPREL`
-remain a separate later rejection boundary; checked AArch64 `RELATIVE`/`RELR`
-acceptance and system-loader application remain the validated relocation
-feature.
+baseline. Unsupported relocation-table tags use the separate
+`runtime.host-context.unsupported-relocation-table` rejection boundary; checked
+AArch64 `RELATIVE`/`RELR` acceptance and system-loader application remain the
+validated relocation feature.
+
+Unsupported dynamic relocation-table tags are independently rejected by the
+HostContext v1 adapter under
+`runtime.host-context.unsupported-relocation-table`. The boundary covers
+`DT_REL`, `DT_RELSZ`, `DT_RELENT`, `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL`;
+the current system-loader contract defines only the checked AArch64
+`RELATIVE`/`RELR` path, so each tag is rejected before relocation processing
+or image-handle creation. The self-test mutates one bounded `DT_NULL` slot at a
+time, preserves surrounding bytes, initializes a nonzero handle sentinel, and
+requires `URP_STATUS_UNSUPPORTED` with a zero handle. The unchanged
+`RELATIVE`/`RELR` fixture remains the positive baseline, and no broader
+relocation-table support is claimed.
 
 The runtime accepts the legacy frame v1 and HostContext frame v2. Both use the
 same 112-byte common header. A v2 header is 136 bytes and appends, in order,
