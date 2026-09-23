@@ -18,7 +18,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl
 
-.PHONY: all test runtime self-test clean check-host
+.PHONY: all test test-adapter runtime self-test clean check-host
 
 all: test
 
@@ -36,6 +36,9 @@ self-test: check-host $(SELF_TEST)
 
 test: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
+
+test-adapter: check-host $(SELF_TEST)
+	"$(SELF_TEST)" "$(ENTRY_FIXTURE)" --adapter-v2
 
 $(SELF_TEST): $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(ENTRY_FIXTURE)
 	@mkdir -p "$(BUILD_DIR)"

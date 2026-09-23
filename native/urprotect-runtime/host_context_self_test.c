@@ -708,7 +708,7 @@ static int fixture_make_v2_frame(
         frame_size_out);
 }
 
-static int fixture_run_real_adapter(const char *fixture_path)
+static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
 {
     uint8_t *source = NULL;
     size_t source_size = 0U;
@@ -848,6 +848,10 @@ static int fixture_run_real_adapter(const char *fixture_path)
             "the PT_GNU_RELRO AArch64 HostContext entry was not invoked with status 23")) {
         free(source);
         return 0;
+    }
+    if (positive_only) {
+        free(source);
+        return 1;
     }
 
     size_t gnu_stack_header_offset = (size_t)(gnu_stack_header - source);
@@ -1431,7 +1435,9 @@ static int fixture_run_real_adapter(const char *fixture_path)
 
 int main(int argc, char **argv)
 {
-    if (!fixture_expect(argc == 2, "the entry fixture path is required")) {
+    if (!fixture_expect(
+            argc == 2 || (argc == 3 && strcmp(argv[2], "--adapter-v2") == 0),
+            "the entry fixture path is required, optionally followed by --adapter-v2")) {
         return 2;
     }
 
@@ -1440,6 +1446,14 @@ int main(int argc, char **argv)
         || !fixture_expect(URP_HOST_CONTEXT_MIN_SIZE == 56U, "context minimum size changed")
         || !fixture_expect(URP_LAUNCH_ARGS_MIN_SIZE == 32U, "launch args minimum size changed")) {
         return 1;
+    }
+
+    if (argc == 3) {
+        if (!fixture_run_real_adapter(argv[1], 1)) {
+            return 1;
+        }
+        puts("HostContext runtime self-test: PASS (real-adapter v2 path)");
+        return 0;
     }
 
     fixture_state state = {0};
@@ -1592,7 +1606,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (!fixture_run_real_adapter(argv[1])) {
+    if (!fixture_run_real_adapter(argv[1], 0)) {
         return 1;
     }
 

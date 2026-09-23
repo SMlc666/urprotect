@@ -232,7 +232,7 @@ run_shell -c '
   make -C /workspace/native/urprotect-runtime \
     SHELL="${PREFIX}/bin/sh" \
     BUILD_DIR=/artifacts/host-context/build \
-    CC=clang test > /artifacts/host-context/build-and-test.log 2>&1
+    CC=clang test-adapter > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
 ' -- "${compiler_package_specs[@]}"
