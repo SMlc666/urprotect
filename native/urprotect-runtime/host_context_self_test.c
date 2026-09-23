@@ -55,6 +55,19 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_DT_RELRSZ 35U
 #define FIXTURE_DT_RELRENT 37U
 #define FIXTURE_DT_TEXTREL 22U
+#define FIXTURE_DT_ANDROID_REL UINT64_C(0x6000000f)
+#define FIXTURE_DT_ANDROID_RELSZ UINT64_C(0x60000010)
+#define FIXTURE_DT_ANDROID_RELA UINT64_C(0x60000011)
+#define FIXTURE_DT_ANDROID_RELASZ UINT64_C(0x60000012)
+#define FIXTURE_DT_ANDROID_RELR UINT64_C(0x6fffe000)
+#define FIXTURE_DT_ANDROID_RELRSZ UINT64_C(0x6fffe001)
+#define FIXTURE_DT_ANDROID_RELRENT UINT64_C(0x6fffe003)
+#define FIXTURE_DT_ANDROID_RELRCOUNT UINT64_C(0x6fffe005)
+#define FIXTURE_DT_VERSYM UINT64_C(0x6ffffff0)
+#define FIXTURE_DT_VERDEF UINT64_C(0x6ffffffc)
+#define FIXTURE_DT_VERDEFNUM UINT64_C(0x6ffffffd)
+#define FIXTURE_DT_VERNEED UINT64_C(0x6ffffffe)
+#define FIXTURE_DT_VERNEEDNUM UINT64_C(0x6fffffff)
 #define FIXTURE_REJECTION_SENTINEL UINT64_C(0xfeedface)
 
 static const uint8_t fixture_frame[] = {
@@ -1197,6 +1210,46 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
             unsupported_relocation_table_tags,
             sizeof(unsupported_relocation_table_tags)
                 / sizeof(unsupported_relocation_table_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
+    static const fixture_dynamic_rejection android_packed_relocation_tags[] = {
+        {FIXTURE_DT_ANDROID_REL, "a DT_ANDROID_REL packed relocation entry was accepted or returned a handle"},
+        {FIXTURE_DT_ANDROID_RELSZ, "a DT_ANDROID_RELSZ packed relocation entry was accepted or returned a handle"},
+        {FIXTURE_DT_ANDROID_RELA, "a DT_ANDROID_RELA packed relocation entry was accepted or returned a handle"},
+        {FIXTURE_DT_ANDROID_RELASZ, "a DT_ANDROID_RELASZ packed relocation entry was accepted or returned a handle"},
+        {FIXTURE_DT_ANDROID_RELR, "a DT_ANDROID_RELR packed relocation entry was accepted or returned a handle"},
+        {FIXTURE_DT_ANDROID_RELRSZ, "a DT_ANDROID_RELRSZ packed relocation entry was accepted or returned a handle"},
+        {FIXTURE_DT_ANDROID_RELRENT, "a DT_ANDROID_RELRENT packed relocation entry was accepted or returned a handle"},
+        {FIXTURE_DT_ANDROID_RELRCOUNT, "a DT_ANDROID_RELRCOUNT packed relocation entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            android_packed_relocation_tags,
+            sizeof(android_packed_relocation_tags)
+                / sizeof(android_packed_relocation_tags[0]))) {
+        free(source);
+        return 0;
+    }
+
+    static const fixture_dynamic_rejection symbol_version_tags[] = {
+        {FIXTURE_DT_VERSYM, "a DT_VERSYM symbol-version entry was accepted or returned a handle"},
+        {FIXTURE_DT_VERDEF, "a DT_VERDEF symbol-version entry was accepted or returned a handle"},
+        {FIXTURE_DT_VERDEFNUM, "a DT_VERDEFNUM symbol-version entry was accepted or returned a handle"},
+        {FIXTURE_DT_VERNEED, "a DT_VERNEED symbol-version entry was accepted or returned a handle"},
+        {FIXTURE_DT_VERNEEDNUM, "a DT_VERNEEDNUM symbol-version entry was accepted or returned a handle"},
+    };
+    if (!fixture_reject_dynamic_tags(
+            &adapter,
+            source,
+            source_size,
+            dynamic_terminator_offset,
+            symbol_version_tags,
+            sizeof(symbol_version_tags) / sizeof(symbol_version_tags[0]))) {
         free(source);
         return 0;
     }

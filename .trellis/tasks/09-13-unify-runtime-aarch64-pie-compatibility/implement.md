@@ -55,8 +55,8 @@ HostContext inputs must fail closed rather than fall back to a temporary file.
 - [ ] Map existing parser models, validator rules, and relocation classifiers
       to matrix feature IDs.
 - [ ] Add sectionless/stripped, segment-layout/alignment, PT_TLS, GNU
-      property/RELRO, dynamic metadata, RELA/RELR, and symbol-version cases in
-      small independently reviewable slices.
+      property/RELRO, dynamic metadata, RELA/RELR, Android packed-relocation,
+      and symbol-version cases in small independently reviewable slices.
 - [ ] Add compiler/toolchain cases only when they exercise a new feature or
       lifecycle obligation.
 - [ ] Add paired malformed/rejected cases for each new accepted feature.
@@ -93,13 +93,16 @@ rather than making the runtime accept unproven semantics.
 
     PATH=/root/.dotnet:$PATH dotnet restore UrProtect.sln --locked-mode
     PATH=/root/.dotnet:$PATH dotnet test UrProtect.sln --configuration Release
-    python3 scripts/validate-fixtures.py --tier pr
+    PATH=/root/.dotnet:$PATH FUZZ_RESULTS_DIRECTORY=.artifacts/fixtures/pr/fuzz ./scripts/run-parser-fuzz.sh
+    python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
     ./scripts/run-fixture-matrix.sh --tier pr
     ./scripts/run-packed-fixture-matrix.sh --tier pr
+    make -C native/urprotect-runtime test
 
-The exact command names are updated with the matrix schema before this plan is
-started. Native AArch64 commands must run on an AArch64 host and must fail
-closed on another architecture.
+Native AArch64 commands must run on an AArch64 host and must fail closed on
+another architecture. The release fixture tier and native bionic lane are
+verified as retained CI evidence; local tool availability is not substituted
+for those required GitHub gates.
 
 ## Review Gates
 

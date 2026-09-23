@@ -100,6 +100,20 @@ requires `URP_STATUS_UNSUPPORTED` with a zero handle. The unchanged
 `RELATIVE`/`RELR` fixture remains the positive baseline, and no broader
 relocation-table support is claimed.
 
+Android packed relocation tags are a distinct rejected boundary recorded as
+`runtime.host-context.android-packed-relocation`. It covers `DT_ANDROID_REL`,
+`DT_ANDROID_RELSZ`, `DT_ANDROID_RELA`, `DT_ANDROID_RELASZ`, `DT_ANDROID_RELR`,
+`DT_ANDROID_RELRSZ`, `DT_ANDROID_RELRENT`, and `DT_ANDROID_RELRCOUNT`;
+HostContext v1 defines only the checked AArch64 `RELATIVE`/`RELR` forms, so
+packed encodings fail with `URP_STATUS_UNSUPPORTED` before loader handoff.
+ELF symbol-version tags are a separate rejected boundary,
+`runtime.host-context.symbol-version`, covering
+`DT_VERSYM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERNEED`, and `DT_VERNEEDNUM`.
+HostContext v1 defines unversioned entry-symbol lookup only. The self-test
+mutates one bounded `DT_NULL` slot per tag, preserves surrounding bytes, uses a
+nonzero image-handle sentinel, and requires a zero handle on rejection; the
+unchanged unversioned `urp_entry` image remains the positive baseline.
+
 The runtime accepts the legacy frame v1 and HostContext frame v2. Both use the
 same 112-byte common header. A v2 header is 136 bytes and appends, in order,
 the HostContext ABI version, a reserved zero field, required capability bits,

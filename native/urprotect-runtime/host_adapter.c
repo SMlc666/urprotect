@@ -64,6 +64,19 @@
 #define URP_DT_RELRSZ 35U
 #define URP_DT_RELR 36U
 #define URP_DT_RELRENT 37U
+#define URP_DT_ANDROID_REL UINT64_C(0x6000000f)
+#define URP_DT_ANDROID_RELSZ UINT64_C(0x60000010)
+#define URP_DT_ANDROID_RELA UINT64_C(0x60000011)
+#define URP_DT_ANDROID_RELASZ UINT64_C(0x60000012)
+#define URP_DT_ANDROID_RELR UINT64_C(0x6fffe000)
+#define URP_DT_ANDROID_RELRSZ UINT64_C(0x6fffe001)
+#define URP_DT_ANDROID_RELRENT UINT64_C(0x6fffe003)
+#define URP_DT_ANDROID_RELRCOUNT UINT64_C(0x6fffe005)
+#define URP_DT_VERSYM UINT64_C(0x6ffffff0)
+#define URP_DT_VERDEF UINT64_C(0x6ffffffc)
+#define URP_DT_VERDEFNUM UINT64_C(0x6ffffffd)
+#define URP_DT_VERNEED UINT64_C(0x6ffffffe)
+#define URP_DT_VERNEEDNUM UINT64_C(0x6fffffff)
 #define URP_DT_FLAGS_1 UINT64_C(0x6ffffffb)
 #define URP_DT_AUXILIARY UINT64_C(0x7ffffffd)
 #define URP_DT_FILTER UINT64_C(0x7fffffff)
@@ -493,6 +506,23 @@ static urp_status urp_validate_dynamic_segment(
         case URP_DT_JMPREL:
         case URP_DT_PLTRELSZ:
         case URP_DT_PLTREL:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 does not define Android packed relocation encodings. */
+        case URP_DT_ANDROID_REL:
+        case URP_DT_ANDROID_RELSZ:
+        case URP_DT_ANDROID_RELA:
+        case URP_DT_ANDROID_RELASZ:
+        case URP_DT_ANDROID_RELR:
+        case URP_DT_ANDROID_RELRSZ:
+        case URP_DT_ANDROID_RELRENT:
+        case URP_DT_ANDROID_RELRCOUNT:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines only unversioned entry-symbol lookup. */
+        case URP_DT_VERSYM:
+        case URP_DT_VERDEF:
+        case URP_DT_VERDEFNUM:
+        case URP_DT_VERNEED:
+        case URP_DT_VERNEEDNUM:
             return URP_STATUS_UNSUPPORTED;
         case URP_DT_FLAGS:
             if (values.has_flags

@@ -38,27 +38,55 @@ address types in Core.
 
 ## 3. HostContext ABI
 
-The first ABI is a C-compatible, fixed-width, versioned structure:
+The frozen public ABI is a C-compatible, fixed-width, versioned structure with
+the exact fields in `native/urprotect-runtime/include/urp/host_context.h`: a
+version/size prefix, capability bits, opaque userdata, and callbacks for
+immutable image loading, symbol lookup, image release, and optional
+diagnostics. On the AArch64 ABI, `urp_host_context_v1` is 56 bytes and
+`urp_launch_args_v1` is 32 bytes. There are no separate allocation, mapping,
+protection, dependency-resolution, thread, synchronization, or file-I/O
+callbacks; those capabilities are not implied by the small callback table.
 
-- a version and structure-size prefix;
-- capability bits and opaque host userdata;
-- function pointers for bounded memory allocation/mapping, protection changes,
-  dependency/image loading, symbol lookup, diagnostics, and lifecycle cleanup;
-- explicit ownership and lifetime rules for every returned pointer or handle;
-- no C++ objects, language-runtime exceptions, host allocator ownership, or
-  platform-specific structs across the boundary.
+The callback contract is:
+
+- `load_image` consumes the supplied bytes before returning, requires the
+  immutable flag, and returns an opaque handle. The native evidence adapter
+  writes the bytes to a sealing-enabled memfd, adds and verifies the required
+  write/size seals, and asks the native system loader to map the FD-backed
+  image. The system loader owns page mapping and protection details.
+- `lookup_symbol` resolves a name on that handle. The current adapter accepts
+  only unversioned lookup; ELF `DT_VERSYM`, `DT_VERDEF*`, and `DT_VERNEED*`
+  metadata is rejected before loader handoff.
+- `release_image` ends the handle lifetime after entry dispatch. Callbacks do
+  not throw across the C ABI and report failure through stable negative
+  `urp_status` values.
+- `emit_diagnostic` is optional; image loading, lookup, and release are
+  mandatory capabilities.
+
+The accepted ELF slice rejects dependency metadata (`DT_NEEDED`,
+`DT_AUXILIARY`, `DT_FILTER`, `DT_RPATH`, and `DT_RUNPATH`), PT_TLS, lifecycle
+arrays, GNU properties, writable-text relocations, unsupported REL/PLT tables,
+and Android packed relocations. Only checked AArch64 `RELATIVE`/`RELR`
+relocation targets reach the native loader. The contract defines no TLS
+module/thread lifetime, thread-creation or reentrancy guarantee, synchronization
+primitive, or normalized descriptor/I/O startup model; payloads requiring those
+semantics are outside this accepted image language. `urp_launch_args_v1`
+passes `argc`, `argv`, and `envp`, not a synthetic process stack or descriptor
+table. No C++ objects, language-runtime exceptions, host allocator ownership,
+or platform-specific structs cross the boundary.
 
 The payload entry has the conceptual form:
 
     int32_t urp_entry(const urp_host_context_v1 *host,
                       const urp_launch_args_v1 *args);
 
-The exact public names and field layout are frozen in the child runtime design
-before implementation. Structures use size/version negotiation so a new host
-can reject an older or truncated table without reading beyond the declared
-size. Entry invocation is single-owner by default; reentrancy, thread
-creation, TLS, and callback-after-return behavior are explicit contract fields
-rather than accidental consequences of a libc startup path.
+Structures use size/version negotiation so a new host can reject an older or
+truncated table without reading beyond the declared size. The runtime calls
+the declared entry synchronously and releases the image after it returns. The
+ABI does not promise thread creation, reentrancy, synchronization, TLS, or
+callback-after-return behavior; a payload that requires these semantics is
+rejected or remains outside the support claim rather than inheriting them from
+an incidental libc startup path.
 
 The runtime core must not emulate ELF process startup, construct a kernel
 initial stack, or call an arbitrary payload main function. A payload that needs
@@ -67,16 +95,17 @@ covered.
 
 ## 4. No-Temporary-Path Handoff
 
-The Host Contract has one abstract immutable-image handoff operation. A
-concrete host may implement it with an anonymous file descriptor, an FD-backed
-linker extension, or an anonymous memory mapping, but the contract must
-guarantee:
+The Host Contract has one abstract immutable-image handoff operation. The
+current concrete adapter uses a sealing-enabled anonymous file descriptor and
+an FD-backed native loader reference. The contract guarantees:
 
 - no payload-controlled path is used;
 - no executable temporary pathname is required;
 - decoded bytes remain immutable after integrity verification;
 - the mapped image lifetime extends through entry execution;
-- all writable-to-executable transitions are explicit and bounded;
+- the native system loader owns mapping and protection transitions; the
+  adapter accepts only relocation targets and ELF flags inside the bounded
+  declared slice;
 - failure occurs before entry invocation and returns a stable diagnostic.
 
 The first design should prefer an existing platform loader through a host

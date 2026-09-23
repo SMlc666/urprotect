@@ -468,6 +468,54 @@
       ]
     },
     {
+      "id": "runtime.host-context.android-packed-relocation",
+      "status": "rejected",
+      "obligation": "The HostContext v1 adapter rejects DT_ANDROID_REL, DT_ANDROID_RELSZ, DT_ANDROID_RELA, DT_ANDROID_RELASZ, DT_ANDROID_RELR, DT_ANDROID_RELRSZ, DT_ANDROID_RELRENT, and DT_ANDROID_RELRCOUNT before relocation processing or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 defines only checked AArch64 RELATIVE/RELR relocation semantics; Android packed relocation encodings have no adapter contract and are rejected before system-loader handoff.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "The unchanged RELATIVE/RELR entry fixture remains the positive relocation baseline; Android packed relocation forms are not included in elf.relocation.aarch64-relative.",
+        "No positive Android packed relocation HostContext fixture or support claim exists until the Host Contract defines these encodings and their application semantics."
+      ]
+    },
+    {
+      "id": "runtime.host-context.symbol-version",
+      "status": "rejected",
+      "obligation": "The HostContext v1 adapter rejects DT_VERSYM, DT_VERDEF, DT_VERDEFNUM, DT_VERNEED, and DT_VERNEEDNUM metadata before symbol lookup or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 defines unversioned entry-symbol lookup only; ELF symbol-version negotiation and versioned entry selection are not specified, so the adapter rejects version metadata before system-loader handoff.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "The unchanged unversioned urp_entry fixture remains the positive symbol lookup baseline; versioned symbol selection is not inferred from dlsym behavior.",
+        "No positive symbol-version HostContext fixture or support claim exists until the Host Contract defines version matching and entry-selection semantics."
+      ]
+    },
+    {
       "id": "android.jni.native-bridge",
       "status": "validated",
       "obligation": "arm64-v8a JNI library loads through the recorded x86_64 Android native bridge",

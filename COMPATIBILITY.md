@@ -160,6 +160,21 @@ output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero
 handle. The unchanged `RELATIVE`/`RELR` fixture remains the positive baseline;
 no broader relocation-table support is claimed.
 
+Android packed relocation encodings are separately rejected as
+`runtime.host-context.android-packed-relocation`. The adapter rejects
+`DT_ANDROID_REL`, `DT_ANDROID_RELSZ`, `DT_ANDROID_RELA`, `DT_ANDROID_RELASZ`,
+`DT_ANDROID_RELR`, `DT_ANDROID_RELRSZ`, `DT_ANDROID_RELRENT`, and
+`DT_ANDROID_RELRCOUNT` before loader handoff because HostContext v1 defines
+only the checked AArch64 `RELATIVE`/`RELR` relocation path. ELF symbol-version
+metadata is a separate rejected boundary,
+`runtime.host-context.symbol-version`, covering
+`DT_VERSYM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERNEED`, and `DT_VERNEEDNUM`;
+the v1 entry lookup contract is unversioned. For both boundaries the native
+self-test mutates one bounded `DT_NULL` slot at a time, preserves surrounding
+bytes, and requires `URP_STATUS_UNSUPPORTED` with a zero image handle before
+loader handoff. The unchanged unversioned entry fixture remains the positive
+baseline; neither feature is implicitly supported by system-loader behavior.
+
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and
 page-size facts, and the pinned image/source revision. The live package index

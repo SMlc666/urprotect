@@ -12,7 +12,7 @@
   "assignee": "SMlc666",
   "createdAt": "2026-09-13",
   "completedAt": null,
-  "branch": "codex/unify-runtime-aarch64-pie-compatibility",
+  "branch": "feat/host-context-gnu-stack-boundary",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,

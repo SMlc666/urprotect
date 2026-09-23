@@ -24,8 +24,13 @@ The inventory is grouped by proof obligation rather than operating system:
 - image metadata: PT_DYNAMIC, PT_INTERP, PT_TLS, PT_GNU_STACK,
   PT_GNU_RELRO, PT_GNU_PROPERTY, notes, and dynamic strings;
 - relocation: RELA forms, RELR forms, Android packed forms, addends, target
-  ranges, and supported AArch64 relocation classes;
-- symbols: hash data, dynamic symbols, symbol versions, undefined dependencies;
+  ranges, and supported AArch64 relocation classes. The current HostContext
+  adapter accepts only checked `RELATIVE`/`RELR` forms and rejects Android
+  packed and unsupported REL/PLT tables as separate matrix boundaries;
+- symbols: hash data, dynamic symbols, symbol versions, undefined dependencies.
+  The current adapter defines unversioned entry lookup and rejects ELF symbol
+  version tags until version matching and entry-selection semantics are part
+  of the Host Contract;
 - lifecycle: constructors, destructors, TLS, unwind/property requirements, and
   HostContext entry behavior;
 - producers: the existing GCC, Clang, Rust, Go, Zig, NativeAOT, and Android

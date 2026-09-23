@@ -473,6 +473,75 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertNotIn("DT_REL", relative_description)
         self.assertNotIn("DT_JMPREL", relative_description)
 
+    def test_android_packed_relocations_are_an_explicit_rejected_boundary(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.android-packed-relocation"
+        )
+        self.assertEqual(feature["status"], "rejected")
+        for relocation_tag in (
+            "DT_ANDROID_REL",
+            "DT_ANDROID_RELSZ",
+            "DT_ANDROID_RELA",
+            "DT_ANDROID_RELASZ",
+            "DT_ANDROID_RELR",
+            "DT_ANDROID_RELRSZ",
+            "DT_ANDROID_RELRENT",
+            "DT_ANDROID_RELRCOUNT",
+        ):
+            self.assertIn(relocation_tag, feature["obligation"])
+        self.assertIn("RELATIVE/RELR", feature["reason"])
+        self.assertEqual(
+            feature["negativeWitness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertIn("COMPATIBILITY.md", feature["evidence"])
+        self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
+        self.assertTrue(
+            any(
+                "nonzero sentinel" in item and "zero handle" in item
+                for item in feature["constraints"]
+            )
+        )
+        self.assertTrue(any("positive" in item for item in feature["constraints"]))
+
+    def test_symbol_versions_are_an_explicit_rejected_host_context_boundary(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.symbol-version"
+        )
+        self.assertEqual(feature["status"], "rejected")
+        for symbol_version_tag in (
+            "DT_VERSYM",
+            "DT_VERDEF",
+            "DT_VERDEFNUM",
+            "DT_VERNEED",
+            "DT_VERNEEDNUM",
+        ):
+            self.assertIn(symbol_version_tag, feature["obligation"])
+        self.assertIn("unversioned entry-symbol lookup", feature["reason"])
+        self.assertEqual(
+            feature["negativeWitness"],
+            "native/urprotect-runtime/host_context_self_test.c",
+        )
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertIn("COMPATIBILITY.md", feature["evidence"])
+        self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
+        self.assertTrue(
+            any(
+                "nonzero sentinel" in item and "zero handle" in item
+                for item in feature["constraints"]
+            )
+        )
+        self.assertTrue(any("unversioned urp_entry" in item for item in feature["constraints"]))
+
     def test_feature_covering_strategy_is_required(self) -> None:
         data = copy.deepcopy(self.data)
         data["coverage"]["strategy"] = "cartesian"
@@ -606,6 +675,8 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.path-search | rejected", rendered)
             self.assertIn("runtime.host-context.text-relocation | rejected", rendered)
             self.assertIn("runtime.host-context.unsupported-relocation-table | rejected", rendered)
+            self.assertIn("runtime.host-context.android-packed-relocation | rejected", rendered)
+            self.assertIn("runtime.host-context.symbol-version | rejected", rendered)
             self.assertIn("runtime.wrapper-v1-baseline | validated", rendered)
 
 

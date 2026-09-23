@@ -144,6 +144,21 @@ executable pathname.
   nonzero sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero output
   handle. The unchanged `RELATIVE`/`RELR` fixture remains the positive
   baseline; no broader relocation-table support is claimed.
+- Android packed relocation encodings are separately rejected as
+  `runtime.host-context.android-packed-relocation`. The adapter rejects
+  `DT_ANDROID_REL`, `DT_ANDROID_RELSZ`, `DT_ANDROID_RELA`,
+  `DT_ANDROID_RELASZ`, `DT_ANDROID_RELR`, `DT_ANDROID_RELRSZ`,
+  `DT_ANDROID_RELRENT`, and `DT_ANDROID_RELRCOUNT` before loader handoff,
+  because HostContext v1 defines only the checked AArch64 `RELATIVE`/`RELR`
+  path. ELF symbol-version metadata
+  is the separate rejected boundary `runtime.host-context.symbol-version`;
+  it covers `DT_VERSYM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERNEED`, and
+  `DT_VERNEEDNUM`, since the v1 entry lookup contract is unversioned. The
+  native self-test mutates one bounded `DT_NULL` tag at a time, preserves
+  surrounding bytes, initializes a nonzero sentinel, and requires
+  `URP_STATUS_UNSUPPORTED` with a zero output handle. The unchanged
+  `RELATIVE`/`RELR`, unversioned entry fixture remains the positive baseline;
+  no version negotiation or Android packed relocation support is claimed.
 - A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
   when that range is inside the image and `p_memsz >= p_filesz`; the real
   adapter must still dispatch the entry. The native system loader owns the
