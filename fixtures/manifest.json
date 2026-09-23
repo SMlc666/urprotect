@@ -256,16 +256,24 @@
     },
     {
       "id": "runtime.host-context.bionic-handoff",
-      "status": "unknown",
-      "obligation": "The pinned native ARM64 Termux userspace can exercise HostContext v2 immutable image loading and entry dispatch without an executable temporary pathname",
+      "status": "validated",
+      "obligation": "The pinned native ARM64 Termux userspace builds and runs the HostContext v2 adapter oracle, verifying sealed memfd image loading, real entry dispatch, release, and no executable temporary pathname",
       "witness": "c-termux-bionic-pie",
       "oracle": "scripts/run-bionic-fixture.sh",
       "evidence": [
         "scripts/run-bionic-fixture.sh",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_adapter.c",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/build/host-context-entry-fixture.so",
         "COMPATIBILITY.md",
         ".trellis/spec/backend/runtime-compatibility.md"
       ],
-      "nextEvidence": "Run a dedicated bionic HostContext/package oracle: build or provide a HostContext v2 entry image, execute it through the /system/bin/linker64-compatible adapter with immutable sealed-image evidence, and retain .artifacts/bionic/c-termux-bionic-pie/host-context plus linker, kernel, page-size, package-lock, and no-fallback facts. The absent HostContext oracle keeps this row unknown."
+      "constraints": [
+        "The native adapter test builds the HostContext entry shared object in the pinned Termux userspace and runs the same v2 frame through /system/bin/linker64's bionic dlopen implementation.",
+        "The real adapter must add and verify F_SEAL_WRITE, F_SEAL_SHRINK, F_SEAL_GROW, and F_SEAL_SEAL before dlopen, dispatch urp_entry with its declared status, and release the image handle.",
+        "The self-test is an adapter-level HostContext runtime witness; it does not claim that the production managed pack command selects a HostContext adapter or emits a v2 frame. runtime.host-context.production-pack remains unknown."
+      ]
     },
     {
       "id": "handoff.no-executable-path",
@@ -861,6 +869,14 @@
             "sha256": "554e79783e047f593ae29955c0da4c47bb6bd8cdb7582f72619767cef4d284f0",
             "licenses": ["NCSA"],
             "licenseSource": "termux-packages:packages/ndk-sysroot/build.sh"
+          },
+          {
+            "name": "make",
+            "version": "4.4.1-1",
+            "filename": "pool/main/m/make/make_4.4.1-1_aarch64.deb",
+            "sha256": "beb7ac00ee4f9958ec8e584ac1b2e1612c549425674ab2aa197d343594bcc5a3",
+            "licenses": ["GPL-3.0"],
+            "licenseSource": "termux-packages:packages/make/build.sh"
           }
         ],
         "linker": "/system/bin/linker64",

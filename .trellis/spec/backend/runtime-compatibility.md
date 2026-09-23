@@ -217,12 +217,15 @@ The image digest pins the base userspace. The lane retains the lock, hash
 verification, apt logs, package policy, before/after package inventories, and
 reports `packageIndex: live` with `packageInputsReproducible: true` to distinguish live
 artifact discovery from pinned package inputs. It must record both host and
-container kernel/page-size facts, refuse AVD, Waydroid, QEMU, native bridge,
-and non-ARM execution rather than silently falling back, and keep both the
-bionic HostContext handoff and production package oracle rows `unknown` until
-their dedicated sealed-image/managed-pack oracles are retained. The concrete
-next evidence is a v2 HostContext entry image executed through the bionic
-adapter with sealed-image and no-fallback artifacts.
+container kernel/page-size facts and refuse AVD, Waydroid, QEMU, native bridge,
+and non-ARM execution rather than silently falling back. The bionic lane now
+builds and runs the native HostContext self-test: a v2 frame exercises the real
+bionic adapter, verifies required memfd seals, dispatches the entry, releases
+the image, and retains its log and fixture ELF. This makes only
+`runtime.host-context.bionic-handoff` validated for that adapter slice. The
+production managed-pack row `runtime.host-context.production-pack` remains
+`unknown` until a managed pack/dispatch oracle runs through a v2-capable
+launcher; the bionic adapter test does not upgrade that separate row.
 
 ### 4. CI Evidence Postconditions
 

@@ -781,13 +781,14 @@ static int fixture_run_real_adapter(const char *fixture_path)
 
     uint8_t *frame = NULL;
     size_t frame_size = 0U;
-    int made_frame = fixture_make_frame(
+    int made_frame = fixture_make_v2_frame(
         source,
         source_size,
         "host-context-entry-fixture.so",
+        "urp_entry",
         &frame,
         &frame_size);
-    if (!fixture_expect(made_frame, "could not construct the real adapter frame")) {
+    if (!fixture_expect(made_frame, "could not construct the real adapter HostContext v2 frame")) {
         free(source);
         return 0;
     }

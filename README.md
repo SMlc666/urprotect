@@ -165,12 +165,16 @@ verifies normal execution and the linker's direct identity probe, and retains
 the before/after package inventories, lock, hash-verification output, apt logs,
 image digest, Termux source revision, linker identity, and page-size facts.
 This makes the compiler inputs reproducible even though the index used to find
-the pinned artifacts is live. The lane refuses AVD, Waydroid, QEMU, and non-ARM
-fallback; it proves bionic userspace behavior without claiming the Android
-framework or physical-device behavior. HostContext/package handoff evidence
-remains explicitly `unknown` until a dedicated bionic HostContext/package
-oracle retains sealed-image and no-fallback evidence; the narrow HostContext
-adapter slice is recorded separately as validated evidence.
+the pinned artifacts is live. The lane also builds and runs the native
+HostContext self-test inside Termux: a HostContext v2 frame reaches the real
+adapter, which checks sealed memfd bytes, dispatches `urp_entry`, and releases
+the image without an executable temporary pathname. The result, build log,
+shared-object ELF report, package lock, and hash verification are retained.
+This validates the bionic implementation of the narrow adapter slice; it
+does not upgrade the separate production managed-pack integration row, which
+remains explicitly `unknown`. The lane refuses AVD, Waydroid, QEMU, and
+non-ARM fallback and does not claim Android framework or physical-device
+behavior.
 
 Render the same manifest into a reviewable matrix report:
 

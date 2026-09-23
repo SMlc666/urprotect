@@ -168,13 +168,18 @@ versions, artifact paths, SHA-256 hashes, and license identifiers are locked.
 The lane checks the downloaded package set and hashes before installation,
 fails on additional or changed packages, and retains the lock, hash-verification
 output, and before/after inventories. The image digest pins the base userspace,
-so the compiler inputs are reproducible despite the live index. This evidence
-intentionally excludes Android framework, OEM, SELinux, device-kernel, AVD,
-Waydroid, QEMU, and native-bridge claims. The matrix row
-`runtime.host-context.bionic-handoff` remains `unknown` until a dedicated
-HostContext/package oracle runs a v2 entry image through the adapter and
-retains sealed-image, linker, package, kernel, page-size, and no-fallback
-evidence; the ordinary bionic PIE pass does not upgrade it.
+so the compiler inputs are reproducible despite the live index. The lane also
+builds and runs `native/urprotect-runtime` inside Termux. Its HostContext v2
+frame is passed to the real fd-backed adapter, the self-test verifies all
+required memfd seals on the image, dispatches `urp_entry` through bionic's
+`dlopen`/`dlsym` path, checks status and release, and retains the build log,
+ELF report, and fixture hash. This validates the narrow bionic adapter
+handoff, with no executable temporary pathname. It does not upgrade the
+separate production managed-pack integration row
+`runtime.host-context.production-pack`, which remains `unknown` until the
+managed pack command and v2-capable launcher have a retained end-to-end oracle.
+The bionic evidence intentionally excludes Android framework, OEM, SELinux,
+device-kernel, AVD, Waydroid, QEMU, and native-bridge claims.
 
 The production managed pack path is a separate deliberate migration boundary.
 `ElfPackService` emits legacy frame v1 for the legacy launcher and must not

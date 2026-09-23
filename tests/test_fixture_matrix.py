@@ -52,7 +52,7 @@ class FixtureMatrixTests(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
 
-    def test_current_manifest_contains_unknown_bionic_handoff_boundary(self) -> None:
+    def test_current_manifest_contains_validated_bionic_handoff_boundary(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
@@ -60,8 +60,10 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in self.data["features"]
             if item["id"] == "runtime.host-context.bionic-handoff"
         )
-        self.assertEqual(feature["status"], "unknown")
-        self.assertTrue(feature["nextEvidence"])
+        self.assertEqual(feature["status"], "validated")
+        self.assertTrue(
+            any(path.endswith("/host-context/build-and-test.log") for path in feature["evidence"])
+        )
 
     def test_release_tier_selects_the_explicit_hardening_witness(self) -> None:
         result = self.run_validator(self.data, tier="release", emit=True)
@@ -96,6 +98,23 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertIn("entry-image adapter", feature["nextEvidence"])
         self.assertIn("v2-capable launcher", feature["nextEvidence"])
         self.assertIn("managed pack/dispatch oracle", feature["nextEvidence"])
+
+    def test_bionic_host_context_handoff_has_a_native_adapter_oracle(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        features = {feature["id"]: feature for feature in self.data["features"]}
+        handoff = features["runtime.host-context.bionic-handoff"]
+        self.assertEqual(handoff["status"], "validated")
+        self.assertTrue(
+            any(path.endswith("/host-context/build-and-test.log") for path in handoff["evidence"])
+        )
+        self.assertTrue(
+            any("F_SEAL_WRITE" in constraint for constraint in handoff["constraints"])
+        )
+        self.assertTrue(
+            any("production managed pack" in constraint for constraint in handoff["constraints"])
+        )
+        self.assertEqual(features["runtime.host-context.production-pack"]["status"], "unknown")
 
     def test_legacy_wrapper_and_android_jni_are_labeled_as_baselines(self) -> None:
         result = self.run_validator(self.data)
@@ -146,7 +165,7 @@ class FixtureMatrixTests(unittest.TestCase):
         feature = next(
             item
             for item in data["features"]
-            if item["id"] == "runtime.host-context.bionic-handoff"
+            if item["id"] == "runtime.host-context.production-pack"
         )
         del feature["nextEvidence"]
 
@@ -477,6 +496,7 @@ class FixtureMatrixTests(unittest.TestCase):
         data = copy.deepcopy(self.data)
         case = next(item for item in data["cases"] if item["id"] == "c-termux-bionic-pie")
         case["required"] = True
+        case["features"].append("runtime.host-context.production-pack")
 
         result = self.run_validator(data)
 
@@ -513,6 +533,7 @@ class FixtureMatrixTests(unittest.TestCase):
                 "libxml2",
                 "lld",
                 "llvm",
+                "make",
                 "ndk-sysroot",
             },
         )
@@ -577,7 +598,7 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             rendered = output.read_text()
             self.assertIn("unknown` rows never count as support", rendered)
-            self.assertIn("runtime.host-context.bionic-handoff | unknown", rendered)
+            self.assertIn("runtime.host-context.bionic-handoff | validated", rendered)
             self.assertIn("runtime.host-context.gnu-property | rejected", rendered)
             self.assertIn("runtime.host-context.pt-tls | rejected", rendered)
             self.assertIn("runtime.host-context.dependency-resolution | rejected", rendered)

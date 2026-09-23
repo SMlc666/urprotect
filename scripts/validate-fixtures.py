@@ -298,6 +298,7 @@ def validate_case(
             "libxml2",
             "lld",
             "llvm",
+            "make",
             "ndk-sysroot",
         }
         if set(locked_versions) != expected_compiler_packages:

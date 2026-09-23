@@ -74,8 +74,8 @@ for package in case["host"]["compilerPackages"]:
     )))
 PY
 )
-if [[ "${#package_lock_rows[@]}" -ne 7 ]]; then
-  echo "bionic case requires the complete seven-package compiler lock" >&2
+if [[ "${#package_lock_rows[@]}" -ne 8 ]]; then
+  echo "bionic case requires the complete eight-package compiler and native runtime lock" >&2
   exit 1
 fi
 package_lock_json="${case_root}/compiler-package-lock.json"
@@ -188,7 +188,7 @@ fi
 run_shell -c '
   set -eu
   export PATH="${PREFIX}/bin:${PATH}"
-  test "$#" -eq 7
+  test "$#" -eq 8
   mkdir -p /artifacts/apt-archives
   find /artifacts/apt-archives -maxdepth 1 -type f -name "*.deb" -delete
   dpkg-query -W -f="\${binary:Package}\t\${Version}\t\${Architecture}\t\${Status}\n" \
@@ -354,14 +354,54 @@ printf '%s\n' \
   "baseline_status=${baseline_status}" \
   "direct_linker_status=${linker_status}" \
   "direct_linker_mode=identity" \
-  "handoff_status=not-yet-implemented" \
+  "handoff_status=pending-native-adapter-oracle" \
   > "${case_root}/provenance.txt"
 
+mkdir -p "${case_root}/host-context"
+chmod a+rwx "${case_root}/host-context"
+if ! run_shell -c '
+  set -eu
+  export PATH="${PREFIX}/bin:${PATH}"
+  make -C /workspace/native/urprotect-runtime \
+    BUILD_DIR=/artifacts/host-context/build \
+    CC=clang test
+' > "${case_root}/host-context/build-and-test.log" 2>&1; then
+  echo "bionic HostContext native adapter oracle failed; see ${case_root}/host-context/build-and-test.log" >&2
+  exit 1
+fi
+if ! grep -Fq "HostContext runtime self-test: PASS" \
+  "${case_root}/host-context/build-and-test.log"; then
+  echo "bionic HostContext self-test did not retain its PASS oracle" >&2
+  exit 1
+fi
+host_context_fixture="${case_root}/host-context/build/host-context-entry-fixture.so"
+if [[ ! -s "${host_context_fixture}" ]]; then
+  echo "bionic HostContext entry fixture is missing or empty: ${host_context_fixture}" >&2
+  exit 1
+fi
+file "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-file.txt"
+readelf -hW -lW -dW "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-readelf.txt"
+sha256sum "${host_context_fixture}" > "${case_root}/host-context/entry-fixture.sha256"
+printf '%s\n' \
+  "status=validated" \
+  "abi=HostContext-v1" \
+  "frame=HostContext-v2" \
+  "handoff=sealed-memfd-with-verified-required-seals" \
+  "loader=Termux-bionic-dlopen-through-proc-self-fd" \
+  "entry=urp_entry" \
+  "executable_temporary_path=false" \
+  "oracle=host-context/build-and-test.log" \
+  > "${case_root}/host-context/result.txt"
+sed -i 's/^handoff_status=.*/handoff_status=validated-host-context-v2-adapter-self-test/' \
+  "${case_root}/provenance.txt"
+
 python3 - "${case_root}/result.json" "${image}" "${termux_source_commit}" \
-  "${clang_package}" "${installed_clang_version}" "${host_kernel}" "${container_kernel}" "${host_page_size}" \
+      "${clang_package}" "${installed_clang_version}" "${host_kernel}" "${container_kernel}" "${host_page_size}" \
   "${container_page_size}" "${baseline_status}" "${linker_status}" \
-  "${package_lock_sha256}" "${case_root}/compiler-package-lock.json" <<'PY'
+  "${package_lock_sha256}" "${case_root}/compiler-package-lock.json" \
+    "${host_context_fixture}" <<'PY'
 import json
+import hashlib
 import pathlib
 import sys
 
@@ -379,6 +419,7 @@ import sys
     linker,
     package_lock_sha256,
     package_lock_path,
+    host_context_fixture,
 ) = sys.argv[1:]
 compiler_packages = json.loads(pathlib.Path(package_lock_path).read_text())
 document = {
@@ -406,7 +447,21 @@ document = {
     "baselineStatus": int(baseline),
     "directLinkerStatus": int(linker),
     "directLinkerMode": "identity",
-    "handoffStatus": "not-yet-implemented",
+    "handoffStatus": "validated-host-context-v2-adapter-self-test",
+    "hostContextAdapterOracle": {
+        "status": "validated",
+        "abi": "HostContext-v1",
+        "frame": "HostContext-v2",
+        "fixture": "host-context/build/host-context-entry-fixture.so",
+        "fixtureSha256": hashlib.sha256(
+            pathlib.Path(host_context_fixture).read_bytes()
+        ).hexdigest(),
+        "selfTest": "host-context/build-and-test.log",
+        "sealedImage": True,
+        "entryDispatch": "urp_entry",
+        "executableTemporaryPath": False,
+        "loader": "Termux-bionic-dlopen-through-proc-self-fd",
+    },
 }
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")
 PY
