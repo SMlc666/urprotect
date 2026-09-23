@@ -802,11 +802,19 @@ static int fixture_run_real_adapter(const char *fixture_path)
         source_size,
         URP_LOAD_IMAGE_IMMUTABLE,
         &sealed_handle);
+    int sealed_invariant = urp_host_adapter_image_is_sealed(sealed_handle);
     if (!fixture_expect(
             sealed_status == URP_STATUS_OK
                 && sealed_handle != 0U
-                && urp_host_adapter_image_is_sealed(sealed_handle),
+                && sealed_invariant,
             "the real adapter did not enforce all required memfd seals")) {
+        (void)fprintf(
+            stderr,
+            "real adapter probe: status=%d handle=%llu sealed=%d errno=%d\n",
+            (int)sealed_status,
+            (unsigned long long)sealed_handle,
+            sealed_invariant,
+            errno);
         if (sealed_handle != 0U) {
             (void)adapter.context.release_image(adapter.context.userdata, sealed_handle);
         }
