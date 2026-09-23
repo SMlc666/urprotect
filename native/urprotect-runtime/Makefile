@@ -12,6 +12,7 @@ MINIZ_CPPFLAGS := -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_DEFLATE_APIS \
 MINIZ_CFLAGS := -std=c11 -O2 -g0 -Wall -Wextra
 SELF_TEST := $(BUILD_DIR)/host-context-self-test
 ENTRY_FIXTURE := $(BUILD_DIR)/host-context-entry-fixture.so
+ENTRY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-entry-fixture.o
 RUNTIME_OBJECTS := $(BUILD_DIR)/runtime.o $(BUILD_DIR)/sha256.o $(BUILD_DIR)/miniz_tinfl.o
 RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
@@ -40,10 +41,13 @@ $(SELF_TEST): $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(ENTRY_FIXTURE)
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(LDLIBS) -o "$@"
 
-$(ENTRY_FIXTURE): host_context_entry_fixture.c include/urp/host_context.h
+$(ENTRY_FIXTURE): $(ENTRY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -shared -nostdlib -nodefaultlibs \
-		-Wl,--build-id=none,--no-undefined,-z,now "$<" -o "$@"
+	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
+
+$(ENTRY_FIXTURE_OBJECT): host_context_entry_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
 
 $(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c include/urp/host_context.h include/urp/runtime.h
 	@mkdir -p "$(BUILD_DIR)"
