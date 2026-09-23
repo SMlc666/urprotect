@@ -230,6 +230,7 @@ run_shell -c '
   sha256sum /system/bin/linker64 /artifacts/fixture > /artifacts/container-sha256sums.txt
   mkdir -p /artifacts/host-context
   make -C /workspace/native/urprotect-runtime \
+    SHELL="${PREFIX}/bin/sh" \
     BUILD_DIR=/artifacts/host-context/build \
     CC=clang test > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
