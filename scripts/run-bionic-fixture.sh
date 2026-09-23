@@ -139,9 +139,22 @@ fi
 run_shell -c '
   set -eu
   export PATH="${PREFIX}/bin:${PATH}"
-  apt-get update
-  apt-get install -y "${1}"
-  dpkg-query -W -f="\${Package}\t\${Version}\n" > /artifacts/packages.txt
+  package_spec="${1}"
+  package_name="${package_spec%%=*}"
+  requested_version="${package_spec#*=}"
+  # The package index is intentionally live; retain the complete installed
+  # inventory and exact apt logs instead of claiming full reproducibility.
+  apt-get update > /artifacts/apt-update.log 2>&1
+  apt-get install -y "${package_spec}" > /artifacts/apt-install.log 2>&1
+  installed_version="$(dpkg-query -W -f="\${Version}" "${package_name}")"
+  test "${installed_version}" = "${requested_version}"
+  printf "%s\n" "${installed_version}" > /artifacts/clang-package-version.txt
+  printf "package_spec=%s\npackage_name=%s\nrequested_version=%s\ninstalled_version=%s\n" \
+    "${package_spec}" "${package_name}" "${requested_version}" "${installed_version}" \
+    > /artifacts/package-request.txt
+  dpkg-query -W -f="\${binary:Package}\t\${Version}\t\${Architecture}\t\${Status}\n" \
+    | sort > /artifacts/packages.txt
+  apt-cache policy "${package_name}" > /artifacts/package-policy.txt
   clang --version > /artifacts/clang-version.txt
   clang -fPIE -pie -Wl,--build-id=none -Wl,--dynamic-linker=/system/bin/linker64 \
     /workspace/fixtures/samples/bionic/main.c -o /artifacts/fixture
@@ -202,6 +215,13 @@ if ! grep -Eq 'Shared library: \[(libc|libdl)\.so\]' "${case_root}/readelf.txt";
   exit 1
 fi
 
+requested_clang_version="${clang_package#*=}"
+installed_clang_version="$(sed -n '1p' "${case_root}/clang-package-version.txt")"
+if [[ -z "${installed_clang_version}" || "${installed_clang_version}" != "${requested_clang_version}" ]]; then
+  echo "Termux clang version does not match the requested package: expected ${requested_clang_version}, got ${installed_clang_version}" >&2
+  exit 1
+fi
+
 container_page_size="$(sed -n 's/^container_page_size=//p' "${case_root}/container-facts.txt")"
 container_kernel="$(sed -n 's/^container_kernel=//p' "${case_root}/container-facts.txt")"
 if ! [[ "${container_page_size}" =~ ^[0-9]+$ ]] || [[ -z "${container_kernel}" ]]; then
@@ -214,7 +234,11 @@ printf '%s\n' \
   "image_digest=${image##*@}" \
   "termux_source_commit=${termux_source_commit}" \
   "clang_package=${clang_package}" \
+  "clang_version=${installed_clang_version}" \
   "linker=${linker}" \
+  "package_index=live" \
+  "fully_reproducible=false" \
+  "package_provenance=complete-installed-package-version-inventory" \
   "host_arch=$(uname -m)" \
   "host_kernel=${host_kernel}" \
   "host_page_size=${host_page_size}" \
@@ -230,7 +254,7 @@ printf '%s\n' \
   > "${case_root}/provenance.txt"
 
 python3 - "${case_root}/result.json" "${image}" "${termux_source_commit}" \
-  "${clang_package}" "${host_kernel}" "${container_kernel}" "${host_page_size}" \
+  "${clang_package}" "${installed_clang_version}" "${host_kernel}" "${container_kernel}" "${host_page_size}" \
   "${container_page_size}" "${baseline_status}" "${linker_status}" <<'PY'
 import json
 import pathlib
@@ -241,6 +265,7 @@ import sys
     image,
     source_commit,
     compiler,
+    clang_version,
     host_kernel,
     container_kernel,
     host_page_size,
@@ -258,7 +283,11 @@ document = {
     "image": image,
     "termuxSourceCommit": source_commit,
     "compilerPackage": compiler,
+    "clangVersion": clang_version,
     "linker": "/system/bin/linker64",
+    "packageIndex": "live",
+    "reproducible": False,
+    "packageProvenance": "complete-installed-package-version-inventory",
     "hostKernel": host_kernel,
     "containerKernel": container_kernel,
     "hostPageSize": int(host_page_size),
@@ -271,4 +300,4 @@ document = {
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")
 PY
 
-echo "PASS ${case_id}: pinned Termux bionic linker and native ARM64 execution validated"
+echo "PASS ${case_id}: requested Termux clang version, bionic linker, and native ARM64 execution validated (live package index; not fully reproducible)"

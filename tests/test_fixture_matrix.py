@@ -22,7 +22,12 @@ class FixtureMatrixTests(unittest.TestCase):
     def setUp(self) -> None:
         self.data = json.loads(MANIFEST.read_text())
 
-    def run_validator(self, data: dict[str, object]) -> subprocess.CompletedProcess[str]:
+    def run_validator(
+        self,
+        data: dict[str, object],
+        tier: str = "pr",
+        emit: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -34,8 +39,11 @@ class FixtureMatrixTests(unittest.TestCase):
             json.dump(data, stream)
             path = Path(stream.name)
         try:
+            command = [sys.executable, str(VALIDATOR), str(path), "--tier", tier]
+            if emit:
+                command.append("--emit")
             return subprocess.run(
-                [sys.executable, str(VALIDATOR), str(path), "--tier", "pr"],
+                command,
                 cwd=REPO_ROOT,
                 check=False,
                 capture_output=True,
@@ -54,6 +62,40 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertEqual(feature["status"], "unknown")
         self.assertTrue(feature["nextEvidence"])
+
+    def test_release_tier_selects_the_explicit_hardening_witness(self) -> None:
+        result = self.run_validator(self.data, tier="release", emit=True)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        selected = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        release_cases = [case for case in selected if case["tier"] == "release"]
+        self.assertEqual(
+            [case["id"] for case in release_cases],
+            ["c-gcc-glibc-release-hardened"],
+        )
+        release_case = release_cases[0]
+        self.assertEqual(release_case["builder"], "gcc-c")
+        self.assertEqual(release_case["variant"], "release-hardened")
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "elf.release.full-relro-now"
+        )
+        self.assertEqual(feature["status"], "validated")
+        self.assertIn("GNU RELRO", feature["obligation"])
+        self.assertIn("BIND_NOW", " ".join(feature["constraints"]))
+
+    def test_production_host_context_pack_gap_is_explicitly_unknown(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.production-pack"
+        )
+        self.assertEqual(feature["status"], "unknown")
+        self.assertIn("entry-image adapter", feature["nextEvidence"])
+        self.assertIn("v2-capable launcher", feature["nextEvidence"])
+        self.assertIn("managed pack/dispatch oracle", feature["nextEvidence"])
 
     def test_pt_tls_is_an_explicit_rejected_host_context_boundary(self) -> None:
         result = self.run_validator(self.data)
@@ -436,6 +478,17 @@ class FixtureMatrixTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("host.kernel", result.stderr or result.stdout)
+
+    def test_bionic_case_records_live_package_index_and_complete_provenance(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        host = next(item for item in self.data["cases"] if item["id"] == "c-termux-bionic-pie")["host"]
+        self.assertEqual(host["packageIndex"], "live")
+        self.assertFalse(host["reproducible"])
+        self.assertEqual(
+            host["packageProvenance"],
+            "complete-installed-package-version-inventory",
+        )
 
     def test_rejected_feature_requires_a_valid_negative_oracle(self) -> None:
         data = copy.deepcopy(self.data)

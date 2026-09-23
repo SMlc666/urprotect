@@ -30,6 +30,9 @@ public sealed class ElfPackServiceTests
         var payload = PayloadFrameCodec.ReadWrapper(wrapper, new PayloadFrameLimits());
         Assert.True(payload.IsSuccess, string.Join(Environment.NewLine, payload.Diagnostics));
         Assert.Equal(source, payload.SourceBytes);
+        Assert.NotNull(payload.Frame);
+        Assert.Equal(PayloadFrameCodec.FormatVersion, payload.Frame!.FrameVersion);
+        Assert.Null(payload.Frame.HostContextMetadata);
     }
 
     [Fact]

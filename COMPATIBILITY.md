@@ -56,12 +56,17 @@ counts as support.
 
 The HostContext self-test contains both a deterministic fake-host contract
 oracle and a real AArch64 `ET_DYN` entry fixture. The fd-backed adapter loads
-the fixture through an anonymous memfd and the host `dlopen`/`dlsym` mechanism,
-then verifies entry dispatch and release ordering without an executable
-temporary pathname. This upgrades only the narrow adapter slice to
-`validated`; it accepts checked AArch64 `RELATIVE`/`RELR` targets while the
-system loader applies them. Dependencies, TLS, constructors, GNU properties,
-and the rejected unsupported-relocation-table feature remains outside that claim.
+the fixture through an anonymous memfd created with `MFD_ALLOW_SEALING`, adds
+and verifies `F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL` after
+writing the verified bytes, and only then calls the host `dlopen`/`dlsym`
+mechanism. A missing sealing capability or incomplete seal set fails closed
+before loader handoff. The test-visible adapter invariant checks those seals
+on the live image handle, then verifies entry dispatch and release ordering
+without an executable temporary pathname. This upgrades only the narrow
+adapter slice to `validated`; it accepts checked AArch64 `RELATIVE`/`RELR`
+targets while the system loader applies them. Dependencies, TLS, constructors,
+GNU properties, and the rejected unsupported-relocation-table feature remains
+outside that claim.
 
 The first expanded ELF slice is sectionless `ET_DYN`: section headers are
 optional metadata, so the parser and validator use bounded program headers and
@@ -150,11 +155,24 @@ no broader relocation-table support is claimed.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and
-page-size facts, and pinned image/source/package provenance. It intentionally
-excludes Android framework, OEM, SELinux, device-kernel, AVD, Waydroid, QEMU,
-and native-bridge claims. The matrix row `runtime.host-context.bionic-handoff`
-remains `unknown` until that userspace runs the HostContext/package oracle and
-retains its no-path evidence; the ordinary bionic PIE pass does not upgrade it.
+page-size facts, the pinned image/source revision, the requested clang version
+verified after installation, and a complete installed package/version
+inventory. The Termux package index remains live, so this evidence is not a
+full package-resolution reproducibility claim. It intentionally excludes
+Android framework, OEM, SELinux, device-kernel, AVD, Waydroid, QEMU, and
+native-bridge claims. The matrix row `runtime.host-context.bionic-handoff`
+remains `unknown` until a dedicated HostContext/package oracle runs a v2 entry
+image through the adapter and retains sealed-image, linker, package, kernel,
+page-size, and no-fallback evidence; the ordinary bionic PIE pass does not
+upgrade it.
+
+The production managed pack path is a separate deliberate migration boundary.
+`ElfPackService` emits legacy frame v1 for the legacy launcher and must not
+force a v2 frame into that path. The matrix row
+`runtime.host-context.production-pack` is `unknown` until the missing
+HostContext entry-image adapter, v2-capable launcher, and managed pack/dispatch
+oracle are implemented and retained. Its unknown status does not weaken the
+legacy v1 compatibility baseline.
 
 The claim therefore applies to every correctly implemented host satisfying the
 contract, not to an unqualified statistical majority of phone vendors.

@@ -202,6 +202,13 @@ def validate_case(
     tier = require_text(case, "tier", case_id)
     if tier not in TIERS:
         fail(f"{case_id} has unsupported tier {tier!r}")
+    variant = case.get("variant")
+    if variant is not None and variant != "release-hardened":
+        fail(f"{case_id}.variant is unsupported: {variant!r}")
+    if tier == "release" and variant != "release-hardened":
+        fail(f"{case_id} release cases must declare the release-hardened variant")
+    if tier != "release" and variant is not None:
+        fail(f"{case_id}.variant is reserved for release cases")
     if not isinstance(case["required"], bool):
         fail(f"{case_id}.required must be boolean")
     if case["required"]:
@@ -255,6 +262,12 @@ def validate_case(
             fail(f"{case_id}.host.architecture must be aarch64")
         if host.get("kernel") != "recorded":
             fail(f"{case_id}.host.kernel must be recorded")
+        if host.get("packageIndex") != "live":
+            fail(f"{case_id}.host.packageIndex must remain live until package sources are pinned")
+        if host.get("reproducible") is not False:
+            fail(f"{case_id}.host.reproducible must be false while the package index is live")
+        if host.get("packageProvenance") != "complete-installed-package-version-inventory":
+            fail(f"{case_id}.host.packageProvenance must identify the complete installed package/version inventory")
     elif execution == "native-linux":
         if host.get("environment") != "native-arm64-linux":
             fail(f"{case_id}.host.environment must identify native ARM64 Linux")

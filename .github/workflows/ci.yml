@@ -330,6 +330,9 @@ jobs:
       - name: Check nightly native Linux evidence
         if: env.FIXTURE_TIER == 'nightly'
         run: python3 scripts/check-evidence.py fixtures/manifest.json --tier nightly --execution native-linux
+      - name: Check release native Linux evidence
+        if: env.FIXTURE_TIER == 'release'
+        run: python3 scripts/check-evidence.py fixtures/manifest.json --tier release --execution native-linux
       - name: Upload fixture evidence
         if: always()
         uses: actions/upload-artifact@v4

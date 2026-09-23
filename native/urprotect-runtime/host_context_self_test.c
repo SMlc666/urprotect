@@ -794,6 +794,31 @@ static int fixture_run_real_adapter(const char *fixture_path)
 
     urp_host_adapter_v1 adapter;
     urp_host_adapter_init(&adapter);
+    urp_image_handle sealed_handle = 0U;
+    urp_status sealed_status = adapter.context.load_image(
+        adapter.context.userdata,
+        source,
+        source_size,
+        URP_LOAD_IMAGE_IMMUTABLE,
+        &sealed_handle);
+    if (!fixture_expect(
+            sealed_status == URP_STATUS_OK
+                && sealed_handle != 0U
+                && urp_host_adapter_image_is_sealed(sealed_handle),
+            "the real adapter did not enforce all required memfd seals")) {
+        if (sealed_handle != 0U) {
+            (void)adapter.context.release_image(adapter.context.userdata, sealed_handle);
+        }
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            adapter.context.release_image(adapter.context.userdata, sealed_handle)
+                == URP_STATUS_OK,
+            "the sealed adapter image could not be released")) {
+        free(source);
+        return 0;
+    }
     const char *launch_argv[] = {"fixture", NULL};
     const char *launch_envp[] = {NULL};
     urp_launch_args_v1 args = {

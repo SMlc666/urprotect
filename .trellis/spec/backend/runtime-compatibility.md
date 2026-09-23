@@ -45,7 +45,7 @@ header is 136 bytes and uses a frame-relative encoded offset because the
 standalone runtime receives the frame slice directly. Legacy v1 retains its
 wrapper-absolute encoded offset for the existing launcher.
 
-The managed and native standalone handoff uses the same sequence:
+The legacy managed/native standalone handoff retains its v1 sequence:
 
 ```text
 memfd_create(name, MFD_CLOEXEC)
@@ -54,6 +54,21 @@ memfd_create(name, MFD_CLOEXEC)
 -> execveat(fd, "", argv, envp, AT_EMPTY_PATH)
 ```
 
+The HostContext system-loader adapter uses a separate sealed-image sequence:
+
+```text
+memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING)
+-> write verified source bytes and rewind
+-> fchmod(fd, 0700)
+-> F_ADD_SEALS(F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
+-> F_GET_SEALS and require every seal
+-> dlopen(/proc/self/fd/<fd>, RTLD_NOW | RTLD_LOCAL)
+```
+
+A failed or incomplete seal operation closes the descriptor and fails before
+loader handoff; the virtual proc reference is not a payload-controlled
+executable pathname.
+
 ### 3. Contracts
 
 #### HostContext
@@ -61,7 +76,13 @@ memfd_create(name, MFD_CLOEXEC)
 - `load_image` consumes verified bytes before returning and returns an opaque
   image handle whose lifetime ends at `release_image`.
 - The runtime requests `URP_LOAD_IMAGE_IMMUTABLE`; the host must not mutate
-  the supplied image bytes after the load operation accepts them.
+  the supplied image bytes after the load operation accepts them. The native
+  adapter enforces this with a sealing-enabled memfd: it adds and verifies
+  `F_SEAL_WRITE`, `F_SEAL_SHRINK`, `F_SEAL_GROW`, and `F_SEAL_SEAL` after the
+  complete write and before `dlopen`, and fails closed when sealing is absent.
+- The native self-test exposes a test-visible live-handle seal invariant; a
+  positive HostContext dispatch is not evidence of immutability unless that
+  invariant passes.
 - `lookup_symbol` resolves the exact declared entry symbol for the loaded
   image; legacy v1 defaults to `urp_entry` and HostContext v2 carries the
   bounded symbol name explicitly.
@@ -165,7 +186,15 @@ memfd_create(name, MFD_CLOEXEC)
   when the congruence holds.
 - The matrix is sourced from `fixtures/manifest.json`, uses tiers (`pr`,
   `nightly`, `release`), and records `proven`, `validated`, `rejected`, or
-  `unknown` for each feature.
+  `unknown` for each feature. The release tier is a documented covering slice:
+  it adds one existing `gcc-c` producer with a `release-hardened` variant and
+  a readelf oracle for GNU RELRO and BIND_NOW rather than a blind Cartesian
+  product.
+- The production managed pack path intentionally emits legacy frame v1 for
+  the legacy launcher. `runtime.host-context.production-pack` is an explicit
+  `unknown` migration boundary until the missing HostContext entry-image
+  adapter, v2-capable launcher, and managed pack/dispatch oracle are retained;
+  no v2 frame may be forced into the legacy path.
 
 #### Environment keys
 
@@ -176,10 +205,17 @@ memfd_create(name, MFD_CLOEXEC)
 - `NATIVE_LAUNCHER_CC` selects the native launcher compiler in tests.
 
 The bionic lane must use the pinned Termux image and exact compiler/linker
-facts from the manifest. It must record both host and container kernel/page-size
-facts, refuse AVD, Waydroid, QEMU, native bridge, and non-ARM execution rather
-than silently falling back, and keep the bionic HostContext handoff row
-`unknown` until its dedicated oracle is retained.
+facts from the manifest. It must verify the requested clang package version
+after installation and retain apt logs, package policy, and a complete installed
+package/version inventory. Because the Termux package index remains live, the
+lane must record `packageIndex: live` and `reproducible: false` rather than
+claiming full package-resolution reproducibility. It must record both host and
+container kernel/page-size facts, refuse AVD, Waydroid, QEMU, native bridge,
+and non-ARM execution rather than silently falling back, and keep both the
+bionic HostContext handoff and production package oracle rows `unknown` until
+their dedicated sealed-image/managed-pack oracles are retained. The concrete
+next evidence is a v2 HostContext entry image executed through the bionic
+adapter with sealed-image and no-fallback artifacts.
 
 ### 4. CI Evidence Postconditions
 
@@ -237,9 +273,13 @@ oracle's retained output, not only source files that describe the oracle.
 - `native/urprotect-launcher/test_managed_handoff.sh`: assert the managed
   self-contained host uses the same anonymous handoff and preserves the
   baseline shell result.
-- `scripts/validate-fixtures.py fixtures/manifest.json --tier pr`: assert
-  feature references, status/evidence completeness, pinned bionic facts, and
-  tier selection.
+- `scripts/validate-fixtures.py fixtures/manifest.json --tier pr` and
+  `scripts/validate-fixtures.py fixtures/manifest.json --tier release`: assert
+  feature references, status/evidence completeness, pinned bionic facts, the
+  release hardening covering case, and tier selection.
+- `scripts/check-evidence.py fixtures/manifest.json --tier release`: run in the
+  release fixture producer after the release case completes; it must check the
+  retained release artifact path.
 - `scripts/run-bionic-fixture.sh`: on a native ARM64 Docker host, assert image
   digest, AArch64 architecture, page size, `/system/bin/linker64`, exact
   `clang` package, ELF `ET_DYN`/`PT_INTERP`, direct linker identity, and no

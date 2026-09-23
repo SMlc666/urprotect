@@ -71,6 +71,26 @@
 #define URP_DF_1_NOW UINT64_C(0x1)
 #define URP_R_AARCH64_RELATIVE 1027U
 #define URP_MEMFD_CLOEXEC 1U
+#define URP_MEMFD_ALLOW_SEALING 2U
+#ifndef F_ADD_SEALS
+#define F_ADD_SEALS 1033
+#endif
+#ifndef F_GET_SEALS
+#define F_GET_SEALS 1034
+#endif
+#ifndef F_SEAL_SEAL
+#define F_SEAL_SEAL 0x0001
+#endif
+#ifndef F_SEAL_SHRINK
+#define F_SEAL_SHRINK 0x0002
+#endif
+#ifndef F_SEAL_GROW
+#define F_SEAL_GROW 0x0004
+#endif
+#ifndef F_SEAL_WRITE
+#define F_SEAL_WRITE 0x0008
+#endif
+#define URP_REQUIRED_IMAGE_SEALS (F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
 #define URP_MAX_PROGRAM_HEADERS 4096U
 #define URP_MAX_DYNAMIC_ENTRIES (1U << 20)
 
@@ -682,6 +702,17 @@ static int urp_write_all(int fd, const void *bytes, size_t size)
     return 1;
 }
 
+static int urp_seal_image_fd(int fd)
+{
+    const int required_seals = URP_REQUIRED_IMAGE_SEALS;
+    if (fcntl(fd, F_ADD_SEALS, required_seals) != 0) {
+        return 0;
+    }
+
+    int seals = fcntl(fd, F_GET_SEALS);
+    return seals >= 0 && (seals & required_seals) == required_seals;
+}
+
 static urp_status urp_adapter_load_image(
     void *userdata,
     const void *bytes,
@@ -703,7 +734,10 @@ static urp_status urp_adapter_load_image(
         return validation;
     }
 
-    long fd_result = syscall(SYS_memfd_create, "urprotect-host-image", URP_MEMFD_CLOEXEC);
+    long fd_result = syscall(
+        SYS_memfd_create,
+        "urprotect-host-image",
+        URP_MEMFD_CLOEXEC | URP_MEMFD_ALLOW_SEALING);
     if (fd_result < 0 || fd_result > INT_MAX) {
         if (fd_result >= 0) {
             (void)close((int)fd_result);
@@ -713,7 +747,8 @@ static urp_status urp_adapter_load_image(
     int fd = (int)fd_result;
     if (!urp_write_all(fd, bytes, size)
         || fchmod(fd, S_IRUSR | S_IWUSR | S_IXUSR) != 0
-        || lseek(fd, 0, SEEK_SET) < 0) {
+        || lseek(fd, 0, SEEK_SET) < 0
+        || !urp_seal_image_fd(fd)) {
         (void)close(fd);
         return URP_STATUS_LOAD_FAILED;
     }
@@ -781,6 +816,17 @@ static urp_status urp_adapter_release_image(void *userdata, urp_image_handle han
     return dl_result == 0 && close_result == 0
         ? URP_STATUS_OK
         : URP_STATUS_LOAD_FAILED;
+}
+
+int urp_host_adapter_image_is_sealed(urp_image_handle handle)
+{
+    if (handle == 0U) {
+        return 0;
+    }
+
+    const urp_fd_image *image = (const urp_fd_image *)(uintptr_t)handle;
+    int seals = fcntl(image->fd, F_GET_SEALS);
+    return seals >= 0 && (seals & URP_REQUIRED_IMAGE_SEALS) == URP_REQUIRED_IMAGE_SEALS;
 }
 
 static urp_status urp_adapter_emit_diagnostic(

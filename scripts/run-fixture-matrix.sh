@@ -86,6 +86,7 @@ run_binary_case() {
   local binary="$2"
   local launcher="${3:-}"
   local library_path="${4:-}"
+  local variant="${5:-}"
   local case_root="${artifact_root}/${id}"
   local copy="${case_root}/no-op-copy"
   local baseline_stdout="${case_root}/baseline.stdout"
@@ -133,6 +134,24 @@ PY
     echo "FAIL ${id}: readelf structural oracle rejected the supported ELF case" >&2
     return 1
   fi
+  if [[ "${variant}" == "release-hardened" ]] && ! python3 - "${case_root}/readelf.txt" "${id}" <<'PY'
+import pathlib
+import sys
+
+report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+case_id = sys.argv[2]
+missing = []
+if "GNU_RELRO" not in report:
+    missing.append("GNU_RELRO")
+if "BIND_NOW" not in report:
+    missing.append("BIND_NOW")
+if missing:
+    raise SystemExit(f"{case_id}: release hardening oracle missing {', '.join(missing)}")
+PY
+  then
+    echo "FAIL ${id}: release hardening oracle rejected the ELF" >&2
+    return 1
+  fi
 
   local -a run_command=("${binary}")
   if [[ -n "${launcher}" ]]; then
@@ -175,23 +194,35 @@ PY
 
 build_case() {
   local case_json="$1"
-  local id language builder source output_dir binary launcher library_path musl_root
+  local id language builder source output_dir binary launcher library_path musl_root variant
   id="$(case_value "${case_json}" id)"
   language="$(case_value "${case_json}" language)"
   builder="$(case_value "${case_json}" builder)"
+  variant="$(case_value "${case_json}" variant)"
   source="${repo_root}/$(case_value "${case_json}" source)"
   output_dir="${artifact_root}/${id}/build"
   mkdir -p "${output_dir}"
 
+  if [[ -n "${variant}" && "${variant}" != "release-hardened" ]]; then
+    skip_or_fail "${case_json}" "unknown fixture variant ${variant}"
+    return
+  fi
+  local -a release_linker_flags=()
+  if [[ "${variant}" == "release-hardened" ]]; then
+    release_linker_flags=(-Wl,-z,relro,-z,now)
+  fi
+
   case "${builder}" in
     gcc-c)
       has_tool gcc || { skip_or_fail "${case_json}" "gcc is unavailable"; return; }
-      gcc -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
+      gcc -std=c11 -O2 -g0 -fPIE -pie -Wl,--build-id=none \
+        "${release_linker_flags[@]}" "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     gcc-cxx)
       has_tool g++ || { skip_or_fail "${case_json}" "g++ is unavailable"; return; }
-      g++ -std=c++17 -O2 -g0 -fPIE -pie -Wl,--build-id=none "${source}" -o "${output_dir}/fixture"
+      g++ -std=c++17 -O2 -g0 -fPIE -pie -Wl,--build-id=none \
+        "${release_linker_flags[@]}" "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
     clang-c)
@@ -277,7 +308,7 @@ build_case() {
     echo "FAIL ${id}: builder did not produce executable ${binary}" >&2
     return 1
   fi
-  run_binary_case "${id}" "${binary}" "${launcher:-}" "${library_path:-}"
+  run_binary_case "${id}" "${binary}" "${launcher:-}" "${library_path:-}" "${variant}"
 }
 
 echo "Running fixture tier ${requested_tier} on $(uname -m)"

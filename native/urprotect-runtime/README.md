@@ -7,10 +7,14 @@ the host for an immutable image, resolves the declared entry symbol, invokes
 it, and releases the image before returning.
 
 The native evidence adapter implements the contract with an anonymous memfd
-and the host's `dlopen`/`dlsym` loader through the generated virtual
-`/proc/self/fd/<N>` reference. It creates no executable filesystem pathname
-and keeps the descriptor open until `release_image`. Before loading, the
-adapter requires AArch64 ELF64 `ET_DYN` program headers and rejects an
+created with `MFD_ALLOW_SEALING` and the host's `dlopen`/`dlsym` loader through
+the generated virtual `/proc/self/fd/<N>` reference. After the verified source
+bytes are fully written, it adds and verifies `F_SEAL_WRITE`, `F_SEAL_SHRINK`,
+`F_SEAL_GROW`, and `F_SEAL_SEAL` before `dlopen`; any unavailable or incomplete
+sealing operation closes the descriptor and fails the load. It creates no
+executable filesystem pathname and keeps the sealed descriptor open until
+`release_image`. Before loading, the adapter requires AArch64 ELF64 `ET_DYN`
+program headers and rejects an
 interpreter, TLS, GNU property, dependency, constructor/destructor lifecycle,
 text-relocation, or path-search requirement that this first entry slice does
 not define. PT_TLS is
@@ -30,7 +34,9 @@ program headers and mapped dynamic metadata are authoritative for the
 sectionless image slice.
 
 The self-test includes both the deterministic fake host contract oracle and a
-real AArch64 `urp_entry` shared-object fixture loaded in-process. It therefore
+real AArch64 `urp_entry` shared-object fixture loaded in-process. It directly
+loads that fixture through the adapter, checks the test-visible seal invariant,
+and releases the image before exercising frame dispatch. It therefore
 validates this narrow adapter slice while leaving broader relocation, TLS,
 constructor/destructor lifecycle, dynamic path-search, dependency, and
 instruction-property combinations explicit in
@@ -105,7 +111,11 @@ name into a terminated local buffer before symbol lookup.
 Legacy v1 keeps its wrapper-absolute encoded offset for the existing launcher.
 HostContext v2 uses a frame-relative encoded offset because the standalone
 runtime receives the frame slice directly; the managed wrapper reader applies
-the corresponding versioned interpretation.
+the corresponding versioned interpretation. The production managed `pack`
+path intentionally calls the v1 encoder for the legacy launcher; it does not
+force v2 metadata into that launcher. Production HostContext packaging remains
+an explicit `unknown` migration boundary until a declared entry-image adapter,
+a v2-capable launcher, and a retained managed pack/dispatch oracle exist.
 
 Run the native contract self-test on a native AArch64 host:
 
