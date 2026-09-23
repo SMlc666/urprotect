@@ -105,6 +105,8 @@ done
 package_lock_sha256="$(sha256sum "${package_lock_json}" | awk '{print $1}')"
 termux_prefix="/data/data/com.termux/files/usr"
 termux_shell="${termux_prefix}/bin/sh"
+mkdir -p "${case_root}/host-context"
+chmod a+rwx "${case_root}/host-context"
 
 if [[ "${linker}" != "/system/bin/linker64" ]]; then
   echo "unsupported bionic linker path: ${linker}" >&2
@@ -226,6 +228,12 @@ run_shell -c '
   clang -fPIE -pie -Wl,--build-id=none -Wl,--dynamic-linker=/system/bin/linker64 \
     /workspace/fixtures/samples/bionic/main.c -o /artifacts/fixture
   sha256sum /system/bin/linker64 /artifacts/fixture > /artifacts/container-sha256sums.txt
+  mkdir -p /artifacts/host-context
+  make -C /workspace/native/urprotect-runtime \
+    BUILD_DIR=/artifacts/host-context/build \
+    CC=clang test > /artifacts/host-context/build-and-test.log 2>&1
+  grep -Fq "HostContext runtime self-test: PASS" \
+    /artifacts/host-context/build-and-test.log
 ' -- "${compiler_package_specs[@]}"
 
 python3 - "${case_root}/packages-before.txt" "${case_root}/packages.txt" \
@@ -357,18 +365,6 @@ printf '%s\n' \
   "handoff_status=pending-native-adapter-oracle" \
   > "${case_root}/provenance.txt"
 
-mkdir -p "${case_root}/host-context"
-chmod a+rwx "${case_root}/host-context"
-if ! run_shell -c '
-  set -eu
-  export PATH="${PREFIX}/bin:${PATH}"
-  make -C /workspace/native/urprotect-runtime \
-    BUILD_DIR=/artifacts/host-context/build \
-    CC=clang test
-' > "${case_root}/host-context/build-and-test.log" 2>&1; then
-  echo "bionic HostContext native adapter oracle failed; see ${case_root}/host-context/build-and-test.log" >&2
-  exit 1
-fi
 if ! grep -Fq "HostContext runtime self-test: PASS" \
   "${case_root}/host-context/build-and-test.log"; then
   echo "bionic HostContext self-test did not retain its PASS oracle" >&2
