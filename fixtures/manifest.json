@@ -864,9 +864,9 @@
           },
           {
             "name": "ndk-sysroot",
-            "version": "29-3",
-            "filename": "pool/main/n/ndk-sysroot/ndk-sysroot_29-3_aarch64.deb",
-            "sha256": "554e79783e047f593ae29955c0da4c47bb6bd8cdb7582f72619767cef4d284f0",
+            "version": "30",
+            "filename": "pool/main/n/ndk-sysroot/ndk-sysroot_30_aarch64.deb",
+            "sha256": "73502f9b04fce210c430c83bf9ae2b8e332ba5c319f3eb94a61ba5cef090f787",
             "licenses": ["NCSA"],
             "licenseSource": "termux-packages:packages/ndk-sysroot/build.sh"
           },
