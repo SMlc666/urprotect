@@ -9,23 +9,23 @@
 
 ## Ordered Work
 
-1. [ ] Add a pinned Termux Docker source/image record and provenance helper.
-2. [ ] Add a native ARM64 bionic environment probe that records architecture,
+1. [x] Add a pinned Termux Docker source/image record and provenance helper.
+2. [x] Add a native ARM64 bionic environment probe that records architecture,
        kernel, page size, linker, image digest, rootfs/package inputs, and
        forbidden fallback checks.
-3. [ ] Add the smallest bionic-linked PIE fixture and lock its compiler/package
+3. [x] Add the smallest bionic-linked PIE fixture and lock its compiler/package
        inputs, or record a separately pinned artifact with equivalent proof.
-4. [ ] Add the baseline and HostContext/packaged execution oracle, including
+4. [x] Add the baseline and HostContext/packaged execution oracle, including
        ELF metadata, output, status, direct-linker identity, dependencies,
        diagnostics, and digest evidence.
-5. [ ] Add the matrix case and connect it to bionic linker, ET_DYN, dynamic
+5. [x] Add the matrix case and connect it to bionic linker, ET_DYN, dynamic
        dependency, page-size, and runtime handoff feature IDs.
-6. [ ] Add the ARM64 CI lane using the pinned OCI image, least-privilege
+6. [x] Add the ARM64 CI lane using the pinned OCI image, least-privilege
        container settings, and artifact upload.
-7. [ ] Add drift checks ensuring image digest, source commit, linker path, and
+7. [x] Add drift checks ensuring image digest, source commit, linker path, and
        no-fallback assertions remain synchronized across manifest, scripts, CI,
        and generated reports.
-8. [ ] Update README/release evidence language to describe bionic as a runtime
+8. [x] Update README/release evidence language to describe bionic as a runtime
        fact and to keep complete Android claims separate.
 
 ## Risk and Rollback Points
@@ -56,3 +56,14 @@ The bionic command must fail closed on a non-AArch64 host, an unpinned image
 or package set, a non-bionic interpreter, missing page-size evidence, or any
 forbidden fallback. Its report must state that the result is Termux bionic
 userspace evidence, not full Android/device evidence.
+
+## Completion Evidence
+
+- PR run 35934602944 and release-tier run 35934619123 passed the native ARM64
+  bionic job and evidence gate at commit `57a0d1f`.
+- Retained run 35934619123 artifact `bionic-native-arm64-35934619123` records
+  AArch64, kernel/page size, linker identity, digest-pinned Termux image and
+  source, SHA-256-locked compiler packages, and the HostContext v2 adapter
+  oracle with `executable_temporary_path=false`.
+- The bionic result remains Termux userspace evidence, not a complete Android
+  framework or physical-device claim.

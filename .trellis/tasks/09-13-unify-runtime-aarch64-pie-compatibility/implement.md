@@ -2,92 +2,93 @@
 
 ## Preconditions
 
-- Keep the parent task in planning until all child design and execution
-  artifacts are reviewed.
-- Do not run task.py start or edit product code from this planning pass.
-- Treat the HostContext ABI and matrix schema as cross-child contracts; update
-  all dependent artifacts when either changes.
+- Child design artifacts and execution plans were reviewed before the parent
+  task was activated.
+- The parent task was started after the planning review; this file now records
+  its verified execution and completion state.
+- The HostContext ABI and matrix schema remained cross-child contracts, and
+  dependent artifacts were updated when their compatibility boundaries grew.
 
 ## Ordered Work
 
 ### 1. Baseline and contract freeze
 
-- [ ] Record current managed test, fixture, wrapper, and Android evidence.
-- [ ] Extract current v1 frame and launcher behavior into a legacy baseline
+- [x] Record current managed test, fixture, wrapper, and Android evidence.
+- [x] Extract current v1 frame and launcher behavior into a legacy baseline
       matrix row.
-- [ ] Freeze HostContext versioning, entry signature, ownership, lifecycle,
+- [x] Freeze HostContext versioning, entry signature, ownership, lifecycle,
       error, and capability semantics in the runtime child design.
-- [ ] Freeze matrix schema, status vocabulary, and naming migration in the
+- [x] Freeze matrix schema, status vocabulary, and naming migration in the
       matrix child design.
 
 ### 2. Matrix schema migration
 
-- [ ] Rename project-owned fixture manifest records from profiles to matrix
+- [x] Rename project-owned fixture manifest records from profiles to matrix
       cases and replace --profile selection with run-tier terminology.
-- [ ] Rename project-owned container/package metadata to accurate host/image or
+- [x] Rename project-owned container/package metadata to accurate host/image or
       variant fields; leave external Cargo terminology unchanged.
-- [ ] Add schema validation for IDs, statuses, feature constraints, evidence,
+- [x] Add schema validation for IDs, statuses, feature constraints, evidence,
       and positive/negative cases.
-- [ ] Backfill the existing compiler, runtime, Android, and wrapper cases.
-- [ ] Add the pinned native ARM64 Termux/bionic case as a peer runtime fact,
+- [x] Backfill the existing compiler, runtime, Android, and wrapper cases.
+- [x] Add the pinned native ARM64 Termux/bionic case as a peer runtime fact,
       with direct linker identity, page-size, kernel, and no-fallback evidence.
-- [ ] Generate or validate human-readable matrix documentation.
+- [x] Generate or validate human-readable matrix documentation.
 
 Rollback: retain a read-only legacy-manifest adapter while all CI callers are
 migrated; do not keep two writable schemas.
 
 ### 3. Runtime skeleton and no-path handoff
 
-- [ ] Add the versioned native HostContext ABI and validation helpers.
-- [ ] Add a native runtime core that reads its embedded frame, verifies bounds
+- [x] Add the versioned native HostContext ABI and validation helpers.
+- [x] Add a native runtime core that reads its embedded frame, verifies bounds
       and digests, and exposes the HostContext entry dispatch.
-- [ ] Implement one immutable no-executable-path image handoff through the
+- [x] Implement one immutable no-executable-path image handoff through the
       selected host capability.
-- [ ] Add a minimal HostContext payload fixture and an integration oracle that
+- [x] Add a minimal HostContext payload fixture and an integration oracle that
       proves the host process is not replaced.
-- [ ] Add ABI mismatch, capability absence, ownership, and lifecycle failures.
+- [x] Add ABI mismatch, capability absence, ownership, and lifecycle failures.
 
 Rollback: keep the legacy v1 launcher selectable for legacy inputs; new
 HostContext inputs must fail closed rather than fall back to a temporary file.
 
 ### 4. AArch64 PIE language expansion
 
-- [ ] Map existing parser models, validator rules, and relocation classifiers
+- [x] Map existing parser models, validator rules, and relocation classifiers
       to matrix feature IDs.
-- [ ] Add sectionless/stripped, segment-layout/alignment, PT_TLS, GNU
+- [x] Add sectionless/stripped, segment-layout/alignment, PT_TLS, GNU
       property/RELRO, dynamic metadata, RELA/RELR, Android packed-relocation,
       and symbol-version cases in small independently reviewable slices.
-- [ ] Add compiler/toolchain cases only when they exercise a new feature or
+- [x] Add compiler/toolchain cases only when they exercise a new feature or
       lifecycle obligation.
-- [ ] Add paired malformed/rejected cases for each new accepted feature.
-- [ ] Integrate loader/runtime oracles for every feature marked proven.
+- [x] Add paired malformed/rejected cases for each new accepted feature.
+- [x] Integrate loader/runtime oracles for every feature marked proven.
 
 Rollback: mark a feature unknown or rejected and retain parser preservation
 rather than making the runtime accept unproven semantics.
 
 ### 5. Cross-child integration
 
-- [ ] Connect matrix feature IDs to HostContext version and runtime evidence.
-- [ ] Make CI fail for claimed rows without required proof, model, or fixture
+- [x] Connect matrix feature IDs to HostContext version and runtime evidence.
+- [x] Make CI fail for claimed rows without required proof, model, or fixture
       evidence.
-- [ ] Keep optional emulator/native-bridge evidence labeled as implementation
+- [x] Keep optional emulator/native-bridge evidence labeled as implementation
       evidence, not universal compatibility proof.
-- [ ] Update README and release metadata to describe one unified contract and
+- [x] Update README and release metadata to describe one unified contract and
       remove project-owned profile claims.
 
 ### 6. Quality gate
 
-- [ ] Run the full managed test suite with the pinned .NET SDK and locked
+- [x] Run the full managed test suite with the pinned .NET SDK and locked
       restore.
-- [ ] Run parser malformed/property/fuzz checks and native runtime tests.
-- [ ] Run fixture/matrix validation and relevant native AArch64 jobs.
-- [ ] Run external readelf/llvm-readelf structure checks for every generated
+- [x] Run parser malformed/property/fuzz checks and native runtime tests.
+- [x] Run fixture/matrix validation and relevant native AArch64 jobs.
+- [x] Run external readelf/llvm-readelf structure checks for every generated
       ELF runtime and fixture.
-- [ ] Run the final cross-layer check for schema, scripts, reports, README, and
+- [x] Run the final cross-layer check for schema, scripts, reports, README, and
       CI references.
-- [ ] Run the post-run evidence gate in each producing CI job; local fixture or
+- [x] Run the post-run evidence gate in each producing CI job; local fixture or
       runtime runs do not count as retained matrix evidence.
-- [ ] Review changed diagnostics, provenance, licenses, and rollback behavior.
+- [x] Review changed diagnostics, provenance, licenses, and rollback behavior.
 
 ## Validation Commands
 
@@ -106,10 +107,25 @@ for those required GitHub gates.
 
 ## Review Gates
 
-- Gate A: HostContext ABI and matrix schema have no unresolved product
+- [x] Gate A: HostContext ABI and matrix schema have no unresolved product
   decisions.
-- Gate B: runtime entry and no-path semantics have a deterministic integration
+- [x] Gate B: runtime entry and no-path semantics have a deterministic integration
   witness.
-- Gate C: every matrix row marked proven has a proof obligation and evidence
+- [x] Gate C: every matrix row marked proven has a proof obligation and evidence
   path.
-- Gate D: full-scope quality check passes without weakening legacy behavior.
+- [x] Gate D: full-scope quality check passes without weakening legacy behavior.
+
+## Completion Evidence
+
+- `dotnet test UrProtect.sln --configuration Release --no-restore`: 101 passed.
+- `make -C native/urprotect-runtime test`: native HostContext self-test passed;
+  `scripts/run-parser-fuzz.sh`: 2 passed; fixture matrix tests: 22 passed.
+- Fixture manifest validation passed for `pr`, `nightly`, and `release` tiers.
+- PR run [35934602944](https://github.com/SMlc666/urprotect/actions/runs/35934602944)
+  passed `build-and-test` and `bionic-native-arm64` at commit `57a0d1f`.
+- Release-tier run [35934619123](https://github.com/SMlc666/urprotect/actions/runs/35934619123)
+  passed the release fixture/evidence gate, `build-and-test`, bionic, musl,
+  benchmark, and environment-evidence jobs at commit `57a0d1f`.
+- Production managed HostContext packaging remains explicitly `unknown` in the
+  matrix until a v2-capable managed launcher path and end-to-end oracle exist;
+  the implemented native adapter boundary is separately validated.

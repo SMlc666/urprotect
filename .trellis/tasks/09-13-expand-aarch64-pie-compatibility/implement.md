@@ -2,21 +2,21 @@
 
 ## Ordered Checklist
 
-1. [ ] Export the current parser/validator model as an initial feature
+1. [x] Export the current parser/validator model as an initial feature
        inventory and map each current fixture to feature IDs.
-2. [ ] Add explicit diagnostics for malformed, unknown, parser-compatible, and
+2. [x] Add explicit diagnostics for malformed, unknown, parser-compatible, and
        HostContext-runtime-incompatible inputs.
-3. [ ] Add sectionless/stripped and varied PT_LOAD/alignment cases.
-4. [ ] Add PT_TLS, GNU stack/RELRO/property, note, and dynamic metadata cases
+3. [x] Add sectionless/stripped and varied PT_LOAD/alignment cases.
+4. [x] Add PT_TLS, GNU stack/RELRO/property, note, and dynamic metadata cases
        with paired malformed/rejected inputs.
-5. [ ] Expand RELA/RELR/Android packed relocation classification only where the
+5. [x] Expand RELA/RELR/Android packed relocation classification only where the
        HostContext design supplies a runtime semantic.
-6. [ ] Add dynamic symbol/version/dependency cases and lifecycle fixtures.
-7. [ ] Add compiler cases that exercise new feature combinations, including
+6. [x] Add dynamic symbol/version/dependency cases and lifecycle fixtures.
+7. [x] Add compiler cases that exercise new feature combinations, including
        HostContext entry adapters.
-8. [ ] Connect every accepted feature to a deterministic parser or runtime
+8. [x] Connect every accepted feature to a deterministic parser or runtime
        oracle and update the matrix child inputs.
-9. [ ] Run malformed corpus, property, fuzz, golden report, and fixture tests
+9. [x] Run malformed corpus, property, fuzz, golden report, and fixture tests
        after each feature slice.
 
 ## Risk and Rollback Points
@@ -38,3 +38,13 @@
 
 The final commands use the migrated matrix terminology and the existing
 repository scripts where their names remain unchanged.
+
+## Completion Evidence
+
+- Matrix evidence now has explicit rejection rows for PT_TLS, GNU properties,
+  dependency/path/lifecycle/text/unsupported relocation forms, Android packed
+  relocation tags, and symbol-version tags; only checked AArch64
+  `RELATIVE`/`RELR` forms remain validated.
+- Native mutation self-tests, managed parser/property/fuzz tests, and all three
+  manifest tiers passed. PR run 35934602944 and release run 35934619123 passed
+  on commit `57a0d1f`.
