@@ -195,6 +195,9 @@ executable pathname.
   `unknown` migration boundary until the missing HostContext entry-image
   adapter, v2-capable launcher, and managed pack/dispatch oracle are retained;
   no v2 frame may be forced into the legacy path.
+- `runtime.wrapper-v1-baseline` keeps Wrapper 0.2 framing and launcher tests as
+  migration evidence only; the Android `android.jni.native-bridge` row is an
+  unwrapped JNI baseline. Neither row upgrades HostContext runtime support.
 
 #### Environment keys
 

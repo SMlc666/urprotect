@@ -11,7 +11,8 @@
       "Every accepted boundary has a nearest rejected or malformed witness.",
       "Runtime facts do not imply Android framework or device behavior.",
       "Unknown features never count as a support claim.",
-      "Release tier uses selected producer/hardening witnesses, not a blind Cartesian product."
+      "Release tier uses selected producer/hardening witnesses, not a blind Cartesian product.",
+      "Legacy Wrapper v1 and Android JNI/native-bridge observations remain baseline evidence, not HostContext compatibility claims."
     ]
   },
   "features": [
@@ -467,6 +468,28 @@
       "evidence": [
         "fixtures/samples/android-jni",
         ".artifacts/android-arm64-native-bridge-on-x64/logcat.txt"
+      ],
+      "constraints": [
+        "This is the existing JNI/native-bridge baseline; it does not execute packed output or prove a native ARM64 Android device/runtime."
+      ]
+    },
+    {
+      "id": "runtime.wrapper-v1-baseline",
+      "status": "validated",
+      "obligation": "The existing Wrapper 0.2 managed v1 frame and launcher behavior remain a regression baseline separate from the in-process HostContext v2 contract.",
+      "witness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+      "oracle": "native/urprotect-launcher/test_launcher.sh",
+      "evidence": [
+        "src/UrProtect.Core/Pack/PayloadFrame.cs",
+        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+        "tests/UrProtect.Core.Tests/PayloadFrameTests.cs",
+        "native/urprotect-launcher/test_launcher.sh",
+        "native/urprotect-launcher/test_managed_handoff.sh",
+        ".artifacts/packed/pr/handoff.log"
+      ],
+      "constraints": [
+        "Legacy v1 retains its wrapper-absolute offset and the managed pack path leaves HostContext metadata null.",
+        "This baseline is not an in-process HostContext support claim and does not add a platform compatibility profile."
       ]
     }
   ],

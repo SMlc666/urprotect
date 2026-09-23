@@ -54,6 +54,13 @@ deterministic implementation evidence, `rejected` for deliberate fail-closed
 boundaries, and `unknown` when an obligation is not complete. `unknown` never
 counts as support.
 
+The matrix feature `runtime.wrapper-v1-baseline` preserves the current Wrapper
+0.2 v1 frame, managed pack, and native launcher as migration regression
+evidence. It is deliberately separate from HostContext v2 and is not an
+in-process compatibility claim. The existing Android row
+`android.jni.native-bridge` is likewise a JNI/native-bridge baseline: it does
+not execute packed output or prove a native ARM64 Android device/runtime.
+
 The HostContext self-test contains both a deterministic fake-host contract
 oracle and a real AArch64 `ET_DYN` entry fixture. The fd-backed adapter loads
 the fixture through an anonymous memfd created with `MFD_ALLOW_SEALING`, adds

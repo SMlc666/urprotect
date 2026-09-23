@@ -81,7 +81,9 @@ jobs:
           ./scripts/run-packed-fixture-matrix.sh --tier pr \
             2>&1 | tee .artifacts/packed/pr/handoff.log
       - name: Check PR handoff evidence
-        run: python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
+        run: |
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.wrapper-v1-baseline
       - name: HostContext runtime contract smoke
         run: |
           mkdir -p .artifacts/host-context/pr

@@ -179,8 +179,9 @@ python3 scripts/render-compatibility-matrix.py \
   fixtures/manifest.json --output .artifacts/compatibility-matrix.md
 ```
 
-The Android sample is an APK/JNI fixture. The released Android Emulator cannot
-boot an `arm64-v8a` system image on an x86_64 host, even with `-accel off`. On
+The Android sample is an APK/JNI baseline fixture, not a packed-output test.
+The released Android Emulator cannot boot an `arm64-v8a` system image on an
+x86_64 host, even with `-accel off`. On
 the GitHub x86_64 runner the project therefore uses an x86_64 API 35 AVD in
 TCG/software CPU mode with Android's `libndk_translation.so` native bridge to
 load the arm64-v8a library:

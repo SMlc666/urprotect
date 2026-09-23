@@ -97,6 +97,20 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertIn("v2-capable launcher", feature["nextEvidence"])
         self.assertIn("managed pack/dispatch oracle", feature["nextEvidence"])
 
+    def test_legacy_wrapper_and_android_jni_are_labeled_as_baselines(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        features = {feature["id"]: feature for feature in self.data["features"]}
+        legacy = features["runtime.wrapper-v1-baseline"]
+        self.assertEqual(legacy["status"], "validated")
+        self.assertIn("Wrapper 0.2", legacy["obligation"])
+        self.assertIn(
+            "not an in-process HostContext support claim",
+            " ".join(legacy["constraints"]),
+        )
+        android = features["android.jni.native-bridge"]
+        self.assertIn("does not execute packed output", " ".join(android["constraints"]))
+
     def test_pt_tls_is_an_explicit_rejected_host_context_boundary(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
@@ -571,6 +585,7 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.path-search | rejected", rendered)
             self.assertIn("runtime.host-context.text-relocation | rejected", rendered)
             self.assertIn("runtime.host-context.unsupported-relocation-table | rejected", rendered)
+            self.assertIn("runtime.wrapper-v1-baseline | validated", rendered)
 
 
 if __name__ == "__main__":
