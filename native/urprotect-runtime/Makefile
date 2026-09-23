@@ -55,7 +55,7 @@ $(BUILD_DIR)/runtime.o: runtime.c include/urp/host_context.h include/urp/runtime
 
 $(BUILD_DIR)/host_adapter.o: host_adapter.c include/urp/host_context.h include/urp/host_adapter.h
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 
 $(BUILD_DIR)/sha256.o: ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h
 	@mkdir -p "$(BUILD_DIR)"

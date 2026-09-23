@@ -763,6 +763,13 @@ static urp_status urp_adapter_load_image(
     (void)dlerror();
     void *dl_handle = dlopen(fd_path, RTLD_NOW | RTLD_LOCAL);
     if (dl_handle == NULL) {
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+        const char *loader_error = dlerror();
+        (void)fprintf(
+            stderr,
+            "HostContext adapter dlopen failed: %s\n",
+            loader_error != NULL ? loader_error : "unknown loader error");
+#endif
         (void)close(fd);
         return URP_STATUS_LOAD_FAILED;
     }
