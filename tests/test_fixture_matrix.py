@@ -479,16 +479,56 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("host.kernel", result.stderr or result.stdout)
 
-    def test_bionic_case_records_live_package_index_and_complete_provenance(self) -> None:
+    def test_bionic_case_records_exact_package_hashes_and_licenses(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         host = next(item for item in self.data["cases"] if item["id"] == "c-termux-bionic-pie")["host"]
         self.assertEqual(host["packageIndex"], "live")
-        self.assertFalse(host["reproducible"])
+        self.assertTrue(host["packageInputsReproducible"])
         self.assertEqual(
             host["packageProvenance"],
-            "complete-installed-package-version-inventory",
+            "version-and-sha256-locked-package-set",
         )
+        packages = host["compilerPackages"]
+        self.assertEqual(
+            {package["name"] for package in packages},
+            {
+                "clang",
+                "libcompiler-rt",
+                "libllvm",
+                "libxml2",
+                "lld",
+                "llvm",
+                "ndk-sysroot",
+            },
+        )
+        for package in packages:
+            self.assertRegex(package["sha256"], r"^[0-9a-f]{64}$")
+            self.assertTrue(package["filename"].endswith("_aarch64.deb"))
+            self.assertTrue(package["licenses"])
+            self.assertTrue(package["licenseSource"])
+
+    def test_bionic_package_lock_rejects_missing_hashes_or_unpinned_dependencies(self) -> None:
+        for mutation, expected_error in (
+            (lambda package: package.pop("sha256"), "sha256"),
+            (lambda package: package.__setitem__("sha256", "0" * 63), "sha256"),
+            (lambda package: package.pop("licenses"), "licenses"),
+        ):
+            data = copy.deepcopy(self.data)
+            host = next(item for item in data["cases"] if item["id"] == "c-termux-bionic-pie")["host"]
+            mutation(host["compilerPackages"][0])
+
+            result = self.run_validator(data)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(expected_error, result.stderr or result.stdout)
+
+        data = copy.deepcopy(self.data)
+        host = next(item for item in data["cases"] if item["id"] == "c-termux-bionic-pie")["host"]
+        host["compilerPackages"].pop()
+        result = self.run_validator(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exact compiler dependency set", result.stderr or result.stdout)
 
     def test_rejected_feature_requires_a_valid_negative_oracle(self) -> None:
         data = copy.deepcopy(self.data)

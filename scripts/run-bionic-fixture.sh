@@ -43,11 +43,11 @@ import sys
 manifest = json.load(open(sys.argv[1]))
 case = next(item for item in manifest["cases"] if item["id"] == "c-termux-bionic-pie")
 host = case["host"]
-for field in ("image", "sourceCommit", "compilerPackage", "linker"):
+for field in ("image", "sourceCommit", "compilerPackage", "linker", "packageRepository"):
     print(host[field])
 PY
 )
-if [[ "${#matrix_values[@]}" -ne 4 ]]; then
+if [[ "${#matrix_values[@]}" -ne 5 ]]; then
   echo "bionic case is missing pinned host facts in the fixture manifest" >&2
   exit 1
 fi
@@ -55,6 +55,54 @@ image="${matrix_values[0]}"
 termux_source_commit="${matrix_values[1]}"
 clang_package="${matrix_values[2]}"
 linker="${matrix_values[3]}"
+package_repository="${matrix_values[4]}"
+mapfile -t package_lock_rows < <(
+  python3 - "${manifest}" <<'PY'
+import json
+import sys
+
+manifest = json.load(open(sys.argv[1]))
+case = next(item for item in manifest["cases"] if item["id"] == "c-termux-bionic-pie")
+for package in case["host"]["compilerPackages"]:
+    print("\t".join((
+        package["name"],
+        package["version"],
+        package["filename"],
+        package["sha256"],
+        ";".join(package["licenses"]),
+        package["licenseSource"],
+    )))
+PY
+)
+if [[ "${#package_lock_rows[@]}" -ne 7 ]]; then
+  echo "bionic case requires the complete seven-package compiler lock" >&2
+  exit 1
+fi
+package_lock_json="${case_root}/compiler-package-lock.json"
+python3 - "${manifest}" "${package_lock_json}" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = json.load(open(sys.argv[1]))
+case = next(item for item in manifest["cases"] if item["id"] == "c-termux-bionic-pie")
+pathlib.Path(sys.argv[2]).write_text(
+    json.dumps(case["host"]["compilerPackages"], indent=2, sort_keys=True) + "\n"
+)
+PY
+compiler_package_specs=()
+printf 'name\tversion\tfilename\tsha256\tlicenses\tlicenseSource\n' \
+  > "${case_root}/compiler-package-lock.tsv"
+: > "${case_root}/package-sha256sums.txt"
+for package_lock_row in "${package_lock_rows[@]}"; do
+  IFS=$'\t' read -r package_name package_version package_filename package_sha256 package_licenses package_license_source \
+    <<< "${package_lock_row}"
+  compiler_package_specs+=("${package_name}=${package_version}")
+  printf '%s\n' "${package_lock_row}" >> "${case_root}/compiler-package-lock.tsv"
+  printf '%s  apt-archives/%s\n' "${package_sha256}" "${package_filename##*/}" \
+    >> "${case_root}/package-sha256sums.txt"
+done
+package_lock_sha256="$(sha256sum "${package_lock_json}" | awk '{print $1}')"
 termux_prefix="/data/data/com.termux/files/usr"
 termux_shell="${termux_prefix}/bin/sh"
 
@@ -102,6 +150,7 @@ container_common=(
   --user 1000:1000
   --env "PREFIX=${termux_prefix}"
   --env "HOME=/tmp"
+  --env "TERMUX_PACKAGE_REPOSITORY=${package_repository}"
   --mount "type=bind,src=${repo_root},dst=/workspace,readonly"
   --mount "type=bind,src=${case_root},dst=/artifacts"
 )
@@ -139,27 +188,80 @@ fi
 run_shell -c '
   set -eu
   export PATH="${PREFIX}/bin:${PATH}"
-  package_spec="${1}"
-  package_name="${package_spec%%=*}"
-  requested_version="${package_spec#*=}"
-  # The package index is intentionally live; retain the complete installed
-  # inventory and exact apt logs instead of claiming full reproducibility.
+  test "$#" -eq 7
+  mkdir -p /artifacts/apt-archives
+  find /artifacts/apt-archives -maxdepth 1 -type f -name "*.deb" -delete
+  dpkg-query -W -f="\${binary:Package}\t\${Version}\t\${Architecture}\t\${Status}\n" \
+    | sort > /artifacts/packages-before.txt
   apt-get update > /artifacts/apt-update.log 2>&1
-  apt-get install -y "${package_spec}" > /artifacts/apt-install.log 2>&1
-  installed_version="$(dpkg-query -W -f="\${Version}" "${package_name}")"
-  test "${installed_version}" = "${requested_version}"
-  printf "%s\n" "${installed_version}" > /artifacts/clang-package-version.txt
-  printf "package_spec=%s\npackage_name=%s\nrequested_version=%s\ninstalled_version=%s\n" \
-    "${package_spec}" "${package_name}" "${requested_version}" "${installed_version}" \
-    > /artifacts/package-request.txt
+  apt-get -o Dir::Cache::archives=/artifacts/apt-archives --download-only install -y \
+    "$@" > /artifacts/apt-download.log 2>&1
+  find /artifacts/apt-archives -maxdepth 1 -type f -name "*.deb" -printf "%f\n" \
+    | sort > /artifacts/downloaded-debs.txt
+  awk -F "\t" "NR > 1 { n = \$3; sub(/^.*\\//, \"\", n); print n }" \
+    /artifacts/compiler-package-lock.tsv | sort > /artifacts/expected-debs.txt
+  diff -u /artifacts/expected-debs.txt /artifacts/downloaded-debs.txt
+  (cd /artifacts && sha256sum --check package-sha256sums.txt) \
+    > /artifacts/package-hash-verification.txt
+  apt-get -o Dir::Cache::archives=/artifacts/apt-archives --no-download install -y \
+    "$@" > /artifacts/apt-install.log 2>&1
+  : > /artifacts/package-request.txt
+  for package_spec do
+    package_name="${package_spec%%=*}"
+    requested_version="${package_spec#*=}"
+    installed_version="$(dpkg-query -W -f="\${Version}" "${package_name}")"
+    test "${installed_version}" = "${requested_version}"
+    printf "%s=%s\t%s\n" "${package_name}" "${requested_version}" \
+      "${installed_version}" >> /artifacts/package-request.txt
+    if test "${package_name}" = "clang"; then
+      printf "%s\n" "${installed_version}" > /artifacts/clang-package-version.txt
+    fi
+  done
+  rm -rf /artifacts/apt-archives
   dpkg-query -W -f="\${binary:Package}\t\${Version}\t\${Architecture}\t\${Status}\n" \
     | sort > /artifacts/packages.txt
-  apt-cache policy "${package_name}" > /artifacts/package-policy.txt
+  apt-cache policy clang > /artifacts/package-policy.txt
+  grep -Fq "${TERMUX_PACKAGE_REPOSITORY}" /artifacts/package-policy.txt
   clang --version > /artifacts/clang-version.txt
   clang -fPIE -pie -Wl,--build-id=none -Wl,--dynamic-linker=/system/bin/linker64 \
     /workspace/fixtures/samples/bionic/main.c -o /artifacts/fixture
   sha256sum /system/bin/linker64 /artifacts/fixture > /artifacts/container-sha256sums.txt
-' -- "${clang_package}"
+' -- "${compiler_package_specs[@]}"
+
+python3 - "${case_root}/packages-before.txt" "${case_root}/packages.txt" \
+  "${package_lock_json}" <<'PY'
+import json
+import pathlib
+import sys
+
+
+def read_inventory(path: pathlib.Path) -> dict[str, tuple[str, str, str]]:
+    packages = {}
+    for line in path.read_text().splitlines():
+        name, version, architecture, status = line.split("\t", 3)
+        packages[name] = (version, architecture, status)
+    return packages
+
+
+before = read_inventory(pathlib.Path(sys.argv[1]))
+after = read_inventory(pathlib.Path(sys.argv[2]))
+lock = json.loads(pathlib.Path(sys.argv[3]).read_text())
+expected = {package["name"]: package["version"] for package in lock}
+changed = {
+    name
+    for name in before.keys() | after.keys()
+    if before.get(name) != after.get(name)
+}
+if changed != set(expected):
+    raise SystemExit(
+        f"installed package set differs from the pinned compiler closure: "
+        f"expected {sorted(expected)}, changed {sorted(changed)}"
+    )
+for name, version in expected.items():
+    installed = after.get(name)
+    if installed is None or installed[0] != version or installed[2] != "install ok installed":
+        raise SystemExit(f"installed package does not match lock: {name}={version}, got {installed}")
+PY
 
 file "${case_root}/fixture" > "${case_root}/file.txt"
 readelf -hW -lW -dW "${case_root}/fixture" > "${case_root}/readelf.txt"
@@ -235,10 +337,12 @@ printf '%s\n' \
   "termux_source_commit=${termux_source_commit}" \
   "clang_package=${clang_package}" \
   "clang_version=${installed_clang_version}" \
-  "linker=${linker}" \
+  "package_repository=${package_repository}" \
   "package_index=live" \
-  "fully_reproducible=false" \
-  "package_provenance=complete-installed-package-version-inventory" \
+  "package_inputs_reproducible=true" \
+  "package_lock_sha256=${package_lock_sha256}" \
+  "package_provenance=version-and-sha256-locked-package-set" \
+  "linker=${linker}" \
   "host_arch=$(uname -m)" \
   "host_kernel=${host_kernel}" \
   "host_page_size=${host_page_size}" \
@@ -255,7 +359,8 @@ printf '%s\n' \
 
 python3 - "${case_root}/result.json" "${image}" "${termux_source_commit}" \
   "${clang_package}" "${installed_clang_version}" "${host_kernel}" "${container_kernel}" "${host_page_size}" \
-  "${container_page_size}" "${baseline_status}" "${linker_status}" <<'PY'
+  "${container_page_size}" "${baseline_status}" "${linker_status}" \
+  "${package_lock_sha256}" "${case_root}/compiler-package-lock.json" <<'PY'
 import json
 import pathlib
 import sys
@@ -272,7 +377,10 @@ import sys
     container_page_size,
     baseline,
     linker,
+    package_lock_sha256,
+    package_lock_path,
 ) = sys.argv[1:]
+compiler_packages = json.loads(pathlib.Path(package_lock_path).read_text())
 document = {
     "schemaVersion": 1,
     "case": "c-termux-bionic-pie",
@@ -284,10 +392,13 @@ document = {
     "termuxSourceCommit": source_commit,
     "compilerPackage": compiler,
     "clangVersion": clang_version,
+    "compilerPackages": compiler_packages,
+    "packageRepository": "https://packages-cf.termux.dev/apt/termux-main",
     "linker": "/system/bin/linker64",
     "packageIndex": "live",
-    "reproducible": False,
-    "packageProvenance": "complete-installed-package-version-inventory",
+    "packageInputsReproducible": True,
+    "packageProvenance": "version-and-sha256-locked-package-set",
+    "packageLockSha256": package_lock_sha256,
     "hostKernel": host_kernel,
     "containerKernel": container_kernel,
     "hostPageSize": int(host_page_size),
@@ -300,4 +411,4 @@ document = {
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")
 PY
 
-echo "PASS ${case_id}: requested Termux clang version, bionic linker, and native ARM64 execution validated (live package index; not fully reproducible)"
+echo "PASS ${case_id}: SHA-256-locked Termux compiler packages, bionic linker, and native ARM64 execution validated"

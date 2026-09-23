@@ -205,11 +205,15 @@ executable pathname.
 - `NATIVE_LAUNCHER_CC` selects the native launcher compiler in tests.
 
 The bionic lane must use the pinned Termux image and exact compiler/linker
-facts from the manifest. It must verify the requested clang package version
-after installation and retain apt logs, package policy, and a complete installed
-package/version inventory. Because the Termux package index remains live, the
-lane must record `packageIndex: live` and `reproducible: false` rather than
-claiming full package-resolution reproducibility. It must record both host and
+facts from the manifest. The live package index may locate artifacts, but the
+complete newly installed compiler dependency closure must be version- and
+SHA-256-locked, with license identifiers and sources recorded in the lock.
+Before installation, the lane verifies that the downloaded artifacts exactly
+match the lock and hashes; it fails on missing, changed, or additional packages.
+The image digest pins the base userspace. The lane retains the lock, hash
+verification, apt logs, package policy, before/after package inventories, and
+reports `packageIndex: live` with `packageInputsReproducible: true` to distinguish live
+artifact discovery from pinned package inputs. It must record both host and
 container kernel/page-size facts, refuse AVD, Waydroid, QEMU, native bridge,
 and non-ARM execution rather than silently falling back, and keep both the
 bionic HostContext handoff and production package oracle rows `unknown` until

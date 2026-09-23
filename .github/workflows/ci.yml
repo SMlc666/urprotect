@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_release_fixtures:
+        description: Run the release-tier compatibility fixture and evidence gates without publishing a release.
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 3 * * *'
   release:
@@ -275,8 +280,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Select fixture tier
+        env:
+          RUN_RELEASE_FIXTURES: ${{ inputs.run_release_fixtures }}
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == release ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == release || "${RUN_RELEASE_FIXTURES}" == true ]]; then
             echo 'FIXTURE_TIER=release' >> "$GITHUB_ENV"
           else
             echo 'FIXTURE_TIER=nightly' >> "$GITHUB_ENV"

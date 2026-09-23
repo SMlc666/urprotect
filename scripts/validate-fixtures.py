@@ -252,6 +252,58 @@ def validate_case(
             fail(f"{case_id}.host.sourceCommit must be a 40-character lowercase commit")
         if compiler_package != "clang=21.1.8-3":
             fail(f"{case_id}.host.compilerPackage must pin clang=21.1.8-3")
+        package_repository = host.get("packageRepository")
+        if package_repository != "https://packages-cf.termux.dev/apt/termux-main":
+            fail(f"{case_id}.host.packageRepository must identify the pinned Termux package source")
+        compiler_packages = host.get("compilerPackages")
+        if not isinstance(compiler_packages, list) or not compiler_packages:
+            fail(f"{case_id}.host.compilerPackages must be a non-empty locked package array")
+        locked_versions: dict[str, str] = {}
+        locked_filenames: set[str] = set()
+        for package_index, package in enumerate(compiler_packages):
+            package_label = f"{case_id}.host.compilerPackages[{package_index}]"
+            if not isinstance(package, dict):
+                fail(f"{package_label} must be an object")
+            name = package.get("name")
+            version = package.get("version")
+            filename = package.get("filename")
+            digest = package.get("sha256")
+            licenses = package.get("licenses")
+            license_source = package.get("licenseSource")
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9+.-]*", name):
+                fail(f"{package_label}.name must be a valid package name")
+            if name in locked_versions:
+                fail(f"{case_id}.host.compilerPackages contains duplicate package {name!r}")
+            if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]+", version):
+                fail(f"{package_label}.version must be an exact package version")
+            if not isinstance(filename, str) or not filename.startswith("pool/") or ".." in filename.split("/"):
+                fail(f"{package_label}.filename must be a repository-relative pool path")
+            if not filename.endswith("_aarch64.deb") or filename in locked_filenames:
+                fail(f"{package_label}.filename must be a unique AArch64 Debian package")
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                fail(f"{package_label}.sha256 must be a lowercase SHA-256 digest")
+            if not isinstance(licenses, list) or not licenses or any(
+                not isinstance(license_id, str) or not license_id.strip()
+                for license_id in licenses
+            ):
+                fail(f"{package_label}.licenses must be a non-empty license identifier array")
+            if not isinstance(license_source, str) or not license_source.strip():
+                fail(f"{package_label}.licenseSource must identify its license record source")
+            locked_versions[name] = version
+            locked_filenames.add(filename)
+        expected_compiler_packages = {
+            "clang",
+            "libcompiler-rt",
+            "libllvm",
+            "libxml2",
+            "lld",
+            "llvm",
+            "ndk-sysroot",
+        }
+        if set(locked_versions) != expected_compiler_packages:
+            fail(f"{case_id}.host.compilerPackages must lock the exact compiler dependency set")
+        if locked_versions.get("clang") != compiler_package.split("=", 1)[1]:
+            fail(f"{case_id}.host.compilerPackages clang version must match compilerPackage")
         if linker != "/system/bin/linker64":
             fail(f"{case_id}.host.linker must be /system/bin/linker64")
         if host.get("environment") != "termux-userspace" or host.get("androidRuntime") is not False:
@@ -263,11 +315,11 @@ def validate_case(
         if host.get("kernel") != "recorded":
             fail(f"{case_id}.host.kernel must be recorded")
         if host.get("packageIndex") != "live":
-            fail(f"{case_id}.host.packageIndex must remain live until package sources are pinned")
-        if host.get("reproducible") is not False:
-            fail(f"{case_id}.host.reproducible must be false while the package index is live")
-        if host.get("packageProvenance") != "complete-installed-package-version-inventory":
-            fail(f"{case_id}.host.packageProvenance must identify the complete installed package/version inventory")
+            fail(f"{case_id}.host.packageIndex must identify the package index used for lookup")
+        if host.get("packageInputsReproducible") is not True:
+            fail(f"{case_id}.host.packageInputsReproducible must be true for the exact version/SHA-256 package lock")
+        if host.get("packageProvenance") != "version-and-sha256-locked-package-set":
+            fail(f"{case_id}.host.packageProvenance must identify the exact package lock contract")
     elif execution == "native-linux":
         if host.get("environment") != "native-arm64-linux":
             fail(f"{case_id}.host.environment must identify native ARM64 Linux")

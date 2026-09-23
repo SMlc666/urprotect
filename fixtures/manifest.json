@@ -175,17 +175,19 @@
     {
       "id": "runtime.bionic.linker",
       "status": "validated",
-      "obligation": "AArch64 PIE is executed by the pinned bionic linker with the requested clang package version verified after install; the live package index is not a full reproducibility claim.",
+      "obligation": "AArch64 PIE is executed by the pinned bionic linker using a pinned Termux compiler package set whose downloaded artifacts match locked SHA-256 digests.",
       "witness": "c-termux-bionic-pie",
       "oracle": "scripts/run-bionic-fixture.sh",
       "evidence": [
         ".artifacts/bionic",
-        ".artifacts/bionic/c-termux-bionic-pie/packages.txt"
+        ".artifacts/bionic/c-termux-bionic-pie/packages.txt",
+        ".artifacts/bionic/c-termux-bionic-pie/compiler-package-lock.json",
+        ".artifacts/bionic/c-termux-bionic-pie/package-hash-verification.txt"
       ],
       "constraints": [
         "The OCI image digest and Termux source revision are pinned.",
-        "The requested clang package version is checked with dpkg-query after installation and the complete installed package/version inventory is retained.",
-        "The Termux package index remains live at run time, so this row does not claim fully reproducible package resolution."
+        "Clang and every package newly installed to provide its compiler/linker are version- and SHA-256-locked in the manifest and verified before installation.",
+        "The Termux package index is used only to locate those locked artifacts; a missing, changed, or additional package fails the lane, while the complete before/after installed package inventories and license identifiers are retained."
       ]
     },
     {
@@ -262,7 +264,7 @@
         "COMPATIBILITY.md",
         ".trellis/spec/backend/runtime-compatibility.md"
       ],
-      "nextEvidence": "Run a dedicated bionic HostContext/package oracle: build or provide a HostContext v2 entry image, execute it through the /system/bin/linker64-compatible adapter with immutable sealed-image evidence, and retain .artifacts/bionic/c-termux-bionic-pie/host-context plus linker, kernel, page-size, package, and no-fallback facts. The current live package index and absent oracle keep this row unknown."
+      "nextEvidence": "Run a dedicated bionic HostContext/package oracle: build or provide a HostContext v2 entry image, execute it through the /system/bin/linker64-compatible adapter with immutable sealed-image evidence, and retain .artifacts/bionic/c-termux-bionic-pie/host-context plus linker, kernel, page-size, package-lock, and no-fallback facts. The absent HostContext oracle keeps this row unknown."
     },
     {
       "id": "handoff.no-executable-path",
@@ -779,14 +781,73 @@
         "image": "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4",
         "sourceCommit": "7033c7639eb86107a4fdf8b72bd6388c07b1284a",
         "compilerPackage": "clang=21.1.8-3",
+        "packageRepository": "https://packages-cf.termux.dev/apt/termux-main",
+        "compilerPackages": [
+          {
+            "name": "clang",
+            "version": "21.1.8-3",
+            "filename": "pool/main/c/clang/clang_21.1.8-3_aarch64.deb",
+            "sha256": "9fb565013b96ce10abd8f8f217aaebb48f72873f53acbf8886329bcea841a21c",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "libcompiler-rt",
+            "version": "21.1.8-3",
+            "filename": "pool/main/libc/libcompiler-rt/libcompiler-rt_21.1.8-3_aarch64.deb",
+            "sha256": "89de02f642e34fa6494ad16105bd08510bd1dbdbe4fdb2b297aaa4f4e8e534b6",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "libllvm",
+            "version": "21.1.8-3",
+            "filename": "pool/main/libl/libllvm/libllvm_21.1.8-3_aarch64.deb",
+            "sha256": "5056a73f2645fc9c0759e6f94a1bd6edcf36305acaef58dc685211ced9cc2a02",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "libxml2",
+            "version": "2.15.4-1",
+            "filename": "pool/main/libx/libxml2/libxml2_2.15.4-1_aarch64.deb",
+            "sha256": "d315861bbcf716cfb088f53cddab9fb6a96430cc66769f79774cc69c2f53bcff",
+            "licenses": ["MIT"],
+            "licenseSource": "termux-packages:packages/libxml2/build.sh"
+          },
+          {
+            "name": "lld",
+            "version": "21.1.8-3",
+            "filename": "pool/main/l/lld/lld_21.1.8-3_aarch64.deb",
+            "sha256": "6299c8fdff59dcff972f6b444805bcdb211c2bd797a64d2ddb3875e699f30630",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "llvm",
+            "version": "21.1.8-3",
+            "filename": "pool/main/l/llvm/llvm_21.1.8-3_aarch64.deb",
+            "sha256": "2d17e4dde485cae71e6872d19ce1d44555789208708b4e0fd15ebf6818a146d3",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "ndk-sysroot",
+            "version": "29-3",
+            "filename": "pool/main/n/ndk-sysroot/ndk-sysroot_29-3_aarch64.deb",
+            "sha256": "554e79783e047f593ae29955c0da4c47bb6bd8cdb7582f72619767cef4d284f0",
+            "licenses": ["NCSA"],
+            "licenseSource": "termux-packages:packages/ndk-sysroot/build.sh"
+          }
+        ],
         "linker": "/system/bin/linker64",
         "androidRuntime": false,
         "pageSize": "recorded",
         "architecture": "aarch64",
         "kernel": "recorded",
         "packageIndex": "live",
-        "reproducible": false,
-        "packageProvenance": "complete-installed-package-version-inventory"
+        "packageInputsReproducible": true,
+        "packageProvenance": "version-and-sha256-locked-package-set"
       }
     }
   ]

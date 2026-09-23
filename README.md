@@ -154,15 +154,18 @@ The native bionic lane is separate from Android framework testing:
 ./scripts/run-bionic-fixture.sh
 ```
 
-It runs the pinned `termux/termux-docker` ARM64 image, installs the exact
-recorded Termux `clang` package, verifies the installed version with
-`dpkg-query`, and builds an AArch64 PIE with `/system/bin/linker64`. It
-verifies both normal execution and the linker's direct identity probe; ELF
-`DT_NEEDED` output records the fixture's bionic dependencies. The lane retains
-apt logs, package policy, a complete installed package/version inventory, image
-digest, Termux source revision, linker identity, and page-size facts. The
-Termux package index is live, so this is not a full package-resolution
-reproducibility claim. The lane refuses AVD, Waydroid, QEMU, and non-ARM
+It runs the pinned `termux/termux-docker` ARM64 image and uses the live Termux
+package index only to locate the exact compiler packages listed in
+`fixtures/manifest.json`. Every newly installed package has a locked version,
+repository-relative artifact name, SHA-256, license identifiers, and license
+source; the lane verifies the downloaded set and every digest before installing
+it, and fails if the package closure changes. The digest-pinned image fixes the
+base package set. The lane builds an AArch64 PIE with `/system/bin/linker64`,
+verifies normal execution and the linker's direct identity probe, and retains
+the before/after package inventories, lock, hash-verification output, apt logs,
+image digest, Termux source revision, linker identity, and page-size facts.
+This makes the compiler inputs reproducible even though the index used to find
+the pinned artifacts is live. The lane refuses AVD, Waydroid, QEMU, and non-ARM
 fallback; it proves bionic userspace behavior without claiming the Android
 framework or physical-device behavior. HostContext/package handoff evidence
 remains explicitly `unknown` until a dedicated bionic HostContext/package

@@ -155,16 +155,19 @@ no broader relocation-table support is claimed.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and
-page-size facts, the pinned image/source revision, the requested clang version
-verified after installation, and a complete installed package/version
-inventory. The Termux package index remains live, so this evidence is not a
-full package-resolution reproducibility claim. It intentionally excludes
-Android framework, OEM, SELinux, device-kernel, AVD, Waydroid, QEMU, and
-native-bridge claims. The matrix row `runtime.host-context.bionic-handoff`
-remains `unknown` until a dedicated HostContext/package oracle runs a v2 entry
-image through the adapter and retains sealed-image, linker, package, kernel,
-page-size, and no-fallback evidence; the ordinary bionic PIE pass does not
-upgrade it.
+page-size facts, and the pinned image/source revision. The live package index
+is used only to locate the exact compiler dependency set in the manifest;
+versions, artifact paths, SHA-256 hashes, and license identifiers are locked.
+The lane checks the downloaded package set and hashes before installation,
+fails on additional or changed packages, and retains the lock, hash-verification
+output, and before/after inventories. The image digest pins the base userspace,
+so the compiler inputs are reproducible despite the live index. This evidence
+intentionally excludes Android framework, OEM, SELinux, device-kernel, AVD,
+Waydroid, QEMU, and native-bridge claims. The matrix row
+`runtime.host-context.bionic-handoff` remains `unknown` until a dedicated
+HostContext/package oracle runs a v2 entry image through the adapter and
+retains sealed-image, linker, package, kernel, page-size, and no-fallback
+evidence; the ordinary bionic PIE pass does not upgrade it.
 
 The production managed pack path is a separate deliberate migration boundary.
 `ElfPackService` emits legacy frame v1 for the legacy launcher and must not
