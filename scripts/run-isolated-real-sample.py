@@ -34,15 +34,23 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def bounded_preexec(timeout_seconds: int, memory_bytes: int, process_limit: int, output_limit: int) -> None:
+def bounded_preexec(
+    timeout_seconds: int,
+    memory_bytes: int,
+    process_limit: int,
+    output_limit: int,
+    *,
+    set_no_new_privs: bool,
+) -> None:
     os.setsid()
     # PR_SET_NO_NEW_PRIVS=38, PR_SET_NO_NEW_PRIVS_ON=1.  Keep this in the
     # child before bubblewrap starts so the target cannot gain privileges even
     # on hosts whose bubblewrap predates --disable-setuid.
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(38, 1, 0, 0, 0) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, "prctl(PR_SET_NO_NEW_PRIVS) failed")
+    if set_no_new_privs:
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(38, 1, 0, 0, 0) != 0:
+            error = ctypes.get_errno()
+            raise OSError(error, "prctl(PR_SET_NO_NEW_PRIVS) failed")
     resource.setrlimit(resource.RLIMIT_CPU, (timeout_seconds + 1, timeout_seconds + 1))
     resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
     resource.setrlimit(resource.RLIMIT_NPROC, (process_limit, process_limit))
@@ -82,7 +90,8 @@ def main() -> int:
 
     # Mount the archive-derived root as '/', not the checkout or the host's
     # writable filesystem.  /tmp is the only writable target mount.
-    wrapped = [
+    sudo = shutil.which("sudo") if os.geteuid() != 0 else None
+    wrapped = ([sudo, "-n"] if sudo else []) + [
         bwrap,
         "--die-with-parent",
         "--new-session",
@@ -114,6 +123,7 @@ def main() -> int:
                 arguments.memory_bytes,
                 arguments.process_limit,
                 arguments.output_limit,
+                set_no_new_privs=sudo is None,
             ),
         )
     except (OSError, ValueError) as error:
