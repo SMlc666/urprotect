@@ -18,12 +18,18 @@ SYMBOL_FIXTURE := $(BUILD_DIR)/host-context-symbol-fixture.so
 SYMBOL_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-symbol-fixture.o
 SYMBOL_SELF_TEST := $(BUILD_DIR)/host-context-symbol-self-test
 SYMBOL_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_symbol_self_test.o
+DEPENDENCY_FIXTURE := $(BUILD_DIR)/host-context-dependency-fixture.so
+DEPENDENCY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-dependency-fixture.o
+TLS_FIXTURE := $(BUILD_DIR)/host-context-tls-fixture.so
+TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-tls-fixture.o
+PROPERTY_FIXTURE := $(BUILD_DIR)/host-context-property-fixture.so
+PROPERTY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-property-fixture.o
 RUNTIME_OBJECTS := $(BUILD_DIR)/runtime.o $(BUILD_DIR)/sha256.o $(BUILD_DIR)/miniz_tinfl.o
 RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl
 
-.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test contract-probe contract-check clean check-host
+.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test dependency-fixture tls-fixture property-fixture contract-probe contract-check clean check-host
 
 all: test
 
@@ -43,8 +49,14 @@ host-context-launcher: $(HOST_CONTEXT_LAUNCHER)
 
 symbol-fixture: $(SYMBOL_FIXTURE)
 
-symbol-self-test: $(SYMBOL_SELF_TEST)
+symbol-self-test: $(SYMBOL_SELF_TEST) $(SYMBOL_FIXTURE)
 	"$(SYMBOL_SELF_TEST)" "$(SYMBOL_FIXTURE)"
+
+dependency-fixture: $(DEPENDENCY_FIXTURE)
+
+tls-fixture: $(TLS_FIXTURE)
+
+property-fixture: $(PROPERTY_FIXTURE)
 
 test: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
@@ -78,6 +90,18 @@ $(SYMBOL_FIXTURE): $(SYMBOL_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
 	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
 
+$(DEPENDENCY_FIXTURE): $(DEPENDENCY_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) -shared -Wl,--build-id=none,-z,now "$<" -o "$@"
+
+$(TLS_FIXTURE): $(TLS_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) -shared -Wl,--build-id=none,-z,now "$<" -o "$@"
+
+$(PROPERTY_FIXTURE): $(PROPERTY_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) -shared -Wl,--build-id=none,-z,now "$<" -o "$@"
+
 $(ENTRY_FIXTURE_OBJECT): host_context_entry_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
@@ -85,6 +109,18 @@ $(ENTRY_FIXTURE_OBJECT): host_context_entry_fixture.c include/urp/host_context.h
 $(SYMBOL_FIXTURE_OBJECT): host_context_symbol_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
+
+$(DEPENDENCY_FIXTURE_OBJECT): host_context_dependency_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
+
+$(TLS_FIXTURE_OBJECT): host_context_tls_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -ftls-model=initial-exec -c "$<" -o "$@"
+
+$(PROPERTY_FIXTURE_OBJECT): host_context_property_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -mbranch-protection=bti -c "$<" -o "$@"
 
 $(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c include/urp/host_context.h include/urp/runtime.h
 	@mkdir -p "$(BUILD_DIR)"

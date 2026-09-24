@@ -84,51 +84,45 @@ the load map as the runtime authority. `ElfParserTests` provides the positive
 witness and the malformed corpus keeps a paired alignment rejection; this
 proves the parser boundary, not arbitrary loader behavior.
 
-PT_TLS is an explicit rejected HostContext v1 boundary, recorded as
-`runtime.host-context.pt-tls` in the matrix. The current system-loader adapter
-has no contract for TLS module allocation, per-thread initialization, TLS
-relocation models, thread creation/reentrancy, or teardown relative to
-`release_image`; a successful `dlopen` therefore does not establish support.
-The native self-test keeps the unchanged entry fixture as the positive
-HostContext baseline, then mutates a bounded PT_LOAD-covered metadata segment
-into a structurally valid PT_TLS and requires `URP_STATUS_UNSUPPORTED` with no
-handle. A paired mutation with `p_filesz > p_memsz` requires
-`URP_STATUS_LOAD_FAILED`. Generic bounds, file/memory-size, alignment, and
-congruence checks protect these rejection boundaries, but no positive TLS
-fixture or compatibility claim is made until
-the Host Contract defines the missing semantics.
+The HostContext production slice now includes a bounded native-glibc dependency
+and lifecycle witness. A single `DT_NEEDED` system-libc basename is accepted
+with bounded string-table metadata and no RPATH/RUNPATH; the system loader's
+fixed default roots resolve it. The fixture's constructor sets state observed
+by `urp_entry`, and its destructor writes a release marker, proving the
+declared constructor-before-entry and destructor-before-release ordering. This
+does not claim arbitrary dependency graphs, payload-controlled path search,
+reentrancy, or live-thread unload behavior.
 
-PT_GNU_PROPERTY is a separate rejected HostContext v1 feature, recorded as
-`runtime.host-context.gnu-property`. The current system-loader adapter does not
-negotiate GNU properties or define BTI/PAC/instruction-state obligations, so a
-loader that accepts a property note does not establish compatibility. The
-self-test preserves the unchanged entry image as its positive HostContext
-baseline, then changes only the type of a bounded PT_LOAD-covered metadata
-program header to PT_GNU_PROPERTY and requires `URP_STATUS_UNSUPPORTED` with a
-zero image handle before loader handoff. No positive property-bearing
-HostContext fixture or support claim is made until those semantics are part of
-the Host Contract. DT_NEEDED, DT_AUXILIARY, and DT_FILTER dependency metadata form a
-separate rejected boundary recorded as `runtime.host-context.dependency-resolution`.
-HostContext v1 and the current system-loader adapter define no
-dependency-resolution, search-path, symbol-scope, or dependency-lifetime
-semantics, so a loader that can resolve a library does not establish support.
-Its self-test mutates one bounded dynamic-table tag at a time, preserves
-surrounding bytes, initializes a sentinel handle, and requires
-`URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff. The
-unchanged non-dependency entry fixture remains the positive HostContext
-baseline.
+PT_TLS has a bounded validated HostContext slice, recorded as
+`runtime.host-context.pt-tls` in the matrix. It covers AArch64 initial-exec TLS
+with a structurally bounded PT_TLS segment and `R_AARCH64_TLS_TPREL64`; the
+system loader owns module allocation and initialization. The managed v3 oracle
+uses a real TLS-backed entry and returns status 43. Dynamic TLS models,
+new-thread initialization, reentrancy, and unload with live TLS users remain
+outside the claim.
 
-Constructor/destructor metadata is a separate rejected boundary recorded as
-`runtime.host-context.constructor-destructor`. It covers `DT_INIT`, `DT_FINI`,
+PT_GNU_PROPERTY has a bounded validated HostContext feature recorded as
+`runtime.host-context.gnu-property`. The adapter accepts a GNU property note
+containing only AArch64 FEATURE_1 BTI/PAC bits and rejects malformed notes or
+unknown feature bits. A BTI-instrumented property fixture reaches the managed
+v3 entry oracle and returns status 47 on the native glibc lane. PAC negotiation
+beyond the note mask and host instruction-state conflicts remain outside the
+claim. The bounded dependency slice is separately recorded as
+`runtime.host-context.dependency-resolution`: one recognized system-libc
+`DT_NEEDED` basename, bounded string-table metadata, fixed native loader roots,
+and no RPATH/RUNPATH. Arbitrary graphs, filters, auxiliary dependencies, and
+payload-controlled search paths remain rejected.
+
+Constructor/destructor metadata is a separate bounded validated slice recorded
+as `runtime.host-context.constructor-destructor`. Nonzero `DT_INIT`, `DT_FINI`,
 `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`,
-`DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ`. HostContext v1 and the current
-system-loader adapter define no constructor/destructor ordering, callback or
-reentrancy behavior, teardown, or lifecycle ownership semantics. The self-test
-mutates one bounded `DT_NULL` tag at a time, preserves all surrounding bytes,
-initializes a nonzero output-handle sentinel, and requires
-`URP_STATUS_UNSUPPORTED` with a zero handle before loader handoff. The
-unchanged non-lifecycle entry fixture remains the positive HostContext
-baseline.
+`DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` follow the system-loader ordering:
+constructors before entry and destructors during release. HostContext v1 and the current
+system-loader adapter define no callback or reentrancy behavior, live-thread
+teardown, or broader lifecycle ownership semantics. The dependency fixture
+observes constructor state in entry and writes a release marker from its
+destructor; zero-valued lifecycle mutations remain rejected by the native
+self-test.
 
 RPATH/RUNPATH metadata is a separate rejected boundary recorded as
 `runtime.host-context.path-search`. HostContext v1 and the current

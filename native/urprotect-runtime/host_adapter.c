@@ -27,6 +27,10 @@
 #define URP_PT_TLS 7U
 #define URP_PT_GNU_PROPERTY 0x6474e553U
 #define URP_PT_GNU_STACK 0x6474e551U
+#define URP_NOTE_GNU 5U
+#define URP_GNU_PROPERTY_AARCH64_FEATURE_1_AND UINT32_C(0xC0000000)
+#define URP_GNU_PROPERTY_AARCH64_FEATURE_1_BTI UINT32_C(1)
+#define URP_GNU_PROPERTY_AARCH64_FEATURE_1_PAC UINT32_C(2)
 #define URP_PF_W 2U
 #define URP_PF_X 1U
 #define URP_DT_NEEDED 1U
@@ -40,9 +44,12 @@
 #define URP_DT_RELAENT 9U
 #define URP_DT_STRSZ 10U
 #define URP_DT_SYMENT 11U
+#define URP_DT_STRTAB 5U
+#define URP_DT_STRSZ 10U
 #define URP_R_AARCH64_ABS64 257U
 #define URP_R_AARCH64_GLOB_DAT 1025U
 #define URP_R_AARCH64_JUMP_SLOT 1026U
+#define URP_R_AARCH64_TLS_TPREL64 1030U
 #define URP_DT_INIT 12U
 #define URP_DT_FINI 13U
 #define URP_DT_SONAME 14U
@@ -116,22 +123,34 @@ typedef struct urp_fd_image {
 } urp_fd_image;
 
 typedef struct urp_dynamic_values {
+    uint64_t strtab;
+    uint64_t strsz;
+    uint64_t needed_offset;
     uint64_t symtab;
     uint64_t syment;
     uint64_t rela;
     uint64_t relasz;
     uint64_t relaent;
+    uint64_t jmprel;
+    uint64_t pltrelsz;
+    uint64_t pltrel;
     uint64_t relr;
     uint64_t relrsz;
     uint64_t relrent;
     int has_rela;
     int has_symtab;
     int has_syment;
+    int has_strtab;
+    int has_strsz;
+    int has_needed;
     int has_relasz;
     int has_relaent;
     int has_relr;
     int has_relrsz;
     int has_relrent;
+    int has_jmprel;
+    int has_pltrelsz;
+    int has_pltrel;
     int has_flags;
     int has_flags_1;
 } urp_dynamic_values;
@@ -175,6 +194,62 @@ static int urp_checked_mul_u64(uint64_t left, uint64_t right, uint64_t *result)
     }
     *result = left * right;
     return 1;
+}
+
+static int urp_u64_to_size(uint64_t value, size_t *result)
+{
+    if (result == NULL || value > (uint64_t)SIZE_MAX) {
+        return 0;
+    }
+    *result = (size_t)value;
+    return 1;
+}
+
+static int urp_range_in_file(
+    size_t image_size,
+    uint64_t offset,
+    uint64_t length,
+    size_t *offset_out,
+    size_t *length_out);
+
+static urp_status urp_validate_gnu_property(
+    const uint8_t *image,
+    size_t image_size,
+    uint64_t offset,
+    uint64_t size)
+{
+    size_t file_offset;
+    size_t file_size;
+    if (!urp_range_in_file(image_size, offset, size, &file_offset, &file_size)
+        || file_size < 28U) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+    const uint8_t *note = image + file_offset;
+    uint32_t namesz = urp_read_u32_le(note);
+    uint32_t descsz = urp_read_u32_le(note + 4U);
+    uint32_t type = urp_read_u32_le(note + 8U);
+    if (namesz != 4U || descsz < 12U || type != URP_NOTE_GNU
+        || memcmp(note + 12U, "GNU\0", 4U) != 0) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+    size_t property_offset = 16U;
+    if (property_offset + 8U > file_size) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+    uint32_t property_type = urp_read_u32_le(note + property_offset);
+    uint32_t property_size = urp_read_u32_le(note + property_offset + 4U);
+    if (property_type != URP_GNU_PROPERTY_AARCH64_FEATURE_1_AND
+        || property_size != 4U
+        || property_offset + 8U + property_size > file_size) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+    uint32_t features = urp_read_u32_le(note + property_offset + 8U);
+    if ((features & ~(URP_GNU_PROPERTY_AARCH64_FEATURE_1_BTI
+        | URP_GNU_PROPERTY_AARCH64_FEATURE_1_PAC)) != 0U
+        || features == 0U) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+    return URP_STATUS_OK;
 }
 
 static int urp_range_in_file(
@@ -318,34 +393,28 @@ static int urp_validate_relocation_target(
         NULL);
 }
 
-static urp_status urp_validate_rela(
+static urp_status urp_validate_rela_table(
     const uint8_t *image,
     size_t image_size,
     const urp_dynamic_values *dynamic,
+    uint64_t rela_address,
+    uint64_t rela_size,
     uint64_t program_header_offset,
     uint16_t program_header_count)
 {
-    if (!dynamic->has_rela && (dynamic->has_relasz || dynamic->has_relaent)) {
-        return URP_STATUS_LOAD_FAILED;
-    }
-    if (!dynamic->has_rela) {
-        return URP_STATUS_OK;
-    }
-    if (!dynamic->has_relasz || !dynamic->has_relaent
-        || dynamic->relaent != 24U
-        || dynamic->relasz % dynamic->relaent != 0U) {
+    if (rela_size == 0U || rela_size % 24U != 0U) {
         return URP_STATUS_LOAD_FAILED;
     }
 
     size_t rela_offset;
-    if (dynamic->relasz > (uint64_t)SIZE_MAX
+    if (rela_size > (uint64_t)SIZE_MAX
         || !urp_find_load_range(
             image,
             image_size,
             program_header_offset,
             program_header_count,
-            dynamic->rela,
-            dynamic->relasz,
+            rela_address,
+            rela_size,
             0U,
             1,
             &rela_offset)) {
@@ -353,7 +422,7 @@ static urp_status urp_validate_rela(
     }
 
     const uint8_t *rela = image + rela_offset;
-    size_t entry_count = (size_t)dynamic->relasz / 24U;
+    size_t entry_count = (size_t)rela_size / 24U;
     for (size_t index = 0; index < entry_count; ++index) {
         const uint8_t *entry = rela + index * 24U;
         uint64_t offset = urp_read_u64_le(entry);
@@ -362,7 +431,8 @@ static urp_status urp_validate_rela(
         uint64_t symbol = info >> 32U;
         int symbolic = type == URP_R_AARCH64_ABS64
             || type == URP_R_AARCH64_GLOB_DAT
-            || type == URP_R_AARCH64_JUMP_SLOT;
+            || type == URP_R_AARCH64_JUMP_SLOT
+            || type == URP_R_AARCH64_TLS_TPREL64;
         uint64_t symbol_delta = 0U;
         uint64_t symbol_address = 0U;
         int symbol_range_valid = 1;
@@ -398,6 +468,60 @@ static urp_status urp_validate_rela(
         }
     }
     return URP_STATUS_OK;
+}
+
+static urp_status urp_validate_rela(
+    const uint8_t *image,
+    size_t image_size,
+    const urp_dynamic_values *dynamic,
+    uint64_t program_header_offset,
+    uint16_t program_header_count)
+{
+    if (!dynamic->has_rela && (dynamic->has_relasz || dynamic->has_relaent)) {
+        return URP_STATUS_LOAD_FAILED;
+    }
+    if (!dynamic->has_rela) {
+        return URP_STATUS_OK;
+    }
+    if (!dynamic->has_relasz || !dynamic->has_relaent
+        || dynamic->relaent != 24U) {
+        return URP_STATUS_LOAD_FAILED;
+    }
+    return urp_validate_rela_table(
+        image,
+        image_size,
+        dynamic,
+        dynamic->rela,
+        dynamic->relasz,
+        program_header_offset,
+        program_header_count);
+}
+
+static urp_status urp_validate_plt_rela(
+    const uint8_t *image,
+    size_t image_size,
+    const urp_dynamic_values *dynamic,
+    uint64_t program_header_offset,
+    uint16_t program_header_count)
+{
+    if (!dynamic->has_jmprel && (dynamic->has_pltrelsz || dynamic->has_pltrel)) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+    if (!dynamic->has_jmprel) {
+        return URP_STATUS_OK;
+    }
+    if (!dynamic->has_pltrelsz || !dynamic->has_pltrel
+        || dynamic->pltrel != URP_DT_RELA) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+    return urp_validate_rela_table(
+        image,
+        image_size,
+        dynamic,
+        dynamic->jmprel,
+        dynamic->pltrelsz,
+        program_header_offset,
+        program_header_count);
 }
 
 static urp_status urp_validate_relr(
@@ -498,6 +622,7 @@ static urp_status urp_validate_dynamic_segment(
     const uint8_t *dynamic = image + dynamic_offset;
     size_t entry_count = dynamic_size / URP_ELF_DYNAMIC_ENTRY_SIZE;
     urp_dynamic_values values = {0};
+    size_t needed_count = 0U;
     int terminated = 0;
     for (size_t index = 0; index < entry_count; ++index) {
         const uint8_t *entry = dynamic + index * URP_ELF_DYNAMIC_ENTRY_SIZE;
@@ -509,9 +634,14 @@ static urp_status urp_validate_dynamic_segment(
 
         switch (tag) {
         case URP_DT_NEEDED:
-            /* HostContext v1 has no dependency-resolution or lifetime contract. */
-            return URP_STATUS_UNSUPPORTED;
-        /* HostContext v1 defines no constructor/destructor ordering, callback/reentrancy, teardown, or lifecycle ownership. */
+            /* P3 narrow slice: one system libc basename, no payload-controlled search path. */
+            if (values.has_needed || needed_count++ != 0U) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            values.needed_offset = urp_read_u64_le(entry + 8U);
+            values.has_needed = 1;
+            break;
+        /* P3 bounded slice: the system loader owns constructor/destructor order; zero mutations remain rejected. */
         case URP_DT_INIT:
         case URP_DT_FINI:
         case URP_DT_INIT_ARRAY:
@@ -520,7 +650,11 @@ static urp_status urp_validate_dynamic_segment(
         case URP_DT_FINI_ARRAYSZ:
         case URP_DT_PREINIT_ARRAY:
         case URP_DT_PREINIT_ARRAYSZ:
-            return URP_STATUS_UNSUPPORTED;
+            /* The system loader defines constructor-before-entry and destructor-on-release. */
+            if (urp_read_u64_le(entry + 8U) == 0U) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            break;
         /* HostContext v1 defines no RPATH/RUNPATH search roots, ordering, or precedence. */
         case URP_DT_RPATH:
         case URP_DT_RUNPATH:
@@ -536,9 +670,6 @@ static urp_status urp_validate_dynamic_segment(
         case URP_DT_REL:
         case URP_DT_RELSZ:
         case URP_DT_RELENT:
-        case URP_DT_JMPREL:
-        case URP_DT_PLTRELSZ:
-        case URP_DT_PLTREL:
             return URP_STATUS_UNSUPPORTED;
         /* HostContext v1 does not define Android packed relocation encodings. */
         case URP_DT_ANDROID_REL:
@@ -556,7 +687,11 @@ static urp_status urp_validate_dynamic_segment(
         case URP_DT_VERDEFNUM:
         case URP_DT_VERNEED:
         case URP_DT_VERNEEDNUM:
-            return URP_STATUS_UNSUPPORTED;
+            if (!values.has_needed) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            /* P3 dependency slice delegates libc symbol-version binding to dlopen. */
+            break;
         case URP_DT_FLAGS:
             if (values.has_flags
                 || (urp_read_u64_le(entry + 8U) & ~URP_DF_BIND_NOW) != 0U) {
@@ -592,6 +727,20 @@ static urp_status urp_validate_dynamic_segment(
             values.syment = urp_read_u64_le(entry + 8U);
             values.has_syment = 1;
             break;
+        case URP_DT_STRTAB:
+            if (values.has_strtab) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            values.strtab = urp_read_u64_le(entry + 8U);
+            values.has_strtab = 1;
+            break;
+        case URP_DT_STRSZ:
+            if (values.has_strsz) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            values.strsz = urp_read_u64_le(entry + 8U);
+            values.has_strsz = 1;
+            break;
         case URP_DT_RELASZ:
             if (values.has_relasz) {
                 return URP_STATUS_LOAD_FAILED;
@@ -605,6 +754,27 @@ static urp_status urp_validate_dynamic_segment(
             }
             values.relaent = urp_read_u64_le(entry + 8U);
             values.has_relaent = 1;
+            break;
+        case URP_DT_JMPREL:
+            if (values.has_jmprel) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            values.jmprel = urp_read_u64_le(entry + 8U);
+            values.has_jmprel = 1;
+            break;
+        case URP_DT_PLTRELSZ:
+            if (values.has_pltrelsz) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            values.pltrelsz = urp_read_u64_le(entry + 8U);
+            values.has_pltrelsz = 1;
+            break;
+        case URP_DT_PLTREL:
+            if (values.has_pltrel) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            values.pltrel = urp_read_u64_le(entry + 8U);
+            values.has_pltrel = 1;
             break;
         case URP_DT_RELR:
             if (values.has_relr) {
@@ -636,7 +806,50 @@ static urp_status urp_validate_dynamic_segment(
         return URP_STATUS_LOAD_FAILED;
     }
 
+    if (values.has_needed) {
+        if (!values.has_strtab || !values.has_strsz
+            || values.strsz == 0U
+            || values.needed_offset >= values.strsz
+            || values.strsz > (uint64_t)SIZE_MAX) {
+            return URP_STATUS_LOAD_FAILED;
+        }
+        size_t string_offset;
+        size_t string_size;
+        if (!urp_find_load_range(
+                image,
+                image_size,
+                program_header_offset,
+                program_header_count,
+                values.strtab,
+                values.strsz,
+                0U,
+                1,
+                &string_offset)
+            || !urp_u64_to_size(values.strsz - values.needed_offset, &string_size)) {
+            return URP_STATUS_LOAD_FAILED;
+        }
+        const char *needed = (const char *)(image + string_offset + (size_t)values.needed_offset);
+        size_t max_length = string_size;
+        size_t length = strnlen(needed, max_length);
+        if (length == max_length
+            || (strcmp(needed, "libc.so.6") != 0
+                && strcmp(needed, "libc.so") != 0
+                && strcmp(needed, "libc.musl-aarch64.so.1") != 0
+                && strcmp(needed, "libc.so.1") != 0)) {
+            return URP_STATUS_UNSUPPORTED;
+        }
+    }
+
     urp_status status = urp_validate_rela(
+        image,
+        image_size,
+        &values,
+        program_header_offset,
+        program_header_count);
+    if (status != URP_STATUS_OK) {
+        return status;
+    }
+    status = urp_validate_plt_rela(
         image,
         image_size,
         &values,
@@ -739,13 +952,30 @@ static urp_status urp_validate_image(const void *bytes, size_t image_size)
             break;
         }
         case URP_PT_TLS:
-            /* HostContext v1 has no TLS/thread lifetime contract; keep this boundary fail-closed. */
-            return URP_STATUS_UNSUPPORTED;
+            /* P4-A bounded slice: static initial-exec TLS is owned by the system loader. */
+            if ((flags & URP_PF_X) != 0U
+                || !urp_find_load_range(
+                    image,
+                    image_size,
+                    program_header_offset,
+                    program_header_count,
+                    virtual_address,
+                    memory_size,
+                    URP_PF_W,
+                    0,
+                    NULL)) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            break;
         case URP_PT_INTERP:
             return URP_STATUS_UNSUPPORTED;
         case URP_PT_GNU_PROPERTY:
-            /* HostContext v1 has no property negotiation or instruction-state contract. */
-            return URP_STATUS_UNSUPPORTED;
+            if ((flags & (URP_PF_W | URP_PF_X)) != 0U
+                || urp_validate_gnu_property(image, image_size, file_offset, file_size)
+                    != URP_STATUS_OK) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            break;
         case URP_PT_GNU_STACK:
             if ((flags & URP_PF_X) != 0U) {
                 return URP_STATUS_UNSUPPORTED;

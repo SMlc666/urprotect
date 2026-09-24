@@ -151,6 +151,14 @@ executable pathname.
   It permits only immediate binding dynamic flags and delegates relocation
   application to the system loader. Other symbol binding, PLT, version, and
   dependency semantics remain explicit boundaries.
+- The current HostContext dependency/lifecycle slice accepts one recognized
+  system-libc `DT_NEEDED` basename with bounded `DT_STRTAB`/`DT_STRSZ` metadata
+  and no RPATH/RUNPATH. The system loader's fixed default roots resolve it;
+  payload-controlled search paths and additional dependency graph forms remain
+  rejected. Nonzero constructor/destructor metadata follows the declared
+  system-loader order: constructors before `urp_entry`, destructors during
+  `release_image`. Zero-valued lifecycle mutations remain rejected, and
+  reentrancy/live-thread teardown is not claimed.
 - The constructor/destructor lifecycle boundary is the rejected feature row
   `runtime.host-context.constructor-destructor`. The first native adapter
   rejects `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`,
@@ -217,26 +225,21 @@ executable pathname.
   an executable-stack request returns `URP_STATUS_UNSUPPORTED` before an
   image handle is created. Protection semantics for the accepted
   non-executable case remain delegated to the native system loader.
-- `PT_TLS` is an explicit rejected feature row
-  (`runtime.host-context.pt-tls`). HostContext v1 does not define TLS module
-  allocation, per-thread initialization, TLS relocation models, thread
-  creation/reentrancy, or TLS teardown relative to `release_image`. The adapter
-  therefore returns `URP_STATUS_UNSUPPORTED` before `dlopen` for a structurally
-  bounded PT_TLS mutation; a paired mutation with `p_filesz > p_memsz` returns
-  `URP_STATUS_LOAD_FAILED`. Generic program-header range, file/memory-size,
-  alignment, and congruence checks still run before rejection. The adapter
-  clears the output handle before validation and leaves it zero on every
-  failure path. The self-test's
-  unchanged entry fixture is only the positive non-TLS HostContext baseline; no
-  positive TLS fixture or support claim exists.
-- `PT_GNU_PROPERTY` is a separate rejected feature row
-  (`runtime.host-context.gnu-property`). HostContext v1 and the current
-  system-loader adapter define no property negotiation or BTI/PAC/instruction-
-  state obligations, so acceptance of a property note by `dlopen` alone does
-  not establish support. The self-test keeps the unchanged entry image as the
-  positive baseline, changes only a bounded PT_LOAD-covered metadata program
-  header type to `PT_GNU_PROPERTY`, and requires `URP_STATUS_UNSUPPORTED` with
-  a zero image handle before loader handoff.
+- `PT_TLS` has a bounded validated feature row
+  (`runtime.host-context.pt-tls`). The first slice accepts structurally bounded
+  AArch64 initial-exec TLS with `R_AARCH64_TLS_TPREL64`; the system loader owns
+  module allocation and initialization. The retained managed oracle uses a
+  TLS-backed entry and returns status 43 on the native glibc lane. Dynamic TLS
+  models, new-thread initialization, reentrancy, and unload with live TLS users
+  remain outside the claim; malformed TLS and unsupported models still fail
+  closed.
+- `PT_GNU_PROPERTY` has a bounded validated feature row
+  (`runtime.host-context.gnu-property`). The adapter accepts a GNU property
+  note containing only AArch64 FEATURE_1 BTI/PAC bits and rejects malformed
+  notes or unknown feature bits. A BTI-instrumented property fixture reaches
+  the managed v3 entry oracle and returns status 47 on the native glibc lane;
+  PAC negotiation beyond the note mask and host instruction-state conflicts
+  remain outside the claim.
   `runtime.host-context.dependency-resolution` is a separate rejected
   boundary for `DT_NEEDED`, `DT_AUXILIARY`, and `DT_FILTER`: HostContext v1
   and the current system-loader adapter define no dependency-resolution,

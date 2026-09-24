@@ -181,14 +181,16 @@ deterministic under explicit roots and must define rollback and release order.
 
 ### P4-A — TLS semantics
 
-P4-A defines TLS module/thread ownership, relocation models, thread creation and
-teardown, reentrancy, and unload safety. It requires concurrent fixtures, not
-only static metadata mutations.
+P4-A defines and validates a bounded initial-exec TLS module/relocation slice
+with current-thread initialization and release ordering. Dynamic TLS,
+new-thread initialization, reentrancy, and live-thread unload remain deferred
+until a separate threaded contract and oracle exist.
 
 ### P4-B — GNU property semantics
 
-P4-B defines the bounded AArch64 GNU property subset, including BTI/PAC and
-instruction-state obligations, before accepting property-bearing images.
+P4-B defines and validates the bounded AArch64 FEATURE_1 BTI/PAC property-note
+mask with a BTI-instrumented fixture. Unknown properties and host instruction-
+state conflicts remain rejected until separately specified.
 
 P4-A and P4-B may be designed in parallel after P3, but each has an independent
 runtime oracle and matrix row.

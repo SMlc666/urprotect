@@ -125,6 +125,8 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-stack
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.production-pack
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.dependency-resolution
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.constructor-destructor
       - name: Render compatibility matrix
         run: |
           python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr

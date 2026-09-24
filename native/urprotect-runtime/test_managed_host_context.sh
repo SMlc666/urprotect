@@ -91,4 +91,81 @@ printf 'symbol_profile=host-context-entry\nsymbol_relocation=GLOB_DAT\nsymbol_st
   >"${artifact_root}/symbol-result.txt"
 sha256sum "${symbol_output}" "${script_dir}/build/host-context-symbol-fixture.so" \
   >>"${artifact_root}/sha256.txt"
+
+make -C "${script_dir}" dependency-fixture >>"${artifact_root}/build.log" 2>&1
+dependency_output="${artifact_root}/host-context-dependency-packed"
+dependency_report="${artifact_root}/host-context-dependency-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${script_dir}/build/host-context-dependency-fixture.so" \
+  --output "${dependency_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry \
+  --json "${dependency_report}" \
+  >"${artifact_root}/dependency-pack.log" 2>&1
+set +e
+URP_LIFECYCLE_MARKER="${artifact_root}/lifecycle-marker.txt" \
+  "${dependency_output}" >"${artifact_root}/dependency.stdout" 2>"${artifact_root}/dependency.stderr"
+dependency_status=$?
+set -e
+if [[ "${dependency_status}" -ne 37 ]]; then
+  echo "libc dependency fixture returned ${dependency_status}, expected 37" >&2
+  exit 1
+fi
+if [[ "$(cat "${artifact_root}/lifecycle-marker.txt" 2>/dev/null || true)" != "released" ]]; then
+  echo "dependency destructor did not run before HostContext release completed" >&2
+  exit 1
+fi
+printf 'dependency=libc.so.6\ndependency_status=%s\n' "${dependency_status}" \
+  >"${artifact_root}/dependency-result.txt"
+sha256sum "${dependency_output}" "${script_dir}/build/host-context-dependency-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
+
+make -C "${script_dir}" tls-fixture >>"${artifact_root}/build.log" 2>&1
+tls_output="${artifact_root}/host-context-tls-packed"
+tls_report="${artifact_root}/host-context-tls-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${script_dir}/build/host-context-tls-fixture.so" \
+  --output "${tls_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry \
+  --json "${tls_report}" \
+  >"${artifact_root}/tls-pack.log" 2>&1
+set +e
+"${tls_output}" >"${artifact_root}/tls.stdout" 2>"${artifact_root}/tls.stderr"
+tls_status=$?
+set -e
+if [[ "${tls_status}" -ne 43 ]]; then
+  echo "TLS fixture returned ${tls_status}, expected 43" >&2
+  exit 1
+fi
+printf 'tls_model=initial-exec\ntls_status=%s\n' "${tls_status}" \
+  >"${artifact_root}/tls-result.txt"
+sha256sum "${tls_output}" "${script_dir}/build/host-context-tls-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
+
+make -C "${script_dir}" property-fixture >>"${artifact_root}/build.log" 2>&1
+property_output="${artifact_root}/host-context-property-packed"
+property_report="${artifact_root}/host-context-property-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${script_dir}/build/host-context-property-fixture.so" \
+  --output "${property_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry \
+  --json "${property_report}" \
+  >"${artifact_root}/property-pack.log" 2>&1
+set +e
+"${property_output}" >"${artifact_root}/property.stdout" 2>"${artifact_root}/property.stderr"
+property_status=$?
+set -e
+if [[ "${property_status}" -ne 47 ]]; then
+  echo "GNU property fixture returned ${property_status}, expected 47" >&2
+  exit 1
+fi
+printf 'gnu_property=BTI\nproperty_status=%s\n' "${property_status}" \
+  >"${artifact_root}/property-result.txt"
+sha256sum "${property_output}" "${script_dir}/build/host-context-property-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
 echo "managed HostContext handoff: PASS"

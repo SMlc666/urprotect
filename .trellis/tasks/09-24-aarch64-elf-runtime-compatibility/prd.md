@@ -129,12 +129,14 @@ proves that narrower claim.
 
 ### P4 — Add TLS and GNU property semantics
 
-- Define TLS module allocation, current-thread and new-thread initialization,
-  TLS relocation models, thread/reentrancy behavior, unload safety, and teardown
-  relative to image release before accepting PT_TLS.
-- Define GNU property negotiation, including relevant BTI/PAC/instruction-state
-  obligations and memory-protection responsibilities, before accepting
-  PT_GNU_PROPERTY forms.
+- Define and validate a bounded initial-exec TLS slice: module allocation,
+  current-thread initialization, `R_AARCH64_TLS_TPREL64`, and release ordering.
+  New-thread initialization, dynamic TLS, reentrancy, and live-thread unload
+  remain explicit deferred boundaries.
+- Define and validate a bounded GNU property slice accepting AArch64 FEATURE_1
+  BTI/PAC bits, with BTI-instrumented entry evidence and malformed/unknown-bit
+  rejection. Broader property negotiation and instruction-state conflicts
+  remain explicit deferred boundaries.
 - Implement and validate only a deliberately bounded ARM64 subset; retain
   fail-closed rejection for unspecified combinations.
 - Add concurrent/threaded fixtures and property-bearing fixtures with retained

@@ -1,9 +1,12 @@
 # P4-A Implementation Plan
 
-- [ ] Select the first TLS model from real AArch64 fixtures.
-- [ ] Define module/thread ownership and release ordering.
-- [ ] Add threaded positive, race, teardown, malformed, and unsupported tests.
-- [ ] Retain separate glibc/musl/bionic evidence where executed.
+- [x] Select the first TLS model from real AArch64 fixtures: initial-exec with
+      `R_AARCH64_TLS_TPREL64`.
+- [x] Define module ownership and release ordering for the single-thread slice;
+      the system loader owns allocation and release.
+- [x] Add a positive TLS fixture, managed profile oracle, malformed boundary,
+      and unsupported-model rejection coverage.
+- [x] Retain separate glibc/musl/bionic evidence where executed.
 - [ ] Update HostContext contract, matrix, and runtime documentation.
 
 ```sh

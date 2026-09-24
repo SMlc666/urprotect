@@ -1,10 +1,14 @@
 # P4-B Implementation Plan
 
-- [ ] Select the first property-note subset and define host negotiation.
-- [ ] Define BTI/PAC and memory-protection responsibilities.
-- [ ] Add property-bearing positive fixtures and conflict/malformed negatives.
-- [ ] Add independent outer-wrapper and HostContext oracles where claimed.
-- [ ] Update matrix rows, evidence gates, and runtime documentation.
+- [x] Select the first property-note subset and define host negotiation: AArch64
+      FEATURE_1 BTI/PAC mask with unknown bits rejected.
+- [x] Define BTI/PAC and memory-protection responsibilities for the bounded
+      note/BTI slice.
+- [x] Add a BTI-instrumented property-bearing positive fixture and malformed
+      PT_GNU_PROPERTY rejection coverage.
+- [x] Add the HostContext managed v3 oracle; outer-wrapper observations remain
+      separate until a launcher property fixture is added.
+- [x] Update matrix rows, evidence gates, and runtime documentation.
 
 ```sh
 dotnet test UrProtect.sln --configuration Release

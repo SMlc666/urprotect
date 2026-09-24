@@ -13,20 +13,22 @@ thread behavior, and image release.
 
 ## Requirements
 
-- Define TLS module allocation, current-thread initialization, new-thread
-  initialization, TLS relocation models, thread exit, reentrancy, unload safety,
-  and teardown relative to `release_image`.
-- Select a bounded first TLS model from real AArch64 fixtures.
-- Add a real threaded fixture and deterministic concurrent entry/lifecycle
-  oracle; static PT_TLS mutation alone is insufficient.
+- Define the bounded first slice: AArch64 initial-exec TLS module allocation,
+  current-thread initialization, `R_AARCH64_TLS_TPREL64`, and release ordering.
+- Explicitly defer dynamic TLS, new-thread initialization, reentrancy, and
+  unload while live TLS users exist; those combinations remain rejected or
+  unknown until a threaded contract is added.
+- Add a real TLS-backed fixture and deterministic managed entry oracle; static
+  PT_TLS mutation alone is insufficient.
 - Record separate runtime evidence for each glibc, musl, and bionic fact.
 - Keep unspecified TLS models and unsafe unload cases fail-closed.
 
 ## Acceptance criteria
 
 - [ ] The HostContext contract names the supported TLS model and lifetime rules.
-- [ ] Current and newly created threads observe the declared TLS behavior.
-- [ ] Release waits for or rejects live TLS users according to the contract.
+- [ ] A future threaded child proves newly created threads observe TLS values.
+- [x] The current single-thread release boundary is delegated to the system
+      loader; live-thread unload remains explicitly deferred.
 - [ ] Race, teardown, malformed, and unsupported cases have stable outcomes.
 - [ ] The matrix has a positive TLS row only after retained threaded evidence.
 

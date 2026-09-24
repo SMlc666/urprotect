@@ -15,11 +15,12 @@ HostContext execution without treating loader acceptance as semantic support.
 
 ## Requirements
 
-- Define the accepted property-note subset and host negotiation behavior.
+- Define the accepted property-note subset and host negotiation behavior. The
+  first slice accepts AArch64 FEATURE_1 BTI/PAC bits and rejects unknown bits.
 - Define BTI/PAC instruction-state obligations and memory-protection ownership.
 - Distinguish parser recognition, outer-wrapper execution, and HostContext
   acceptance in the compatibility matrix.
-- Add property-bearing fixtures, host-state observations, and paired unsupported
+- Add a BTI-instrumented property-bearing fixture, host-state observations, and paired unsupported
   or conflicting-property cases.
 - Keep unspecified or conflicting properties fail-closed.
 
