@@ -46,22 +46,22 @@ behavior, proof status, fixture selection, and CI gates.
 
 ## Acceptance Criteria
 
-- [ ] The manifest and scripts no longer expose project-owned
+- [x] The manifest and scripts no longer expose project-owned
       profiles/--profile compatibility terminology.
-- [ ] A schema validator rejects missing, duplicate, contradictory, or
+- [x] A schema validator rejects missing, duplicate, contradictory, or
       evidence-free matrix rows.
-- [ ] The current fixture set is represented as matrix cases with explicit
+- [x] The current fixture set is represented as matrix cases with explicit
       toolchain/runtime/artifact facts.
-- [ ] At least one positive, one rejected, and one unknown row flow through the
+- [x] At least one positive, one rejected, and one unknown row flow through the
       validator and CI reporting.
-- [ ] CI fails when a claimed row lacks its required proof/model/fixture
+- [x] CI fails when a claimed row lacks its required proof/model/fixture
       evidence, while optional execution evidence remains clearly labeled.
-- [ ] Native ARM64 bionic evidence is retained and mapped to the features it
+- [x] Native ARM64 bionic evidence is retained and mapped to the features it
   actually exercises, without upgrading Android framework/device claims.
-- [ ] The matrix records the pinned Termux Docker source commit and ARM64 image
+- [x] The matrix records the pinned Termux Docker source commit and ARM64 image
       digest, and rejects a bionic row whose direct linker or architecture
       checks are absent.
-- [ ] Generated documentation explains the conditional Host Contract claim and
+- [x] Generated documentation explains the conditional Host Contract claim and
       does not claim universal physical-device compatibility.
 
 ## Out of Scope
@@ -70,9 +70,3 @@ behavior, proof status, fixture selection, and CI gates.
 - Treating a single emulator/device run as a universal proof.
 - Adding a new runtime backend without the Host Contract and feature evidence
   owned by the other child tasks.
-
-## Notes
-
-- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- The child design and implementation artifacts are present; implementation
-  still waits for the parent planning review and task start.

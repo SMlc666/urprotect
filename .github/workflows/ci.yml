@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_release_fixtures:
+        description: Run the release-tier compatibility fixture and evidence gates without publishing a release.
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 3 * * *'
   release:
@@ -59,6 +64,8 @@ jobs:
         run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
       - name: Check coverage floor
         run: python3 scripts/check-coverage.py
+      - name: Check compatibility matrix contract
+        run: python3 tests/test_fixture_matrix.py
       - name: Fixture smoke
         run: ./scripts/run-fixture-matrix.sh --tier pr
       - name: Check PR fixture evidence
@@ -74,7 +81,9 @@ jobs:
           ./scripts/run-packed-fixture-matrix.sh --tier pr \
             2>&1 | tee .artifacts/packed/pr/handoff.log
       - name: Check PR handoff evidence
-        run: python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
+        run: |
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.wrapper-v1-baseline
       - name: HostContext runtime contract smoke
         run: |
           mkdir -p .artifacts/host-context/pr
@@ -84,16 +93,34 @@ jobs:
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v1
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v2
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-image-boundaries
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-lifecycle-path-search
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.pt-tls
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-property
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.dependency-resolution
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.constructor-destructor
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.path-search
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.text-relocation
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.unsupported-relocation-table
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.sectionless-image
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-relro
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-stack
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
       - name: Render compatibility matrix
         run: |
           python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
           python3 scripts/render-compatibility-matrix.py \
             fixtures/manifest.json --output .artifacts/compatibility-matrix.md
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("fixtures/manifest.json").read_text())
+          feature = next(
+              item for item in manifest["features"]
+              if item["id"] == "runtime.host-context.bionic-handoff"
+          )
+          if feature["status"] != "validated":
+              raise SystemExit("bionic HostContext handoff must remain validated only with its dedicated oracle")
+          PY
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -132,6 +159,8 @@ jobs:
             --execution native-arm64-bionic-container
           python3 scripts/check-evidence.py fixtures/manifest.json \
             --feature runtime.bionic.linker
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --feature runtime.host-context.bionic-handoff
       - name: Upload bionic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -255,8 +284,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Select fixture tier
+        env:
+          RUN_RELEASE_FIXTURES: ${{ inputs.run_release_fixtures }}
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == release ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == release || "${RUN_RELEASE_FIXTURES}" == true ]]; then
             echo 'FIXTURE_TIER=release' >> "$GITHUB_ENV"
           else
             echo 'FIXTURE_TIER=nightly' >> "$GITHUB_ENV"
@@ -310,6 +341,9 @@ jobs:
       - name: Check nightly native Linux evidence
         if: env.FIXTURE_TIER == 'nightly'
         run: python3 scripts/check-evidence.py fixtures/manifest.json --tier nightly --execution native-linux
+      - name: Check release native Linux evidence
+        if: env.FIXTURE_TIER == 'release'
+        run: python3 scripts/check-evidence.py fixtures/manifest.json --tier release --execution native-linux
       - name: Upload fixture evidence
         if: always()
         uses: actions/upload-artifact@v4

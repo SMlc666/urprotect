@@ -45,7 +45,7 @@ header is 136 bytes and uses a frame-relative encoded offset because the
 standalone runtime receives the frame slice directly. Legacy v1 retains its
 wrapper-absolute encoded offset for the existing launcher.
 
-The managed and native standalone handoff uses the same sequence:
+The legacy managed/native standalone handoff retains its v1 sequence:
 
 ```text
 memfd_create(name, MFD_CLOEXEC)
@@ -54,6 +54,21 @@ memfd_create(name, MFD_CLOEXEC)
 -> execveat(fd, "", argv, envp, AT_EMPTY_PATH)
 ```
 
+The HostContext system-loader adapter uses a separate sealed-image sequence:
+
+```text
+memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING)
+-> write verified source bytes and rewind
+-> fchmod(fd, 0700)
+-> F_ADD_SEALS(F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
+-> F_GET_SEALS and require every seal
+-> dlopen(/proc/self/fd/<fd>, RTLD_NOW | RTLD_LOCAL)
+```
+
+A failed or incomplete seal operation closes the descriptor and fails before
+loader handoff; the virtual proc reference is not a payload-controlled
+executable pathname.
+
 ### 3. Contracts
 
 #### HostContext
@@ -61,7 +76,13 @@ memfd_create(name, MFD_CLOEXEC)
 - `load_image` consumes verified bytes before returning and returns an opaque
   image handle whose lifetime ends at `release_image`.
 - The runtime requests `URP_LOAD_IMAGE_IMMUTABLE`; the host must not mutate
-  the supplied image bytes after the load operation accepts them.
+  the supplied image bytes after the load operation accepts them. The native
+  adapter enforces this with a sealing-enabled memfd: it adds and verifies
+  `F_SEAL_WRITE`, `F_SEAL_SHRINK`, `F_SEAL_GROW`, and `F_SEAL_SEAL` after the
+  complete write and before `dlopen`, and fails closed when sealing is absent.
+- The native self-test exposes a test-visible live-handle seal invariant; a
+  positive HostContext dispatch is not evidence of immutability unless that
+  invariant passes.
 - `lookup_symbol` resolves the exact declared entry symbol for the loaded
   image; legacy v1 defaults to `urp_entry` and HostContext v2 carries the
   bounded symbol name explicitly.
@@ -81,24 +102,117 @@ memfd_create(name, MFD_CLOEXEC)
   slice accepts only checked `RELATIVE`/`RELR` targets, permits only immediate
   binding dynamic flags, and delegates relocation application to the system
   loader.
-- The first native adapter rejects `DT_INIT`, `DT_FINI`, `DT_RPATH`,
-  `DT_RUNPATH`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`,
-  `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` with
-  `URP_STATUS_UNSUPPORTED` before creating an image handle. The native
-  self-test mutates a bounded `DT_NULL` tag one case at a time, verifies that
-  no other image bytes changed, and requires a zero output handle.
+- The constructor/destructor lifecycle boundary is the rejected feature row
+  `runtime.host-context.constructor-destructor`. The first native adapter
+  rejects `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`,
+  `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and
+  `DT_PREINIT_ARRAYSZ` with `URP_STATUS_UNSUPPORTED` before constructor or
+  destructor execution and image-handle creation. HostContext v1 and the
+  current system-loader adapter define no constructor/destructor ordering,
+  callback or reentrancy behavior, teardown, or lifecycle ownership semantics.
+  The native self-test mutates one bounded `DT_NULL` tag at a time, preserves
+  surrounding bytes, initializes a nonzero sentinel, and requires a zero
+  output handle.
+- RPATH/RUNPATH are the separate rejected feature row
+  `runtime.host-context.path-search`. HostContext v1 and the current
+  system-loader adapter define no dynamic path-search roots, ordering, or
+  precedence semantics, so each bounded tag mutation fails closed before
+  loader handoff. Unsupported relocation-table tags use the separate
+  `runtime.host-context.unsupported-relocation-table` rejection boundary and
+  are not included in this row.
+- `DT_TEXTREL` writable-text relocation metadata is the separate rejected
+  feature row `runtime.host-context.text-relocation`. HostContext v1 and the
+  current system-loader adapter define no writable-text relocation or
+  W^X/protection semantics for in-process images, so loader acceptance alone
+  does not establish support. The native self-test mutates one bounded
+  `DT_NULL` tag to `DT_TEXTREL`, preserves surrounding bytes, initializes a
+  nonzero output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a
+  zero handle before loader handoff. The unchanged non-text-relocation entry
+  fixture remains the positive HostContext baseline. Unsupported relocation-
+  table tags use the separate `runtime.host-context.unsupported-relocation-table`
+  rejection boundary; checked AArch64 `RELATIVE`/`RELR` acceptance and
+  system-loader application remain the validated `elf.relocation.aarch64-relative`
+  feature.
+- Unsupported dynamic relocation-table tags are an independently rejected
+  HostContext v1 feature recorded as
+  `runtime.host-context.unsupported-relocation-table`. It covers `DT_REL`,
+  `DT_RELSZ`, `DT_RELENT`, `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL`; the
+  current system-loader contract defines only the checked AArch64
+  `RELATIVE`/`RELR` path, so these forms are rejected before relocation
+  processing or image-handle creation. The native self-test mutates one
+  bounded `DT_NULL` tag at a time, preserves surrounding bytes, initializes a
+  nonzero sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero output
+  handle. The unchanged `RELATIVE`/`RELR` fixture remains the positive
+  baseline; no broader relocation-table support is claimed.
+- Android packed relocation encodings are separately rejected as
+  `runtime.host-context.android-packed-relocation`. The adapter rejects
+  `DT_ANDROID_REL`, `DT_ANDROID_RELSZ`, `DT_ANDROID_RELA`,
+  `DT_ANDROID_RELASZ`, `DT_ANDROID_RELR`, `DT_ANDROID_RELRSZ`,
+  `DT_ANDROID_RELRENT`, and `DT_ANDROID_RELRCOUNT` before loader handoff,
+  because HostContext v1 defines only the checked AArch64 `RELATIVE`/`RELR`
+  path. ELF symbol-version metadata
+  is the separate rejected boundary `runtime.host-context.symbol-version`;
+  it covers `DT_VERSYM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERNEED`, and
+  `DT_VERNEEDNUM`, since the v1 entry lookup contract is unversioned. The
+  native self-test mutates one bounded `DT_NULL` tag at a time, preserves
+  surrounding bytes, initializes a nonzero sentinel, and requires
+  `URP_STATUS_UNSUPPORTED` with a zero output handle. The unchanged
+  `RELATIVE`/`RELR`, unversioned entry fixture remains the positive baseline;
+  no version negotiation or Android packed relocation support is claimed.
 - A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
   when that range is inside the image and `p_memsz >= p_filesz`; the real
   adapter must still dispatch the entry. The native system loader owns the
   resulting memory protection semantics, so this row is implementation
   evidence rather than proof of a custom RELRO loader.
+- The first native adapter accepts `PT_GNU_STACK` only when `PF_X` is clear;
+  an executable-stack request returns `URP_STATUS_UNSUPPORTED` before an
+  image handle is created. Protection semantics for the accepted
+  non-executable case remain delegated to the native system loader.
+- `PT_TLS` is an explicit rejected feature row
+  (`runtime.host-context.pt-tls`). HostContext v1 does not define TLS module
+  allocation, per-thread initialization, TLS relocation models, thread
+  creation/reentrancy, or TLS teardown relative to `release_image`. The adapter
+  therefore returns `URP_STATUS_UNSUPPORTED` before `dlopen` for a structurally
+  bounded PT_TLS mutation; a paired mutation with `p_filesz > p_memsz` returns
+  `URP_STATUS_LOAD_FAILED`. Generic program-header range, file/memory-size,
+  alignment, and congruence checks still run before rejection. The adapter
+  clears the output handle before validation and leaves it zero on every
+  failure path. The self-test's
+  unchanged entry fixture is only the positive non-TLS HostContext baseline; no
+  positive TLS fixture or support claim exists.
+- `PT_GNU_PROPERTY` is a separate rejected feature row
+  (`runtime.host-context.gnu-property`). HostContext v1 and the current
+  system-loader adapter define no property negotiation or BTI/PAC/instruction-
+  state obligations, so acceptance of a property note by `dlopen` alone does
+  not establish support. The self-test keeps the unchanged entry image as the
+  positive baseline, changes only a bounded PT_LOAD-covered metadata program
+  header type to `PT_GNU_PROPERTY`, and requires `URP_STATUS_UNSUPPORTED` with
+  a zero image handle before loader handoff.
+  `runtime.host-context.dependency-resolution` is a separate rejected
+  boundary for `DT_NEEDED`, `DT_AUXILIARY`, and `DT_FILTER`: HostContext v1
+  and the current system-loader adapter define no dependency-resolution,
+  search-path, symbol-scope, or dependency-lifetime semantics, so a loader
+  that can resolve a library does not establish support. The bounded mutations
+  keep the unchanged non-dependency entry fixture as the positive baseline and
+  require a zero image handle before loader handoff.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid
   when the congruence holds.
 - The matrix is sourced from `fixtures/manifest.json`, uses tiers (`pr`,
   `nightly`, `release`), and records `proven`, `validated`, `rejected`, or
-  `unknown` for each feature.
+  `unknown` for each feature. The release tier is a documented covering slice:
+  it adds one existing `gcc-c` producer with a `release-hardened` variant and
+  a readelf oracle for GNU RELRO and BIND_NOW rather than a blind Cartesian
+  product.
+- The production managed pack path intentionally emits legacy frame v1 for
+  the legacy launcher. `runtime.host-context.production-pack` is an explicit
+  `unknown` migration boundary until the missing HostContext entry-image
+  adapter, v2-capable launcher, and managed pack/dispatch oracle are retained;
+  no v2 frame may be forced into the legacy path.
+- `runtime.wrapper-v1-baseline` keeps Wrapper 0.2 framing and launcher tests as
+  migration evidence only; the Android `android.jni.native-bridge` row is an
+  unwrapped JNI baseline. Neither row upgrades HostContext runtime support.
 
 #### Environment keys
 
@@ -109,8 +223,24 @@ memfd_create(name, MFD_CLOEXEC)
 - `NATIVE_LAUNCHER_CC` selects the native launcher compiler in tests.
 
 The bionic lane must use the pinned Termux image and exact compiler/linker
-facts from the manifest. It must refuse AVD, Waydroid, QEMU, native bridge,
-and non-ARM execution rather than silently falling back.
+facts from the manifest. The live package index may locate artifacts, but the
+complete newly installed compiler dependency closure must be version- and
+SHA-256-locked, with license identifiers and sources recorded in the lock.
+Before installation, the lane verifies that the downloaded artifacts exactly
+match the lock and hashes; it fails on missing, changed, or additional packages.
+The image digest pins the base userspace. The lane retains the lock, hash
+verification, apt logs, package policy, before/after package inventories, and
+reports `packageIndex: live` with `packageInputsReproducible: true` to distinguish live
+artifact discovery from pinned package inputs. It must record both host and
+container kernel/page-size facts and refuse AVD, Waydroid, QEMU, native bridge,
+and non-ARM execution rather than silently falling back. The bionic lane now
+builds and runs the native HostContext self-test: a v2 frame exercises the real
+bionic adapter, verifies required memfd seals, dispatches the entry, releases
+the image, and retains its log and fixture ELF. This makes only
+`runtime.host-context.bionic-handoff` validated for that adapter slice. The
+production managed-pack row `runtime.host-context.production-pack` remains
+`unknown` until a managed pack/dispatch oracle runs through a v2-capable
+launcher; the bionic adapter test does not upgrade that separate row.
 
 ### 4. CI Evidence Postconditions
 
@@ -168,9 +298,13 @@ oracle's retained output, not only source files that describe the oracle.
 - `native/urprotect-launcher/test_managed_handoff.sh`: assert the managed
   self-contained host uses the same anonymous handoff and preserves the
   baseline shell result.
-- `scripts/validate-fixtures.py fixtures/manifest.json --tier pr`: assert
-  feature references, status/evidence completeness, pinned bionic facts, and
-  tier selection.
+- `scripts/validate-fixtures.py fixtures/manifest.json --tier pr` and
+  `scripts/validate-fixtures.py fixtures/manifest.json --tier release`: assert
+  feature references, status/evidence completeness, pinned bionic facts, the
+  release hardening covering case, and tier selection.
+- `scripts/check-evidence.py fixtures/manifest.json --tier release`: run in the
+  release fixture producer after the release case completes; it must check the
+  retained release artifact path.
 - `scripts/run-bionic-fixture.sh`: on a native ARM64 Docker host, assert image
   digest, AArch64 architecture, page size, `/system/bin/linker64`, exact
   `clang` package, ELF `ET_DYN`/`PT_INTERP`, direct linker identity, and no

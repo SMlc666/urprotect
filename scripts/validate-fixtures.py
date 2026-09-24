@@ -141,11 +141,12 @@ def validate_android(android: object) -> None:
             fail(f"fixture manifest android.container.{field} must be a lowercase SHA-256")
 
 
-def validate_features(data: dict[str, object]) -> set[str]:
+def validate_features(data: dict[str, object]) -> dict[str, str]:
     features = data.get("features")
     if not isinstance(features, list) or not features:
         fail("fixture manifest must contain a non-empty features array")
 
+    statuses: dict[str, str] = {}
     ids: set[str] = set()
     for feature in features:
         if not isinstance(feature, dict):
@@ -167,12 +168,13 @@ def validate_features(data: dict[str, object]) -> set[str]:
             require_text(feature, "reason", feature_id)
             require_text(feature, "negativeWitness", feature_id)
             require_text(feature, "negativeOracle", feature_id)
-    return ids
+        statuses[feature_id] = status
+    return statuses
 
 
 def validate_case(
     case: object,
-    feature_ids: set[str],
+    feature_statuses: dict[str, str],
     repo_root: Path,
     ids: set[str],
     requested: str,
@@ -191,15 +193,35 @@ def validate_case(
         or any(not isinstance(feature, str) for feature in features)
     ):
         fail(f"{case_id}.features must be a non-empty string array")
-    missing_features = set(features) - feature_ids
+    if len(set(features)) != len(features):
+        fail(f"{case_id}.features must not contain duplicate feature identifiers")
+    missing_features = set(features) - feature_statuses.keys()
     if missing_features:
         fail(f"{case_id} references unknown features: {sorted(missing_features)}")
 
     tier = require_text(case, "tier", case_id)
     if tier not in TIERS:
         fail(f"{case_id} has unsupported tier {tier!r}")
+    variant = case.get("variant")
+    if variant is not None and variant != "release-hardened":
+        fail(f"{case_id}.variant is unsupported: {variant!r}")
+    if tier == "release" and variant != "release-hardened":
+        fail(f"{case_id} release cases must declare the release-hardened variant")
+    if tier != "release" and variant is not None:
+        fail(f"{case_id}.variant is reserved for release cases")
     if not isinstance(case["required"], bool):
         fail(f"{case_id}.required must be boolean")
+    if case["required"]:
+        unsupported_features = {
+            feature: feature_statuses[feature]
+            for feature in features
+            if feature_statuses[feature] in {"rejected", "unknown"}
+        }
+        if unsupported_features:
+            fail(
+                f"{case_id} is required but references non-supporting features: "
+                f"{unsupported_features}"
+            )
     execution = require_text(case, "execution", case_id)
     if execution not in EXECUTIONS:
         fail(f"{case_id} has unsupported execution {execution!r}")
@@ -230,12 +252,75 @@ def validate_case(
             fail(f"{case_id}.host.sourceCommit must be a 40-character lowercase commit")
         if compiler_package != "clang=21.1.8-3":
             fail(f"{case_id}.host.compilerPackage must pin clang=21.1.8-3")
+        package_repository = host.get("packageRepository")
+        if package_repository != "https://packages-cf.termux.dev/apt/termux-main":
+            fail(f"{case_id}.host.packageRepository must identify the pinned Termux package source")
+        compiler_packages = host.get("compilerPackages")
+        if not isinstance(compiler_packages, list) or not compiler_packages:
+            fail(f"{case_id}.host.compilerPackages must be a non-empty locked package array")
+        locked_versions: dict[str, str] = {}
+        locked_filenames: set[str] = set()
+        for package_index, package in enumerate(compiler_packages):
+            package_label = f"{case_id}.host.compilerPackages[{package_index}]"
+            if not isinstance(package, dict):
+                fail(f"{package_label} must be an object")
+            name = package.get("name")
+            version = package.get("version")
+            filename = package.get("filename")
+            digest = package.get("sha256")
+            licenses = package.get("licenses")
+            license_source = package.get("licenseSource")
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9+.-]*", name):
+                fail(f"{package_label}.name must be a valid package name")
+            if name in locked_versions:
+                fail(f"{case_id}.host.compilerPackages contains duplicate package {name!r}")
+            if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]+", version):
+                fail(f"{package_label}.version must be an exact package version")
+            if not isinstance(filename, str) or not filename.startswith("pool/") or ".." in filename.split("/"):
+                fail(f"{package_label}.filename must be a repository-relative pool path")
+            if not filename.endswith("_aarch64.deb") or filename in locked_filenames:
+                fail(f"{package_label}.filename must be a unique AArch64 Debian package")
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                fail(f"{package_label}.sha256 must be a lowercase SHA-256 digest")
+            if not isinstance(licenses, list) or not licenses or any(
+                not isinstance(license_id, str) or not license_id.strip()
+                for license_id in licenses
+            ):
+                fail(f"{package_label}.licenses must be a non-empty license identifier array")
+            if not isinstance(license_source, str) or not license_source.strip():
+                fail(f"{package_label}.licenseSource must identify its license record source")
+            locked_versions[name] = version
+            locked_filenames.add(filename)
+        expected_compiler_packages = {
+            "clang",
+            "libcompiler-rt",
+            "libllvm",
+            "libxml2",
+            "lld",
+            "llvm",
+            "make",
+            "ndk-sysroot",
+        }
+        if set(locked_versions) != expected_compiler_packages:
+            fail(f"{case_id}.host.compilerPackages must lock the exact compiler dependency set")
+        if locked_versions.get("clang") != compiler_package.split("=", 1)[1]:
+            fail(f"{case_id}.host.compilerPackages clang version must match compilerPackage")
         if linker != "/system/bin/linker64":
             fail(f"{case_id}.host.linker must be /system/bin/linker64")
         if host.get("environment") != "termux-userspace" or host.get("androidRuntime") is not False:
             fail(f"{case_id}.host must identify a non-Android Termux userspace")
         if host.get("pageSize") != "recorded":
             fail(f"{case_id}.host.pageSize must be recorded")
+        if host.get("architecture") != "aarch64":
+            fail(f"{case_id}.host.architecture must be aarch64")
+        if host.get("kernel") != "recorded":
+            fail(f"{case_id}.host.kernel must be recorded")
+        if host.get("packageIndex") != "live":
+            fail(f"{case_id}.host.packageIndex must identify the package index used for lookup")
+        if host.get("packageInputsReproducible") is not True:
+            fail(f"{case_id}.host.packageInputsReproducible must be true for the exact version/SHA-256 package lock")
+        if host.get("packageProvenance") != "version-and-sha256-locked-package-set":
+            fail(f"{case_id}.host.packageProvenance must identify the exact package lock contract")
     elif execution == "native-linux":
         if host.get("environment") != "native-arm64-linux":
             fail(f"{case_id}.host.environment must identify native ARM64 Linux")
@@ -255,13 +340,21 @@ def main() -> int:
         fail("fixture manifest root must be an object")
     if data.get("schemaVersion") != 3:
         fail("fixture manifest schemaVersion must be 3")
+    coverage = data.get("coverage")
+    if not isinstance(coverage, dict) or coverage.get("strategy") != "feature-covering":
+        fail("fixture manifest coverage.strategy must be feature-covering")
+    rules = coverage.get("rules")
+    if not isinstance(rules, list) or not rules or any(
+        not isinstance(rule, str) or not rule for rule in rules
+    ):
+        fail("fixture manifest coverage.rules must be a non-empty string array")
     host_contract = data.get("hostContract")
     if not isinstance(host_contract, dict) or host_contract.get("id") != "urp-host-v1":
         fail("fixture manifest hostContract must identify urp-host-v1")
     if host_contract.get("version") != 1:
         fail("fixture manifest hostContract version must be 1")
     validate_android(data.get("android"))
-    feature_ids = validate_features(data)
+    feature_statuses = validate_features(data)
     cases = data.get("cases")
     if not isinstance(cases, list) or not cases:
         fail("fixture manifest must contain a non-empty cases array")
@@ -272,7 +365,7 @@ def main() -> int:
     for case in cases:
         selected_case = validate_case(
             case,
-            feature_ids,
+            feature_statuses,
             repo_root,
             ids,
             requested,
@@ -291,6 +384,13 @@ def main() -> int:
             validate_reference(
                 feature["negativeWitness"],
                 f"{feature_id}.negativeWitness",
+                repo_root,
+                case_ids,
+            )
+        if "negativeOracle" in feature:
+            validate_reference(
+                feature["negativeOracle"],
+                f"{feature_id}.negativeOracle",
                 repo_root,
                 case_ids,
             )

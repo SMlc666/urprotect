@@ -52,18 +52,41 @@ structure:
     int32_t urp_entry(const struct urp_host_context_v1 *host,
                       const struct urp_launch_args_v1 *args);
 
-The exact typedef spelling, callback flags, handle representation, and stable
-diagnostic codes are frozen in a native public header before implementation.
-The design intentionally keeps the first surface small. Memory allocation,
-thread creation, TLS, and synchronization are not passed as callbacks unless
-an accepted payload feature requires them; an image that requires an absent
-capability is rejected before entry.
+The exact typedef spelling, callback flags, handle representation, capability
+bits, and stable status codes are frozen in
+`native/urprotect-runtime/include/urp/host_context.h`. The four callbacks are
+the complete v1 host surface; their capability semantics are:
+
+- `load_image` is the single mapping/protection boundary. The host consumes the
+  bytes synchronously, returns an opaque handle, and keeps the mapped image
+  valid through entry dispatch. The native adapter uses a sealed memfd plus
+  the platform's `dlopen`; the system loader owns page mapping and protection.
+- `lookup_symbol` resolves the named entry in that handle. The current adapter
+  accepts unversioned lookup only and rejects `DT_VERSYM`, `DT_VERDEF*`, and
+  `DT_VERNEED*` metadata before loader handoff.
+- `release_image` tears down the handle after the entry returns. Dependency
+  loading, symbol scope, search paths, and dependency lifetime are not separate
+  host capabilities in v1; `DT_NEEDED`, `DT_AUXILIARY`, `DT_FILTER`,
+  `DT_RPATH`, and `DT_RUNPATH` are rejected.
+- `emit_diagnostic` is optional; load, lookup, and release are mandatory. The
+  callback reports a stable code/message and must not throw across the C ABI.
+
+Only checked AArch64 `RELATIVE`/`RELR` relocation targets are accepted for the
+system loader to apply. REL/PLT tables and Android packed relocation tags are
+rejected. The ABI supplies no TLS module/thread state, thread-creation,
+reentrancy, synchronization, file-descriptor, or generic I/O callbacks;
+`urp_launch_args_v1` carries only `argc`, `argv`, and `envp`. PT_TLS and
+constructor/destructor metadata are rejected, and the contract makes no
+normalization claim about inherited process descriptors or runtime-created
+threads. An image requiring these semantics does not enter the accepted
+HostContext v1 language.
 
 The host owns userdata and image handles. The runtime owns the decoded byte
-buffer until load_image returns. The host must not retain the byte pointer
-after the callback. A successful image handle remains valid until release or
-entry return, whichever contract rule is stricter. Callbacks must not throw
-across the ABI and must return a documented negative error code on failure.
+buffer until `load_image` returns; the host must not retain the byte pointer
+after that callback. A successful handle remains valid during entry and is
+released after entry returns, including a nonzero entry result. The runtime
+does not invoke host callbacks after `release_image` returns. Every callback
+returns a documented `urp_status` on failure.
 
 ## Frame and ABI Versioning
 
@@ -89,11 +112,12 @@ connect this callback to a platform-native FD or memory-backed loader where
 available. It must not fall back silently to the legacy temporary extraction
 path.
 
-The runtime does not initially reimplement all dynamic linking. The accepted
-payload feature set therefore includes only image forms whose dependency,
-relocation, TLS, constructor, and property behavior the host callback can
-account for. Custom mapping and relocation become a separate explicitly
-planned capability if the host loader boundary is insufficient.
+The runtime does not reimplement dynamic linking. The accepted payload feature
+set therefore includes only image forms whose mapping, relocation, symbol,
+TLS, dependency, constructor, symbol-version, Android packed relocation, and
+property behavior is explicitly defined above and recorded in the matrix.
+Custom mapping and relocation become a separate explicitly planned capability
+if the host loader boundary is insufficient.
 
 ## Failure Model
 

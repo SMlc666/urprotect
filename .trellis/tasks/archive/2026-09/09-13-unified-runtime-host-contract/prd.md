@@ -34,17 +34,17 @@ HostContext ABI and no executable temporary pathname.
 
 ## Acceptance Criteria
 
-- [ ] A versioned HostContext ABI is documented with stable layout and
+- [x] A versioned HostContext ABI is documented with stable layout and
       ownership rules.
-- [ ] A runtime design describes the no-temporary-path handoff and all host
+- [x] A runtime design describes the no-temporary-path handoff and all host
       capabilities required by the accepted image language.
-- [ ] The design states which ELF mapping, relocation, TLS, dependency, and
+- [x] The design states which ELF mapping, relocation, TLS, dependency, and
       lifecycle behaviors are proven, validated, rejected, or unknown.
-- [ ] Unit/property tests cover ABI validation, bounds, ownership, integrity,
+- [x] Unit/property tests cover ABI validation, bounds, ownership, integrity,
       and fail-closed behavior.
-- [ ] An integration witness enters an image through HostContext without
+- [x] An integration witness enters an image through HostContext without
       replacing the host process or executing a recovered temporary pathname.
-- [ ] Existing Wrapper 0.2 behavior is retained only as a documented baseline
+- [x] Existing Wrapper 0.2 behavior is retained only as a documented baseline
       or explicitly rejected migration path.
 
 ## Out of Scope
@@ -53,9 +53,3 @@ HostContext ABI and no executable temporary pathname.
 - Stealth, anti-analysis, or vendor-specific behavior.
 - Declaring all existing executable fixtures compatible before an entry adapter
   exists.
-
-## Notes
-
-- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- The child design and implementation artifacts are present; implementation
-  still waits for the parent planning review and task start.

@@ -34,17 +34,17 @@ compatibility language under the shared in-process HostContext runtime.
 
 ## Acceptance Criteria
 
-- [ ] A feature inventory maps current parser fields and validator rules to
+- [x] A feature inventory maps current parser fields and validator rules to
       explicit compatibility obligations.
-- [ ] At least one expanded segment/layout case, one relocation case, and one
+- [x] At least one expanded segment/layout case, one relocation case, and one
       lifecycle/dependency case have positive and negative coverage.
-- [ ] Existing GCC/Clang/Rust/Go/Zig/NativeAOT fixtures are classified by
+- [x] Existing GCC/Clang/Rust/Go/Zig/NativeAOT fixtures are classified by
       exercised ELF/runtime features.
-- [ ] Stripped/sectionless and malformed cases are covered where they are
+- [x] Stripped/sectionless and malformed cases are covered where they are
       relevant to program-header-based loading.
-- [ ] Every accepted feature has a deterministic test oracle and a documented
+- [x] Every accepted feature has a deterministic test oracle and a documented
       reason it is within the Host Contract.
-- [ ] Unsupported features produce stable rejection/unknown diagnostics and
+- [x] Unsupported features produce stable rejection/unknown diagnostics and
       cannot enter the runtime as if proven.
 
 ## Out of Scope
@@ -52,9 +52,3 @@ compatibility language under the shared in-process HostContext runtime.
 - Non-AArch64 architectures, PE, Mach-O, and .NET assembly protection.
 - Arbitrary standalone process entry emulation.
 - Broad claims based only on one emulator, one OEM, or one compiler version.
-
-## Notes
-
-- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- The child design and implementation artifacts are present; implementation
-  still waits for the parent planning review and task start.

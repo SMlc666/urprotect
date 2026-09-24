@@ -9,7 +9,10 @@
     "rules": [
       "Every proven feature has a model or positive witness.",
       "Every accepted boundary has a nearest rejected or malformed witness.",
-      "Runtime facts do not imply Android framework or device behavior."
+      "Runtime facts do not imply Android framework or device behavior.",
+      "Unknown features never count as a support claim.",
+      "Release tier uses selected producer/hardening witnesses, not a blind Cartesian product.",
+      "Legacy Wrapper v1 and Android JNI/native-bridge observations remain baseline evidence, not HostContext compatibility claims."
     ]
   },
   "features": [
@@ -63,7 +66,7 @@
       "constraints": [
         "AArch64 RELA entries must be NONE or RELATIVE with symbol index zero",
         "RELR targets must be aligned and writable",
-        "Dynamic flag entries allow only immediate binding flags; text-relocation flags are rejected",
+        "Dynamic flag entries allow only immediate binding flags",
         "The system loader remains responsible for applying accepted relocations"
       ]
     },
@@ -116,6 +119,41 @@
       ]
     },
     {
+      "id": "runtime.host-context.gnu-stack",
+      "status": "validated",
+      "obligation": "The HostContext adapter accepts a PT_GNU_STACK program header when PF_X is clear and rejects an executable PT_GNU_STACK before creating an image handle",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The real fixture must contain PT_GNU_STACK with PF_X clear and must complete HostContext dispatch through the unchanged adapter path",
+        "The self-test sets only the PT_GNU_STACK p_flags PF_X bit in one bounded image copy and requires URP_STATUS_UNSUPPORTED with a zero image handle before loading",
+        "Memory protection remains delegated to the native system loader for the accepted non-executable GNU_STACK case; this is validated implementation evidence, not proof of custom stack-protection semantics"
+      ]
+    },
+    {
+      "id": "elf.release.full-relro-now",
+      "status": "validated",
+      "obligation": "The release-tier GCC AArch64 PIE witness is built with full GNU RELRO and immediate binding and retains that ELF hardening in the release artifact.",
+      "witness": "c-gcc-glibc-release-hardened",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": [
+        ".artifacts/fixtures/release/c-gcc-glibc-release-hardened"
+      ],
+      "constraints": [
+        "This is one deliberate release producer/hardening witness, not a compiler/runtime Cartesian product.",
+        "The existing gcc-c fixture builder supplies the source and execution path; the release-hardened variant adds -z relro -z now.",
+        "The runner readelf oracle requires GNU_RELRO and BIND_NOW before baseline/copy comparison."
+      ]
+    },
+    {
       "id": "runtime.glibc",
       "status": "validated",
       "obligation": "AArch64 dynamically linked PIE runs on the recorded native glibc host",
@@ -138,17 +176,25 @@
     {
       "id": "runtime.bionic.linker",
       "status": "validated",
-      "obligation": "AArch64 PIE is executed by the pinned bionic linker without host-libc fallback",
+      "obligation": "AArch64 PIE is executed by the pinned bionic linker using a pinned Termux compiler package set whose downloaded artifacts match locked SHA-256 digests.",
       "witness": "c-termux-bionic-pie",
       "oracle": "scripts/run-bionic-fixture.sh",
       "evidence": [
-        ".artifacts/bionic"
+        ".artifacts/bionic",
+        ".artifacts/bionic/c-termux-bionic-pie/packages.txt",
+        ".artifacts/bionic/c-termux-bionic-pie/compiler-package-lock.json",
+        ".artifacts/bionic/c-termux-bionic-pie/package-hash-verification.txt"
+      ],
+      "constraints": [
+        "The OCI image digest and Termux source revision are pinned.",
+        "Clang and every package newly installed to provide its compiler/linker are version- and SHA-256-locked in the manifest and verified before installation.",
+        "The Termux package index is used only to locate those locked artifacts; a missing, changed, or additional package fails the lane, while the complete before/after installed package inventories and license identifiers are retained."
       ]
     },
     {
       "id": "runtime.host-context-v1",
       "status": "validated",
-      "obligation": "Versioned HostContext v1 callbacks and the legacy frame provide immutable AArch64 ET_DYN image loading and explicit entry dispatch for the declared adapter slice",
+      "obligation": "Versioned HostContext v1 callbacks and the legacy frame provide immutable AArch64 ET_DYN image loading and explicit entry dispatch for the declared adapter slice; the native adapter enforces image-byte immutability with verified memfd seals before loader handoff.",
       "witness": "native/urprotect-runtime/host_context_entry_fixture.c",
       "oracle": "native/urprotect-runtime/host_context_self_test.c",
       "evidence": [
@@ -162,8 +208,10 @@
         ".artifacts/host-context/pr/self-test.log"
       ],
       "constraints": [
-        "No PT_INTERP, PT_TLS, PT_GNU_PROPERTY, DT_NEEDED, constructor, path-search, or text-relocation semantics",
-        "Dynamic flags are limited to immediate binding flags; other lifecycle or relocation flags are rejected",
+        "The native adapter creates the memfd with MFD_ALLOW_SEALING, adds F_SEAL_WRITE/F_SEAL_SHRINK/F_SEAL_GROW/F_SEAL_SEAL after the complete verified write, verifies F_GET_SEALS, and fails closed before dlopen when any seal operation is unavailable or incomplete.",
+        "No PT_INTERP or DT_NEEDED semantics; constructor/destructor tags use the separate runtime.host-context.constructor-destructor rejection boundary",
+        "RPATH/RUNPATH tags use the separate runtime.host-context.path-search rejection boundary",
+        "Dynamic flags are limited to immediate binding flags; runtime.host-context.unsupported-relocation-table is the dedicated rejection boundary for unsupported relocation-table tags",
         "Only checked AArch64 RELATIVE/RELR relocation targets are accepted; application and memory protection are delegated to the recorded native system loader"
       ]
     },
@@ -187,7 +235,44 @@
       "constraints": [
         "The legacy v1 wrapper-absolute offset remains unchanged",
         "v2 reserved fields must be zero and unknown ABI or capability bits are rejected before image loading",
-        "Entry and source names are bounded strict UTF-8 values without path components; ordinary standalone PIE inputs are not implicitly HostContext images"
+        "Entry and source names are bounded strict UTF-8 values without path components; ordinary standalone PIE inputs are not implicitly HostContext images",
+        "The production managed pack path intentionally emits legacy v1 for the legacy launcher; HostContext v2 production-pack integration is a separate unknown migration boundary."
+      ]
+    },
+    {
+      "id": "runtime.host-context.production-pack",
+      "status": "unknown",
+      "obligation": "The production managed pack command can select a HostContext entry image and a compatible v2-capable launcher without forcing a v2 frame into the legacy v1 launcher.",
+      "witness": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "oracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "evidence": [
+        "src/UrProtect.Core/Pack/ElfPackService.cs",
+        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+        "native/urprotect-launcher/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md"
+      ],
+      "nextEvidence": "Add a production HostContext pack option that accepts a declared HostContext entry-image adapter and a v2-capable launcher, then retain a managed pack/dispatch oracle proving v2 metadata, immutable in-process handoff, and entry dispatch. Until that adapter, v2-capable launcher, and oracle exist, ElfPackService must keep emitting v1 to the legacy launcher and this row remains unknown."
+    },
+    {
+      "id": "runtime.host-context.bionic-handoff",
+      "status": "validated",
+      "obligation": "The pinned native ARM64 Termux userspace builds and runs the HostContext v2 adapter oracle, verifying sealed memfd image loading, real entry dispatch, release, and no executable temporary pathname",
+      "witness": "c-termux-bionic-pie",
+      "oracle": "scripts/run-bionic-fixture.sh",
+      "evidence": [
+        "scripts/run-bionic-fixture.sh",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_adapter.c",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/build/host-context-entry-fixture.so",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md"
+      ],
+      "constraints": [
+        "The native adapter test builds the HostContext entry shared object in the pinned Termux userspace and runs the same v2 frame through /system/bin/linker64's bionic dlopen implementation.",
+        "The real adapter must add and verify F_SEAL_WRITE, F_SEAL_SHRINK, F_SEAL_GROW, and F_SEAL_SEAL before dlopen, dispatch urp_entry with its declared status, and release the image handle.",
+        "The self-test is an adapter-level HostContext runtime witness; it does not claim that the production managed pack command selects a HostContext adapter or emits a v2 frame. runtime.host-context.production-pack remains unknown."
       ]
     },
     {
@@ -218,9 +303,9 @@
       "negativeOracle": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs"
     },
     {
-      "id": "runtime.host-context.unsupported-image-boundaries",
+      "id": "runtime.host-context.pt-tls",
       "status": "rejected",
-      "obligation": "The narrow HostContext adapter rejects PT_TLS, PT_GNU_PROPERTY, and DT_NEEDED image metadata before creating an image handle",
+      "obligation": "The HostContext v1 adapter rejects PT_TLS before creating an image handle because its system-loader contract does not define TLS or thread lifetime semantics",
       "witness": "native/urprotect-runtime/host_context_self_test.c",
       "oracle": "native/urprotect-runtime/host_adapter.c",
       "evidence": [
@@ -229,14 +314,20 @@
         "native/urprotect-runtime/host_context_entry_fixture.c",
         ".artifacts/host-context/pr/self-test.log"
       ],
-      "reason": "The first HostContext adapter has no defined TLS, GNU property, lifecycle, or dependency-resolution semantics for in-process images.",
+      "reason": "HostContext v1 does not define TLS module allocation, per-thread initialization, TLS relocation models, thread creation/reentrancy, or TLS teardown relative to release_image; dlopen acceptance alone is not a compatibility proof.",
       "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
-      "negativeOracle": "native/urprotect-runtime/host_adapter.c"
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged entry fixture is the positive HostContext dispatch baseline.",
+        "A structurally bounded PT_TLS mutation is rejected with URP_STATUS_UNSUPPORTED and a zero image handle.",
+        "A PT_TLS mutation with p_filesz greater than p_memsz is rejected with URP_STATUS_LOAD_FAILED before any loader handoff.",
+        "No positive TLS HostContext fixture or support claim exists until the Host Contract defines TLS and thread lifetime semantics."
+      ]
     },
     {
-      "id": "runtime.host-context.unsupported-lifecycle-path-search",
+      "id": "runtime.host-context.gnu-property",
       "status": "rejected",
-      "obligation": "The narrow HostContext adapter rejects DT_INIT, DT_FINI, DT_RPATH, DT_RUNPATH, DT_INIT_ARRAY, DT_FINI_ARRAY, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAY, and DT_PREINIT_ARRAYSZ before creating an image handle",
+      "obligation": "The HostContext v1 adapter rejects PT_GNU_PROPERTY BTI/PAC/instruction-property metadata before creating an image handle because its system-loader contract defines no property negotiation or instruction-state semantics",
       "witness": "native/urprotect-runtime/host_context_self_test.c",
       "oracle": "native/urprotect-runtime/host_adapter.c",
       "evidence": [
@@ -245,9 +336,184 @@
         "native/urprotect-runtime/host_context_entry_fixture.c",
         ".artifacts/host-context/pr/self-test.log"
       ],
-      "reason": "The first HostContext entry adapter has no defined constructor, destructor, or dynamic path-search semantics for in-process images, so these lifecycle and search tags remain rejected.",
+      "reason": "HostContext v1 and the current system-loader adapter define no GNU property negotiation or BTI/PAC/instruction-state obligations; dlopen acceptance of a property note alone is not a compatibility proof.",
       "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
-      "negativeOracle": "native/urprotect-runtime/host_adapter.c"
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged entry fixture is the positive HostContext dispatch baseline.",
+        "A bounded PT_LOAD-covered metadata segment mutation to PT_GNU_PROPERTY is rejected with URP_STATUS_UNSUPPORTED and a zero image handle before loader handoff.",
+        "No positive GNU property HostContext fixture or support claim exists until the Host Contract defines property negotiation and BTI/PAC/instruction-state semantics."
+      ]
+    },
+    {
+      "id": "runtime.host-context.dependency-resolution",
+      "status": "rejected",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_NEEDED, DT_AUXILIARY, and DT_FILTER dependency metadata before dependency resolution or image creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "COMPATIBILITY.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 and the current system-loader adapter define no dependency-resolution, search-path, symbol-scope, or dependency-lifetime semantics; a loader resolving a library is not a compatibility proof.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged non-dependency entry fixture remains the positive HostContext dispatch baseline.",
+        "Each bounded dynamic-table mutation changes only one of DT_NEEDED, DT_AUXILIARY, or DT_FILTER, is rejected with URP_STATUS_UNSUPPORTED and a zero image handle before loader handoff, and preserves every surrounding byte.",
+        "No positive dependency-bearing HostContext fixture or support claim exists until the Host Contract defines dependency resolution, search paths, symbol scope, and dependency lifetime."
+      ]
+    },
+    {
+      "id": "runtime.host-context.constructor-destructor",
+      "status": "rejected",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_INIT, DT_FINI, DT_INIT_ARRAY, DT_FINI_ARRAY, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAY, and DT_PREINIT_ARRAYSZ before constructor or destructor execution and image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 and the current system-loader adapter define no constructor/destructor ordering, callback or reentrancy behavior, teardown, or lifecycle ownership semantics for in-process images; loader execution alone is not a compatibility proof.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged non-lifecycle entry fixture remains the positive HostContext dispatch baseline.",
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "Unsupported relocation-table tags use the separate runtime.host-context.unsupported-relocation-table rejection boundary and are not part of this feature.",
+        "No positive constructor/destructor HostContext fixture or support claim exists until ordering, callback/reentrancy, teardown, and lifecycle ownership semantics are defined by the Host Contract."
+      ]
+    },
+    {
+      "id": "runtime.host-context.path-search",
+      "status": "rejected",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_RPATH and DT_RUNPATH dynamic path-search metadata before path search or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 and the current system-loader adapter define no dynamic path-search roots, ordering, or precedence semantics for in-process images; loader path resolution alone is not a compatibility proof.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged non-path-search entry fixture remains the positive HostContext dispatch baseline.",
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "Constructor/destructor lifecycle metadata and runtime.host-context.unsupported-relocation-table remain separate rejection boundaries."
+      ]
+    },
+    {
+      "id": "runtime.host-context.text-relocation",
+      "status": "rejected",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_TEXTREL writable-text relocation metadata before writable-text relocation or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 and the current system-loader adapter define no writable-text relocation or W^X/protection semantics for in-process images; loader acceptance alone is not a compatibility proof.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged non-text-relocation entry fixture remains the positive HostContext dispatch baseline.",
+        "A bounded dynamic-table mutation changes only one DT_NULL tag to DT_TEXTREL, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "AArch64 RELATIVE/RELR relocation acceptance and application delegation remain the separate validated elf.relocation.aarch64-relative feature.",
+        "Unsupported relocation-table tags use the separate runtime.host-context.unsupported-relocation-table rejection boundary.",
+        "No positive text-relocation HostContext fixture or support claim exists until writable-text relocation and W^X/protection semantics are defined by the Host Contract."
+      ]
+    },
+    {
+      "id": "runtime.host-context.unsupported-relocation-table",
+      "status": "rejected",
+      "obligation": "The HostContext v1 system-loader adapter rejects DT_REL, DT_RELSZ, DT_RELENT, DT_JMPREL, DT_PLTRELSZ, and DT_PLTREL relocation-table metadata before relocation processing or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 and the current system-loader adapter define only the checked AArch64 RELATIVE/RELR relocation path; legacy REL and PLT relocation-table semantics are not defined, so loader acceptance alone is not a compatibility proof.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "The unchanged RELATIVE/RELR entry fixture remains the positive HostContext dispatch baseline.",
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "The validated elf.relocation.aarch64-relative feature covers only checked AArch64 RELATIVE/RELR relocation targets; no broader relocation-table support is claimed.",
+        "No positive unsupported-relocation-table HostContext fixture or support claim exists until the Host Contract defines the required relocation-table semantics."
+      ]
+    },
+    {
+      "id": "runtime.host-context.android-packed-relocation",
+      "status": "rejected",
+      "obligation": "The HostContext v1 adapter rejects DT_ANDROID_REL, DT_ANDROID_RELSZ, DT_ANDROID_RELA, DT_ANDROID_RELASZ, DT_ANDROID_RELR, DT_ANDROID_RELRSZ, DT_ANDROID_RELRENT, and DT_ANDROID_RELRCOUNT before relocation processing or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 defines only checked AArch64 RELATIVE/RELR relocation semantics; Android packed relocation encodings have no adapter contract and are rejected before system-loader handoff.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "The unchanged RELATIVE/RELR entry fixture remains the positive relocation baseline; Android packed relocation forms are not included in elf.relocation.aarch64-relative.",
+        "No positive Android packed relocation HostContext fixture or support claim exists until the Host Contract defines these encodings and their application semantics."
+      ]
+    },
+    {
+      "id": "runtime.host-context.symbol-version",
+      "status": "rejected",
+      "obligation": "The HostContext v1 adapter rejects DT_VERSYM, DT_VERDEF, DT_VERDEFNUM, DT_VERNEED, and DT_VERNEEDNUM metadata before symbol lookup or image-handle creation",
+      "witness": "native/urprotect-runtime/host_context_self_test.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/host_context_self_test.c",
+        "native/urprotect-runtime/host_context_entry_fixture.c",
+        "native/urprotect-runtime/README.md",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md",
+        ".artifacts/host-context/pr/self-test.log"
+      ],
+      "reason": "HostContext v1 defines unversioned entry-symbol lookup only; ELF symbol-version negotiation and versioned entry selection are not specified, so the adapter rejects version metadata before system-loader handoff.",
+      "negativeWitness": "native/urprotect-runtime/host_context_self_test.c",
+      "negativeOracle": "native/urprotect-runtime/host_adapter.c",
+      "constraints": [
+        "Each bounded dynamic-table mutation changes only one DT_NULL tag, preserves surrounding bytes, initializes a nonzero sentinel handle, and must return URP_STATUS_UNSUPPORTED with a zero handle before loader handoff.",
+        "The unchanged unversioned urp_entry fixture remains the positive symbol lookup baseline; versioned symbol selection is not inferred from dlsym behavior.",
+        "No positive symbol-version HostContext fixture or support claim exists until the Host Contract defines version matching and entry-selection semantics."
+      ]
     },
     {
       "id": "android.jni.native-bridge",
@@ -258,6 +524,28 @@
       "evidence": [
         "fixtures/samples/android-jni",
         ".artifacts/android-arm64-native-bridge-on-x64/logcat.txt"
+      ],
+      "constraints": [
+        "This is the existing JNI/native-bridge baseline; it does not execute packed output or prove a native ARM64 Android device/runtime."
+      ]
+    },
+    {
+      "id": "runtime.wrapper-v1-baseline",
+      "status": "validated",
+      "obligation": "The existing Wrapper 0.2 managed v1 frame and launcher behavior remain a regression baseline separate from the in-process HostContext v2 contract.",
+      "witness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+      "oracle": "native/urprotect-launcher/test_launcher.sh",
+      "evidence": [
+        "src/UrProtect.Core/Pack/PayloadFrame.cs",
+        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+        "tests/UrProtect.Core.Tests/PayloadFrameTests.cs",
+        "native/urprotect-launcher/test_launcher.sh",
+        "native/urprotect-launcher/test_managed_handoff.sh",
+        ".artifacts/packed/pr/handoff.log"
+      ],
+      "constraints": [
+        "Legacy v1 retains its wrapper-absolute offset and the managed pack path leaves HostContext metadata null.",
+        "This baseline is not an in-process HostContext support claim and does not add a platform compatibility profile."
       ]
     }
   ],
@@ -324,6 +612,32 @@
       "execution": "native-linux",
       "oracle": "scripts/run-fixture-matrix.sh",
       "evidence": ".artifacts/fixtures/pr/cxx-gcc-glibc-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
+    },
+    {
+      "id": "c-gcc-glibc-release-hardened",
+      "features": [
+        "elf.identity.aarch64-et-dyn",
+        "elf.dynamic",
+        "runtime.glibc",
+        "elf.release.full-relro-now"
+      ],
+      "language": "c",
+      "toolchain": "gcc",
+      "builder": "gcc-c",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "pie-release-hardened",
+      "source": "fixtures/samples/c/main.c",
+      "tier": "release",
+      "required": true,
+      "execution": "native-linux",
+      "oracle": "scripts/run-fixture-matrix.sh",
+      "evidence": ".artifacts/fixtures/release/c-gcc-glibc-release-hardened",
+      "variant": "release-hardened",
       "host": {
         "environment": "native-arm64-linux",
         "libc": "glibc"
@@ -526,7 +840,8 @@
       "features": [
         "elf.identity.aarch64-et-dyn",
         "elf.dynamic",
-        "runtime.bionic.linker"
+        "runtime.bionic.linker",
+        "runtime.host-context.bionic-handoff"
       ],
       "language": "c",
       "toolchain": "termux-clang",
@@ -545,9 +860,81 @@
         "image": "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4",
         "sourceCommit": "7033c7639eb86107a4fdf8b72bd6388c07b1284a",
         "compilerPackage": "clang=21.1.8-3",
+        "packageRepository": "https://packages-cf.termux.dev/apt/termux-main",
+        "compilerPackages": [
+          {
+            "name": "clang",
+            "version": "21.1.8-3",
+            "filename": "pool/main/c/clang/clang_21.1.8-3_aarch64.deb",
+            "sha256": "9fb565013b96ce10abd8f8f217aaebb48f72873f53acbf8886329bcea841a21c",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "libcompiler-rt",
+            "version": "21.1.8-3",
+            "filename": "pool/main/libc/libcompiler-rt/libcompiler-rt_21.1.8-3_aarch64.deb",
+            "sha256": "89de02f642e34fa6494ad16105bd08510bd1dbdbe4fdb2b297aaa4f4e8e534b6",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "libllvm",
+            "version": "21.1.8-3",
+            "filename": "pool/main/libl/libllvm/libllvm_21.1.8-3_aarch64.deb",
+            "sha256": "5056a73f2645fc9c0759e6f94a1bd6edcf36305acaef58dc685211ced9cc2a02",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "libxml2",
+            "version": "2.15.4-1",
+            "filename": "pool/main/libx/libxml2/libxml2_2.15.4-1_aarch64.deb",
+            "sha256": "d315861bbcf716cfb088f53cddab9fb6a96430cc66769f79774cc69c2f53bcff",
+            "licenses": ["MIT"],
+            "licenseSource": "termux-packages:packages/libxml2/build.sh"
+          },
+          {
+            "name": "lld",
+            "version": "21.1.8-3",
+            "filename": "pool/main/l/lld/lld_21.1.8-3_aarch64.deb",
+            "sha256": "6299c8fdff59dcff972f6b444805bcdb211c2bd797a64d2ddb3875e699f30630",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "llvm",
+            "version": "21.1.8-3",
+            "filename": "pool/main/l/llvm/llvm_21.1.8-3_aarch64.deb",
+            "sha256": "2d17e4dde485cae71e6872d19ce1d44555789208708b4e0fd15ebf6818a146d3",
+            "licenses": ["Apache-2.0", "NCSA"],
+            "licenseSource": "termux-packages:packages/libllvm/build.sh"
+          },
+          {
+            "name": "ndk-sysroot",
+            "version": "30",
+            "filename": "pool/main/n/ndk-sysroot/ndk-sysroot_30_aarch64.deb",
+            "sha256": "73502f9b04fce210c430c83bf9ae2b8e332ba5c319f3eb94a61ba5cef090f787",
+            "licenses": ["NCSA"],
+            "licenseSource": "termux-packages:packages/ndk-sysroot/build.sh"
+          },
+          {
+            "name": "make",
+            "version": "4.4.1-1",
+            "filename": "pool/main/m/make/make_4.4.1-1_aarch64.deb",
+            "sha256": "beb7ac00ee4f9958ec8e584ac1b2e1612c549425674ab2aa197d343594bcc5a3",
+            "licenses": ["GPL-3.0"],
+            "licenseSource": "termux-packages:packages/make/build.sh"
+          }
+        ],
         "linker": "/system/bin/linker64",
         "androidRuntime": false,
-        "pageSize": "recorded"
+        "pageSize": "recorded",
+        "architecture": "aarch64",
+        "kernel": "recorded",
+        "packageIndex": "live",
+        "packageInputsReproducible": true,
+        "packageProvenance": "version-and-sha256-locked-package-set"
       }
     }
   ]

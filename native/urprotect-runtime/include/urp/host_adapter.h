@@ -14,6 +14,9 @@ typedef struct urp_host_adapter_v1 {
 /* Initialize the fd-backed host implementation used by native evidence tests. */
 void urp_host_adapter_init(urp_host_adapter_v1 *adapter);
 
+/* Return nonzero only when the adapter image fd carries every required seal. */
+int urp_host_adapter_image_is_sealed(urp_image_handle handle);
+
 #ifdef __cplusplus
 }
 #endif

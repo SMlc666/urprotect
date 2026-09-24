@@ -32,25 +32,16 @@ Run a pinned bionic userspace natively on the ARM64 CI runner without AVD, Waydr
 
 ## Acceptance Criteria
 
-- [ ] CI runs the pinned ARM64 Termux Docker image on an ARM64 runner without
+- [x] CI runs the pinned ARM64 Termux Docker image on an ARM64 runner without
       AVD, Waydroid, QEMU, or native bridge.
-- [ ] The lane fails closed unless architecture, bionic linker, image/source
+- [x] The lane fails closed unless architecture, bionic linker, image/source
       pin, kernel, and page-size evidence are present and consistent.
-- [ ] A bionic PIE fixture executes with a direct /system/bin/linker64 check
+- [x] A bionic PIE fixture executes with a direct /system/bin/linker64 check
       and a deterministic baseline/packaged or HostContext oracle.
-- [ ] The matrix contains a bionic case alongside glibc and musl cases, with
+- [x] The matrix contains a bionic case alongside glibc and musl cases, with
       feature references, status, evidence paths, and explicit scope limits.
-- [ ] The report states that Termux Docker supplies bionic userspace but not
+- [x] The report states that Termux Docker supplies bionic userspace but not
       DalvikVM, framework services, OEM behavior, SELinux policy, or a device
       kernel.
-- [ ] The test remains reproducible from pinned inputs; dynamically changing
+- [x] The test remains reproducible from pinned inputs; dynamically changing
       package metadata or an implicit host fallback is recorded as a failure.
-
-## Notes
-
-- This complex child has design and implementation artifacts; implementation
-  still waits for the parent planning review and task start.
-
-- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- Lightweight tasks can remain PRD-only.
-- For complex tasks, add `design.md` for technical design and `implement.md` for execution planning before `task.py start`.

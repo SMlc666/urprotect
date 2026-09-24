@@ -166,30 +166,30 @@ is not the foundation of the compatibility proof.
 
 ## Acceptance Criteria
 
-- [ ] A design document defines one runtime core, one Host Contract, the
+- [x] A design document defines one runtime core, one Host Contract, the
       versioned `HostContext` entry ABI, no-temporary-path handoff, and the
       observable-equivalence boundary.
-- [ ] The current wrapper and Android fixture limitations are represented as
+- [x] The current wrapper and Android fixture limitations are represented as
       baseline evidence rather than separate product profiles.
-- [ ] The compatibility manifest is machine-readable, has explicit status and
+- [x] The compatibility manifest is machine-readable, has explicit status and
       proof/evidence fields, and is consumed by at least one automated check.
-- [ ] Project-owned fixture and matrix interfaces no longer expose
+- [x] Project-owned fixture and matrix interfaces no longer expose
       `--profile`, a top-level `profiles` collection, or compatibility-profile
       claims; remaining variant names describe their actual build/test meaning.
-- [ ] The first matrix slice covers the current AArch64 PIE fixture set and
+- [x] The first matrix slice covers the current AArch64 PIE fixture set and
       records both supported and intentionally rejected cases.
-- [ ] At least one expanded ELF compatibility slice is implemented with paired
+- [x] At least one expanded ELF compatibility slice is implemented with paired
       positive/negative fixtures and a documented proof obligation.
-- [ ] The runtime no longer requires an executable temporary pathname for the
+- [x] The runtime no longer requires an executable temporary pathname for the
       target handoff, or the task records a concrete blocking invariant and
       leaves the feature explicitly unsupported.
-- [ ] CI distinguishes proof/model checks from runtime smoke evidence and
+- [x] CI distinguishes proof/model checks from runtime smoke evidence and
       fails when a claimed matrix row lacks its required evidence.
-- [ ] A native ARM64 bionic userspace lane runs without AVD, Waydroid, QEMU, or
+- [x] A native ARM64 bionic userspace lane runs without AVD, Waydroid, QEMU, or
       native bridge, records pinned Termux source/image, rootfs, kernel,
       linker, and page-size evidence, and is represented in the matrix with
       its narrower scope clearly stated.
-- [ ] Existing managed tests continue to pass, and all changed behavior has
+- [x] Existing managed tests continue to pass, and all changed behavior has
       regression coverage.
 
 ## Out of Scope
@@ -215,9 +215,3 @@ is not the foundation of the compatibility proof.
   Termux Docker source/image as a host case, not as a product profile or a
   replacement for complete Android app/device evidence. The matrix records
   bionic beside glibc and musl as a runtime fact.
-
-## Notes
-
-- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- The parent design and implementation artifacts are present. The task remains
-  in planning until the final review gate and an explicit task start.

@@ -88,7 +88,11 @@ toolchain used by CI:
 
 The launcher is a static AArch64 `ET_DYN` PIE with no interpreter or shared
 library dependencies. `pack` requires `--launcher`; it never silently turns
-the C# packer into the runtime wrapper.
+the C# packer into the runtime wrapper. Production `pack` intentionally emits
+legacy frame v1 for this launcher; HostContext v2 is not forced into the
+legacy path. The production HostContext pack gap remains an explicit unknown
+migration boundary until the missing entry-image adapter, v2-capable launcher,
+and managed pack/dispatch oracle are available.
 
 The current wrapper contract supports native ARM64 Linux glibc and is
 exercised by the PR covering fixture matrix. Shared objects, static `ET_EXEC`,
@@ -123,6 +127,7 @@ claiming a full language/toolchain Cartesian product:
 ```sh
 ./scripts/run-fixture-matrix.sh --tier pr
 ./scripts/run-fixture-matrix.sh --tier nightly
+./scripts/run-fixture-matrix.sh --tier release
 ./scripts/run-packed-fixture-matrix.sh --tier pr
 ```
 
@@ -131,9 +136,12 @@ Rust, Go, musl-gcc, Zig, and NativeAOT samples. Nightly ARM64 CI installs
 Ubuntu Noble musl packages at the pinned `1.2.4-2` version and Zig 0.13.0 from
 the official checksum-verified archive before running the required tiers.
 Each executable is validated and copied through the no-op CLI, then the
-baseline and copied output behavior are compared. A missing required toolchain
-or invalid output fails the job rather than falling back to glibc; Android and
-bionic lanes are handled by their separate runtime jobs.
+baseline and copied output behavior are compared. The release tier adds one
+explicit GCC C PIE hardening witness using the existing `gcc-c` builder; its
+readelf oracle requires GNU RELRO and BIND_NOW, and the release CI job gates
+its retained evidence separately from PR/nightly selection. A missing required
+toolchain or invalid output fails the job rather than falling back to glibc;
+Android and bionic lanes are handled by their separate runtime jobs.
 
 The packed fixture runner first builds the native PR covering set and the
 static native ARM64 launcher, runs the native codec/integration checks, packs
@@ -146,16 +154,27 @@ The native bionic lane is separate from Android framework testing:
 ./scripts/run-bionic-fixture.sh
 ```
 
-It runs the pinned `termux/termux-docker` ARM64 image, installs the exact
-recorded Termux `clang` package, builds an AArch64 PIE with
-`/system/bin/linker64`, and verifies both normal execution and the linker's
-direct identity probe; ELF `DT_NEEDED` output records the fixture's bionic
-dependencies. It records image digest, Termux source revision,
-package versions, linker identity, and page size. The lane refuses AVD, Waydroid, QEMU, and
-non-ARM fallback; it proves bionic userspace behavior without claiming the
-Android framework or physical-device behavior. HostContext/package handoff
-evidence remains explicitly unknown until the bionic lane runs; the narrow
-HostContext adapter slice is recorded separately as validated evidence.
+It runs the pinned `termux/termux-docker` ARM64 image and uses the live Termux
+package index only to locate the exact compiler packages listed in
+`fixtures/manifest.json`. Every newly installed package has a locked version,
+repository-relative artifact name, SHA-256, license identifiers, and license
+source; the lane verifies the downloaded set and every digest before installing
+it, and fails if the package closure changes. The digest-pinned image fixes the
+base package set. The lane builds an AArch64 PIE with `/system/bin/linker64`,
+verifies normal execution and the linker's direct identity probe, and retains
+the before/after package inventories, lock, hash-verification output, apt logs,
+image digest, Termux source revision, linker identity, and page-size facts.
+This makes the compiler inputs reproducible even though the index used to find
+the pinned artifacts is live. The lane also builds and runs the native
+HostContext self-test inside Termux: a HostContext v2 frame reaches the real
+adapter, which checks sealed memfd bytes, dispatches `urp_entry`, and releases
+the image without an executable temporary pathname. The result, build log,
+shared-object ELF report, package lock, and hash verification are retained.
+This validates the bionic implementation of the narrow adapter slice; it
+does not upgrade the separate production managed-pack integration row, which
+remains explicitly `unknown`. The lane refuses AVD, Waydroid, QEMU, and
+non-ARM fallback and does not claim Android framework or physical-device
+behavior.
 
 Render the same manifest into a reviewable matrix report:
 
@@ -164,8 +183,9 @@ python3 scripts/render-compatibility-matrix.py \
   fixtures/manifest.json --output .artifacts/compatibility-matrix.md
 ```
 
-The Android sample is an APK/JNI fixture. The released Android Emulator cannot
-boot an `arm64-v8a` system image on an x86_64 host, even with `-accel off`. On
+The Android sample is an APK/JNI baseline fixture, not a packed-output test.
+The released Android Emulator cannot boot an `arm64-v8a` system image on an
+x86_64 host, even with `-accel off`. On
 the GitHub x86_64 runner the project therefore uses an x86_64 API 35 AVD in
 TCG/software CPU mode with Android's `libndk_translation.so` native bridge to
 load the arm64-v8a library:

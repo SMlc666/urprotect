@@ -26,6 +26,7 @@
 #define URP_PT_INTERP 3U
 #define URP_PT_TLS 7U
 #define URP_PT_GNU_PROPERTY 0x6474e553U
+#define URP_PT_GNU_STACK 0x6474e551U
 #define URP_PF_W 2U
 #define URP_PF_X 1U
 #define URP_DT_NEEDED 1U
@@ -63,13 +64,46 @@
 #define URP_DT_RELRSZ 35U
 #define URP_DT_RELR 36U
 #define URP_DT_RELRENT 37U
+#define URP_DT_ANDROID_REL UINT64_C(0x6000000f)
+#define URP_DT_ANDROID_RELSZ UINT64_C(0x60000010)
+#define URP_DT_ANDROID_RELA UINT64_C(0x60000011)
+#define URP_DT_ANDROID_RELASZ UINT64_C(0x60000012)
+#define URP_DT_ANDROID_RELR UINT64_C(0x6fffe000)
+#define URP_DT_ANDROID_RELRSZ UINT64_C(0x6fffe001)
+#define URP_DT_ANDROID_RELRENT UINT64_C(0x6fffe003)
+#define URP_DT_ANDROID_RELRCOUNT UINT64_C(0x6fffe005)
+#define URP_DT_VERSYM UINT64_C(0x6ffffff0)
+#define URP_DT_VERDEF UINT64_C(0x6ffffffc)
+#define URP_DT_VERDEFNUM UINT64_C(0x6ffffffd)
+#define URP_DT_VERNEED UINT64_C(0x6ffffffe)
+#define URP_DT_VERNEEDNUM UINT64_C(0x6fffffff)
 #define URP_DT_FLAGS_1 UINT64_C(0x6ffffffb)
-#define URP_DT_AUXILIARY UINT64_C(0x7ffffffe)
+#define URP_DT_AUXILIARY UINT64_C(0x7ffffffd)
 #define URP_DT_FILTER UINT64_C(0x7fffffff)
 #define URP_DF_BIND_NOW UINT64_C(0x8)
 #define URP_DF_1_NOW UINT64_C(0x1)
 #define URP_R_AARCH64_RELATIVE 1027U
 #define URP_MEMFD_CLOEXEC 1U
+#define URP_MEMFD_ALLOW_SEALING 2U
+#ifndef F_ADD_SEALS
+#define F_ADD_SEALS 1033
+#endif
+#ifndef F_GET_SEALS
+#define F_GET_SEALS 1034
+#endif
+#ifndef F_SEAL_SEAL
+#define F_SEAL_SEAL 0x0001
+#endif
+#ifndef F_SEAL_SHRINK
+#define F_SEAL_SHRINK 0x0002
+#endif
+#ifndef F_SEAL_GROW
+#define F_SEAL_GROW 0x0004
+#endif
+#ifndef F_SEAL_WRITE
+#define F_SEAL_WRITE 0x0008
+#endif
+#define URP_REQUIRED_IMAGE_SEALS (F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
 #define URP_MAX_PROGRAM_HEADERS 4096U
 #define URP_MAX_DYNAMIC_ENTRIES (1U << 20)
 
@@ -442,25 +476,53 @@ static urp_status urp_validate_dynamic_segment(
 
         switch (tag) {
         case URP_DT_NEEDED:
+            /* HostContext v1 has no dependency-resolution or lifetime contract. */
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no constructor/destructor ordering, callback/reentrancy, teardown, or lifecycle ownership. */
         case URP_DT_INIT:
         case URP_DT_FINI:
-        case URP_DT_RPATH:
-        case URP_DT_TEXTREL:
         case URP_DT_INIT_ARRAY:
         case URP_DT_FINI_ARRAY:
-        case URP_DT_RUNPATH:
-        case URP_DT_PREINIT_ARRAY:
         case URP_DT_INIT_ARRAYSZ:
         case URP_DT_FINI_ARRAYSZ:
+        case URP_DT_PREINIT_ARRAY:
         case URP_DT_PREINIT_ARRAYSZ:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no RPATH/RUNPATH search roots, ordering, or precedence. */
+        case URP_DT_RPATH:
+        case URP_DT_RUNPATH:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no writable-text relocation or W^X semantics. */
+        case URP_DT_TEXTREL:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines no auxiliary or filter dependency semantics. */
         case URP_DT_AUXILIARY:
         case URP_DT_FILTER:
+            return URP_STATUS_UNSUPPORTED;
+        /* runtime.host-context.unsupported-relocation-table: v1 defines only the checked AArch64 RELATIVE/RELR path. */
         case URP_DT_REL:
         case URP_DT_RELSZ:
         case URP_DT_RELENT:
         case URP_DT_JMPREL:
         case URP_DT_PLTRELSZ:
         case URP_DT_PLTREL:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 does not define Android packed relocation encodings. */
+        case URP_DT_ANDROID_REL:
+        case URP_DT_ANDROID_RELSZ:
+        case URP_DT_ANDROID_RELA:
+        case URP_DT_ANDROID_RELASZ:
+        case URP_DT_ANDROID_RELR:
+        case URP_DT_ANDROID_RELRSZ:
+        case URP_DT_ANDROID_RELRENT:
+        case URP_DT_ANDROID_RELRCOUNT:
+            return URP_STATUS_UNSUPPORTED;
+        /* HostContext v1 defines only unversioned entry-symbol lookup. */
+        case URP_DT_VERSYM:
+        case URP_DT_VERDEF:
+        case URP_DT_VERDEFNUM:
+        case URP_DT_VERNEED:
+        case URP_DT_VERNEEDNUM:
             return URP_STATUS_UNSUPPORTED;
         case URP_DT_FLAGS:
             if (values.has_flags
@@ -629,10 +691,19 @@ static urp_status urp_validate_image(const void *bytes, size_t image_size)
             }
             break;
         }
-        case URP_PT_INTERP:
         case URP_PT_TLS:
-        case URP_PT_GNU_PROPERTY:
+            /* HostContext v1 has no TLS/thread lifetime contract; keep this boundary fail-closed. */
             return URP_STATUS_UNSUPPORTED;
+        case URP_PT_INTERP:
+            return URP_STATUS_UNSUPPORTED;
+        case URP_PT_GNU_PROPERTY:
+            /* HostContext v1 has no property negotiation or instruction-state contract. */
+            return URP_STATUS_UNSUPPORTED;
+        case URP_PT_GNU_STACK:
+            if ((flags & URP_PF_X) != 0U) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+            break;
         default:
             break;
         }
@@ -661,6 +732,17 @@ static int urp_write_all(int fd, const void *bytes, size_t size)
     return 1;
 }
 
+static int urp_seal_image_fd(int fd)
+{
+    const int required_seals = URP_REQUIRED_IMAGE_SEALS;
+    if (fcntl(fd, F_ADD_SEALS, required_seals) != 0) {
+        return 0;
+    }
+
+    int seals = fcntl(fd, F_GET_SEALS);
+    return seals >= 0 && (seals & required_seals) == required_seals;
+}
+
 static urp_status urp_adapter_load_image(
     void *userdata,
     const void *bytes,
@@ -669,7 +751,11 @@ static urp_status urp_adapter_load_image(
     urp_image_handle *out_handle)
 {
     (void)userdata;
-    if (out_handle == NULL || (flags & URP_LOAD_IMAGE_IMMUTABLE) == 0U) {
+    if (out_handle == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    *out_handle = 0U;
+    if ((flags & URP_LOAD_IMAGE_IMMUTABLE) == 0U) {
         return URP_STATUS_INVALID_ARGUMENT;
     }
 
@@ -678,7 +764,10 @@ static urp_status urp_adapter_load_image(
         return validation;
     }
 
-    long fd_result = syscall(SYS_memfd_create, "urprotect-host-image", URP_MEMFD_CLOEXEC);
+    long fd_result = syscall(
+        SYS_memfd_create,
+        "urprotect-host-image",
+        URP_MEMFD_CLOEXEC | URP_MEMFD_ALLOW_SEALING);
     if (fd_result < 0 || fd_result > INT_MAX) {
         if (fd_result >= 0) {
             (void)close((int)fd_result);
@@ -688,7 +777,8 @@ static urp_status urp_adapter_load_image(
     int fd = (int)fd_result;
     if (!urp_write_all(fd, bytes, size)
         || fchmod(fd, S_IRUSR | S_IWUSR | S_IXUSR) != 0
-        || lseek(fd, 0, SEEK_SET) < 0) {
+        || lseek(fd, 0, SEEK_SET) < 0
+        || !urp_seal_image_fd(fd)) {
         (void)close(fd);
         return URP_STATUS_LOAD_FAILED;
     }
@@ -703,6 +793,13 @@ static urp_status urp_adapter_load_image(
     (void)dlerror();
     void *dl_handle = dlopen(fd_path, RTLD_NOW | RTLD_LOCAL);
     if (dl_handle == NULL) {
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+        const char *loader_error = dlerror();
+        (void)fprintf(
+            stderr,
+            "HostContext adapter dlopen failed: %s\n",
+            loader_error != NULL ? loader_error : "unknown loader error");
+#endif
         (void)close(fd);
         return URP_STATUS_LOAD_FAILED;
     }
@@ -756,6 +853,17 @@ static urp_status urp_adapter_release_image(void *userdata, urp_image_handle han
     return dl_result == 0 && close_result == 0
         ? URP_STATUS_OK
         : URP_STATUS_LOAD_FAILED;
+}
+
+int urp_host_adapter_image_is_sealed(urp_image_handle handle)
+{
+    if (handle == 0U) {
+        return 0;
+    }
+
+    const urp_fd_image *image = (const urp_fd_image *)(uintptr_t)handle;
+    int seals = fcntl(image->fd, F_GET_SEALS);
+    return seals >= 0 && (seals & URP_REQUIRED_IMAGE_SEALS) == URP_REQUIRED_IMAGE_SEALS;
 }
 
 static urp_status urp_adapter_emit_diagnostic(
