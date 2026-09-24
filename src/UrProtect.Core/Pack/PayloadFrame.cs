@@ -40,6 +40,8 @@ public sealed record PayloadFrameEncoding(
     public ushort FrameVersion { get; init; } = PayloadFrameCodec.FormatVersion;
 
     public HostContextFrameMetadata? HostContextMetadata { get; init; }
+
+    public PayloadDispatchProfile? Profile { get; init; }
 }
 
 public sealed record PayloadFrameDecodeResult(
@@ -57,6 +59,8 @@ public sealed record PayloadFrameDecodeResult(
     public ushort FrameVersion { get; init; }
 
     public HostContextFrameMetadata? HostContextMetadata { get; init; }
+
+    public PayloadDispatchProfile? Profile { get; init; }
 }
 
 public sealed record WrapperPayloadResult(
@@ -73,6 +77,7 @@ public static class PayloadFrameCodec
 {
     public const ushort FormatVersion = 1;
     public const ushort HostContextFormatVersion = 2;
+    public const ushort CurrentFormatVersion = 3;
     public const ushort LauncherAbiVersion = LauncherContract.AbiVersion;
     public const int VersionOffset = 8;
     public const int HeaderSizeOffset = 10;
@@ -87,11 +92,14 @@ public static class PayloadFrameCodec
     public const int EncodedSha256Offset = 80;
     public const ushort HeaderSize = 112;
     public const ushort HostContextHeaderSize = 136;
+    public const ushort CurrentHeaderSize = 144;
     public const int HostContextAbiVersionOffset = 112;
     public const int HostContextReservedBeforeCapabilitiesOffset = 116;
     public const int HostContextRequiredCapabilitiesOffset = 120;
     public const int HostContextEntryNameSizeOffset = 128;
     public const int HostContextReservedAfterEntryNameSizeOffset = 132;
+    public const int CurrentProfileOffset = 136;
+    public const int CurrentReservedOffset = 140;
     public const int TrailerSize = 24;
     public const int TrailerFrameOffset = 8;
     public const int TrailerLengthOffset = 16;
@@ -142,6 +150,31 @@ public static class PayloadFrameCodec
             out diagnostics);
     }
 
+    public static bool TryEncodeCurrent(
+        ReadOnlySpan<byte> source,
+        PayloadCompression compression,
+        PayloadFrameLimits limits,
+        string sourceName,
+        PayloadDispatchProfile profile,
+        HostContextFrameMetadata? hostContextMetadata,
+        out PayloadFrameEncoding? encoding,
+        out IReadOnlyList<Diagnostic> diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+        return TryEncodeCoreVersioned(
+            source,
+            frameOffset: 0,
+            compression,
+            limits,
+            sourceName,
+            hostContextMetadata,
+            CurrentFormatVersion,
+            profile,
+            frameRelativeOffset: true,
+            out encoding,
+            out diagnostics);
+    }
+
     private static bool TryEncodeCore(
         ReadOnlySpan<byte> source,
         ulong frameOffset,
@@ -151,10 +184,69 @@ public static class PayloadFrameCodec
         HostContextFrameMetadata? hostContextMetadata,
         out PayloadFrameEncoding? encoding,
         out IReadOnlyList<Diagnostic> diagnostics)
+        => TryEncodeCoreVersioned(
+            source,
+            frameOffset,
+            compression,
+            limits,
+            sourceName,
+            hostContextMetadata,
+            hostContextMetadata is null ? FormatVersion : HostContextFormatVersion,
+            hostContextMetadata is null ? null : PayloadDispatchProfile.HostContextEntry,
+            frameRelativeOffset: hostContextMetadata is not null,
+            out encoding,
+            out diagnostics);
+
+    private static bool TryEncodeCoreVersioned(
+        ReadOnlySpan<byte> source,
+        ulong frameOffset,
+        PayloadCompression compression,
+        PayloadFrameLimits limits,
+        string sourceName,
+        HostContextFrameMetadata? hostContextMetadata,
+        ushort frameVersion,
+        PayloadDispatchProfile? profile,
+        bool frameRelativeOffset,
+        out PayloadFrameEncoding? encoding,
+        out IReadOnlyList<Diagnostic> diagnostics)
     {
         ArgumentNullException.ThrowIfNull(limits);
         var errors = new DiagnosticBag();
         encoding = null;
+
+        if (frameVersion == CurrentFormatVersion && profile is null)
+        {
+            errors.Error(DiagnosticCode.PayloadMalformed, "The current frame requires a dispatch profile.");
+            diagnostics = errors.ToArray();
+            return false;
+        }
+
+        if (frameVersion == CurrentFormatVersion
+            && profile != PayloadDispatchProfile.OuterExecveat
+            && profile != PayloadDispatchProfile.HostContextEntry)
+        {
+            errors.Error(DiagnosticCode.PayloadUnsupported, "The current dispatch profile is unsupported.");
+            diagnostics = errors.ToArray();
+            return false;
+        }
+
+        if (frameVersion == CurrentFormatVersion
+            && profile == PayloadDispatchProfile.HostContextEntry
+            && hostContextMetadata is null)
+        {
+            errors.Error(DiagnosticCode.PayloadMalformed, "The HostContext profile requires HostContext metadata.");
+            diagnostics = errors.ToArray();
+            return false;
+        }
+
+        if (frameVersion == CurrentFormatVersion
+            && profile == PayloadDispatchProfile.OuterExecveat
+            && hostContextMetadata is not null)
+        {
+            errors.Error(DiagnosticCode.PayloadMalformed, "The outer profile cannot carry HostContext metadata.");
+            diagnostics = errors.ToArray();
+            return false;
+        }
 
         if (!TryEncodeSourceName(sourceName, limits.MaximumSourceNameBytes, out var sourceNameBytes))
         {
@@ -245,7 +337,13 @@ public static class PayloadFrameCodec
             return false;
         }
 
-        var headerSize = hostContextMetadata is null ? HeaderSize : HostContextHeaderSize;
+        var headerSize = frameVersion switch
+        {
+            FormatVersion => HeaderSize,
+            HostContextFormatVersion => HostContextHeaderSize,
+            CurrentFormatVersion => CurrentHeaderSize,
+            _ => throw new InvalidOperationException("Unsupported payload frame version."),
+        };
         if (!TryCheckedAdd((ulong)headerSize, (ulong)sourceNameBytes.Length, out var entryNameOffset)
             || !TryCheckedAdd(entryNameOffset, (ulong)entryNameBytes.Length, out var encodedOffsetWithinFrame)
             || !TryCheckedAdd(frameOffset, encodedOffsetWithinFrame, out var payloadOffset)
@@ -269,7 +367,7 @@ public static class PayloadFrameCodec
         HeaderMagic.CopyTo(header);
         BinaryPrimitives.WriteUInt16LittleEndian(
             header[VersionOffset..HeaderSizeOffset],
-            hostContextMetadata is null ? FormatVersion : HostContextFormatVersion);
+            frameVersion);
         BinaryPrimitives.WriteUInt16LittleEndian(header[HeaderSizeOffset..FlagsOffset], headerSize);
         BinaryPrimitives.WriteUInt32LittleEndian(header[FlagsOffset..ArchitectureOffset], (uint)compression);
         BinaryPrimitives.WriteUInt16LittleEndian(header[ArchitectureOffset..FileTypeOffset], Elf.ElfConstants.MachineAarch64);
@@ -280,7 +378,7 @@ public static class PayloadFrameCodec
         // Legacy v1 keeps the wrapper-absolute offset; the standalone HostContext runtime uses v2 frame-relative offsets.
         BinaryPrimitives.WriteUInt64LittleEndian(
             header[EncodedOffsetOffset..SourceSha256Offset],
-            hostContextMetadata is null ? payloadOffset : encodedOffsetWithinFrame);
+            frameRelativeOffset ? encodedOffsetWithinFrame : payloadOffset);
         sourceHash.CopyTo(header[SourceSha256Offset..EncodedSha256Offset]);
         encodedHash.CopyTo(header[EncodedSha256Offset..HeaderSize]);
         if (hostContextMetadata is not null)
@@ -296,6 +394,14 @@ public static class PayloadFrameCodec
                 checked((uint)entryNameBytes.Length));
         }
 
+        if (frameVersion == CurrentFormatVersion)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                header[CurrentProfileOffset..CurrentReservedOffset],
+                checked((uint)profile!.Value));
+            BinaryPrimitives.WriteUInt32LittleEndian(header[CurrentReservedOffset..], 0);
+        }
+
         sourceNameBytes.CopyTo(frame.AsSpan(checked((int)headerSize)));
         entryNameBytes.CopyTo(frame.AsSpan(checked((int)entryNameOffset)));
         encoded.CopyTo(frame.AsSpan(checked((int)encodedOffsetWithinFrame)));
@@ -309,8 +415,9 @@ public static class PayloadFrameCodec
             sourceName,
             compression)
         {
-            FrameVersion = hostContextMetadata is null ? FormatVersion : HostContextFormatVersion,
+            FrameVersion = frameVersion,
             HostContextMetadata = hostContextMetadata,
+            Profile = profile,
         };
         diagnostics = Array.Empty<Diagnostic>();
         return true;
@@ -341,6 +448,7 @@ public static class PayloadFrameCodec
         {
             FormatVersion => HeaderSize,
             HostContextFormatVersion => HostContextHeaderSize,
+            CurrentFormatVersion => CurrentHeaderSize,
             _ => (ushort)0,
         };
         if (expectedHeaderSize == 0)
@@ -374,10 +482,37 @@ public static class PayloadFrameCodec
             return Failure(diagnostics, frameVersion: version);
         }
 
+        PayloadDispatchProfile? profile = null;
         HostContextFrameMetadata? hostContextMetadata = null;
         uint entryNameSize = 0;
         HostContextCapability requiredCapabilities = HostContextCapability.None;
-        if (version == HostContextFormatVersion)
+        if (version == CurrentFormatVersion)
+        {
+            var profileValue = BinaryPrimitives.ReadUInt32LittleEndian(header[CurrentProfileOffset..CurrentReservedOffset]);
+            var reserved = BinaryPrimitives.ReadUInt32LittleEndian(header[CurrentReservedOffset..]);
+            if (reserved != 0
+                || (profileValue != (uint)PayloadDispatchProfile.OuterExecveat
+                    && profileValue != (uint)PayloadDispatchProfile.HostContextEntry))
+            {
+                diagnostics.Error(DiagnosticCode.PayloadUnsupported, "The current payload frame profile is unsupported.");
+                return Failure(diagnostics, frameVersion: version);
+            }
+
+            profile = (PayloadDispatchProfile)profileValue;
+            if (profile == PayloadDispatchProfile.HostContextEntry)
+            {
+                entryNameSize = BinaryPrimitives.ReadUInt32LittleEndian(
+                    header[HostContextEntryNameSizeOffset..]);
+            }
+            else if (header[HostContextAbiVersionOffset..CurrentProfileOffset].IndexOfAnyExcept((byte)0) >= 0)
+            {
+                diagnostics.Error(DiagnosticCode.PayloadMalformed, "The outer profile carries HostContext metadata.");
+                return Failure(diagnostics, frameVersion: version, profile: profile);
+            }
+        }
+
+        if (version == HostContextFormatVersion
+            || (version == CurrentFormatVersion && profile == PayloadDispatchProfile.HostContextEntry))
         {
             var abiVersion = BinaryPrimitives.ReadUInt32LittleEndian(
                 header[HostContextAbiVersionOffset..]);
@@ -392,7 +527,7 @@ public static class PayloadFrameCodec
             if (reservedBeforeCapabilities != 0 || reservedAfterEntryNameSize != 0)
             {
                 diagnostics.Error(DiagnosticCode.PayloadMalformed, "The HostContext frame reserved fields are not zero.");
-                return Failure(diagnostics, frameVersion: version);
+                return Failure(diagnostics, frameVersion: version, profile: profile);
             }
 
             if (!HostContextContract.IsSupportedVersion(abiVersion)
@@ -402,20 +537,20 @@ public static class PayloadFrameCodec
                 || !HostContextContract.HasOnlySupportedCapabilities(requiredCapabilities))
             {
                 diagnostics.Error(DiagnosticCode.PayloadUnsupported, "The HostContext frame ABI or capabilities are unsupported.");
-                return Failure(diagnostics, frameVersion: version);
+                return Failure(diagnostics, frameVersion: version, profile: profile);
             }
 
             if (entryNameSize == 0)
             {
                 diagnostics.Error(DiagnosticCode.PayloadMalformed, "The HostContext entry name is empty.");
-                return Failure(diagnostics, frameVersion: version);
+                return Failure(diagnostics, frameVersion: version, profile: profile);
             }
 
             if ((ulong)entryNameSize > limits.MaximumEntryNameBytes
                 || entryNameSize > HostContextContract.MaximumEntryNameBytes)
             {
                 diagnostics.Error(DiagnosticCode.PayloadLimitExceeded, "The HostContext entry name exceeds the configured limit.");
-                return Failure(diagnostics, frameVersion: version);
+                return Failure(diagnostics, frameVersion: version, profile: profile);
             }
         }
 
@@ -483,7 +618,8 @@ public static class PayloadFrameCodec
             return Failure(diagnostics, sourceSize, encodedSize, frameVersion: version);
         }
 
-        if (version == HostContextFormatVersion)
+        if (version == HostContextFormatVersion
+            || (version == CurrentFormatVersion && profile == PayloadDispatchProfile.HostContextEntry))
         {
             var entryNameBytes = frame.Slice((int)entryNameOffset, (int)entryNameSize);
             string entryName;
@@ -588,6 +724,7 @@ public static class PayloadFrameCodec
         {
             FrameVersion = version,
             HostContextMetadata = hostContextMetadata,
+            Profile = profile,
         };
     }
 
@@ -720,11 +857,13 @@ public static class PayloadFrameCodec
         byte[]? sourceHash = null,
         string? sourceName = null,
         ushort frameVersion = 0,
-        HostContextFrameMetadata? hostContextMetadata = null) =>
+        HostContextFrameMetadata? hostContextMetadata = null,
+        PayloadDispatchProfile? profile = null) =>
         new(null, sourceSize, encodedSize, sourceHash, encodedHash, sourceName, null, diagnostics.ToArray())
         {
             FrameVersion = frameVersion,
             HostContextMetadata = hostContextMetadata,
+            Profile = profile,
         };
 
     private static bool LooksLikeFrameHeader(ReadOnlySpan<byte> frame, ulong frameOffset)
@@ -739,6 +878,7 @@ public static class PayloadFrameCodec
         {
             FormatVersion => HeaderSize,
             HostContextFormatVersion => HostContextHeaderSize,
+            CurrentFormatVersion => CurrentHeaderSize,
             _ => (ushort)0,
         };
         if (expectedHeaderSize == 0 || frame.Length < expectedHeaderSize)
@@ -756,7 +896,27 @@ public static class PayloadFrameCodec
         }
 
         uint entryNameSize = 0;
-        if (version == HostContextFormatVersion)
+        PayloadDispatchProfile? profile = null;
+        if (version == CurrentFormatVersion)
+        {
+            var profileValue = BinaryPrimitives.ReadUInt32LittleEndian(header[CurrentProfileOffset..CurrentReservedOffset]);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(header[CurrentReservedOffset..]) != 0
+                || (profileValue != (uint)PayloadDispatchProfile.OuterExecveat
+                    && profileValue != (uint)PayloadDispatchProfile.HostContextEntry))
+            {
+                return false;
+            }
+
+            profile = (PayloadDispatchProfile)profileValue;
+            if (profile == PayloadDispatchProfile.OuterExecveat
+                && header[HostContextAbiVersionOffset..CurrentProfileOffset].IndexOfAnyExcept((byte)0) >= 0)
+            {
+                return false;
+            }
+        }
+
+        if (version == HostContextFormatVersion
+            || (version == CurrentFormatVersion && profile == PayloadDispatchProfile.HostContextEntry))
         {
             var abiVersion = BinaryPrimitives.ReadUInt32LittleEndian(
                 header[HostContextAbiVersionOffset..]);
@@ -816,7 +976,8 @@ public static class PayloadFrameCodec
                 return false;
             }
 
-            if (version == HostContextFormatVersion)
+            if (version == HostContextFormatVersion
+                || (version == CurrentFormatVersion && profile == PayloadDispatchProfile.HostContextEntry))
             {
                 var entryName = StrictUtf8.GetString(
                     frame.Slice((int)entryNameOffset, (int)entryNameSize));

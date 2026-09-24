@@ -1,10 +1,11 @@
 # HostContext runtime core
 
 This directory defines the versioned, host-neutral `HostContext` entry
-contract and a bounded frame-dispatch runtime. `urp_runtime_execute_frame`
-verifies the legacy v1 or HostContext v2 frame and both payload digests, asks
-the host for an immutable image, resolves the declared entry symbol, invokes
-it, and releases the image before returning.
+contract and a bounded frame-dispatch runtime. The current production frame is
+v3 with an explicit `host-context-entry` profile. `urp_runtime_execute_frame`
+verifies the selected frame and both payload digests, asks the host for an
+immutable image, resolves the declared entry symbol, invokes it, and releases
+the image before returning. v1/v2 remain isolated migration-test layouts.
 
 The native evidence adapter implements the contract with an anonymous memfd
 created with `MFD_ALLOW_SEALING` and the host's `dlopen`/`dlsym` loader through
@@ -114,22 +115,23 @@ mutates one bounded `DT_NULL` slot per tag, preserves surrounding bytes, uses a
 nonzero image-handle sentinel, and requires a zero handle on rejection; the
 unchanged unversioned `urp_entry` image remains the positive baseline.
 
-The runtime accepts the legacy frame v1 and HostContext frame v2. Both use the
-same 112-byte common header. A v2 header is 136 bytes and appends, in order,
-the HostContext ABI version, a reserved zero field, required capability bits,
-the UTF-8 entry-symbol byte length, and a second reserved zero field. Its
-variable data is `source_name`, `entry_name`, then compressed payload. The
-runtime validates those fields before decoding and copies the bounded entry
-name into a terminated local buffer before symbol lookup.
+The runtime retains legacy frame v1 and HostContext frame v2 only for migration
+tests. The current v3 header is 144 bytes and appends, in order, the HostContext
+ABI version, a reserved zero field, required capability bits, the UTF-8
+entry-symbol byte length, a dispatch profile, and a second reserved zero field.
+Its variable data is `source_name`, optional `entry_name`, then compressed
+payload. The outer profile carries no HostContext metadata and is handled by
+the separate static launcher. The runtime validates the fields before decoding
+and copies the bounded entry name into a terminated local buffer before symbol
+lookup.
 
-Legacy v1 keeps its wrapper-absolute encoded offset for the existing launcher.
-HostContext v2 uses a frame-relative encoded offset because the standalone
-runtime receives the frame slice directly; the managed wrapper reader applies
-the corresponding versioned interpretation. The production managed `pack`
-path intentionally calls the v1 encoder for the legacy launcher; it does not
-force v2 metadata into that launcher. Production HostContext packaging remains
-an explicit `unknown` migration boundary until a declared entry-image adapter,
-a v2-capable launcher, and a retained managed pack/dispatch oracle exist.
+Legacy v1 keeps its wrapper-absolute encoded offset for migration evidence.
+HostContext v2 uses a frame-relative encoded offset in its migration self-test.
+Current v3 uses a frame-relative offset for both explicit profiles. The current
+managed `pack` path selects v3 and validates the profile-specific launcher
+marker before publication. `host-context-launcher` discovers the appended
+frame, invokes `urp_runtime_execute_wrapper`, and returns the declared entry
+status.
 
 Run the native contract self-test on a native AArch64 host:
 

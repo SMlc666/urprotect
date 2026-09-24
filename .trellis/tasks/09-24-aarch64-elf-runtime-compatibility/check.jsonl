@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/runtime-compatibility.md", "reason": "Verify profile, ABI, evidence, and rejection behavior against the runtime contract."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify managed/native/fixture/fuzz/CI quality gates."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify stable status and diagnostic behavior."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review all layer boundaries and round-trip data flow."}
+{"file": "COMPATIBILITY.md", "reason": "Review current claim boundaries and retained evidence vocabulary."}
+{"file": "tests/ContractInventory.md", "reason": "Check literal ownership and cross-language contract drift."}

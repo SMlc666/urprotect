@@ -37,8 +37,8 @@ source_git_sha=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)
 
 {
     printf '%s\n' 'schema=urprotect-native-launcher-provenance-v1'
-    printf '%s\n' 'launcher_abi=1'
-    printf '%s\n' 'launcher_marker=URPROTECT-AARCH64-LAUNCHER-V1'
+    printf '%s\n' 'launcher_abi=2'
+    printf '%s\n' 'launcher_marker=URPROTECT-AARCH64-LAUNCHER-V3'
     printf 'source_date_epoch=%s\n' "$source_date_epoch"
     printf 'compiler=%s\n' "$compiler"
     printf 'compiler_version=%s\n' "$compiler_version"

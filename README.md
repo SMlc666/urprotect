@@ -66,16 +66,28 @@ The conditional compatibility claim and its proof boundary are documented in
 [`COMPATIBILITY.md`](COMPATIBILITY.md). The machine-readable obligations and
 evidence map live in `fixtures/manifest.json`.
 
-## First ELF Wrapper
+## Current AArch64 Packaging Profiles
 
-Pack only a Linux ARM64 dynamically linked `ET_DYN` PIE executable with a
-`PT_INTERP` interpreter:
+Pack a Linux ARM64 dynamically linked `ET_DYN` PIE executable with a
+`PT_INTERP` interpreter through the explicit outer profile:
 
 ```sh
 urprotect pack ./program \
   --output ./program.wrapped \
   --launcher ./urprotect-launcher \
+  --profile outer-execveat \
   --json ./program.pack.json
+```
+
+Pack a declared HostContext entry image through its matching launcher:
+
+```sh
+urprotect pack ./entry-image.so \
+  --output ./entry-image.host.wrapped \
+  --launcher ./host-context-launcher \
+  --profile host-context-entry \
+  --entry-symbol urp_entry \
+  --json ./entry-image.pack.json
 ```
 
 Build the small native launcher on a native AArch64 host with the pinned musl
@@ -86,18 +98,20 @@ toolchain used by CI:
 ./native/urprotect-launcher/build.sh test
 ```
 
-The launcher is a static AArch64 `ET_DYN` PIE with no interpreter or shared
-library dependencies. `pack` requires `--launcher`; it never silently turns
-the C# packer into the runtime wrapper. Production `pack` intentionally emits
-legacy frame v1 for this launcher; HostContext v2 is not forced into the
-legacy path. The production HostContext pack gap remains an explicit unknown
-migration boundary until the missing entry-image adapter, v2-capable launcher,
-and managed pack/dispatch oracle are available.
+The outer launcher is a static AArch64 `ET_DYN` PIE with no interpreter or
+shared-library dependencies. The HostContext launcher is a profile-matched
+AArch64 runtime executable that uses the sealed-memfd adapter. `pack` requires
+an explicit profile-matched `--launcher`; it never silently turns the C# packer
+into a runtime wrapper or falls back between profiles. Current production
+packaging emits frame v3. Legacy v1/v2 behavior remains historical migration
+evidence only and is rejected by current launchers.
 
-The current wrapper contract supports native ARM64 Linux glibc and is
-exercised by the PR covering fixture matrix. Shared objects, static `ET_EXEC`,
-Android/bionic packaging, payload encryption, and full custom in-process
-loading remain rejected or deferred. The frame stores a source basename for
+The outer profile supports native ARM64 Linux glibc and is exercised by the PR
+covering fixture matrix. The first HostContext production slice supports a
+declared AArch64 `ET_DYN` entry image exposing `urp_entry` through the native
+sealed-memfd adapter. Shared objects without the entry profile, static
+`ET_EXEC`, Android/bionic production packaging, payload encryption, and full
+custom in-process loading remain rejected or deferred. The frame stores a source basename for
 `argv[0]`;
 path separators are rejected and no payload directory is taken from the
 environment. Both the native launcher and the managed self-contained host use

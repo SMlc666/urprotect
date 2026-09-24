@@ -1,10 +1,10 @@
 # UrProtect native launcher
 
-This directory contains the Wrapper 0.2 runtime launcher for Linux AArch64.
-It is intentionally separate from the C# packer: the packer validates the
-source ELF and appends the v1 frame, while this executable only discovers its
-own frame, verifies and inflates the payload, and hands the recovered program
-to `execveat(AT_EMPTY_PATH)`.
+This directory contains the current `outer-execveat` profile launcher for Linux
+AArch64. It is intentionally separate from the C# packer: the packer validates
+the source ELF and appends the current v3 frame, while this executable only
+discovers its own profile frame, verifies and inflates the payload, and hands the
+recovered program to `execveat(AT_EMPTY_PATH)`.
 
 Build on a native AArch64 host with the pinned musl toolchain used by CI:
 
@@ -21,8 +21,9 @@ but required CI jobs must use the pinned native ARM64 toolchain.
 The build records compiler, linker, miniz, source-hash, and launcher-hash
 information in `build/PROVENANCE.txt`.
 
-The launcher uses the raw-deflate v1 frame and SHA-256 implementation in this
-repository. It rejects malformed trailers, unsupported frame metadata, unsafe
-basenames, digest mismatches, invalid recovered ELF files, and failed
-memfd_create/execveat operations without invoking a shell. The recovered
-payload is never written to an executable temporary pathname.
+The launcher uses the current raw-deflate frame and SHA-256 implementation in
+this repository. It rejects stale versions, non-outer profiles, malformed
+trailers, unsupported frame metadata, unsafe basenames, digest mismatches,
+invalid recovered ELF files, and failed memfd_create/execveat operations
+without invoking a shell. The recovered payload is never written to an
+executable temporary pathname.

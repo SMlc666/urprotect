@@ -86,7 +86,7 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertIn("GNU RELRO", feature["obligation"])
         self.assertIn("BIND_NOW", " ".join(feature["constraints"]))
 
-    def test_production_host_context_pack_gap_is_explicitly_unknown(self) -> None:
+    def test_production_host_context_pack_is_current_and_validated(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
@@ -94,10 +94,10 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in self.data["features"]
             if item["id"] == "runtime.host-context.production-pack"
         )
-        self.assertEqual(feature["status"], "unknown")
-        self.assertIn("entry-image adapter", feature["nextEvidence"])
-        self.assertIn("v2-capable launcher", feature["nextEvidence"])
-        self.assertIn("managed pack/dispatch oracle", feature["nextEvidence"])
+        self.assertEqual(feature["status"], "validated")
+        self.assertIn("test_managed_host_context.sh", feature["witness"])
+        self.assertIn("test_managed_host_context.sh", feature["oracle"])
+        self.assertIn("host-context/managed", " ".join(feature["evidence"]))
 
     def test_bionic_host_context_handoff_has_a_native_adapter_oracle(self) -> None:
         result = self.run_validator(self.data)
@@ -112,9 +112,9 @@ class FixtureMatrixTests(unittest.TestCase):
             any("F_SEAL_WRITE" in constraint for constraint in handoff["constraints"])
         )
         self.assertTrue(
-            any("production managed pack" in constraint for constraint in handoff["constraints"])
+            any("production-pack" in constraint for constraint in handoff["constraints"])
         )
-        self.assertEqual(features["runtime.host-context.production-pack"]["status"], "unknown")
+        self.assertEqual(features["runtime.host-context.production-pack"]["status"], "validated")
 
     def test_legacy_wrapper_and_android_jni_are_labeled_as_baselines(self) -> None:
         result = self.run_validator(self.data)
@@ -167,6 +167,8 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in data["features"]
             if item["id"] == "runtime.host-context.production-pack"
         )
+        feature["status"] = "unknown"
+        feature["nextEvidence"] = "test evidence"
         del feature["nextEvidence"]
 
         result = self.run_validator(data)
@@ -565,6 +567,9 @@ class FixtureMatrixTests(unittest.TestCase):
         data = copy.deepcopy(self.data)
         case = next(item for item in data["cases"] if item["id"] == "c-termux-bionic-pie")
         case["required"] = True
+        production = next(item for item in data["features"] if item["id"] == "runtime.host-context.production-pack")
+        production["status"] = "unknown"
+        production["nextEvidence"] = "test evidence"
         case["features"].append("runtime.host-context.production-pack")
 
         result = self.run_validator(data)

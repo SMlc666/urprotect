@@ -295,7 +295,7 @@ public sealed class CliApplication
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  urprotect validate <input> [--copy <output>] [--json <path|->] [--no-analysis]");
-        writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>]");
+        writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>]");
     }
 
     private static int RunValidation(CliOptions options, TextWriter stdout, TextWriter stderr)
@@ -418,7 +418,10 @@ public sealed class CliApplication
         var result = new ElfPackService().Pack(
             options.InputPath,
             options.OutputPath,
-            options.LauncherPath);
+            options.LauncherPath,
+            new ElfPackOptions(
+                Profile: options.Profile,
+                EntrySymbol: options.EntrySymbol));
         return WritePackResult(options, result, stdout, stderr);
     }
 
@@ -509,6 +512,8 @@ public sealed class CliApplication
         string? outputPath = null;
         string? jsonPath = null;
         string? launcherPath = null;
+        var profile = PayloadDispatchProfile.OuterExecveat;
+        var entrySymbol = HostContextContract.EntrySymbol;
         for (var index = 2; index < args.Length; index++)
         {
             switch (args[index])
@@ -541,6 +546,23 @@ public sealed class CliApplication
 
                     launcherPath = args[++index];
                     break;
+                case "--profile" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
+                    if (!PayloadDispatchProfileExtensions.TryParse(args[++index], out profile))
+                    {
+                        error = "Usage: --profile must be outer-execveat or host-context-entry.";
+                        return false;
+                    }
+
+                    break;
+                case "--entry-symbol" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
+                    if (entrySymbol != HostContextContract.EntrySymbol)
+                    {
+                        error = "Usage: --entry-symbol may be specified only once.";
+                        return false;
+                    }
+
+                    entrySymbol = args[++index];
+                    break;
                 case "-h":
                 case "--help":
                     error = "Usage: help is only valid before the command.";
@@ -557,7 +579,14 @@ public sealed class CliApplication
             return false;
         }
 
-        options = new PackOptions(args[1], outputPath, jsonPath, launcherPath);
+        if (profile == PayloadDispatchProfile.OuterExecveat
+            && entrySymbol != HostContextContract.EntrySymbol)
+        {
+            error = "Usage: --entry-symbol requires --profile host-context-entry.";
+            return false;
+        }
+
+        options = new PackOptions(args[1], outputPath, jsonPath, launcherPath, profile, entrySymbol);
         return true;
     }
 
@@ -836,5 +865,7 @@ public sealed class CliApplication
         string InputPath,
         string OutputPath,
         string? JsonPath,
-        string? LauncherPath);
+        string? LauncherPath,
+        PayloadDispatchProfile Profile,
+        string EntrySymbol);
 }

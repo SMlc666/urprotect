@@ -191,18 +191,19 @@ required memfd seals on the image, dispatches `urp_entry` through bionic's
 ELF report, and fixture hash. This validates the narrow bionic adapter
 handoff, with no executable temporary pathname. It does not upgrade the
 separate production managed-pack integration row
-`runtime.host-context.production-pack`, which remains `unknown` until the
-managed pack command and v2-capable launcher have a retained end-to-end oracle.
+`runtime.host-context.production-pack`, which now has a retained managed v3
+profile oracle on the native glibc lane. The bionic adapter evidence remains a
+peer runtime fact and does not silently promote the glibc production row.
 The bionic evidence intentionally excludes Android framework, OEM, SELinux,
 device-kernel, AVD, Waydroid, QEMU, and native-bridge claims.
 
-The production managed pack path is a separate deliberate migration boundary.
-`ElfPackService` emits legacy frame v1 for the legacy launcher and must not
-force a v2 frame into that path. The matrix row
-`runtime.host-context.production-pack` is `unknown` until the missing
-HostContext entry-image adapter, v2-capable launcher, and managed pack/dispatch
-oracle are implemented and retained. Its unknown status does not weaken the
-legacy v1 compatibility baseline.
+The production managed pack path now uses current frame v3 with explicit
+`outer-execveat` and `host-context-entry` profiles. The outer profile retains
+the static launcher and `execveat(AT_EMPTY_PATH)` behavior. The HostContext
+profile uses the profile-matched HostContext launcher, sealed memfd loading,
+exact entry lookup, exactly-once dispatch, release, and status preservation.
+Legacy v1/v2 behavior remains migration evidence only; current launchers reject
+stale versions and profile/launcher mismatches.
 
 The claim therefore applies to every correctly implemented host satisfying the
 contract, not to an unqualified statistical majority of phone vendors.

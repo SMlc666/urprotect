@@ -1,0 +1,33 @@
+{
+  "id": "aarch64-elf-runtime-compatibility",
+  "name": "aarch64-elf-runtime-compatibility",
+  "title": "Expand AArch64 ELF Compatibility and Runtime Semantics",
+  "description": "Plan and deliver an ARM64-only compatibility roadmap with one current packaging contract and explicit outer-execveat and host-context-entry profiles across ELF inputs, relocation and symbol semantics, dependency/lifecycle behavior, TLS, and GNU properties.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "SMlc666",
+  "assignee": "SMlc666",
+  "createdAt": "2026-09-24",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-24-p0-current-packaging-contract",
+    "09-24-p1-outer-aarch64-wrapper",
+    "09-24-p2-aarch64-relocation-symbols",
+    "09-24-p3-dependency-path-lifecycle",
+    "09-24-p4a-aarch64-tls",
+    "09-24-p4b-gnu-property-bti-pac"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

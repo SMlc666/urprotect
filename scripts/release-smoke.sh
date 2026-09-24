@@ -77,7 +77,7 @@ for archive in "${archives[@]}"; do
     exit 1
   fi
   "${native_launcher_self_test}" > "${extracted}/native-launcher-self-test.txt"
-  grep -a -q 'URPROTECT-AARCH64-LAUNCHER-V1' "${native_launcher}"
+  grep -a -q 'URPROTECT-AARCH64-LAUNCHER-V3' "${native_launcher}"
   python3 - "${native_launcher}" "${native_launcher_provenance}" <<'PY'
 import hashlib
 import pathlib
@@ -92,8 +92,8 @@ for line in provenance.read_text().splitlines():
 actual = hashlib.sha256(launcher.read_bytes()).hexdigest()
 assert values.get("launcher_sha256") == actual
 assert values.get("schema") == "urprotect-native-launcher-provenance-v1"
-assert values.get("launcher_abi") == "1"
-assert values.get("launcher_marker") == "URPROTECT-AARCH64-LAUNCHER-V1"
+assert values.get("launcher_abi") == "2"
+assert values.get("launcher_marker") == "URPROTECT-AARCH64-LAUNCHER-V3"
 PY
   readelf -lW "${binary}" > "${extracted}/program-headers.txt"
   readelf -hW -lW -dW "${native_launcher}" > "${extracted}/native-launcher-readelf.txt"
@@ -219,9 +219,10 @@ report = json.loads(pathlib.Path(sys.argv[1]).read_text())
 assert report["schemaVersion"] == 1
 assert report["success"] is True
 assert report["payload"]["compression"] == "deflate"
-assert report["payload"]["launcherAbiVersion"] == 1
-assert report["payload"]["frameVersion"] == 1
-assert report["payload"]["launcherMarker"] == "URPROTECT-AARCH64-LAUNCHER-V1"
+assert report["payload"]["profile"] == "outer-execveat"
+assert report["payload"]["launcherAbiVersion"] == 2
+assert report["payload"]["frameVersion"] == 3
+assert report["payload"]["launcherMarker"] == "URPROTECT-AARCH64-LAUNCHER-V3"
 assert len(report["payload"]["launcherSha256"]) == 64
 assert report["output"]["published"] is True
 PY

@@ -41,6 +41,60 @@ public sealed class PayloadFrameTests
     }
 
     [Fact]
+    [Trait("Category", "PackFrame")]
+    public void RoundTripsCurrentOuterProfileWithFrameRelativeOffset()
+    {
+        var source = Enumerable.Range(0, 2048).Select(index => (byte)(index % 31)).ToArray();
+        Assert.True(PayloadFrameCodec.TryEncodeCurrent(
+            source,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "outer-fixture",
+            PayloadDispatchProfile.OuterExecveat,
+            null,
+            out var frame,
+            out var diagnostics), string.Join(Environment.NewLine, diagnostics));
+        Assert.NotNull(frame);
+        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, frame!.FrameVersion);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, frame.Profile);
+        Assert.Equal(
+            (ulong)PayloadFrameCodec.CurrentHeaderSize + (ulong)"outer-fixture"u8.Length,
+            BinaryPrimitives.ReadUInt64LittleEndian(
+                frame.FrameBytes.AsSpan(PayloadFrameCodec.EncodedOffsetOffset, sizeof(ulong))));
+
+        var decoded = PayloadFrameCodec.Decode(frame.FrameBytes, 1234, new PayloadFrameLimits());
+        TestAssertions.FrameSuccess(decoded, "current outer frame decoding");
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, decoded.Profile);
+        Assert.Null(decoded.HostContextMetadata);
+        Assert.Equal(source, decoded.SourceBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void RoundTripsCurrentHostContextProfile()
+    {
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities,
+            "urp_entry");
+        Assert.True(PayloadFrameCodec.TryEncodeCurrent(
+            ElfFixture.MinimalPie(),
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "entry-image",
+            PayloadDispatchProfile.HostContextEntry,
+            metadata,
+            out var frame,
+            out var diagnostics), string.Join(Environment.NewLine, diagnostics));
+        Assert.NotNull(frame);
+        Assert.Equal(PayloadDispatchProfile.HostContextEntry, frame!.Profile);
+        var decoded = PayloadFrameCodec.Decode(frame.FrameBytes, 0, new PayloadFrameLimits());
+        TestAssertions.FrameSuccess(decoded, "current HostContext frame decoding");
+        Assert.Equal(PayloadDispatchProfile.HostContextEntry, decoded.Profile);
+        Assert.Equal(metadata, decoded.HostContextMetadata);
+    }
+
+    [Fact]
     [Trait("Category", "PackHostContext")]
     public void RoundTripsHostContextFrameWithExplicitEntrySymbol()
     {

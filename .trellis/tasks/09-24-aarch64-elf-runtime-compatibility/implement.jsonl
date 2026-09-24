@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/runtime-compatibility.md", "reason": "Durable AArch64 profile, HostContext, evidence, and failure contracts."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required binary-safety, testing, and CI quality gates."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Stable diagnostics and failure propagation for cross-layer changes."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer data-flow and contract checklist."}

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/runtime-compatibility.md", "reason": "Current frame, explicit profiles, HostContext lifecycle, and evidence contract."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Cross-language layout, binary safety, and validation gates."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Stable diagnostics and fail-closed pack/runtime behavior."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Managed/native/launcher data-flow checklist."}

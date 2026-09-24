@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/runtime-compatibility.md", "reason": "Review profile semantics and evidence claims."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review tests, ABI ownership, and native build constraints."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review diagnostic and failure propagation."}
+{"file": "tests/ContractInventory.md", "reason": "Review cross-language literal ownership."}

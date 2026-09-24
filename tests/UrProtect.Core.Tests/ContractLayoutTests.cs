@@ -48,6 +48,9 @@ public sealed class ContractLayoutTests
             PayloadFrameCodec.HostContextHeaderSize,
             root.GetProperty("frameV2HeaderSize").GetUInt16());
         Assert.Equal(
+            PayloadFrameCodec.CurrentHeaderSize,
+            root.GetProperty("frameV3HeaderSize").GetUInt16());
+        Assert.Equal(
             PayloadFrameCodec.TrailerSize,
             root.GetProperty("frameTrailerSize").GetUInt16());
         Assert.Equal(
@@ -62,6 +65,12 @@ public sealed class ContractLayoutTests
         Assert.Equal(
             PayloadFrameCodec.HostContextEntryNameSizeOffset,
             root.GetProperty("v2EntryNameSizeOffset").GetUInt16());
+        Assert.Equal(
+            PayloadFrameCodec.CurrentProfileOffset,
+            root.GetProperty("v3ProfileOffset").GetUInt16());
+        Assert.Equal(
+            PayloadFrameCodec.CurrentReservedOffset,
+            root.GetProperty("v3ReservedOffset").GetUInt16());
 
         Assert.True(
             string.IsNullOrWhiteSpace(error),

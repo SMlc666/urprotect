@@ -107,7 +107,7 @@ $(BUILD_DIR)/miniz_tinfl.o: ../../third_party/miniz/miniz_tinfl.c \
 
 check-elf: $(LAUNCHER)
 	@file "$<"
-	@grep -a -q 'URPROTECT-AARCH64-LAUNCHER-V1' "$<"
+	@grep -a -q 'URPROTECT-AARCH64-LAUNCHER-V3' "$<"
 	@"$(READELF)" -hW "$<" | grep -q 'Class:.*ELF64'
 	@"$(READELF)" -hW "$<" | grep -q 'Data:.*little endian'
 	@"$(READELF)" -hW "$<" | grep -q 'Machine:.*AArch64'

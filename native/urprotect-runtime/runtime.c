@@ -10,6 +10,7 @@
 #define URP_MAX_ARGUMENTS 4096U
 
 static const uint8_t urp_frame_magic[] = URP_FRAME_MAGIC;
+static const uint8_t urp_trailer_magic[] = URP_FRAME_TRAILER_MAGIC;
 
 typedef struct urp_frame_view {
     const uint8_t *encoded;
@@ -21,6 +22,7 @@ typedef struct urp_frame_view {
     size_t entry_name_size;
     uint32_t host_abi_version;
     uint64_t required_capabilities;
+    uint32_t profile;
 } urp_frame_view;
 
 static uint16_t urp_read_u16_le(const uint8_t *bytes)
@@ -239,13 +241,16 @@ static urp_status urp_parse_frame(
     uint16_t version = urp_read_u16_le(header + URP_FRAME_VERSION_OFFSET);
     uint16_t header_size = urp_read_u16_le(header + URP_FRAME_HEADER_SIZE_OFFSET);
     if (version != URP_FRAME_VERSION_V1
-        && version != URP_FRAME_VERSION_V2) {
+        && version != URP_FRAME_VERSION_V2
+        && version != URP_FRAME_VERSION_V3) {
         return URP_STATUS_UNSUPPORTED;
     }
 
     uint16_t expected_header_size = version == URP_RUNTIME_FRAME_VERSION_V1
         ? URP_FRAME_V1_HEADER_SIZE
-        : URP_FRAME_V2_HEADER_SIZE;
+        : (version == URP_RUNTIME_FRAME_VERSION_V2
+            ? URP_FRAME_V2_HEADER_SIZE
+            : URP_FRAME_V3_HEADER_SIZE);
     if (header_size != expected_header_size
         || urp_read_u32_le(header + URP_FRAME_FLAGS_OFFSET) != URP_FRAME_DEFLATE_FLAG
         || urp_read_u16_le(header + URP_FRAME_MACHINE_OFFSET) != URP_FRAME_MACHINE_AARCH64
@@ -257,7 +262,29 @@ static urp_status urp_parse_frame(
     uint32_t host_abi_version = URP_HOST_ABI_VERSION;
     uint64_t required_capabilities = 0U;
     uint32_t entry_name_size_u32 = 0U;
-    if (version == URP_RUNTIME_FRAME_VERSION_V2) {
+    uint32_t profile = version == URP_RUNTIME_FRAME_VERSION_V3
+        ? 0U
+        : URP_PROFILE_HOST_CONTEXT_ENTRY;
+    if (version == URP_RUNTIME_FRAME_VERSION_V3) {
+        profile = urp_read_u32_le(frame + URP_FRAME_V3_PROFILE_OFFSET);
+        if (urp_read_u32_le(frame + URP_FRAME_V3_RESERVED_OFFSET) != 0U
+            || (profile != URP_PROFILE_OUTER_EXECVEAT
+                && profile != URP_PROFILE_HOST_CONTEXT_ENTRY)) {
+            return URP_STATUS_UNSUPPORTED;
+        }
+        if (profile == URP_PROFILE_OUTER_EXECVEAT) {
+            for (size_t index = URP_FRAME_V2_HOST_ABI_OFFSET;
+                 index < URP_FRAME_V3_PROFILE_OFFSET;
+                 ++index) {
+                if (frame[index] != 0U) {
+                    return URP_STATUS_FRAME_INVALID;
+                }
+            }
+        }
+    }
+    if (version == URP_RUNTIME_FRAME_VERSION_V2
+        || (version == URP_RUNTIME_FRAME_VERSION_V3
+            && profile == URP_PROFILE_HOST_CONTEXT_ENTRY)) {
         host_abi_version = urp_read_u32_le(
             frame + URP_RUNTIME_FRAME_V2_HOST_ABI_OFFSET);
         uint32_t reserved_before_capabilities = urp_read_u32_le(
@@ -307,7 +334,9 @@ static urp_status urp_parse_frame(
     }
 
     uint64_t entry_name_offset = 0U;
-    if (version == URP_RUNTIME_FRAME_VERSION_V2) {
+    if (version == URP_RUNTIME_FRAME_VERSION_V2
+        || (version == URP_RUNTIME_FRAME_VERSION_V3
+            && profile == URP_PROFILE_HOST_CONTEXT_ENTRY)) {
         entry_name_offset = encoded_offset_expected;
         if (!urp_checked_add_u64(
                 encoded_offset_expected,
@@ -340,7 +369,9 @@ static urp_status urp_parse_frame(
         || !urp_u64_to_size((uint64_t)name_size, &name_size_size)) {
         return URP_STATUS_FRAME_INVALID;
     }
-    if (version == URP_RUNTIME_FRAME_VERSION_V2
+    if ((version == URP_RUNTIME_FRAME_VERSION_V2
+         || (version == URP_RUNTIME_FRAME_VERSION_V3
+             && profile == URP_PROFILE_HOST_CONTEXT_ENTRY))
         && !urp_u64_to_size(entry_name_offset, &entry_name_offset_size)) {
         return URP_STATUS_FRAME_INVALID;
     }
@@ -361,7 +392,9 @@ static urp_status urp_parse_frame(
 
     const uint8_t *entry_name = NULL;
     size_t entry_name_size = 0U;
-    if (version == URP_RUNTIME_FRAME_VERSION_V2) {
+    if (version == URP_RUNTIME_FRAME_VERSION_V2
+        || (version == URP_RUNTIME_FRAME_VERSION_V3
+            && profile == URP_PROFILE_HOST_CONTEXT_ENTRY)) {
         if (!urp_u64_to_size((uint64_t)entry_name_size_u32, &entry_name_size)
             || entry_name_offset_size > frame_size
             || entry_name_size > frame_size - entry_name_offset_size) {
@@ -396,6 +429,7 @@ static urp_status urp_parse_frame(
     view->entry_name_size = entry_name_size;
     view->host_abi_version = host_abi_version;
     view->required_capabilities = required_capabilities;
+    view->profile = profile;
     return URP_STATUS_OK;
 }
 
@@ -481,6 +515,11 @@ urp_status urp_runtime_execute_frame(
         return status;
     }
 
+    if (frame_view.profile == URP_PROFILE_OUTER_EXECVEAT) {
+        urp_emit(host, URP_STATUS_UNSUPPORTED, "The outer-execveat profile requires the outer launcher");
+        return URP_STATUS_UNSUPPORTED;
+    }
+
     if (frame_view.host_abi_version != host->abi_version
         || (host->capabilities & frame_view.required_capabilities)
             != frame_view.required_capabilities) {
@@ -547,4 +586,39 @@ urp_status urp_runtime_execute_frame(
         urp_emit(host, entry_status, "HostContext entry dispatch failed");
     }
     return entry_status;
+}
+
+urp_status urp_runtime_execute_wrapper(
+    const urp_host_context_v1 *host,
+    const uint8_t *wrapper,
+    size_t wrapper_size,
+    const urp_launch_args_v1 *args)
+{
+    if (wrapper == NULL || wrapper_size < URP_FRAME_TRAILER_SIZE) {
+        return URP_STATUS_FRAME_INVALID;
+    }
+
+    const uint8_t *trailer = wrapper + wrapper_size - URP_FRAME_TRAILER_SIZE;
+    if (memcmp(trailer, urp_trailer_magic, sizeof(urp_trailer_magic) - 1U) != 0) {
+        return URP_STATUS_FRAME_INVALID;
+    }
+
+    uint64_t frame_offset = urp_read_u64_le(trailer + URP_FRAME_TRAILER_FRAME_OFFSET);
+    uint64_t frame_length = urp_read_u64_le(trailer + URP_FRAME_TRAILER_LENGTH_OFFSET);
+    uint64_t frame_end;
+    uint64_t wrapper_end;
+    if (!urp_checked_add_u64(frame_offset, frame_length, &frame_end)
+        || !urp_checked_add_u64(frame_end, URP_FRAME_TRAILER_SIZE, &wrapper_end)
+        || wrapper_end != (uint64_t)wrapper_size
+        || frame_offset > (uint64_t)wrapper_size
+        || frame_length > (uint64_t)SIZE_MAX
+        || frame_offset > (uint64_t)SIZE_MAX) {
+        return URP_STATUS_FRAME_INVALID;
+    }
+
+    return urp_runtime_execute_frame(
+        host,
+        wrapper + (size_t)frame_offset,
+        (size_t)frame_length,
+        args);
 }

@@ -104,6 +104,11 @@ jobs:
           mkdir -p .artifacts/host-context/pr
           make -C native/urprotect-runtime test \
             2>&1 | tee .artifacts/host-context/pr/self-test.log
+      - name: Managed HostContext packaging oracle
+        run: |
+          MANAGED_HOST_CONTEXT_ARTIFACT_ROOT=.artifacts/host-context/managed \
+            native/urprotect-runtime/test_managed_host_context.sh \
+            2>&1 | tee .artifacts/host-context/pr/managed-pack.log
       - name: Check PR HostContext evidence
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v1
@@ -119,6 +124,7 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-relro
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-stack
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.production-pack
       - name: Render compatibility matrix
         run: |
           python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr

@@ -15,6 +15,52 @@ frame and ELF invariants pass and the host implements the declared HostContext
 ABI. A deterministic runtime pass is evidence for an implementation; it does
 not by itself upgrade an unproved host behavior to `proven`.
 
+### Development-stage scope and evolution policy
+
+UrProtect is an AArch64/ARM64-only product. The current compatibility roadmap
+does not add x86_64, ARM32, RISC-V, or another architecture backend. Technical
+contracts and examples should use **AArch64**; user-facing text may explain the
+term as ARM64.
+
+The project is in the 0.x rapid-development stage. Breaking changes to the
+frame format, HostContext ABI, launcher ABI, CLI contract, report schema, and
+fixture contracts are allowed when the current design requires them. A change
+to one of these cross-layer contracts must update every producer, consumer,
+validation rule, test, fixture, evidence declaration, and document in the same
+change. Do not add a compatibility adapter solely to preserve an obsolete
+internal production path.
+
+The production runtime should converge on one current versioned packaging
+contract with explicit execution profiles. The current profiles are
+`outer-execveat` for standalone PIE recovery and `host-context-entry` for an
+entry image loaded through HostContext. These profiles have different image
+lifetime and launch semantics, so a profile-specific launcher or adapter is
+explicitly selected and validated rather than inferred from loader behavior.
+During migration, an older path may remain as explicitly named historical
+evidence, but new packaging must not select it silently and the compatibility
+matrix must not count it as current support. A stale version or profile/
+launcher mismatch must produce a clear version or unsupported result.
+
+Compatibility work is layered and must be reported at the layer actually
+proved:
+
+1. parser/model acceptance;
+2. outer wrapper and native interpreter execution;
+3. in-process HostContext loading and entry dispatch;
+4. runtime-specific evidence such as glibc, musl, or bionic.
+
+Success at a lower layer does not promote a claim at a higher layer. In
+particular, a system loader accepting an ELF feature is not HostContext support
+until the HostContext contract defines its semantics and a corresponding
+oracle is retained.
+
+The compatibility expansion order is recorded in the active parent task rather
+than duplicated here: converge the current contract and explicit profiles
+first, then expand the outer AArch64 wrapper, relocation/symbol semantics,
+dependency/path/lifecycle semantics, and finally TLS/GNU property semantics.
+The parent task owns the phase details and child-task acceptance criteria; this
+spec owns the durable rules that every phase must follow.
+
 ### 2. Signatures
 
 The native runtime entry point is:
@@ -205,11 +251,12 @@ executable pathname.
   it adds one existing `gcc-c` producer with a `release-hardened` variant and
   a readelf oracle for GNU RELRO and BIND_NOW rather than a blind Cartesian
   product.
-- The production managed pack path intentionally emits legacy frame v1 for
-  the legacy launcher. `runtime.host-context.production-pack` is an explicit
-  `unknown` migration boundary until the missing HostContext entry-image
-  adapter, v2-capable launcher, and managed pack/dispatch oracle are retained;
-  no v2 frame may be forced into the legacy path.
+- The current production managed pack path emits frame v3 with explicit
+  `outer-execveat` and `host-context-entry` profiles. Profile-matched launcher
+  markers are validated before frame encoding and stale v1/v2 behavior remains
+  migration evidence only. `runtime.host-context.production-pack` is validated
+  by the retained managed HostContext pack/dispatch oracle on the native
+  AArch64 glibc lane.
 - `runtime.wrapper-v1-baseline` keeps Wrapper 0.2 framing and launcher tests as
   migration evidence only; the Android `android.jni.native-bridge` row is an
   unwrapped JNI baseline. Neither row upgrades HostContext runtime support.
@@ -234,13 +281,12 @@ reports `packageIndex: live` with `packageInputsReproducible: true` to distingui
 artifact discovery from pinned package inputs. It must record both host and
 container kernel/page-size facts and refuse AVD, Waydroid, QEMU, native bridge,
 and non-ARM execution rather than silently falling back. The bionic lane now
-builds and runs the native HostContext self-test: a v2 frame exercises the real
-bionic adapter, verifies required memfd seals, dispatches the entry, releases
-the image, and retains its log and fixture ELF. This makes only
-`runtime.host-context.bionic-handoff` validated for that adapter slice. The
-production managed-pack row `runtime.host-context.production-pack` remains
-`unknown` until a managed pack/dispatch oracle runs through a v2-capable
-launcher; the bionic adapter test does not upgrade that separate row.
+builds and runs the native HostContext self-test: a current HostContext frame
+exercises the real bionic adapter, verifies required memfd seals, dispatches
+the entry, releases the image, and retains its log and fixture ELF. This makes
+only `runtime.host-context.bionic-handoff` validated for that adapter slice.
+The managed production-pack row has its separate native-glibc oracle; the
+bionic adapter test does not silently change that runtime-specific claim.
 
 ### 4. CI Evidence Postconditions
 

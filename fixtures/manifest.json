@@ -233,31 +233,41 @@
         ".artifacts/host-context/pr/self-test.log"
       ],
       "constraints": [
-        "The legacy v1 wrapper-absolute offset remains unchanged",
-        "v2 reserved fields must be zero and unknown ABI or capability bits are rejected before image loading",
-        "Entry and source names are bounded strict UTF-8 values without path components; ordinary standalone PIE inputs are not implicitly HostContext images",
-        "The production managed pack path intentionally emits legacy v1 for the legacy launcher; HostContext v2 production-pack integration is a separate unknown migration boundary."
+        "The legacy v1 and HostContext v2 layouts remain migration evidence only",
+        "Current v3 reserved fields must be zero and unknown profile, ABI, or capability bits are rejected before image loading",
+        "Entry and source names are bounded strict UTF-8 values without path components; profile selection is explicit",
+        "The current packaging contract uses profile-matched v3 launchers; stale versions and profile/launcher mismatches fail closed."
       ]
     },
     {
       "id": "runtime.host-context.production-pack",
-      "status": "unknown",
-      "obligation": "The production managed pack command can select a HostContext entry image and a compatible v2-capable launcher without forcing a v2 frame into the legacy v1 launcher.",
-      "witness": "src/UrProtect.Core/Pack/ElfPackService.cs",
-      "oracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "status": "validated",
+      "obligation": "The production managed pack command selects the current v3 host-context-entry profile and a matching launcher, verifies the sealed in-process handoff, dispatches urp_entry once, releases the image, and preserves its status.",
+      "witness": "native/urprotect-runtime/test_managed_host_context.sh",
+      "oracle": "native/urprotect-runtime/test_managed_host_context.sh",
       "evidence": [
+        "native/urprotect-runtime/test_managed_host_context.sh",
         "src/UrProtect.Core/Pack/ElfPackService.cs",
+        "src/UrProtect.Core/Pack/PayloadFrame.cs",
+        "src/UrProtect.Cli/CliApplication.cs",
         "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-        "native/urprotect-launcher/README.md",
+        "native/urprotect-runtime/host_context_launcher.c",
+        "native/urprotect-runtime/runtime.c",
+        ".artifacts/host-context/managed/host-context-packed.json",
+        ".artifacts/host-context/managed/result.txt",
         "COMPATIBILITY.md",
         ".trellis/spec/backend/runtime-compatibility.md"
       ],
-      "nextEvidence": "Add a production HostContext pack option that accepts a declared HostContext entry-image adapter and a v2-capable launcher, then retain a managed pack/dispatch oracle proving v2 metadata, immutable in-process handoff, and entry dispatch. Until that adapter, v2-capable launcher, and oracle exist, ElfPackService must keep emitting v1 to the legacy launcher and this row remains unknown."
+      "constraints": [
+        "The current frame is v3 with an explicit host-context-entry profile and bounded urp_entry metadata.",
+        "The launcher uses a sealed memfd adapter and the system loader; the retained oracle verifies status 23, clean streams, and the managed report profile/version.",
+        "This row proves the declared glibc/native AArch64 adapter slice; bionic remains separately evidenced by runtime.host-context.bionic-handoff."
+      ]
     },
     {
       "id": "runtime.host-context.bionic-handoff",
       "status": "validated",
-      "obligation": "The pinned native ARM64 Termux userspace builds and runs the HostContext v2 adapter oracle, verifying sealed memfd image loading, real entry dispatch, release, and no executable temporary pathname",
+      "obligation": "The pinned native ARM64 Termux userspace builds and runs the HostContext adapter oracle, verifying sealed memfd image loading, real entry dispatch, release, and no executable temporary pathname",
       "witness": "c-termux-bionic-pie",
       "oracle": "scripts/run-bionic-fixture.sh",
       "evidence": [
@@ -270,9 +280,9 @@
         ".trellis/spec/backend/runtime-compatibility.md"
       ],
       "constraints": [
-        "The native adapter test builds the HostContext entry shared object in the pinned Termux userspace and runs the same v2 frame through /system/bin/linker64's bionic dlopen implementation.",
+        "The native adapter test builds the HostContext entry shared object in the pinned Termux userspace and runs the current HostContext frame through /system/bin/linker64's bionic dlopen implementation.",
         "The real adapter must add and verify F_SEAL_WRITE, F_SEAL_SHRINK, F_SEAL_GROW, and F_SEAL_SEAL before dlopen, dispatch urp_entry with its declared status, and release the image handle.",
-        "The self-test is an adapter-level HostContext runtime witness; it does not claim that the production managed pack command selects a HostContext adapter or emits a v2 frame. runtime.host-context.production-pack remains unknown."
+        "The self-test is an adapter-level HostContext runtime witness; it remains a separate bionic fact from the managed native-glibc production-pack oracle."
       ]
     },
     {

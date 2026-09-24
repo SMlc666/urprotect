@@ -25,7 +25,7 @@
 #define URP_EXIT_VALIDATION 4
 #define URP_EXIT_INTEGRITY 5
 #define URP_MAX_ARGUMENTS 4096U
-#define URP_LAUNCHER_ABI_MARKER "URPROTECT-AARCH64-LAUNCHER-V1"
+#define URP_LAUNCHER_ABI_MARKER "URPROTECT-AARCH64-LAUNCHER-V3"
 #define URP_MEMFD_CLOEXEC 1U
 
 static const uint8_t urp_header_magic[8] = {'U', 'R', 'P', 'C', 'K', '0', '1', 0};
@@ -67,9 +67,13 @@ static int urp_write_all(int fd, const void *buffer, size_t size)
 static int urp_launcher_abi_is_valid(void)
 {
     volatile const char *marker = urp_launcher_abi_marker;
-    return marker[0] == 'U'
-        && marker[sizeof(URP_LAUNCHER_ABI_MARKER) - 2U] == '1'
-        && marker[sizeof(URP_LAUNCHER_ABI_MARKER) - 1U] == '\0';
+    static const char expected[] = URP_LAUNCHER_ABI_MARKER;
+    for (size_t index = 0U; index < sizeof(URP_LAUNCHER_ABI_MARKER); ++index) {
+        if (marker[index] != expected[index]) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int urp_report(int status, const char *code, const char *message)
@@ -321,7 +325,7 @@ static int urp_parse_frame(
     uint64_t frame_length = urp_read_u64_le(trailer + URP_FRAME_TRAILER_LENGTH_OFFSET);
     uint64_t frame_end;
     uint64_t wrapper_end;
-    if (frame_length < URP_FRAME_V1_HEADER_SIZE
+    if (frame_length < URP_FRAME_V3_HEADER_SIZE
         || !urp_checked_add_u64(frame_offset, frame_length, &frame_end)
         || !urp_checked_add_u64(frame_end, URP_FRAME_TRAILER_SIZE, &wrapper_end)
         || wrapper_end != (uint64_t)wrapper_size
@@ -337,12 +341,24 @@ static int urp_parse_frame(
     }
     const uint8_t *header = wrapper + frame_offset_size;
     if (memcmp(header, urp_header_magic, sizeof(urp_header_magic)) != 0
-        || urp_read_u16_le(header + URP_FRAME_VERSION_OFFSET) != URP_FRAME_VERSION_V1
-        || urp_read_u16_le(header + URP_FRAME_HEADER_SIZE_OFFSET) != URP_FRAME_V1_HEADER_SIZE
+        || urp_read_u16_le(header + URP_FRAME_VERSION_OFFSET) != URP_FRAME_VERSION_V3
+        || urp_read_u16_le(header + URP_FRAME_HEADER_SIZE_OFFSET) != URP_FRAME_V3_HEADER_SIZE
         || urp_read_u32_le(header + URP_FRAME_FLAGS_OFFSET) != URP_FRAME_DEFLATE_FLAG
         || urp_read_u16_le(header + URP_FRAME_MACHINE_OFFSET) != URP_FRAME_MACHINE_AARCH64
         || urp_read_u16_le(header + URP_FRAME_TYPE_OFFSET) != URP_FRAME_TYPE_DYN) {
         return 0;
+    }
+
+    if (urp_read_u32_le(header + URP_FRAME_V3_PROFILE_OFFSET) != URP_PROFILE_OUTER_EXECVEAT
+        || urp_read_u32_le(header + URP_FRAME_V3_RESERVED_OFFSET) != 0U) {
+        return 0;
+    }
+    for (size_t index = URP_FRAME_V2_HOST_ABI_OFFSET;
+         index < URP_FRAME_V3_PROFILE_OFFSET;
+         ++index) {
+        if (header[index] != 0U) {
+            return 0;
+        }
     }
 
     uint32_t source_name_size_u32 = urp_read_u32_le(header + URP_FRAME_SOURCE_NAME_SIZE_OFFSET);
@@ -352,7 +368,7 @@ static int urp_parse_frame(
     if (source_name_size_u32 > URP_FRAME_MAX_SOURCE_NAME
         || source_size > URP_FRAME_MAX_SOURCE_SIZE
         || encoded_size_u64 > URP_FRAME_MAX_ENCODED_SIZE
-        || (uint64_t)source_name_size_u32 > frame_length - URP_FRAME_V1_HEADER_SIZE) {
+        || (uint64_t)source_name_size_u32 > frame_length - URP_FRAME_V3_HEADER_SIZE) {
         return 0;
     }
 
@@ -360,29 +376,31 @@ static int urp_parse_frame(
     size_t encoded_size;
     if (!urp_u64_to_size((uint64_t)source_name_size_u32, &source_name_size)
         || !urp_u64_to_size(encoded_size_u64, &encoded_size)
-        || !urp_validate_source_name(header + URP_FRAME_V1_HEADER_SIZE, source_name_size)) {
+        || !urp_validate_source_name(header + URP_FRAME_V3_HEADER_SIZE, source_name_size)) {
         return 0;
     }
 
-    uint64_t expected_encoded_offset;
     uint64_t name_offset;
-    if (!urp_checked_add_u64(frame_offset, URP_FRAME_V1_HEADER_SIZE, &name_offset)
-        || !urp_checked_add_u64(name_offset, (uint64_t)source_name_size, &expected_encoded_offset)
-        || encoded_offset != expected_encoded_offset
-        || !urp_checked_add_u64(encoded_offset, encoded_size_u64, &frame_end)
-        || frame_end != (uint64_t)frame_offset + (uint64_t)frame_length
-        || frame_length_size != URP_FRAME_V1_HEADER_SIZE + source_name_size + encoded_size) {
+    uint64_t frame_relative_end;
+    if (!urp_checked_add_u64(URP_FRAME_V3_HEADER_SIZE, (uint64_t)source_name_size, &name_offset)
+        || encoded_offset != name_offset
+        || !urp_checked_add_u64(encoded_offset, encoded_size_u64, &frame_relative_end)
+        || frame_relative_end != frame_length
+        || frame_length_size != URP_FRAME_V3_HEADER_SIZE + source_name_size + encoded_size) {
         return 0;
     }
 
     size_t encoded_offset_size;
+    size_t frame_payload_offset;
     if (!urp_u64_to_size(encoded_offset, &encoded_offset_size)
+        || !urp_checked_add_u64(frame_offset, encoded_offset, &frame_payload_offset)
+        || !urp_u64_to_size(frame_payload_offset, &encoded_offset_size)
         || encoded_offset_size > wrapper_size
         || encoded_size > wrapper_size - encoded_offset_size) {
         return 0;
     }
 
-    frame->source_name = header + URP_FRAME_V1_HEADER_SIZE;
+    frame->source_name = header + URP_FRAME_V3_HEADER_SIZE;
     frame->source_name_size = source_name_size;
     frame->encoded = wrapper + encoded_offset_size;
     frame->encoded_size = encoded_size;
@@ -639,7 +657,7 @@ int main(int argc, char **argv, char **envp)
     urp_frame_view frame;
     if (!urp_parse_frame(wrapper, wrapper_size, &frame)) {
         free(wrapper);
-        return urp_report(URP_EXIT_VALIDATION, "WrapperMalformed", "the v1 payload frame or trailer is malformed");
+        return urp_report(URP_EXIT_VALIDATION, "WrapperMalformed", "the current payload frame or trailer is malformed");
     }
 
     uint8_t *source = NULL;
