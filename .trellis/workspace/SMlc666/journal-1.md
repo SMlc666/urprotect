@@ -90,3 +90,25 @@ Completed the ARM64-only AArch64 runtime roadmap: current v3 packaging with expl
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Complete public real-sample CI corpus
+<!-- trellis-session: v=2 fp=eec3c597a5908dfa -->
+
+**Date**: 2026-09-25
+**Task**: Complete public real-sample CI corpus
+**Branch**: `chore/session-journal-public-real-sample`
+
+### Summary
+
+Established and merged a 20-project public AArch64 real-sample corpus with CI-only acquisition, bounded archive/fingerprint/evidence tooling, native ARM64 isolated BusyBox baseline, full PR/nightly/release workflow coverage, and CI-first compatibility documentation. PR #13 delivered the feature and PR #14 archived the completed Trellis task; required ARM64 CI and the post-merge main CI passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c5285924bf02d518162b935394387e160b37e940` | feat: add public real-sample CI corpus |
+
+### Status
+
+[OK] **Completed**
