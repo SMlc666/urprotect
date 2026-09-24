@@ -385,3 +385,46 @@ verify(frame, ELF invariants)
 
 Host-specific mechanics stay behind the contract, while unsupported loader
 features remain explicit `unknown` or `rejected` rows.
+
+### Public real-sample ecology evidence
+
+The controlled feature matrix and the public real-sample corpus have separate
+ownership. `fixtures/manifest.json` proves named invariants with repository
+fixtures and explicit oracles; `fixtures/real-samples/manifest.json` records
+what public AArch64 software actually produces and which observations are
+applicable. The latter is metadata-only in the developer tree and is acquired
+only by the native ARM64 GitHub Actions job.
+
+The locked corpus contains exactly 20 distinct upstream identities. Every pull
+request runs the full set, including provenance/hash verification, static
+fingerprint, and UrProtect JSON validation. Nightly and release reuse the same
+set and runner; they may repeat or retain more evidence but never replace PR
+coverage with a subset. Runtime/build/libc variants do not add identities.
+
+The CI fingerprint is authoritative for observed facts. The registry locks and
+compares only ELF64, little-endian, AArch64, `ET_DYN`, and the declared
+interpreter invariants. Relocation/RELR/PLT details, symbol versions, TLS, GNU
+properties, RELRO, GNU_STACK, stripped state, dependencies, file size, and
+feature tags are emitted by the bounded CI `readelf` inspection and retained
+as evidence rather than guessed support claims. Hash drift stops acquisition
+before extraction or execution.
+
+Layer policy uses the fixed result vocabulary
+`accepted-and-runs`, `expected-rejected`, `unexpected-rejection`,
+`unexpected-acceptance`, `runtime-failure`, `environment-unavailable`, and
+`not-applicable`. Static evidence is required for all projects. An applicable
+baseline/outer/HostContext oracle runs with network disabled, read-only inputs,
+a bounded temporary filesystem, dropped capabilities, resource/time/output
+limits, and cleanup. A normal ELF without the declared `urp_entry` ABI is
+`not-applicable` to HostContext; loader acceptance is not HostContext proof.
+The current BusyBox Alpine record is the explicit musl baseline: its policy
+command must name the extracted `/bin/busybox` artifact and runs only inside
+its archive-derived rootfs, never through a host fallback.
+
+For future compatibility work, the plan must include a real-sample impact table
+(project IDs, feature, layer, oracle, expected classification, and artifact
+path). An unexpected result blocks completion. Support expansion additionally
+requires real observation, controlled positive and nearest-negative fixtures,
+stable diagnostics, and synchronized contract, documentation, and evidence
+updates. Real-sample count is ecology evidence and cannot substitute for a
+feature invariant or controlled negative boundary.

@@ -264,6 +264,49 @@ ARM64 jobs fail if the runner is not `aarch64`; the Android native-bridge job
 records its x86_64 host and translated execution mode separately. Fixture,
 benchmark, and Android evidence is uploaded even when the job fails.
 
+## Public real-sample CI corpus
+
+The repository also tracks a locked ecology corpus in
+[`fixtures/real-samples/manifest.json`](fixtures/real-samples/manifest.json). It
+contains exactly 20 distinct public AArch64 project identities, including
+Debian/glibc applications, an Alpine/musl BusyBox rootfs, a public
+Termux/bionic Node.js artifact, and real ET_EXEC boundaries. `candidates.json` retains rejected/deferred
+public candidates and `selection.md` explains the feature/runtime covering
+rationale. No raw archive or ELF binary is committed.
+
+Local validation remains metadata-only and sample-free:
+
+```sh
+python3 scripts/validate-real-samples.py \
+  fixtures/real-samples/manifest.json \
+  --candidates fixtures/real-samples/candidates.json --tier pr
+python3 tests/test_real_sample_manifest.py
+```
+
+Every pull request runs the full 20-project suite on the native
+`ubuntu-24.04-arm` runner; no affected-path or sample filter can reduce it.
+Scheduled runs use the same registry and runner as `nightly`, and published
+releases use it as `release`, adding retention/repeat strength without
+replacing PR coverage. The CI-only runner downloads into `RUNNER_TEMP`, checks
+archive and extracted-file SHA-256 values, rejects archive traversal, records a
+bounded `readelf`/UrProtect report, compares ELF64/little-endian/AArch64/ET_DYN
+identity and interpreter against the registry policy, and removes raw inputs
+on exit. It never uploads the downloaded archive, ELF, or runtime rootfs.
+
+The result gate distinguishes `accepted-and-runs`, `expected-rejected`,
+`unexpected-rejection`, `unexpected-acceptance`, `runtime-failure`,
+`environment-unavailable`, and `not-applicable`. A missing isolation capability
+for an applicable oracle fails the required CI gate. Ordinary packages are
+explicitly `not-applicable` to HostContext unless they declare `urp_entry`; a
+real-sample observation discovers or locks a regression and does not
+automatically promote an ELF/HostContext support claim.
+
+Compatibility changes must include a real-sample impact table in the plan:
+project IDs, feature/layer, oracle, expected result, and evidence path. A new
+support claim still requires a controlled positive fixture, nearest-negative
+fixture, stable diagnostic, layer-specific oracle, contract update, and
+retained real-sample evidence.
+
 ## CI Cache Policy
 
 CI caches NuGet packages from the pinned project lock files, while
