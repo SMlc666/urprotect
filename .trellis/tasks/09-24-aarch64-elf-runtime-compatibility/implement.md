@@ -153,8 +153,9 @@ make -C native/urprotect-runtime test
 python3 scripts/check-evidence.py fixtures/manifest.json --tier nightly
 ```
 
-Rollback point: retain PT_TLS as an explicit rejected boundary and revert only
-the incomplete positive TLS path.
+Rollback point: retain the bounded initial-exec TLS row only when its managed
+oracle is retained; otherwise revert the positive path and keep dynamic/live-
+thread TLS explicitly rejected.
 
 ### Phase 4-B — GNU property / BTI / PAC
 
@@ -179,17 +180,17 @@ keep any outer-wrapper observation in its own lower-layer row.
 
 ## Final integration gate
 
-- [ ] All child tasks are individually checked and their artifacts archived or
+- [x] All child tasks are individually checked and their artifacts archived or
       ready for archive.
-- [ ] Parent PRD, design, implementation plan, runtime spec, README,
+- [x] Parent PRD, design, implementation plan, runtime spec, README,
       `COMPATIBILITY.md`, and rendered matrix agree.
-- [ ] `ContractInventory.md` has no duplicated current offsets or stale profile
+- [x] `ContractInventory.md` has no duplicated current offsets or stale profile
       names.
-- [ ] Full managed tests, native tests, fixture matrix, fuzz smoke, stress
+- [x] Full managed tests, native tests, fixture matrix, fuzz smoke, stress
       profile, manifest validation, and evidence checks pass at their declared
       tiers.
-- [ ] No `unknown` matrix row is counted as support.
-- [ ] The final commit contains implementation plus contract/evidence updates,
+- [x] No `unknown` matrix row is counted as support.
+- [x] The final commit contains implementation plus contract/evidence updates,
       not a planning-only status change.
 
 ## Review gates and ownership

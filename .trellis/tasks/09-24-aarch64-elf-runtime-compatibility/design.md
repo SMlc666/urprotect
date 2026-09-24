@@ -40,8 +40,9 @@ boundaries:
   `execveat` handoff and carries the v1 launcher marker.
 - `ElfPackService` currently validates a standalone PIE with a supported
   interpreter and emits the legacy frame to the static launcher.
-- The production managed HostContext pack row remains `unknown`; the native
-  HostContext self-test and bionic adapter evidence do not upgrade it.
+- The production managed HostContext pack row is validated by the retained
+  native-AArch64 managed v3 profile oracle; the bionic adapter remains a
+  separate runtime fact.
 
 The design therefore treats P0 as a real cross-layer contract cut, not as a
 small option added to the existing legacy pack call.

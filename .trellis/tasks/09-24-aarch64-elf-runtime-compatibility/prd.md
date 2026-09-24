@@ -20,9 +20,9 @@ proves that narrower claim.
   frame format v2. The native HostContext ABI is currently version 1.
 - Native HostContext v2 frame dispatch and the narrow memfd/system-loader
   adapter have validated evidence, including glibc, musl, and bionic slices.
-- The production managed pack path intentionally emits v1 to the legacy
-  launcher, while `runtime.host-context.production-pack` remains `unknown` in
-  `fixtures/manifest.json` and `COMPATIBILITY.md`.
+- The current managed pack path emits frame v3 with explicit
+  `outer-execveat` and `host-context-entry` profiles. The production
+  HostContext row is validated by a retained native-AArch64 managed oracle.
 - The project is in 0.x rapid development. Breaking changes are acceptable and
   preferred over carrying legacy production paths when the current contract is
   replaced coherently.
@@ -157,21 +157,21 @@ proves that narrower claim.
 
 ## Cross-phase acceptance criteria
 
-- [ ] The parent has a reviewed P0-P4 design, implementation order, child-task
+- [x] The parent has a reviewed P0-P4 design, implementation order, child-task
       map, and explicit dependencies.
-- [ ] The project has one documented current packaging contract with explicit
+- [x] The project has one documented current packaging contract with explicit
       execution profiles, and stale versions or profile/launcher mismatches are
       rejected clearly.
-- [ ] Every accepted compatibility feature has an owner, model rule, positive
+- [x] Every accepted compatibility feature has an owner, model rule, positive
       witness, negative boundary, execution oracle where applicable, and retained
       matrix evidence.
-- [ ] Every unsupported or deferred feature remains fail-closed and is labeled
+- [x] Every unsupported or deferred feature remains fail-closed and is labeled
       `rejected` or `unknown`; unknown rows never count as support.
-- [ ] The ARM64 compatibility matrix distinguishes outer-wrapper, HostContext,
+- [x] The ARM64 compatibility matrix distinguishes outer-wrapper, HostContext,
       and runtime-specific claims.
-- [ ] Full managed, native, fixture, fuzz, and matrix validation passes for each
+- [x] Full managed, native, fixture, fuzz, and matrix validation passes for each
       completed phase; no phase is marked complete with unresolved regressions.
-- [ ] The final documentation states the supported ARM64 boundary and the
+- [x] The final documentation states the supported ARM64 boundary and the
       intentionally excluded architecture/platform claims.
 
 ## Child-task map

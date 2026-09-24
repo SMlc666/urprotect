@@ -159,17 +159,15 @@ executable pathname.
   system-loader order: constructors before `urp_entry`, destructors during
   `release_image`. Zero-valued lifecycle mutations remain rejected, and
   reentrancy/live-thread teardown is not claimed.
-- The constructor/destructor lifecycle boundary is the rejected feature row
-  `runtime.host-context.constructor-destructor`. The first native adapter
-  rejects `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`,
-  `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and
-  `DT_PREINIT_ARRAYSZ` with `URP_STATUS_UNSUPPORTED` before constructor or
-  destructor execution and image-handle creation. HostContext v1 and the
-  current system-loader adapter define no constructor/destructor ordering,
-  callback or reentrancy behavior, teardown, or lifecycle ownership semantics.
-  The native self-test mutates one bounded `DT_NULL` tag at a time, preserves
-  surrounding bytes, initializes a nonzero sentinel, and requires a zero
-  output handle.
+- The constructor/destructor lifecycle slice is recorded as
+  `runtime.host-context.constructor-destructor`. Nonzero `DT_INIT`, `DT_FINI`,
+  `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`,
+  `DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` follow the system-loader order:
+  constructors before `urp_entry` and destructors during `release_image`. The
+  dependency fixture observes both sides. Zero-valued lifecycle mutations are
+  still rejected before image creation; callback/reentrancy behavior,
+  live-thread teardown, and broader lifecycle ownership remain outside the
+  validated slice.
 - RPATH/RUNPATH are the separate rejected feature row
   `runtime.host-context.path-search`. HostContext v1 and the current
   system-loader adapter define no dynamic path-search roots, ordering, or
@@ -240,13 +238,11 @@ executable pathname.
   the managed v3 entry oracle and returns status 47 on the native glibc lane;
   PAC negotiation beyond the note mask and host instruction-state conflicts
   remain outside the claim.
-  `runtime.host-context.dependency-resolution` is a separate rejected
-  boundary for `DT_NEEDED`, `DT_AUXILIARY`, and `DT_FILTER`: HostContext v1
-  and the current system-loader adapter define no dependency-resolution,
-  search-path, symbol-scope, or dependency-lifetime semantics, so a loader
-  that can resolve a library does not establish support. The bounded mutations
-  keep the unchanged non-dependency entry fixture as the positive baseline and
-  require a zero image handle before loader handoff.
+  `runtime.host-context.dependency-resolution` is a separate bounded validated
+  slice for one recognized system-libc `DT_NEEDED` basename with bounded string
+  metadata and fixed native loader roots. RPATH/RUNPATH, auxiliary/filter
+  dependencies, arbitrary graphs, and payload-controlled search paths remain
+  rejected.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid
