@@ -18,7 +18,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl
 
-.PHONY: all test test-adapter runtime self-test clean check-host
+.PHONY: all test test-adapter runtime self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -40,6 +40,11 @@ test: check-host $(SELF_TEST)
 test-adapter: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)" --adapter-v2
 
+contract-probe: $(BUILD_DIR)/contract-probe
+
+contract-check: contract-probe
+	"$(BUILD_DIR)/contract-probe"
+
 $(SELF_TEST): $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(ENTRY_FIXTURE)
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(LDLIBS) -o "$@"
@@ -55,6 +60,10 @@ $(ENTRY_FIXTURE_OBJECT): host_context_entry_fixture.c include/urp/host_context.h
 $(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c include/urp/host_context.h include/urp/runtime.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+
+$(BUILD_DIR)/contract-probe: contract_probe.c include/urp/host_context.h include/urp/payload_frame.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) "$<" -o "$@"
 
 $(BUILD_DIR)/runtime.o: runtime.c include/urp/host_context.h include/urp/runtime.h ../urprotect-launcher/sha256.h ../../third_party/miniz/miniz_tinfl.h
 	@mkdir -p "$(BUILD_DIR)"

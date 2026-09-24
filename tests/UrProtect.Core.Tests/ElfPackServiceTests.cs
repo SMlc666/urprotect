@@ -1,4 +1,5 @@
 using UrProtect.Core.Diagnostics;
+using UrProtect.Core.Elf;
 using UrProtect.Core.Pack;
 
 namespace UrProtect.Core.Tests;
@@ -128,8 +129,8 @@ public sealed class ElfPackServiceTests
     private static byte[] RemoveInterpreter(byte[] source)
     {
         var copy = source.ToArray();
-        copy.AsSpan(232, 56).Clear();
-        copy.AsSpan(24, 8).Clear();
+        copy.AsSpan(ElfFixture.InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        copy.AsSpan(ElfHeaderOffsets.Entry, sizeof(ulong)).Clear();
         return copy;
     }
 

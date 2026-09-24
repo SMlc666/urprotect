@@ -119,6 +119,42 @@ bundle must be smoke-tested in an environment providing
 The release workflow also runs the musl bundle inside a pinned ARM64 musl
 container when the host does not provide compatible C++/zlib runtime libraries.
 
+## Regression profiles
+
+The repository keeps a machine-readable regression map in
+[`tests/regression-matrix.json`](tests/regression-matrix.json). Validate its
+coverage and evidence schema with:
+
+```sh
+python3 scripts/validate-regression-matrix.py tests/regression-matrix.json
+python3 tests/test_regression_matrix.py
+```
+
+The managed concurrency and large-input smoke profile is bounded and
+deterministic:
+
+```sh
+./scripts/run-regression-stress.sh --tier pr
+```
+
+Nightly increases workers, iterations, and the multi-megabyte input profile;
+both profiles retain a parameter manifest and test result artifact. The
+coverage-guided fuzzer uses a pinned SharpFuzz/libFuzzer bridge and has
+separate ELF and payload-frame targets:
+
+```sh
+./scripts/run-coverage-fuzz.sh --tier pr
+./scripts/run-coverage-fuzz.sh --tier nightly
+```
+
+PR fuzzing uses a fixed seed and run count. Nightly and release profiles use a
+bounded wall-clock budget, RSS limit, maximum input size, crash/timeout artifact
+prefix, and retained corpus. The existing deterministic parser mutation tests
+remain independent regression coverage. The fuzzer bridge uses a verified
+file-backed mmap portability patch because some native ARM64 CI kernels do not
+expose System V shared memory; this changes only the test transport, not the
+instrumented coverage signal.
+
 ## Fixture Matrix
 
 The fixture manifest covers a small, explicit set of ELF producers instead of

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply bounded-input, no-throw, malformed-corpus, toolchain, and evidence requirements to the fuzz target."}
+{"file":".trellis/tasks/09-24-test-infrastructure-regression/research/fuzzing.md","reason":"Use the selected SharpFuzz/libFuzzer architecture, pinning, licensing, and explicit prerequisite-failure rules."}

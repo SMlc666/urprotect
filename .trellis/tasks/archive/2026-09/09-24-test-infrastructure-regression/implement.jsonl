@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Preserve the repository's parser, binary-safety, testing, CI, and evidence contracts while adding the regression infrastructure."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Use the existing constants, fixture builders, assertion patterns, and scripts before introducing new helpers or duplicated contract values."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The work crosses managed, native, Python, shell, fixture, and CI layers; use the guide to keep data flow and evidence contracts aligned."}
+{"file":".trellis/tasks/09-24-test-infrastructure-regression/research/fuzzing.md","reason":"Use the researched SharpFuzz/libFuzzer choice, provenance requirements, and bridge failure semantics when implementing fuzz infrastructure."}

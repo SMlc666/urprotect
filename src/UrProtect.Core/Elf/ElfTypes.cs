@@ -6,6 +6,8 @@ public static class ElfConstants
 {
     public const byte Class64 = 2;
     public const byte LittleEndian = 1;
+    public const byte IdentificationVersionCurrent = 1;
+    public const uint HeaderVersionCurrent = 1;
     public const ushort TypeDyn = 3;
     public const ushort MachineAarch64 = 183;
     public const ushort HeaderSize64 = 64;
@@ -103,6 +105,39 @@ public static class ElfConstants
     public const uint RArm64TlsTprel64 = 1030;
     public const uint RArm64TlsDesc = 1031;
     public const uint RArm64IRelative = 1032;
+}
+
+public static class ElfHeaderOffsets
+{
+    public const int Magic = 0;
+    public const int Class = 4;
+    public const int DataEncoding = 5;
+    public const int IdentificationVersion = 6;
+    public const int Type = 16;
+    public const int Machine = 18;
+    public const int Version = 20;
+    public const int Entry = 24;
+    public const int ProgramHeaderOffset = 32;
+    public const int SectionHeaderOffset = 40;
+    public const int Flags = 48;
+    public const int HeaderSize = 52;
+    public const int ProgramHeaderEntrySize = 54;
+    public const int ProgramHeaderCount = 56;
+    public const int SectionHeaderEntrySize = 58;
+    public const int SectionHeaderCount = 60;
+    public const int SectionNameIndex = 62;
+}
+
+public static class ElfProgramHeaderOffsets
+{
+    public const int Type = 0;
+    public const int Flags = 4;
+    public const int FileOffset = 8;
+    public const int VirtualAddress = 16;
+    public const int PhysicalAddress = 24;
+    public const int FileSize = 32;
+    public const int MemorySize = 40;
+    public const int Alignment = 48;
 }
 
 public enum ElfFileKind

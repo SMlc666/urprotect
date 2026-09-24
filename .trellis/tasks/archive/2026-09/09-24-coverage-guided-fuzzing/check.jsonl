@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify fuzzing does not broaden accepted formats, hide missing toolchains, or lose retained failure evidence."}
+{"file":".trellis/tasks/09-24-test-infrastructure-regression/research/fuzzing.md","reason":"Check that the implementation actually provides coverage guidance rather than only random mutation."}

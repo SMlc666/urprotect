@@ -12,11 +12,17 @@ public enum PayloadCompression : uint
 }
 
 public sealed record PayloadFrameLimits(
-    ulong MaximumSourceBytes = 256UL * 1024 * 1024,
-    ulong MaximumEncodedBytes = 256UL * 1024 * 1024,
-    ulong MaximumWrapperBytes = 512UL * 1024 * 1024,
-    ulong MaximumSourceNameBytes = 4096,
-    ulong MaximumEntryNameBytes = HostContextContract.MaximumEntryNameBytes);
+    ulong MaximumSourceBytes = PayloadFrameLimits.DefaultMaximumSourceBytes,
+    ulong MaximumEncodedBytes = PayloadFrameLimits.DefaultMaximumEncodedBytes,
+    ulong MaximumWrapperBytes = PayloadFrameLimits.DefaultMaximumWrapperBytes,
+    ulong MaximumSourceNameBytes = PayloadFrameLimits.DefaultMaximumSourceNameBytes,
+    ulong MaximumEntryNameBytes = HostContextContract.MaximumEntryNameBytes)
+{
+    public const ulong DefaultMaximumSourceBytes = 256UL * 1024 * 1024;
+    public const ulong DefaultMaximumEncodedBytes = 256UL * 1024 * 1024;
+    public const ulong DefaultMaximumWrapperBytes = 512UL * 1024 * 1024;
+    public const ulong DefaultMaximumSourceNameBytes = 4096;
+}
 
 public sealed record PayloadFrameEncoding(
     byte[] FrameBytes,
@@ -68,6 +74,17 @@ public static class PayloadFrameCodec
     public const ushort FormatVersion = 1;
     public const ushort HostContextFormatVersion = 2;
     public const ushort LauncherAbiVersion = LauncherContract.AbiVersion;
+    public const int VersionOffset = 8;
+    public const int HeaderSizeOffset = 10;
+    public const int FlagsOffset = 12;
+    public const int ArchitectureOffset = 16;
+    public const int FileTypeOffset = 18;
+    public const int SourceNameSizeOffset = 20;
+    public const int SourceSizeOffset = 24;
+    public const int EncodedSizeOffset = 32;
+    public const int EncodedOffsetOffset = 40;
+    public const int SourceSha256Offset = 48;
+    public const int EncodedSha256Offset = 80;
     public const ushort HeaderSize = 112;
     public const ushort HostContextHeaderSize = 136;
     public const int HostContextAbiVersionOffset = 112;
@@ -76,6 +93,8 @@ public static class PayloadFrameCodec
     public const int HostContextEntryNameSizeOffset = 128;
     public const int HostContextReservedAfterEntryNameSizeOffset = 132;
     public const int TrailerSize = 24;
+    public const int TrailerFrameOffset = 8;
+    public const int TrailerLengthOffset = 16;
     public const uint DeflateFlag = (uint)PayloadCompression.Deflate;
     public const int Sha256Size = 32;
 
@@ -249,21 +268,21 @@ public static class PayloadFrameCodec
         var header = frame.AsSpan(0, headerSize);
         HeaderMagic.CopyTo(header);
         BinaryPrimitives.WriteUInt16LittleEndian(
-            header[8..10],
+            header[VersionOffset..HeaderSizeOffset],
             hostContextMetadata is null ? FormatVersion : HostContextFormatVersion);
-        BinaryPrimitives.WriteUInt16LittleEndian(header[10..12], headerSize);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[12..16], (uint)compression);
-        BinaryPrimitives.WriteUInt16LittleEndian(header[16..18], Elf.ElfConstants.MachineAarch64);
-        BinaryPrimitives.WriteUInt16LittleEndian(header[18..20], Elf.ElfConstants.TypeDyn);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[20..24], checked((uint)sourceNameBytes.Length));
-        BinaryPrimitives.WriteUInt64LittleEndian(header[24..32], (ulong)source.Length);
-        BinaryPrimitives.WriteUInt64LittleEndian(header[32..40], (ulong)encoded.Length);
+        BinaryPrimitives.WriteUInt16LittleEndian(header[HeaderSizeOffset..FlagsOffset], headerSize);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[FlagsOffset..ArchitectureOffset], (uint)compression);
+        BinaryPrimitives.WriteUInt16LittleEndian(header[ArchitectureOffset..FileTypeOffset], Elf.ElfConstants.MachineAarch64);
+        BinaryPrimitives.WriteUInt16LittleEndian(header[FileTypeOffset..SourceNameSizeOffset], Elf.ElfConstants.TypeDyn);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[SourceNameSizeOffset..SourceSizeOffset], checked((uint)sourceNameBytes.Length));
+        BinaryPrimitives.WriteUInt64LittleEndian(header[SourceSizeOffset..EncodedSizeOffset], (ulong)source.Length);
+        BinaryPrimitives.WriteUInt64LittleEndian(header[EncodedSizeOffset..EncodedOffsetOffset], (ulong)encoded.Length);
         // Legacy v1 keeps the wrapper-absolute offset; the standalone HostContext runtime uses v2 frame-relative offsets.
         BinaryPrimitives.WriteUInt64LittleEndian(
-            header[40..48],
+            header[EncodedOffsetOffset..SourceSha256Offset],
             hostContextMetadata is null ? payloadOffset : encodedOffsetWithinFrame);
-        sourceHash.CopyTo(header[48..80]);
-        encodedHash.CopyTo(header[80..112]);
+        sourceHash.CopyTo(header[SourceSha256Offset..EncodedSha256Offset]);
+        encodedHash.CopyTo(header[EncodedSha256Offset..HeaderSize]);
         if (hostContextMetadata is not null)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(
@@ -317,7 +336,7 @@ public static class PayloadFrameCodec
             return Failure(diagnostics);
         }
 
-        var version = BinaryPrimitives.ReadUInt16LittleEndian(commonHeader[8..10]);
+        var version = BinaryPrimitives.ReadUInt16LittleEndian(commonHeader[VersionOffset..HeaderSizeOffset]);
         var expectedHeaderSize = version switch
         {
             FormatVersion => HeaderSize,
@@ -330,7 +349,7 @@ public static class PayloadFrameCodec
             return Failure(diagnostics, frameVersion: version);
         }
 
-        var headerSize = BinaryPrimitives.ReadUInt16LittleEndian(commonHeader[10..12]);
+        var headerSize = BinaryPrimitives.ReadUInt16LittleEndian(commonHeader[HeaderSizeOffset..FlagsOffset]);
         if (headerSize != expectedHeaderSize || frame.Length < expectedHeaderSize)
         {
             diagnostics.Error(DiagnosticCode.PayloadMalformed, "The payload frame header size is invalid.");
@@ -338,15 +357,15 @@ public static class PayloadFrameCodec
         }
 
         var header = frame[..headerSize];
-        var flags = BinaryPrimitives.ReadUInt32LittleEndian(header[12..16]);
+        var flags = BinaryPrimitives.ReadUInt32LittleEndian(header[FlagsOffset..ArchitectureOffset]);
         if (flags != DeflateFlag)
         {
             diagnostics.Error(DiagnosticCode.PayloadUnsupported, $"Payload frame flags 0x{flags:X} are unsupported.");
             return Failure(diagnostics, frameVersion: version);
         }
 
-        var sourceArch = BinaryPrimitives.ReadUInt16LittleEndian(header[16..18]);
-        var sourceType = BinaryPrimitives.ReadUInt16LittleEndian(header[18..20]);
+        var sourceArch = BinaryPrimitives.ReadUInt16LittleEndian(header[ArchitectureOffset..FileTypeOffset]);
+        var sourceType = BinaryPrimitives.ReadUInt16LittleEndian(header[FileTypeOffset..SourceNameSizeOffset]);
         if (sourceArch != Elf.ElfConstants.MachineAarch64 || sourceType != Elf.ElfConstants.TypeDyn)
         {
             diagnostics.Error(
@@ -400,16 +419,16 @@ public static class PayloadFrameCodec
             }
         }
 
-        var sourceNameSize = BinaryPrimitives.ReadUInt32LittleEndian(header[20..24]);
+        var sourceNameSize = BinaryPrimitives.ReadUInt32LittleEndian(header[SourceNameSizeOffset..SourceSizeOffset]);
         if ((ulong)sourceNameSize > limits.MaximumSourceNameBytes)
         {
             diagnostics.Error(DiagnosticCode.PayloadLimitExceeded, "The source argv[0] name exceeds the configured limit.");
             return Failure(diagnostics, frameVersion: version);
         }
 
-        var sourceSize = BinaryPrimitives.ReadUInt64LittleEndian(header[24..32]);
-        var encodedSize = BinaryPrimitives.ReadUInt64LittleEndian(header[32..40]);
-        var payloadOffset = BinaryPrimitives.ReadUInt64LittleEndian(header[40..48]);
+        var sourceSize = BinaryPrimitives.ReadUInt64LittleEndian(header[SourceSizeOffset..EncodedSizeOffset]);
+        var encodedSize = BinaryPrimitives.ReadUInt64LittleEndian(header[EncodedSizeOffset..EncodedOffsetOffset]);
+        var payloadOffset = BinaryPrimitives.ReadUInt64LittleEndian(header[EncodedOffsetOffset..SourceSha256Offset]);
         if (sourceSize > limits.MaximumSourceBytes
             || encodedSize > limits.MaximumEncodedBytes
             || sourceSize > int.MaxValue
@@ -498,7 +517,7 @@ public static class PayloadFrameCodec
         }
 
         var encoded = frame.Slice((int)encodedOffsetWithinFrame, (int)encodedSize);
-        var expectedEncodedHash = header[80..112];
+        var expectedEncodedHash = header[EncodedSha256Offset..HeaderSize];
         var actualEncodedHash = SHA256.HashData(encoded);
         if (!CryptographicOperations.FixedTimeEquals(expectedEncodedHash, actualEncodedHash))
         {
@@ -543,7 +562,7 @@ public static class PayloadFrameCodec
         }
 
         var actualSourceHash = SHA256.HashData(source);
-        if (!CryptographicOperations.FixedTimeEquals(header[48..80], actualSourceHash))
+        if (!CryptographicOperations.FixedTimeEquals(header[SourceSha256Offset..EncodedSha256Offset], actualSourceHash))
         {
             diagnostics.Error(DiagnosticCode.PayloadIntegrityMismatch, "The recovered source digest does not match.");
             return Failure(
@@ -597,8 +616,8 @@ public static class PayloadFrameCodec
             return new WrapperPayloadResult(null, 0, 0, null, diagnostics.ToArray());
         }
 
-        var frameOffset = BinaryPrimitives.ReadUInt64LittleEndian(trailer[8..16]);
-        var frameLength = BinaryPrimitives.ReadUInt64LittleEndian(trailer[16..24]);
+        var frameOffset = BinaryPrimitives.ReadUInt64LittleEndian(trailer[TrailerFrameOffset..TrailerLengthOffset]);
+        var frameLength = BinaryPrimitives.ReadUInt64LittleEndian(trailer[TrailerLengthOffset..TrailerSize]);
         if (frameOffset > (ulong)wrapper.Length
             || frameLength < HeaderSize
             || !TryCheckedAdd(frameOffset, frameLength, out var frameEnd)
@@ -652,8 +671,8 @@ public static class PayloadFrameCodec
     {
         var trailer = new byte[TrailerSize];
         Buffer.BlockCopy(TrailerMagic, 0, trailer, 0, TrailerMagic.Length);
-        BinaryPrimitives.WriteUInt64LittleEndian(trailer.AsSpan(8, 8), frameOffset);
-        BinaryPrimitives.WriteUInt64LittleEndian(trailer.AsSpan(16, 8), frameLength);
+        BinaryPrimitives.WriteUInt64LittleEndian(trailer.AsSpan(TrailerFrameOffset, sizeof(ulong)), frameOffset);
+        BinaryPrimitives.WriteUInt64LittleEndian(trailer.AsSpan(TrailerLengthOffset, sizeof(ulong)), frameLength);
         return trailer;
     }
 
@@ -715,7 +734,7 @@ public static class PayloadFrameCodec
             return false;
         }
 
-        var version = BinaryPrimitives.ReadUInt16LittleEndian(frame[8..10]);
+        var version = BinaryPrimitives.ReadUInt16LittleEndian(frame[VersionOffset..HeaderSizeOffset]);
         var expectedHeaderSize = version switch
         {
             FormatVersion => HeaderSize,
@@ -728,10 +747,10 @@ public static class PayloadFrameCodec
         }
 
         var header = frame[..expectedHeaderSize];
-        if (BinaryPrimitives.ReadUInt16LittleEndian(header[10..12]) != expectedHeaderSize
-            || BinaryPrimitives.ReadUInt32LittleEndian(header[12..16]) != DeflateFlag
-            || BinaryPrimitives.ReadUInt16LittleEndian(header[16..18]) != Elf.ElfConstants.MachineAarch64
-            || BinaryPrimitives.ReadUInt16LittleEndian(header[18..20]) != Elf.ElfConstants.TypeDyn)
+        if (BinaryPrimitives.ReadUInt16LittleEndian(header[HeaderSizeOffset..FlagsOffset]) != expectedHeaderSize
+            || BinaryPrimitives.ReadUInt32LittleEndian(header[FlagsOffset..ArchitectureOffset]) != DeflateFlag
+            || BinaryPrimitives.ReadUInt16LittleEndian(header[ArchitectureOffset..FileTypeOffset]) != Elf.ElfConstants.MachineAarch64
+            || BinaryPrimitives.ReadUInt16LittleEndian(header[FileTypeOffset..SourceNameSizeOffset]) != Elf.ElfConstants.TypeDyn)
         {
             return false;
         }
@@ -763,10 +782,10 @@ public static class PayloadFrameCodec
             }
         }
 
-        var sourceNameSize = BinaryPrimitives.ReadUInt32LittleEndian(header[20..24]);
-        var encodedSize = BinaryPrimitives.ReadUInt64LittleEndian(header[32..40]);
-        var payloadOffset = BinaryPrimitives.ReadUInt64LittleEndian(header[40..48]);
-        if (sourceNameSize > 4096
+        var sourceNameSize = BinaryPrimitives.ReadUInt32LittleEndian(header[SourceNameSizeOffset..SourceSizeOffset]);
+        var encodedSize = BinaryPrimitives.ReadUInt64LittleEndian(header[EncodedSizeOffset..EncodedOffsetOffset]);
+        var payloadOffset = BinaryPrimitives.ReadUInt64LittleEndian(header[EncodedOffsetOffset..SourceSha256Offset]);
+        if (sourceNameSize > PayloadFrameLimits.DefaultMaximumSourceNameBytes
             || sourceNameSize > int.MaxValue
             || !TryCheckedAdd((ulong)expectedHeaderSize, sourceNameSize, out var entryNameOffset)
             || !TryCheckedAdd(entryNameOffset, entryNameSize, out var encodedOffsetWithinFrame)

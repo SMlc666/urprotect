@@ -7,13 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define URP_DEFLATE_FLAG 1U
-#define URP_MACHINE_AARCH64 183U
-#define URP_TYPE_DYN 3U
-#define URP_SHA256_SIZE 32U
 #define URP_MAX_ARGUMENTS 4096U
 
-static const uint8_t urp_frame_magic[8] = {'U', 'R', 'P', 'C', 'K', '0', '1', 0};
+static const uint8_t urp_frame_magic[] = URP_FRAME_MAGIC;
 
 typedef struct urp_frame_view {
     const uint8_t *encoded;
@@ -231,29 +227,29 @@ static urp_status urp_parse_frame(
     size_t frame_size,
     urp_frame_view *view)
 {
-    if (frame == NULL || view == NULL || frame_size < URP_RUNTIME_FRAME_COMMON_HEADER_SIZE) {
+    if (frame == NULL || view == NULL || frame_size < URP_FRAME_COMMON_HEADER_SIZE) {
         return URP_STATUS_FRAME_INVALID;
     }
 
     const uint8_t *header = frame;
-    if (memcmp(header, urp_frame_magic, sizeof(urp_frame_magic)) != 0) {
+    if (memcmp(header, urp_frame_magic, sizeof(urp_frame_magic) - 1U) != 0) {
         return URP_STATUS_FRAME_INVALID;
     }
 
-    uint16_t version = urp_read_u16_le(header + 8U);
-    uint16_t header_size = urp_read_u16_le(header + 10U);
-    if (version != URP_RUNTIME_FRAME_VERSION_V1
-        && version != URP_RUNTIME_FRAME_VERSION_V2) {
+    uint16_t version = urp_read_u16_le(header + URP_FRAME_VERSION_OFFSET);
+    uint16_t header_size = urp_read_u16_le(header + URP_FRAME_HEADER_SIZE_OFFSET);
+    if (version != URP_FRAME_VERSION_V1
+        && version != URP_FRAME_VERSION_V2) {
         return URP_STATUS_UNSUPPORTED;
     }
 
     uint16_t expected_header_size = version == URP_RUNTIME_FRAME_VERSION_V1
-        ? URP_RUNTIME_FRAME_V1_HEADER_SIZE
-        : URP_RUNTIME_FRAME_V2_HEADER_SIZE;
+        ? URP_FRAME_V1_HEADER_SIZE
+        : URP_FRAME_V2_HEADER_SIZE;
     if (header_size != expected_header_size
-        || urp_read_u32_le(header + 12U) != URP_DEFLATE_FLAG
-        || urp_read_u16_le(header + 16U) != URP_MACHINE_AARCH64
-        || urp_read_u16_le(header + 18U) != URP_TYPE_DYN
+        || urp_read_u32_le(header + URP_FRAME_FLAGS_OFFSET) != URP_FRAME_DEFLATE_FLAG
+        || urp_read_u16_le(header + URP_FRAME_MACHINE_OFFSET) != URP_FRAME_MACHINE_AARCH64
+        || urp_read_u16_le(header + URP_FRAME_TYPE_OFFSET) != URP_FRAME_TYPE_DYN
         || frame_size < (size_t)header_size) {
         return URP_STATUS_FRAME_INVALID;
     }
@@ -288,10 +284,10 @@ static urp_status urp_parse_frame(
         }
     }
 
-    uint32_t name_size = urp_read_u32_le(header + 20U);
-    uint64_t source_size = urp_read_u64_le(header + 24U);
-    uint64_t encoded_size = urp_read_u64_le(header + 32U);
-    uint64_t encoded_offset = urp_read_u64_le(header + 40U);
+    uint32_t name_size = urp_read_u32_le(header + URP_FRAME_SOURCE_NAME_SIZE_OFFSET);
+    uint64_t source_size = urp_read_u64_le(header + URP_FRAME_SOURCE_SIZE_OFFSET);
+    uint64_t encoded_size = urp_read_u64_le(header + URP_FRAME_ENCODED_SIZE_OFFSET);
+    uint64_t encoded_offset = urp_read_u64_le(header + URP_FRAME_ENCODED_OFFSET_OFFSET);
     if (name_size == 0U
         || name_size > URP_RUNTIME_MAX_ENTRY_NAME
         || source_size == 0U
@@ -394,8 +390,8 @@ static urp_status urp_parse_frame(
     view->encoded = frame + encoded_offset_size;
     view->encoded_size = encoded_size_size;
     view->source_size = source_size;
-    view->source_sha256 = header + 48U;
-    view->encoded_sha256 = header + 80U;
+    view->source_sha256 = header + URP_FRAME_SOURCE_SHA256_OFFSET;
+    view->encoded_sha256 = header + URP_FRAME_ENCODED_SHA256_OFFSET;
     view->entry_name = entry_name;
     view->entry_name_size = entry_name_size;
     view->host_abi_version = host_abi_version;
@@ -413,12 +409,12 @@ static urp_status urp_decode_frame(
         return URP_STATUS_FRAME_INVALID;
     }
 
-    uint8_t encoded_digest[URP_SHA256_SIZE];
+    uint8_t encoded_digest[URP_FRAME_SHA256_SIZE];
     urp_sha256_context encoded_context;
     urp_sha256_init(&encoded_context);
     urp_sha256_update(&encoded_context, frame->encoded, frame->encoded_size);
     urp_sha256_final(&encoded_context, encoded_digest);
-    if (!urp_constant_time_equal(encoded_digest, frame->encoded_sha256, URP_SHA256_SIZE)) {
+    if (!urp_constant_time_equal(encoded_digest, frame->encoded_sha256, URP_FRAME_SHA256_SIZE)) {
         return URP_STATUS_INTEGRITY_FAILURE;
     }
 
@@ -447,12 +443,12 @@ static urp_status urp_decode_frame(
         return URP_STATUS_FRAME_INVALID;
     }
 
-    uint8_t source_digest[URP_SHA256_SIZE];
+    uint8_t source_digest[URP_FRAME_SHA256_SIZE];
     urp_sha256_context source_context;
     urp_sha256_init(&source_context);
     urp_sha256_update(&source_context, source, source_size);
     urp_sha256_final(&source_context, source_digest);
-    if (!urp_constant_time_equal(source_digest, frame->source_sha256, URP_SHA256_SIZE)) {
+    if (!urp_constant_time_equal(source_digest, frame->source_sha256, URP_FRAME_SHA256_SIZE)) {
         free(source);
         return URP_STATUS_INTEGRITY_FAILURE;
     }

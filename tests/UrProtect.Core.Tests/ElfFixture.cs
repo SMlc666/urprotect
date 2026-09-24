@@ -7,10 +7,18 @@ namespace UrProtect.Core.Tests;
 
 internal static class ElfFixture
 {
+    public const int MinimalSize = 0x204;
+    public const int FirstProgramHeaderOffset = ElfConstants.HeaderSize64;
+    public const int SecondProgramHeaderOffset = FirstProgramHeaderOffset + ElfConstants.ProgramHeaderSize64;
+    public const int DynamicProgramHeaderOffset = SecondProgramHeaderOffset + ElfConstants.ProgramHeaderSize64;
+    public const int InterpreterProgramHeaderOffset = DynamicProgramHeaderOffset + ElfConstants.ProgramHeaderSize64;
+    public const int DynamicTableOffset = 0x180;
+    public const int InterpreterOffset = 0x1C0;
+    public const int EntryInstructionOffset = 0x200;
+
     public static byte[] MinimalPie()
     {
-        const int size = 0x204;
-        var bytes = new byte[size];
+        var bytes = new byte[MinimalSize];
         var span = bytes.AsSpan();
         span[0] = 0x7F;
         span[1] = (byte)'E';
@@ -33,29 +41,29 @@ internal static class ElfFixture
         WriteUInt16(span, 60, 0);
         WriteUInt16(span, 62, 0);
 
-        WriteProgramHeader(span, 64, ElfConstants.PtLoad, ElfConstants.PfR, 0, 0, 0x200, 0x200, 0x1000);
-        WriteProgramHeader(span, 120, ElfConstants.PtLoad, ElfConstants.PfR | ElfConstants.PfX, 0x200, 0x1200, 4, 4, 0x1000);
-        WriteProgramHeader(span, 176, ElfConstants.PtDynamic, ElfConstants.PfR, 0x180, 0x180, 32, 32, 8);
+        WriteProgramHeader(span, FirstProgramHeaderOffset, ElfConstants.PtLoad, ElfConstants.PfR, 0, 0, 0x200, 0x200, 0x1000);
+        WriteProgramHeader(span, SecondProgramHeaderOffset, ElfConstants.PtLoad, ElfConstants.PfR | ElfConstants.PfX, 0x200, 0x1200, 4, 4, 0x1000);
+        WriteProgramHeader(span, DynamicProgramHeaderOffset, ElfConstants.PtDynamic, ElfConstants.PfR, DynamicTableOffset, DynamicTableOffset, 32, 32, 8);
         const string interpreter = "/lib/ld-linux-aarch64.so.1\0";
-        WriteUInt64(span, 0x180, ElfConstants.DtFlags1);
-        WriteUInt64(span, 0x188, ElfConstants.Df1Pie);
-        WriteUInt64(span, 0x190, ElfConstants.DtNull);
-        WriteUInt64(span, 0x198, 0);
+        WriteUInt64(span, DynamicTableOffset, ElfConstants.DtFlags1);
+        WriteUInt64(span, DynamicTableOffset + 8, ElfConstants.Df1Pie);
+        WriteUInt64(span, DynamicTableOffset + 16, ElfConstants.DtNull);
+        WriteUInt64(span, DynamicTableOffset + 24, 0);
 
         WriteProgramHeader(
             span,
-            232,
+            InterpreterProgramHeaderOffset,
             ElfConstants.PtInterp,
             ElfConstants.PfR,
-            0x1C0,
-            0x1C0,
+            InterpreterOffset,
+            InterpreterOffset,
             (ulong)Encoding.ASCII.GetByteCount(interpreter),
             (ulong)Encoding.ASCII.GetByteCount(interpreter),
             1);
-        Encoding.ASCII.GetBytes(interpreter).CopyTo(span[0x1C0..]);
+        Encoding.ASCII.GetBytes(interpreter).CopyTo(span[InterpreterOffset..]);
 
         // NOP at the ET_DYN entry point.
-        WriteUInt32(span, 0x200, 0xD503201F);
+        WriteUInt32(span, EntryInstructionOffset, 0xD503201F);
         return bytes;
     }
 

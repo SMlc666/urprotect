@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check determinism, publication safety, explicit resource budgets, and absence of undocumented thread-safety claims."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review concurrency and large-input evidence across managed filesystem, CLI, and native boundaries."}

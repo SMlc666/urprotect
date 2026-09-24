@@ -1,0 +1,31 @@
+{
+  "id": "test-infrastructure-regression",
+  "name": "test-infrastructure-regression",
+  "title": "Build test infrastructure and regression coverage",
+  "description": "Unify protocol constants and assertion style, add coverage-guided fuzzing, concurrency and large-input regressions, and comprehensive end-to-end test coverage.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "SMlc666",
+  "assignee": "SMlc666",
+  "createdAt": "2026-09-24",
+  "completedAt": "2026-09-24",
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-24-constants-and-assertions",
+    "09-24-coverage-guided-fuzzing",
+    "09-24-concurrency-large-inputs",
+    "09-24-end-to-end-regression"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

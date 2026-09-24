@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0": {
+      "SharpFuzz.Common": {
+        "type": "Direct",
+        "requested": "[2.2.0, )",
+        "resolved": "2.2.0",
+        "contentHash": "biITWpwnMR7HUp43lAGU97DWq/4LfyXqqhuOK0Z4IuRP97KjQMOe/GKq3wE1KY21gNrc7OPO9HbAtQUvMKTImA=="
+      }
+    },
+    "net8.0/linux-arm64": {},
+    "net8.0/linux-musl-arm64": {}
+  }
+}

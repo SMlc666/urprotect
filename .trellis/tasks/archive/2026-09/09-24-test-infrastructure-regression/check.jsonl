@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check test coverage, bounded binary handling, stable diagnostics, platform evidence, and CI retention against the backend contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify malformed, timeout, unavailable-capability, and publication failures remain explicit and do not become green skips."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review for remaining duplicated constants, fixture logic, assertion wrappers, and script behavior after implementation."}
+{"file":".trellis/tasks/09-24-test-infrastructure-regression/research/fuzzing.md","reason":"Verify the coverage-guided runner is genuine, pinned, licensed, reproducible, and distinct from Coverlet line coverage."}
