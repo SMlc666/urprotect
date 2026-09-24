@@ -2,14 +2,24 @@ namespace UrProtect.Core.Pack;
 
 public static class LauncherContract
 {
-    public const ushort AbiVersion = 1;
-    public const string Marker = "URPROTECT-AARCH64-LAUNCHER-V1";
+    public const ushort AbiVersion = 2;
+    public const string Marker = "URPROTECT-AARCH64-LAUNCHER-V3";
+    public const string HostContextMarker = "URPROTECT-AARCH64-HOST-CONTEXT-V3";
 
-    public static bool HasMarker(ReadOnlySpan<byte> launcher)
+    public static bool HasMarker(ReadOnlySpan<byte> launcher, PayloadDispatchProfile profile)
     {
-        return launcher.IndexOf(MarkerBytes) >= 0;
+        return launcher.IndexOf(profile == PayloadDispatchProfile.OuterExecveat
+            ? MarkerBytes
+            : HostContextMarkerBytes) >= 0;
     }
 
+    public static bool HasMarker(ReadOnlySpan<byte> launcher) =>
+        HasMarker(launcher, PayloadDispatchProfile.OuterExecveat)
+        || HasMarker(launcher, PayloadDispatchProfile.HostContextEntry);
+
     private static ReadOnlySpan<byte> MarkerBytes =>
-        "URPROTECT-AARCH64-LAUNCHER-V1"u8;
+        "URPROTECT-AARCH64-LAUNCHER-V3"u8;
+
+    private static ReadOnlySpan<byte> HostContextMarkerBytes =>
+        "URPROTECT-AARCH64-HOST-CONTEXT-V3"u8;
 }

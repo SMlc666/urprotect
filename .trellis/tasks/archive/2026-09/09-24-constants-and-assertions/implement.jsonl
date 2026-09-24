@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Follow existing binary-safety, named-contract, focused-test, and no-regression conventions."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Guide the inventory and consolidation of duplicated constants and repeated assertion semantics."}

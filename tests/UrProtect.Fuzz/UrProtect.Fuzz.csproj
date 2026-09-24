@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>UrProtect.Fuzz</RootNamespace>
+    <AssemblyName>UrProtect.Fuzz</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpFuzz.Common" Version="2.2.0" />
+    <ProjectReference Include="../../src/UrProtect.Core/UrProtect.Core.csproj" />
+    <ProjectReference Include="../../third_party/SharpFuzzCompat/SharpFuzz/SharpFuzz.csproj" />
+  </ItemGroup>
+</Project>

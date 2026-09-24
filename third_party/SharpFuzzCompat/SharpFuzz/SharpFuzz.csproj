@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SharpFuzz</AssemblyName>
+    <RootNamespace>SharpFuzz</RootNamespace>
+    <NoWarn>$(NoWarn);CA1806;CA2101</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpFuzz.Common" Version="2.2.0" />
+  </ItemGroup>
+</Project>

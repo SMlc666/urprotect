@@ -24,19 +24,20 @@ public static class ElfParser
             return new ElfParseResult(null, diagnostics.ToArray());
         }
 
-        if (!reader.TryReadByte(4, out var elfClass) || elfClass != ElfConstants.Class64)
+        if (!reader.TryReadByte(ElfHeaderOffsets.Class, out var elfClass) || elfClass != ElfConstants.Class64)
         {
-            diagnostics.Error(DiagnosticCode.UnsupportedClass, "Only ELFCLASS64 inputs are supported.", 4);
+            diagnostics.Error(DiagnosticCode.UnsupportedClass, "Only ELFCLASS64 inputs are supported.", ElfHeaderOffsets.Class);
         }
 
-        if (!reader.TryReadByte(5, out var dataEncoding) || dataEncoding != ElfConstants.LittleEndian)
+        if (!reader.TryReadByte(ElfHeaderOffsets.DataEncoding, out var dataEncoding) || dataEncoding != ElfConstants.LittleEndian)
         {
-            diagnostics.Error(DiagnosticCode.UnsupportedEndianness, "Only little-endian ELF inputs are supported.", 5);
+            diagnostics.Error(DiagnosticCode.UnsupportedEndianness, "Only little-endian ELF inputs are supported.", ElfHeaderOffsets.DataEncoding);
         }
 
-        if (!reader.TryReadByte(6, out var identVersion) || identVersion != 1)
+        if (!reader.TryReadByte(ElfHeaderOffsets.IdentificationVersion, out var identVersion)
+            || identVersion != ElfConstants.IdentificationVersionCurrent)
         {
-            diagnostics.Error(DiagnosticCode.InvalidHeader, "Only the current ELF identification version is supported.", 6);
+            diagnostics.Error(DiagnosticCode.InvalidHeader, "Only the current ELF identification version is supported.", ElfHeaderOffsets.IdentificationVersion);
         }
 
         if (diagnostics.HasErrors)
@@ -64,7 +65,7 @@ public static class ElfParser
             diagnostics.Error(
                 DiagnosticCode.UnsupportedMachine,
                 $"Machine 0x{header.Machine:X} is not AArch64.",
-                18);
+                ElfHeaderOffsets.Machine);
         }
 
         if (header.Type != ElfConstants.TypeDyn)
@@ -72,17 +73,17 @@ public static class ElfParser
             diagnostics.Error(
                 DiagnosticCode.UnsupportedFileType,
                 $"ELF type {header.Type} is not the supported ET_DYN type.",
-                16);
+                ElfHeaderOffsets.Type);
         }
 
-        if (header.Version != 1)
+        if (header.Version != ElfConstants.HeaderVersionCurrent)
         {
-            diagnostics.Error(DiagnosticCode.InvalidHeader, "Only the current ELF header version is supported.", 20);
+            diagnostics.Error(DiagnosticCode.InvalidHeader, "Only the current ELF header version is supported.", ElfHeaderOffsets.Version);
         }
 
         if (header.HeaderSize != ElfConstants.HeaderSize64)
         {
-            diagnostics.Error(DiagnosticCode.InvalidHeader, "The ELF64 header size is not exactly 64 bytes.", 52);
+            diagnostics.Error(DiagnosticCode.InvalidHeader, "The ELF64 header size is not exactly 64 bytes.", ElfHeaderOffsets.HeaderSize);
         }
 
         if (header.ProgramHeaderCount > 0
@@ -91,7 +92,7 @@ public static class ElfParser
             diagnostics.Error(
                 DiagnosticCode.InvalidHeader,
                 "The program-header entry size is not the ELF64 size.",
-                54);
+                ElfHeaderOffsets.ProgramHeaderEntrySize);
         }
 
         if (diagnostics.HasErrors)
@@ -161,10 +162,10 @@ public static class ElfParser
 
     private static bool HasElfMagic(BoundedReader reader)
     {
-        return reader.TryReadByte(0, out var b0)
-            && reader.TryReadByte(1, out var b1)
-            && reader.TryReadByte(2, out var b2)
-            && reader.TryReadByte(3, out var b3)
+        return reader.TryReadByte(ElfHeaderOffsets.Magic, out var b0)
+            && reader.TryReadByte(ElfHeaderOffsets.Magic + 1, out var b1)
+            && reader.TryReadByte(ElfHeaderOffsets.Magic + 2, out var b2)
+            && reader.TryReadByte(ElfHeaderOffsets.Magic + 3, out var b3)
             && b0 == 0x7F
             && b1 == (byte)'E'
             && b2 == (byte)'L'
@@ -174,19 +175,19 @@ public static class ElfParser
     private static bool TryReadHeader(BoundedReader reader, out ElfHeader header)
     {
         header = default;
-        if (!reader.TryReadUInt16(16, out var type)
-            || !reader.TryReadUInt16(18, out var machine)
-            || !reader.TryReadUInt32(20, out var version)
-            || !reader.TryReadUInt64(24, out var entry)
-            || !reader.TryReadUInt64(32, out var programHeaderOffset)
-            || !reader.TryReadUInt64(40, out var sectionHeaderOffset)
-            || !reader.TryReadUInt32(48, out var flags)
-            || !reader.TryReadUInt16(52, out var headerSize)
-            || !reader.TryReadUInt16(54, out var programHeaderEntrySize)
-            || !reader.TryReadUInt16(56, out var programHeaderCount)
-            || !reader.TryReadUInt16(58, out var sectionHeaderEntrySize)
-            || !reader.TryReadUInt16(60, out var sectionHeaderCount)
-            || !reader.TryReadUInt16(62, out var sectionNameIndex))
+        if (!reader.TryReadUInt16(ElfHeaderOffsets.Type, out var type)
+            || !reader.TryReadUInt16(ElfHeaderOffsets.Machine, out var machine)
+            || !reader.TryReadUInt32(ElfHeaderOffsets.Version, out var version)
+            || !reader.TryReadUInt64(ElfHeaderOffsets.Entry, out var entry)
+            || !reader.TryReadUInt64(ElfHeaderOffsets.ProgramHeaderOffset, out var programHeaderOffset)
+            || !reader.TryReadUInt64(ElfHeaderOffsets.SectionHeaderOffset, out var sectionHeaderOffset)
+            || !reader.TryReadUInt32(ElfHeaderOffsets.Flags, out var flags)
+            || !reader.TryReadUInt16(ElfHeaderOffsets.HeaderSize, out var headerSize)
+            || !reader.TryReadUInt16(ElfHeaderOffsets.ProgramHeaderEntrySize, out var programHeaderEntrySize)
+            || !reader.TryReadUInt16(ElfHeaderOffsets.ProgramHeaderCount, out var programHeaderCount)
+            || !reader.TryReadUInt16(ElfHeaderOffsets.SectionHeaderEntrySize, out var sectionHeaderEntrySize)
+            || !reader.TryReadUInt16(ElfHeaderOffsets.SectionHeaderCount, out var sectionHeaderCount)
+            || !reader.TryReadUInt16(ElfHeaderOffsets.SectionNameIndex, out var sectionNameIndex))
         {
             return false;
         }
@@ -240,14 +241,14 @@ public static class ElfParser
                     header.ProgramHeaderEntrySize,
                     (ulong)index,
                     out var offset)
-                || !reader.TryReadUInt32(offset, out var type)
-                || !reader.TryReadUInt32(offset + 4, out var flags)
-                || !reader.TryReadUInt64(offset + 8, out var fileOffset)
-                || !reader.TryReadUInt64(offset + 16, out var virtualAddress)
-                || !reader.TryReadUInt64(offset + 24, out var physicalAddress)
-                || !reader.TryReadUInt64(offset + 32, out var fileSize)
-                || !reader.TryReadUInt64(offset + 40, out var memorySize)
-                || !reader.TryReadUInt64(offset + 48, out var alignment))
+                || !reader.TryReadUInt32(offset + ElfProgramHeaderOffsets.Type, out var type)
+                || !reader.TryReadUInt32(offset + ElfProgramHeaderOffsets.Flags, out var flags)
+                || !reader.TryReadUInt64(offset + ElfProgramHeaderOffsets.FileOffset, out var fileOffset)
+                || !reader.TryReadUInt64(offset + ElfProgramHeaderOffsets.VirtualAddress, out var virtualAddress)
+                || !reader.TryReadUInt64(offset + ElfProgramHeaderOffsets.PhysicalAddress, out var physicalAddress)
+                || !reader.TryReadUInt64(offset + ElfProgramHeaderOffsets.FileSize, out var fileSize)
+                || !reader.TryReadUInt64(offset + ElfProgramHeaderOffsets.MemorySize, out var memorySize)
+                || !reader.TryReadUInt64(offset + ElfProgramHeaderOffsets.Alignment, out var alignment))
             {
                 diagnostics.Error(
                     DiagnosticCode.InvalidProgramHeader,

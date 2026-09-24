@@ -8,6 +8,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Cli", "src\UrProt
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Core.Tests", "tests\UrProtect.Core.Tests\UrProtect.Core.Tests.csproj", "{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Fuzz", "tests\UrProtect.Fuzz\UrProtect.Fuzz.csproj", "{A7D8E9F0-5A6B-4C7D-8E9F-1029384756AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SharpFuzz", "third_party\SharpFuzzCompat\SharpFuzz\SharpFuzz.csproj", "{B8E9F0A1-6B7C-4D8E-9FA0-213A495867BC}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UrProtect.Benchmarks", "benchmarks\UrProtect.Benchmarks\UrProtect.Benchmarks.csproj", "{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "third_party", "third_party", "{1FD13B3B-BA5E-403F-8ECE-6529B6989F44}"
@@ -36,6 +40,14 @@ Global
 		{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D2A7B9C0-A0BF-42E5-B8A9-9358B7A77E13}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7D8E9F0-5A6B-4C7D-8E9F-1029384756AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7D8E9F0-5A6B-4C7D-8E9F-1029384756AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7D8E9F0-5A6B-4C7D-8E9F-1029384756AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7D8E9F0-5A6B-4C7D-8E9F-1029384756AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B8E9F0A1-6B7C-4D8E-9FA0-213A495867BC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8E9F0A1-6B7C-4D8E-9FA0-213A495867BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8E9F0A1-6B7C-4D8E-9FA0-213A495867BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8E9F0A1-6B7C-4D8E-9FA0-213A495867BC}.Release|Any CPU.Build.0 = Release|Any CPU
 		{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1D53D06F-C0F0-46F7-9F32-E9E42E0A8B64}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -75,9 +75,12 @@ host_path, wrapper_path, output_path = map(pathlib.Path, sys.argv[1:])
 wrapper = wrapper_path.read_bytes()
 frame_offset, frame_length = struct.unpack_from("<QQ", wrapper, len(wrapper) - 16)
 frame = bytearray(wrapper[frame_offset:frame_offset + frame_length])
-name_size = struct.unpack_from("<I", frame, 20)[0]
 new_offset = host_path.stat().st_size
-struct.pack_into("<Q", frame, 40, new_offset + 112 + name_size)
+version = struct.unpack_from("<H", frame, 8)[0]
+if version == 1:
+    header_size = struct.unpack_from("<H", frame, 10)[0]
+    name_size = struct.unpack_from("<I", frame, 20)[0]
+    struct.pack_into("<Q", frame, 40, new_offset + header_size + name_size)
 trailer = wrapper[-24:-16] + struct.pack("<QQ", new_offset, frame_length)
 output_path.write_bytes(host_path.read_bytes() + frame + trailer)
 output_path.chmod(0o755)

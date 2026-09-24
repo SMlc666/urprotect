@@ -16,9 +16,9 @@ public sealed class NoOpPipelineTests
             emitOutput: true,
             analyzeInstructions: false);
 
-        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        TestAssertions.Success(result.IsSuccess, result.Diagnostics, "byte-identical no-op output");
         Assert.NotNull(result.OutputBytes);
-        Assert.Equal(input, result.OutputBytes);
+        TestAssertions.ByteIdentity(input, result.OutputBytes!, "byte-identical no-op output");
     }
 
     [Fact]
@@ -26,7 +26,7 @@ public sealed class NoOpPipelineTests
     {
         var result = new NoOpPipeline().Validate(ElfFixture.MinimalPie());
 
-        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        TestAssertions.Success(result.IsSuccess, result.Diagnostics, "entry-region analysis");
         Assert.NotNull(result.Analysis);
         Assert.Contains(result.Analysis!.Candidates, candidate => candidate.VirtualAddress == 0x1200);
     }
@@ -50,7 +50,7 @@ public sealed class NoOpPipelineTests
 
             var result = new NoOpPipeline().ValidateAndCopy(inputPath, outputPath, analyzeInstructions: false);
 
-            Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+            TestAssertions.Success(result.IsSuccess, result.Diagnostics, "mode-preserving copy");
             Assert.Equal(mode, File.GetUnixFileMode(outputPath));
         }
         finally
@@ -96,8 +96,8 @@ public sealed class NoOpPipelineTests
 
             var result = new NoOpPipeline().ValidateAndCopy(inputPath, outputPath, analyzeInstructions: false);
 
-            Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
-            Assert.Equal(input, File.ReadAllBytes(outputPath));
+            TestAssertions.Success(result.IsSuccess, result.Diagnostics, "atomic copy");
+            TestAssertions.ByteIdentity(input, File.ReadAllBytes(outputPath), "atomic copy");
         }
         finally
         {
@@ -124,7 +124,10 @@ public sealed class NoOpPipelineTests
                 inputOverride: invalidSnapshot);
 
             Assert.False(result.IsSuccess);
-            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.InputTooSmall);
+            TestAssertions.ContainsDiagnostic(
+                result.Diagnostics,
+                DiagnosticCode.InputTooSmall,
+                "invalid snapshot publication");
             Assert.False(File.Exists(outputPath));
         }
         finally

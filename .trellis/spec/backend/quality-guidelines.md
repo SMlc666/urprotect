@@ -55,6 +55,19 @@ tests plus the relevant malformed-input path:
   stable exit codes, JSON stream behavior, and byte identity.
 - `PayloadFrameTests.cs` and `ElfPackServiceTests.cs` cover deterministic
   frames, limits, digests, launcher variants, and publication failures.
+- `ConcurrencyRegressionTests.cs` and `LargeInputRegressionTests.cs` cover
+  immutable shared-input use, deterministic outputs, exact/plus-one limits,
+  multi-megabyte inputs, and no-partial-publication behavior under bounded PR
+  and amplified nightly profiles.
+- `ContractLayoutTests.cs` and `tests/ContractInventory.md` own the
+  cross-language ABI/frame-layout drift check and literal ownership record.
+- `tests/regression-matrix.json` and `scripts/validate-regression-matrix.py`
+  map each E2E regression class to its command, tier, budget, platform, and
+  artifact witness.
+- `scripts/run-coverage-fuzz.sh` runs the separate SharpFuzz/libFuzzer ELF and
+  payload-frame targets. It must retain the pinned bridge hash, seed/corpus,
+  limits, and crash/timeout artifacts; it does not replace deterministic fuzz
+  tests or Coverlet line/branch coverage.
 - Native `self_test.c` and `test_launcher.sh` cover SHA-256, raw deflate,
   malformed frames, handoff behavior, and signal/status preservation.
 
@@ -86,6 +99,9 @@ ASLR addresses and timing.
 - Are stripped ELF files, unknown records, and unsupported semantics handled
   without guessing?
 - Are tests present for both the valid path and the nearest malformed path?
+- Are concurrency, large-input, fuzz, and E2E profiles bounded, reproducible,
+  and assigned to the correct CI tier?
+- Does every promoted fuzz finding have a minimized deterministic regression?
 - Does CI retain enough environment and failure evidence to distinguish a
   product failure from a missing capability?
 

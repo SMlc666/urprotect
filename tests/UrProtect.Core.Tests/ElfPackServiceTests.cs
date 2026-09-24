@@ -1,4 +1,5 @@
 using UrProtect.Core.Diagnostics;
+using UrProtect.Core.Elf;
 using UrProtect.Core.Pack;
 
 namespace UrProtect.Core.Tests;
@@ -24,14 +25,16 @@ public sealed class ElfPackServiceTests
         Assert.Equal(outputPath, result.OutputPath);
         var wrapper = File.ReadAllBytes(outputPath);
         Assert.NotEqual(source, wrapper);
-        Assert.Equal((ushort)1, result.LauncherAbiVersion);
-        Assert.Equal((ushort)1, result.FrameVersion);
+        Assert.Equal(LauncherContract.AbiVersion, result.LauncherAbiVersion);
+        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, result.FrameVersion);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, result.Profile);
         Assert.NotNull(result.LauncherSha256);
         var payload = PayloadFrameCodec.ReadWrapper(wrapper, new PayloadFrameLimits());
         Assert.True(payload.IsSuccess, string.Join(Environment.NewLine, payload.Diagnostics));
         Assert.Equal(source, payload.SourceBytes);
         Assert.NotNull(payload.Frame);
-        Assert.Equal(PayloadFrameCodec.FormatVersion, payload.Frame!.FrameVersion);
+        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, payload.Frame!.FrameVersion);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, payload.Frame.Profile);
         Assert.Null(payload.Frame.HostContextMetadata);
     }
 
@@ -54,6 +57,53 @@ public sealed class ElfPackServiceTests
         Assert.True(second.IsSuccess, string.Join(Environment.NewLine, second.Diagnostics));
         Assert.Equal(File.ReadAllBytes(firstOutputPath), File.ReadAllBytes(secondOutputPath));
         Assert.Equal(first.WrapperSha256, second.WrapperSha256);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void PacksAHostContextEntryImageWithTheExplicitCurrentProfile()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("entry.so");
+        var launcherPath = directory.Path("host-launcher.elf");
+        var outputPath = directory.Path("host-packed.elf");
+        File.WriteAllBytes(inputPath, RemoveInterpreter(ElfFixture.MinimalPie()));
+        File.WriteAllBytes(
+            launcherPath,
+            ElfFixture.MinimalPie().Concat(System.Text.Encoding.ASCII.GetBytes(LauncherContract.HostContextMarker)).ToArray());
+
+        var result = new ElfPackService().Pack(
+            inputPath,
+            outputPath,
+            launcherPath,
+            new ElfPackOptions(Profile: PayloadDispatchProfile.HostContextEntry));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.Equal(PayloadDispatchProfile.HostContextEntry, result.Profile);
+        var payload = PayloadFrameCodec.ReadWrapper(File.ReadAllBytes(outputPath), new PayloadFrameLimits());
+        Assert.True(payload.IsSuccess, string.Join(Environment.NewLine, payload.Diagnostics));
+        Assert.Equal(PayloadDispatchProfile.HostContextEntry, payload.Frame!.Profile);
+        Assert.Equal(HostContextContract.EntrySymbol, payload.Frame.HostContextMetadata!.EntryName);
+    }
+
+    [Fact]
+    [Trait("Category", "PackWrapper")]
+    public void PacksStaticPieThroughTheOuterProfile()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("static-pie.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.StaticPiePayload());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var decoded = PayloadFrameCodec.ReadWrapper(File.ReadAllBytes(outputPath), new PayloadFrameLimits());
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        Assert.Equal(ElfFixture.StaticPiePayload(), decoded.SourceBytes);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, decoded.Frame!.Profile);
     }
 
     [Fact]
@@ -128,8 +178,8 @@ public sealed class ElfPackServiceTests
     private static byte[] RemoveInterpreter(byte[] source)
     {
         var copy = source.ToArray();
-        copy.AsSpan(232, 56).Clear();
-        copy.AsSpan(24, 8).Clear();
+        copy.AsSpan(ElfFixture.InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        copy.AsSpan(ElfHeaderOffsets.Entry, sizeof(ulong)).Clear();
         return copy;
     }
 

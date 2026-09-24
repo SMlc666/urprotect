@@ -86,7 +86,7 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertIn("GNU RELRO", feature["obligation"])
         self.assertIn("BIND_NOW", " ".join(feature["constraints"]))
 
-    def test_production_host_context_pack_gap_is_explicitly_unknown(self) -> None:
+    def test_production_host_context_pack_is_current_and_validated(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
@@ -94,10 +94,10 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in self.data["features"]
             if item["id"] == "runtime.host-context.production-pack"
         )
-        self.assertEqual(feature["status"], "unknown")
-        self.assertIn("entry-image adapter", feature["nextEvidence"])
-        self.assertIn("v2-capable launcher", feature["nextEvidence"])
-        self.assertIn("managed pack/dispatch oracle", feature["nextEvidence"])
+        self.assertEqual(feature["status"], "validated")
+        self.assertIn("test_managed_host_context.sh", feature["witness"])
+        self.assertIn("test_managed_host_context.sh", feature["oracle"])
+        self.assertIn("host-context/managed", " ".join(feature["evidence"]))
 
     def test_bionic_host_context_handoff_has_a_native_adapter_oracle(self) -> None:
         result = self.run_validator(self.data)
@@ -112,9 +112,9 @@ class FixtureMatrixTests(unittest.TestCase):
             any("F_SEAL_WRITE" in constraint for constraint in handoff["constraints"])
         )
         self.assertTrue(
-            any("production managed pack" in constraint for constraint in handoff["constraints"])
+            any("production-pack" in constraint for constraint in handoff["constraints"])
         )
-        self.assertEqual(features["runtime.host-context.production-pack"]["status"], "unknown")
+        self.assertEqual(features["runtime.host-context.production-pack"]["status"], "validated")
 
     def test_legacy_wrapper_and_android_jni_are_labeled_as_baselines(self) -> None:
         result = self.run_validator(self.data)
@@ -130,7 +130,7 @@ class FixtureMatrixTests(unittest.TestCase):
         android = features["android.jni.native-bridge"]
         self.assertIn("does not execute packed output", " ".join(android["constraints"]))
 
-    def test_pt_tls_is_an_explicit_rejected_host_context_boundary(self) -> None:
+    def test_pt_tls_has_a_bounded_initial_exec_slice(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
@@ -138,27 +138,21 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in self.data["features"]
             if item["id"] == "runtime.host-context.pt-tls"
         )
-        self.assertEqual(feature["status"], "rejected")
+        self.assertEqual(feature["status"], "validated")
         self.assertEqual(
             feature["witness"],
-            "native/urprotect-runtime/host_context_self_test.c",
+            "native/urprotect-runtime/host_context_tls_fixture.c",
         )
         self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
-        self.assertIn("dlopen", feature["reason"])
-        self.assertEqual(
-            feature["negativeWitness"],
-            "native/urprotect-runtime/host_context_self_test.c",
-        )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
         self.assertIn(
-            "native/urprotect-runtime/host_context_self_test.c",
+            "native/urprotect-runtime/host_context_tls_fixture.c",
             feature["evidence"],
         )
         self.assertIn(
-            ".artifacts/host-context/pr/self-test.log",
+            ".artifacts/host-context/managed/tls-result.txt",
             feature["evidence"],
         )
-        self.assertTrue(any("p_filesz" in item for item in feature["constraints"]))
+        self.assertTrue(any("initial-exec" in item for item in feature["constraints"]))
 
     def test_unknown_feature_requires_next_evidence(self) -> None:
         data = copy.deepcopy(self.data)
@@ -167,6 +161,8 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in data["features"]
             if item["id"] == "runtime.host-context.production-pack"
         )
+        feature["status"] = "unknown"
+        feature["nextEvidence"] = "test evidence"
         del feature["nextEvidence"]
 
         result = self.run_validator(data)
@@ -174,7 +170,7 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("nextEvidence", result.stderr or result.stdout)
 
-    def test_gnu_property_is_an_explicit_rejected_host_context_boundary(self) -> None:
+    def test_gnu_property_has_a_bounded_bti_slice(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
@@ -182,26 +178,19 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in self.data["features"]
             if item["id"] == "runtime.host-context.gnu-property"
         )
-        self.assertEqual(feature["status"], "rejected")
+        self.assertEqual(feature["status"], "validated")
         self.assertEqual(
             feature["witness"],
-            "native/urprotect-runtime/host_context_self_test.c",
+            "native/urprotect-runtime/host_context_property_fixture.c",
         )
         self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
-        self.assertIn("property negotiation", feature["reason"])
-        self.assertIn("BTI/PAC", feature["reason"])
-        self.assertEqual(
-            feature["negativeWitness"],
-            "native/urprotect-runtime/host_context_self_test.c",
-        )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
         self.assertIn(
-            ".artifacts/host-context/pr/self-test.log",
+            ".artifacts/host-context/managed/property-result.txt",
             feature["evidence"],
         )
-        self.assertTrue(any("zero image handle" in item for item in feature["constraints"]))
+        self.assertTrue(any("BTI" in item for item in feature["constraints"]))
 
-    def test_dependency_resolution_is_an_explicit_rejected_boundary(self) -> None:
+    def test_dependency_resolution_has_a_bounded_validated_slice(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
@@ -209,16 +198,10 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in self.data["features"]
             if item["id"] == "runtime.host-context.dependency-resolution"
         )
-        self.assertEqual(feature["status"], "rejected")
-        for dependency_tag in ("DT_NEEDED", "DT_AUXILIARY", "DT_FILTER"):
-            self.assertIn(dependency_tag, feature["obligation"])
-        self.assertIn("dependency-resolution", feature["reason"])
-        self.assertIn("search-path", feature["reason"])
-        self.assertIn("symbol-scope", feature["reason"])
-        self.assertIn("dependency-lifetime", feature["reason"])
+        self.assertEqual(feature["status"], "validated")
+        self.assertIn("DT_NEEDED", " ".join(feature["constraints"]))
+        self.assertIn("Search roots", " ".join(feature["constraints"]))
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
-        self.assertTrue(any("surrounding byte" in item for item in feature["constraints"]))
-        self.assertTrue(any("positive" in item for item in feature["constraints"]))
 
         lifecycle = next(
             item
@@ -226,7 +209,6 @@ class FixtureMatrixTests(unittest.TestCase):
             if item["id"] == "runtime.host-context.constructor-destructor"
         )
         self.assertNotIn("DT_NEEDED", lifecycle["obligation"])
-        self.assertNotIn("DT_NEEDED", lifecycle["reason"])
 
     def test_constructor_destructor_lifecycle_is_separate_from_path_search(self) -> None:
         result = self.run_validator(self.data)
@@ -252,18 +234,8 @@ class FixtureMatrixTests(unittest.TestCase):
             for item in self.data["features"]
             if item["id"] == "runtime.host-context.constructor-destructor"
         )
-        self.assertEqual(lifecycle["status"], "rejected")
-        for tag in (
-            "DT_INIT",
-            "DT_FINI",
-            "DT_INIT_ARRAY",
-            "DT_FINI_ARRAY",
-            "DT_INIT_ARRAYSZ",
-            "DT_FINI_ARRAYSZ",
-            "DT_PREINIT_ARRAY",
-            "DT_PREINIT_ARRAYSZ",
-        ):
-            self.assertIn(tag, lifecycle["obligation"])
+        self.assertEqual(lifecycle["status"], "validated")
+        self.assertIn("DT_INIT", " ".join(lifecycle["constraints"]))
         self.assertNotIn("DT_RPATH", lifecycle["obligation"])
         self.assertNotIn("DT_RUNPATH", lifecycle["obligation"])
         self.assertNotIn("DT_TEXTREL", lifecycle["obligation"])
@@ -282,14 +254,8 @@ class FixtureMatrixTests(unittest.TestCase):
             "DT_PLTREL",
         ):
             self.assertNotIn(relocation_tag, lifecycle["obligation"])
-        self.assertIn("constructor/destructor ordering", lifecycle["reason"])
-        self.assertIn("reentrancy", lifecycle["reason"])
-        self.assertIn("teardown", lifecycle["reason"])
-        self.assertIn("lifecycle ownership", lifecycle["reason"])
         self.assertIn("COMPATIBILITY.md", lifecycle["evidence"])
-        self.assertTrue(any("nonzero sentinel" in item for item in lifecycle["constraints"]))
-        self.assertTrue(any("surrounding bytes" in item for item in lifecycle["constraints"]))
-        self.assertTrue(any("positive" in item for item in lifecycle["constraints"]))
+        self.assertTrue(any("before urp_entry" in item for item in lifecycle["constraints"]))
 
         path_search = next(
             item
@@ -565,6 +531,9 @@ class FixtureMatrixTests(unittest.TestCase):
         data = copy.deepcopy(self.data)
         case = next(item for item in data["cases"] if item["id"] == "c-termux-bionic-pie")
         case["required"] = True
+        production = next(item for item in data["features"] if item["id"] == "runtime.host-context.production-pack")
+        production["status"] = "unknown"
+        production["nextEvidence"] = "test evidence"
         case["features"].append("runtime.host-context.production-pack")
 
         result = self.run_validator(data)
@@ -639,7 +608,7 @@ class FixtureMatrixTests(unittest.TestCase):
         feature = next(
             item
             for item in data["features"]
-            if item["id"] == "runtime.host-context.dependency-resolution"
+            if item["id"] == "runtime.host-context.path-search"
         )
         feature["negativeOracle"] = "fixtures/missing-negative-oracle"
 
@@ -668,10 +637,10 @@ class FixtureMatrixTests(unittest.TestCase):
             rendered = output.read_text()
             self.assertIn("unknown` rows never count as support", rendered)
             self.assertIn("runtime.host-context.bionic-handoff | validated", rendered)
-            self.assertIn("runtime.host-context.gnu-property | rejected", rendered)
-            self.assertIn("runtime.host-context.pt-tls | rejected", rendered)
-            self.assertIn("runtime.host-context.dependency-resolution | rejected", rendered)
-            self.assertIn("runtime.host-context.constructor-destructor | rejected", rendered)
+            self.assertIn("runtime.host-context.gnu-property | validated", rendered)
+            self.assertIn("runtime.host-context.pt-tls | validated", rendered)
+            self.assertIn("runtime.host-context.dependency-resolution | validated", rendered)
+            self.assertIn("runtime.host-context.constructor-destructor | validated", rendered)
             self.assertIn("runtime.host-context.path-search | rejected", rendered)
             self.assertIn("runtime.host-context.text-relocation | rejected", rendered)
             self.assertIn("runtime.host-context.unsupported-relocation-table | rejected", rendered)

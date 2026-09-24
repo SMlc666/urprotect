@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/runtime-compatibility.md", "reason": "Runtime/profile/evidence contract."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Binary safety and validation quality gates."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Stable diagnostics and fail-closed behavior."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer data-flow review."}

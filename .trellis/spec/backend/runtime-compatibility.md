@@ -15,6 +15,52 @@ frame and ELF invariants pass and the host implements the declared HostContext
 ABI. A deterministic runtime pass is evidence for an implementation; it does
 not by itself upgrade an unproved host behavior to `proven`.
 
+### Development-stage scope and evolution policy
+
+UrProtect is an AArch64/ARM64-only product. The current compatibility roadmap
+does not add x86_64, ARM32, RISC-V, or another architecture backend. Technical
+contracts and examples should use **AArch64**; user-facing text may explain the
+term as ARM64.
+
+The project is in the 0.x rapid-development stage. Breaking changes to the
+frame format, HostContext ABI, launcher ABI, CLI contract, report schema, and
+fixture contracts are allowed when the current design requires them. A change
+to one of these cross-layer contracts must update every producer, consumer,
+validation rule, test, fixture, evidence declaration, and document in the same
+change. Do not add a compatibility adapter solely to preserve an obsolete
+internal production path.
+
+The production runtime should converge on one current versioned packaging
+contract with explicit execution profiles. The current profiles are
+`outer-execveat` for standalone PIE recovery and `host-context-entry` for an
+entry image loaded through HostContext. These profiles have different image
+lifetime and launch semantics, so a profile-specific launcher or adapter is
+explicitly selected and validated rather than inferred from loader behavior.
+During migration, an older path may remain as explicitly named historical
+evidence, but new packaging must not select it silently and the compatibility
+matrix must not count it as current support. A stale version or profile/
+launcher mismatch must produce a clear version or unsupported result.
+
+Compatibility work is layered and must be reported at the layer actually
+proved:
+
+1. parser/model acceptance;
+2. outer wrapper and native interpreter execution;
+3. in-process HostContext loading and entry dispatch;
+4. runtime-specific evidence such as glibc, musl, or bionic.
+
+Success at a lower layer does not promote a claim at a higher layer. In
+particular, a system loader accepting an ELF feature is not HostContext support
+until the HostContext contract defines its semantics and a corresponding
+oracle is retained.
+
+The compatibility expansion order is recorded in the active parent task rather
+than duplicated here: converge the current contract and explicit profiles
+first, then expand the outer AArch64 wrapper, relocation/symbol semantics,
+dependency/path/lifecycle semantics, and finally TLS/GNU property semantics.
+The parent task owns the phase details and child-task acceptance criteria; this
+spec owns the durable rules that every phase must follow.
+
 ### 2. Signatures
 
 The native runtime entry point is:
@@ -99,20 +145,29 @@ executable pathname.
 - AArch64 program headers and `LoadMap` define runtime layout; section headers
   may be absent. Unknown relocation or lifecycle semantics remain `unknown` or
   `rejected` until an invariant and oracle exist. The first native adapter
-  slice accepts only checked `RELATIVE`/`RELR` targets, permits only immediate
-  binding dynamic flags, and delegates relocation application to the system
-  loader.
-- The constructor/destructor lifecycle boundary is the rejected feature row
-  `runtime.host-context.constructor-destructor`. The first native adapter
-  rejects `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`,
-  `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`, `DT_PREINIT_ARRAY`, and
-  `DT_PREINIT_ARRAYSZ` with `URP_STATUS_UNSUPPORTED` before constructor or
-  destructor execution and image-handle creation. HostContext v1 and the
-  current system-loader adapter define no constructor/destructor ordering,
-  callback or reentrancy behavior, teardown, or lifecycle ownership semantics.
-  The native self-test mutates one bounded `DT_NULL` tag at a time, preserves
-  surrounding bytes, initializes a nonzero sentinel, and requires a zero
-  output handle.
+  slice accepts checked `RELATIVE`/`RELR` targets and the bounded
+  `R_AARCH64_GLOB_DAT` symbolic form when `DT_SYMTAB`/`DT_SYMENT` identify a
+  file-backed symbol record and the relocation target is aligned and writable.
+  It permits only immediate binding dynamic flags and delegates relocation
+  application to the system loader. Other symbol binding, PLT, version, and
+  dependency semantics remain explicit boundaries.
+- The current HostContext dependency/lifecycle slice accepts one recognized
+  system-libc `DT_NEEDED` basename with bounded `DT_STRTAB`/`DT_STRSZ` metadata
+  and no RPATH/RUNPATH. The system loader's fixed default roots resolve it;
+  payload-controlled search paths and additional dependency graph forms remain
+  rejected. Nonzero constructor/destructor metadata follows the declared
+  system-loader order: constructors before `urp_entry`, destructors during
+  `release_image`. Zero-valued lifecycle mutations remain rejected, and
+  reentrancy/live-thread teardown is not claimed.
+- The constructor/destructor lifecycle slice is recorded as
+  `runtime.host-context.constructor-destructor`. Nonzero `DT_INIT`, `DT_FINI`,
+  `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`,
+  `DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` follow the system-loader order:
+  constructors before `urp_entry` and destructors during `release_image`. The
+  dependency fixture observes both sides. Zero-valued lifecycle mutations are
+  still rejected before image creation; callback/reentrancy behavior,
+  live-thread teardown, and broader lifecycle ownership remain outside the
+  validated slice.
 - RPATH/RUNPATH are the separate rejected feature row
   `runtime.host-context.path-search`. HostContext v1 and the current
   system-loader adapter define no dynamic path-search roots, ordering, or
@@ -168,33 +223,26 @@ executable pathname.
   an executable-stack request returns `URP_STATUS_UNSUPPORTED` before an
   image handle is created. Protection semantics for the accepted
   non-executable case remain delegated to the native system loader.
-- `PT_TLS` is an explicit rejected feature row
-  (`runtime.host-context.pt-tls`). HostContext v1 does not define TLS module
-  allocation, per-thread initialization, TLS relocation models, thread
-  creation/reentrancy, or TLS teardown relative to `release_image`. The adapter
-  therefore returns `URP_STATUS_UNSUPPORTED` before `dlopen` for a structurally
-  bounded PT_TLS mutation; a paired mutation with `p_filesz > p_memsz` returns
-  `URP_STATUS_LOAD_FAILED`. Generic program-header range, file/memory-size,
-  alignment, and congruence checks still run before rejection. The adapter
-  clears the output handle before validation and leaves it zero on every
-  failure path. The self-test's
-  unchanged entry fixture is only the positive non-TLS HostContext baseline; no
-  positive TLS fixture or support claim exists.
-- `PT_GNU_PROPERTY` is a separate rejected feature row
-  (`runtime.host-context.gnu-property`). HostContext v1 and the current
-  system-loader adapter define no property negotiation or BTI/PAC/instruction-
-  state obligations, so acceptance of a property note by `dlopen` alone does
-  not establish support. The self-test keeps the unchanged entry image as the
-  positive baseline, changes only a bounded PT_LOAD-covered metadata program
-  header type to `PT_GNU_PROPERTY`, and requires `URP_STATUS_UNSUPPORTED` with
-  a zero image handle before loader handoff.
-  `runtime.host-context.dependency-resolution` is a separate rejected
-  boundary for `DT_NEEDED`, `DT_AUXILIARY`, and `DT_FILTER`: HostContext v1
-  and the current system-loader adapter define no dependency-resolution,
-  search-path, symbol-scope, or dependency-lifetime semantics, so a loader
-  that can resolve a library does not establish support. The bounded mutations
-  keep the unchanged non-dependency entry fixture as the positive baseline and
-  require a zero image handle before loader handoff.
+- `PT_TLS` has a bounded validated feature row
+  (`runtime.host-context.pt-tls`). The first slice accepts structurally bounded
+  AArch64 initial-exec TLS with `R_AARCH64_TLS_TPREL64`; the system loader owns
+  module allocation and initialization. The retained managed oracle uses a
+  TLS-backed entry and returns status 43 on the native glibc lane. Dynamic TLS
+  models, new-thread initialization, reentrancy, and unload with live TLS users
+  remain outside the claim; malformed TLS and unsupported models still fail
+  closed.
+- `PT_GNU_PROPERTY` has a bounded validated feature row
+  (`runtime.host-context.gnu-property`). The adapter accepts a GNU property
+  note containing only AArch64 FEATURE_1 BTI/PAC bits and rejects malformed
+  notes or unknown feature bits. A BTI-instrumented property fixture reaches
+  the managed v3 entry oracle and returns status 47 on the native glibc lane;
+  PAC negotiation beyond the note mask and host instruction-state conflicts
+  remain outside the claim.
+  `runtime.host-context.dependency-resolution` is a separate bounded validated
+  slice for one recognized system-libc `DT_NEEDED` basename with bounded string
+  metadata and fixed native loader roots. RPATH/RUNPATH, auxiliary/filter
+  dependencies, arbitrary graphs, and payload-controlled search paths remain
+  rejected.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid
@@ -205,11 +253,12 @@ executable pathname.
   it adds one existing `gcc-c` producer with a `release-hardened` variant and
   a readelf oracle for GNU RELRO and BIND_NOW rather than a blind Cartesian
   product.
-- The production managed pack path intentionally emits legacy frame v1 for
-  the legacy launcher. `runtime.host-context.production-pack` is an explicit
-  `unknown` migration boundary until the missing HostContext entry-image
-  adapter, v2-capable launcher, and managed pack/dispatch oracle are retained;
-  no v2 frame may be forced into the legacy path.
+- The current production managed pack path emits frame v3 with explicit
+  `outer-execveat` and `host-context-entry` profiles. Profile-matched launcher
+  markers are validated before frame encoding and stale v1/v2 behavior remains
+  migration evidence only. `runtime.host-context.production-pack` is validated
+  by the retained managed HostContext pack/dispatch oracle on the native
+  AArch64 glibc lane.
 - `runtime.wrapper-v1-baseline` keeps Wrapper 0.2 framing and launcher tests as
   migration evidence only; the Android `android.jni.native-bridge` row is an
   unwrapped JNI baseline. Neither row upgrades HostContext runtime support.
@@ -234,13 +283,12 @@ reports `packageIndex: live` with `packageInputsReproducible: true` to distingui
 artifact discovery from pinned package inputs. It must record both host and
 container kernel/page-size facts and refuse AVD, Waydroid, QEMU, native bridge,
 and non-ARM execution rather than silently falling back. The bionic lane now
-builds and runs the native HostContext self-test: a v2 frame exercises the real
-bionic adapter, verifies required memfd seals, dispatches the entry, releases
-the image, and retains its log and fixture ELF. This makes only
-`runtime.host-context.bionic-handoff` validated for that adapter slice. The
-production managed-pack row `runtime.host-context.production-pack` remains
-`unknown` until a managed pack/dispatch oracle runs through a v2-capable
-launcher; the bionic adapter test does not upgrade that separate row.
+builds and runs the native HostContext self-test: a current HostContext frame
+exercises the real bionic adapter, verifies required memfd seals, dispatches
+the entry, releases the image, and retains its log and fixture ELF. This makes
+only `runtime.host-context.bionic-handoff` validated for that adapter slice.
+The managed production-pack row has its separate native-glibc oracle; the
+bionic adapter test does not silently change that runtime-specific claim.
 
 ### 4. CI Evidence Postconditions
 

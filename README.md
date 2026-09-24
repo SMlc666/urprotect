@@ -66,16 +66,28 @@ The conditional compatibility claim and its proof boundary are documented in
 [`COMPATIBILITY.md`](COMPATIBILITY.md). The machine-readable obligations and
 evidence map live in `fixtures/manifest.json`.
 
-## First ELF Wrapper
+## Current AArch64 Packaging Profiles
 
-Pack only a Linux ARM64 dynamically linked `ET_DYN` PIE executable with a
-`PT_INTERP` interpreter:
+Pack a Linux ARM64 dynamically linked `ET_DYN` PIE executable with a
+`PT_INTERP` interpreter through the explicit outer profile:
 
 ```sh
 urprotect pack ./program \
   --output ./program.wrapped \
   --launcher ./urprotect-launcher \
+  --profile outer-execveat \
   --json ./program.pack.json
+```
+
+Pack a declared HostContext entry image through its matching launcher:
+
+```sh
+urprotect pack ./entry-image.so \
+  --output ./entry-image.host.wrapped \
+  --launcher ./host-context-launcher \
+  --profile host-context-entry \
+  --entry-symbol urp_entry \
+  --json ./entry-image.pack.json
 ```
 
 Build the small native launcher on a native AArch64 host with the pinned musl
@@ -86,18 +98,20 @@ toolchain used by CI:
 ./native/urprotect-launcher/build.sh test
 ```
 
-The launcher is a static AArch64 `ET_DYN` PIE with no interpreter or shared
-library dependencies. `pack` requires `--launcher`; it never silently turns
-the C# packer into the runtime wrapper. Production `pack` intentionally emits
-legacy frame v1 for this launcher; HostContext v2 is not forced into the
-legacy path. The production HostContext pack gap remains an explicit unknown
-migration boundary until the missing entry-image adapter, v2-capable launcher,
-and managed pack/dispatch oracle are available.
+The outer launcher is a static AArch64 `ET_DYN` PIE with no interpreter or
+shared-library dependencies. The HostContext launcher is a profile-matched
+AArch64 runtime executable that uses the sealed-memfd adapter. `pack` requires
+an explicit profile-matched `--launcher`; it never silently turns the C# packer
+into a runtime wrapper or falls back between profiles. Current production
+packaging emits frame v3. Legacy v1/v2 behavior remains historical migration
+evidence only and is rejected by current launchers.
 
-The current wrapper contract supports native ARM64 Linux glibc and is
-exercised by the PR covering fixture matrix. Shared objects, static `ET_EXEC`,
-Android/bionic packaging, payload encryption, and full custom in-process
-loading remain rejected or deferred. The frame stores a source basename for
+The outer profile supports native ARM64 Linux glibc and is exercised by the PR
+covering fixture matrix. The first HostContext production slice supports a
+declared AArch64 `ET_DYN` entry image exposing `urp_entry` through the native
+sealed-memfd adapter. Shared objects without the entry profile, static
+`ET_EXEC`, Android/bionic production packaging, payload encryption, and full
+custom in-process loading remain rejected or deferred. The frame stores a source basename for
 `argv[0]`;
 path separators are rejected and no payload directory is taken from the
 environment. Both the native launcher and the managed self-contained host use
@@ -118,6 +132,42 @@ bundle must be smoke-tested in an environment providing
 
 The release workflow also runs the musl bundle inside a pinned ARM64 musl
 container when the host does not provide compatible C++/zlib runtime libraries.
+
+## Regression profiles
+
+The repository keeps a machine-readable regression map in
+[`tests/regression-matrix.json`](tests/regression-matrix.json). Validate its
+coverage and evidence schema with:
+
+```sh
+python3 scripts/validate-regression-matrix.py tests/regression-matrix.json
+python3 tests/test_regression_matrix.py
+```
+
+The managed concurrency and large-input smoke profile is bounded and
+deterministic:
+
+```sh
+./scripts/run-regression-stress.sh --tier pr
+```
+
+Nightly increases workers, iterations, and the multi-megabyte input profile;
+both profiles retain a parameter manifest and test result artifact. The
+coverage-guided fuzzer uses a pinned SharpFuzz/libFuzzer bridge and has
+separate ELF and payload-frame targets:
+
+```sh
+./scripts/run-coverage-fuzz.sh --tier pr
+./scripts/run-coverage-fuzz.sh --tier nightly
+```
+
+PR fuzzing uses a fixed seed and run count. Nightly and release profiles use a
+bounded wall-clock budget, RSS limit, maximum input size, crash/timeout artifact
+prefix, and retained corpus. The existing deterministic parser mutation tests
+remain independent regression coverage. The fuzzer bridge uses a verified
+file-backed mmap portability patch because some native ARM64 CI kernels do not
+expose System V shared memory; this changes only the test transport, not the
+instrumented coverage signal.
 
 ## Fixture Matrix
 
@@ -166,13 +216,13 @@ the before/after package inventories, lock, hash-verification output, apt logs,
 image digest, Termux source revision, linker identity, and page-size facts.
 This makes the compiler inputs reproducible even though the index used to find
 the pinned artifacts is live. The lane also builds and runs the native
-HostContext self-test inside Termux: a HostContext v2 frame reaches the real
+HostContext self-test inside Termux: a current HostContext frame reaches the real
 adapter, which checks sealed memfd bytes, dispatches `urp_entry`, and releases
 the image without an executable temporary pathname. The result, build log,
 shared-object ELF report, package lock, and hash verification are retained.
-This validates the bionic implementation of the narrow adapter slice; it
-does not upgrade the separate production managed-pack integration row, which
-remains explicitly `unknown`. The lane refuses AVD, Waydroid, QEMU, and
+This validates the bionic implementation of the narrow adapter slice; the
+managed production-pack row has its separate native-glibc v3 oracle. The lane
+refuses AVD, Waydroid, QEMU, and
 non-ARM fallback and does not claim Android framework or physical-device
 behavior.
 

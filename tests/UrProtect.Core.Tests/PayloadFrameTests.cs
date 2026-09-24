@@ -22,14 +22,14 @@ public sealed class PayloadFrameTests
             out var frame,
             out var diagnostics);
 
-        Assert.True(encoded, string.Join(Environment.NewLine, diagnostics));
+        TestAssertions.Success(encoded, diagnostics, "v1 frame encoding");
         Assert.NotNull(frame);
         var decoded = PayloadFrameCodec.Decode(
             frame!.FrameBytes,
             frameOffset: 1234,
             new PayloadFrameLimits());
 
-        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        TestAssertions.FrameSuccess(decoded, "v1 frame decoding");
         Assert.Equal(source, decoded.SourceBytes);
         Assert.Equal("fixture", decoded.SourceName);
         Assert.Equal(Convert.ToHexString(SHA256.HashData(source)).ToLowerInvariant(), frame.SourceSha256Hex);
@@ -38,6 +38,60 @@ public sealed class PayloadFrameTests
         Assert.Equal(PayloadFrameCodec.FormatVersion, frame.FrameVersion);
         Assert.Equal(PayloadFrameCodec.FormatVersion, decoded.FrameVersion);
         Assert.Null(decoded.HostContextMetadata);
+    }
+
+    [Fact]
+    [Trait("Category", "PackFrame")]
+    public void RoundTripsCurrentOuterProfileWithFrameRelativeOffset()
+    {
+        var source = Enumerable.Range(0, 2048).Select(index => (byte)(index % 31)).ToArray();
+        Assert.True(PayloadFrameCodec.TryEncodeCurrent(
+            source,
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "outer-fixture",
+            PayloadDispatchProfile.OuterExecveat,
+            null,
+            out var frame,
+            out var diagnostics), string.Join(Environment.NewLine, diagnostics));
+        Assert.NotNull(frame);
+        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, frame!.FrameVersion);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, frame.Profile);
+        Assert.Equal(
+            (ulong)PayloadFrameCodec.CurrentHeaderSize + (ulong)"outer-fixture"u8.Length,
+            BinaryPrimitives.ReadUInt64LittleEndian(
+                frame.FrameBytes.AsSpan(PayloadFrameCodec.EncodedOffsetOffset, sizeof(ulong))));
+
+        var decoded = PayloadFrameCodec.Decode(frame.FrameBytes, 1234, new PayloadFrameLimits());
+        TestAssertions.FrameSuccess(decoded, "current outer frame decoding");
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, decoded.Profile);
+        Assert.Null(decoded.HostContextMetadata);
+        Assert.Equal(source, decoded.SourceBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void RoundTripsCurrentHostContextProfile()
+    {
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities,
+            "urp_entry");
+        Assert.True(PayloadFrameCodec.TryEncodeCurrent(
+            ElfFixture.MinimalPie(),
+            PayloadCompression.Deflate,
+            new PayloadFrameLimits(),
+            "entry-image",
+            PayloadDispatchProfile.HostContextEntry,
+            metadata,
+            out var frame,
+            out var diagnostics), string.Join(Environment.NewLine, diagnostics));
+        Assert.NotNull(frame);
+        Assert.Equal(PayloadDispatchProfile.HostContextEntry, frame!.Profile);
+        var decoded = PayloadFrameCodec.Decode(frame.FrameBytes, 0, new PayloadFrameLimits());
+        TestAssertions.FrameSuccess(decoded, "current HostContext frame decoding");
+        Assert.Equal(PayloadDispatchProfile.HostContextEntry, decoded.Profile);
+        Assert.Equal(metadata, decoded.HostContextMetadata);
     }
 
     [Fact]
@@ -61,19 +115,23 @@ public sealed class PayloadFrameTests
             out var diagnostics), string.Join(Environment.NewLine, diagnostics));
         Assert.NotNull(frame);
         Assert.Equal(PayloadFrameCodec.HostContextFormatVersion, frame!.FrameVersion);
-        Assert.Equal(PayloadFrameCodec.HostContextHeaderSize, BinaryPrimitives.ReadUInt16LittleEndian(frame.FrameBytes.AsSpan(10, 2)));
+        Assert.Equal(
+            PayloadFrameCodec.HostContextHeaderSize,
+            BinaryPrimitives.ReadUInt16LittleEndian(
+                frame.FrameBytes.AsSpan(PayloadFrameCodec.HeaderSizeOffset, sizeof(ushort))));
         Assert.Equal(
             (ulong)PayloadFrameCodec.HostContextHeaderSize
                 + (ulong)"fixture"u8.Length
                 + (ulong)"custom_entry"u8.Length,
-            BinaryPrimitives.ReadUInt64LittleEndian(frame.FrameBytes.AsSpan(40, 8)));
+            BinaryPrimitives.ReadUInt64LittleEndian(
+                frame.FrameBytes.AsSpan(PayloadFrameCodec.EncodedOffsetOffset, sizeof(ulong))));
 
         var decoded = PayloadFrameCodec.Decode(
             frame.FrameBytes,
             frameOffset: 1234,
             new PayloadFrameLimits());
 
-        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        TestAssertions.FrameSuccess(decoded, "HostContext frame decoding");
         Assert.Equal(source, decoded.SourceBytes);
         Assert.Equal(PayloadFrameCodec.HostContextFormatVersion, decoded.FrameVersion);
         Assert.Equal(metadata, decoded.HostContextMetadata);
@@ -87,7 +145,9 @@ public sealed class PayloadFrameTests
                 (ulong)frame.FrameBytes.Length))
             .ToArray();
         var wrapperResult = PayloadFrameCodec.ReadWrapper(wrapper, new PayloadFrameLimits());
-        Assert.True(wrapperResult.IsSuccess, string.Join(Environment.NewLine, wrapperResult.Diagnostics));
+        Assert.True(
+            wrapperResult.IsSuccess,
+            $"HostContext wrapper decoding: {string.Join(Environment.NewLine, wrapperResult.Diagnostics)}");
         Assert.Equal(source, wrapperResult.SourceBytes);
     }
 
@@ -219,7 +279,9 @@ public sealed class PayloadFrameTests
             out _));
 
         var unsupported = frame!.FrameBytes.ToArray();
-        BinaryPrimitives.WriteUInt16LittleEndian(unsupported.AsSpan(8, 2), 99);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            unsupported.AsSpan(PayloadFrameCodec.VersionOffset, sizeof(ushort)),
+            99);
         var decoded = PayloadFrameCodec.Decode(unsupported, 0, new PayloadFrameLimits());
 
         Assert.False(decoded.IsSuccess);
@@ -241,7 +303,9 @@ public sealed class PayloadFrameTests
             out _));
 
         var wrongArchitecture = frame!.FrameBytes.ToArray();
-        BinaryPrimitives.WriteUInt16LittleEndian(wrongArchitecture.AsSpan(16, 2), 62);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            wrongArchitecture.AsSpan(PayloadFrameCodec.ArchitectureOffset, sizeof(ushort)),
+            62);
         var decoded = PayloadFrameCodec.Decode(wrongArchitecture, 0, new PayloadFrameLimits());
 
         Assert.False(decoded.IsSuccess);

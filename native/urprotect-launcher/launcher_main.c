@@ -2,6 +2,7 @@
 
 #include "sha256.h"
 #include "miniz_tinfl.h"
+#include "urp/payload_frame.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -14,17 +15,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define URP_TRAILER_SIZE 24U
-#define URP_HEADER_SIZE 112U
-#define URP_SHA256_SIZE 32U
-#define URP_MAX_SOURCE_NAME 4096U
-#define URP_MAX_SOURCE_SIZE (256ULL * 1024ULL * 1024ULL)
-#define URP_MAX_ENCODED_SIZE (256ULL * 1024ULL * 1024ULL)
-#define URP_MAX_WRAPPER_SIZE (512ULL * 1024ULL * 1024ULL)
-#define URP_FORMAT_VERSION 1U
-#define URP_DEFLATE_FLAG 1U
-#define URP_MACHINE_AARCH64 183U
-#define URP_TYPE_DYN 3U
 #define URP_ELF_CLASS_64 2U
 #define URP_ELF_DATA_LSB 1U
 #define URP_ELF_VERSION_CURRENT 1U
@@ -35,7 +25,7 @@
 #define URP_EXIT_VALIDATION 4
 #define URP_EXIT_INTEGRITY 5
 #define URP_MAX_ARGUMENTS 4096U
-#define URP_LAUNCHER_ABI_MARKER "URPROTECT-AARCH64-LAUNCHER-V1"
+#define URP_LAUNCHER_ABI_MARKER "URPROTECT-AARCH64-LAUNCHER-V3"
 #define URP_MEMFD_CLOEXEC 1U
 
 static const uint8_t urp_header_magic[8] = {'U', 'R', 'P', 'C', 'K', '0', '1', 0};
@@ -77,9 +67,13 @@ static int urp_write_all(int fd, const void *buffer, size_t size)
 static int urp_launcher_abi_is_valid(void)
 {
     volatile const char *marker = urp_launcher_abi_marker;
-    return marker[0] == 'U'
-        && marker[sizeof(URP_LAUNCHER_ABI_MARKER) - 2U] == '1'
-        && marker[sizeof(URP_LAUNCHER_ABI_MARKER) - 1U] == '\0';
+    static const char expected[] = URP_LAUNCHER_ABI_MARKER;
+    for (size_t index = 0U; index < sizeof(URP_LAUNCHER_ABI_MARKER); ++index) {
+        if (marker[index] != expected[index]) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int urp_report(int status, const char *code, const char *message)
@@ -280,7 +274,7 @@ static int urp_read_self(uint8_t **bytes_out, size_t *size_out)
     }
     uint64_t file_size = (uint64_t)info.st_size;
     size_t size;
-    if (file_size > URP_MAX_WRAPPER_SIZE || !urp_u64_to_size(file_size, &size)) {
+    if (file_size > URP_FRAME_MAX_WRAPPER_SIZE || !urp_u64_to_size(file_size, &size)) {
         (void)close(fd);
         return 0;
     }
@@ -319,21 +313,21 @@ static int urp_parse_frame(
     size_t wrapper_size,
     urp_frame_view *frame)
 {
-    if (wrapper_size < URP_TRAILER_SIZE) {
+    if (wrapper_size < URP_FRAME_TRAILER_SIZE) {
         return 0;
     }
-    const uint8_t *trailer = wrapper + (wrapper_size - URP_TRAILER_SIZE);
+    const uint8_t *trailer = wrapper + (wrapper_size - URP_FRAME_TRAILER_SIZE);
     if (memcmp(trailer, urp_trailer_magic, sizeof(urp_trailer_magic)) != 0) {
         return 0;
     }
 
-    uint64_t frame_offset = urp_read_u64_le(trailer + 8U);
-    uint64_t frame_length = urp_read_u64_le(trailer + 16U);
+    uint64_t frame_offset = urp_read_u64_le(trailer + URP_FRAME_TRAILER_FRAME_OFFSET);
+    uint64_t frame_length = urp_read_u64_le(trailer + URP_FRAME_TRAILER_LENGTH_OFFSET);
     uint64_t frame_end;
     uint64_t wrapper_end;
-    if (frame_length < URP_HEADER_SIZE
+    if (frame_length < URP_FRAME_V3_HEADER_SIZE
         || !urp_checked_add_u64(frame_offset, frame_length, &frame_end)
-        || !urp_checked_add_u64(frame_end, URP_TRAILER_SIZE, &wrapper_end)
+        || !urp_checked_add_u64(frame_end, URP_FRAME_TRAILER_SIZE, &wrapper_end)
         || wrapper_end != (uint64_t)wrapper_size
         || frame_offset > (uint64_t)wrapper_size) {
         return 0;
@@ -347,22 +341,34 @@ static int urp_parse_frame(
     }
     const uint8_t *header = wrapper + frame_offset_size;
     if (memcmp(header, urp_header_magic, sizeof(urp_header_magic)) != 0
-        || urp_read_u16_le(header + 8U) != URP_FORMAT_VERSION
-        || urp_read_u16_le(header + 10U) != URP_HEADER_SIZE
-        || urp_read_u32_le(header + 12U) != URP_DEFLATE_FLAG
-        || urp_read_u16_le(header + 16U) != URP_MACHINE_AARCH64
-        || urp_read_u16_le(header + 18U) != URP_TYPE_DYN) {
+        || urp_read_u16_le(header + URP_FRAME_VERSION_OFFSET) != URP_FRAME_VERSION_V3
+        || urp_read_u16_le(header + URP_FRAME_HEADER_SIZE_OFFSET) != URP_FRAME_V3_HEADER_SIZE
+        || urp_read_u32_le(header + URP_FRAME_FLAGS_OFFSET) != URP_FRAME_DEFLATE_FLAG
+        || urp_read_u16_le(header + URP_FRAME_MACHINE_OFFSET) != URP_FRAME_MACHINE_AARCH64
+        || urp_read_u16_le(header + URP_FRAME_TYPE_OFFSET) != URP_FRAME_TYPE_DYN) {
         return 0;
     }
 
-    uint32_t source_name_size_u32 = urp_read_u32_le(header + 20U);
-    uint64_t source_size = urp_read_u64_le(header + 24U);
-    uint64_t encoded_size_u64 = urp_read_u64_le(header + 32U);
-    uint64_t encoded_offset = urp_read_u64_le(header + 40U);
-    if (source_name_size_u32 > URP_MAX_SOURCE_NAME
-        || source_size > URP_MAX_SOURCE_SIZE
-        || encoded_size_u64 > URP_MAX_ENCODED_SIZE
-        || (uint64_t)source_name_size_u32 > frame_length - URP_HEADER_SIZE) {
+    if (urp_read_u32_le(header + URP_FRAME_V3_PROFILE_OFFSET) != URP_PROFILE_OUTER_EXECVEAT
+        || urp_read_u32_le(header + URP_FRAME_V3_RESERVED_OFFSET) != 0U) {
+        return 0;
+    }
+    for (size_t index = URP_FRAME_V2_HOST_ABI_OFFSET;
+         index < URP_FRAME_V3_PROFILE_OFFSET;
+         ++index) {
+        if (header[index] != 0U) {
+            return 0;
+        }
+    }
+
+    uint32_t source_name_size_u32 = urp_read_u32_le(header + URP_FRAME_SOURCE_NAME_SIZE_OFFSET);
+    uint64_t source_size = urp_read_u64_le(header + URP_FRAME_SOURCE_SIZE_OFFSET);
+    uint64_t encoded_size_u64 = urp_read_u64_le(header + URP_FRAME_ENCODED_SIZE_OFFSET);
+    uint64_t encoded_offset = urp_read_u64_le(header + URP_FRAME_ENCODED_OFFSET_OFFSET);
+    if (source_name_size_u32 > URP_FRAME_MAX_SOURCE_NAME
+        || source_size > URP_FRAME_MAX_SOURCE_SIZE
+        || encoded_size_u64 > URP_FRAME_MAX_ENCODED_SIZE
+        || (uint64_t)source_name_size_u32 > frame_length - URP_FRAME_V3_HEADER_SIZE) {
         return 0;
     }
 
@@ -370,35 +376,37 @@ static int urp_parse_frame(
     size_t encoded_size;
     if (!urp_u64_to_size((uint64_t)source_name_size_u32, &source_name_size)
         || !urp_u64_to_size(encoded_size_u64, &encoded_size)
-        || !urp_validate_source_name(header + URP_HEADER_SIZE, source_name_size)) {
+        || !urp_validate_source_name(header + URP_FRAME_V3_HEADER_SIZE, source_name_size)) {
         return 0;
     }
 
-    uint64_t expected_encoded_offset;
     uint64_t name_offset;
-    if (!urp_checked_add_u64(frame_offset, URP_HEADER_SIZE, &name_offset)
-        || !urp_checked_add_u64(name_offset, (uint64_t)source_name_size, &expected_encoded_offset)
-        || encoded_offset != expected_encoded_offset
-        || !urp_checked_add_u64(encoded_offset, encoded_size_u64, &frame_end)
-        || frame_end != (uint64_t)frame_offset + (uint64_t)frame_length
-        || frame_length_size != URP_HEADER_SIZE + source_name_size + encoded_size) {
+    uint64_t frame_relative_end;
+    if (!urp_checked_add_u64(URP_FRAME_V3_HEADER_SIZE, (uint64_t)source_name_size, &name_offset)
+        || encoded_offset != name_offset
+        || !urp_checked_add_u64(encoded_offset, encoded_size_u64, &frame_relative_end)
+        || frame_relative_end != frame_length
+        || frame_length_size != URP_FRAME_V3_HEADER_SIZE + source_name_size + encoded_size) {
         return 0;
     }
 
     size_t encoded_offset_size;
+    size_t frame_payload_offset;
     if (!urp_u64_to_size(encoded_offset, &encoded_offset_size)
+        || !urp_checked_add_u64(frame_offset, encoded_offset, &frame_payload_offset)
+        || !urp_u64_to_size(frame_payload_offset, &encoded_offset_size)
         || encoded_offset_size > wrapper_size
         || encoded_size > wrapper_size - encoded_offset_size) {
         return 0;
     }
 
-    frame->source_name = header + URP_HEADER_SIZE;
+    frame->source_name = header + URP_FRAME_V3_HEADER_SIZE;
     frame->source_name_size = source_name_size;
     frame->encoded = wrapper + encoded_offset_size;
     frame->encoded_size = encoded_size;
     frame->source_size = source_size;
-    frame->source_sha256 = header + 48U;
-    frame->encoded_sha256 = header + 80U;
+    frame->source_sha256 = header + URP_FRAME_SOURCE_SHA256_OFFSET;
+    frame->encoded_sha256 = header + URP_FRAME_ENCODED_SHA256_OFFSET;
     return 1;
 }
 
@@ -413,12 +421,12 @@ static int urp_decode_frame(
         return 0;
     }
 
-    uint8_t encoded_digest[URP_SHA256_SIZE];
+    uint8_t encoded_digest[URP_FRAME_SHA256_SIZE];
     urp_sha256_context encoded_context;
     urp_sha256_init(&encoded_context);
     urp_sha256_update(&encoded_context, frame->encoded, frame->encoded_size);
     urp_sha256_final(&encoded_context, encoded_digest);
-    if (!urp_constant_time_equal(encoded_digest, frame->encoded_sha256, URP_SHA256_SIZE)) {
+    if (!urp_constant_time_equal(encoded_digest, frame->encoded_sha256, URP_FRAME_SHA256_SIZE)) {
         return -1;
     }
 
@@ -446,12 +454,12 @@ static int urp_decode_frame(
         return 0;
     }
 
-    uint8_t source_digest[URP_SHA256_SIZE];
+    uint8_t source_digest[URP_FRAME_SHA256_SIZE];
     urp_sha256_context source_context;
     urp_sha256_init(&source_context);
     urp_sha256_update(&source_context, source, source_size);
     urp_sha256_final(&source_context, source_digest);
-    if (!urp_constant_time_equal(source_digest, frame->source_sha256, URP_SHA256_SIZE)) {
+    if (!urp_constant_time_equal(source_digest, frame->source_sha256, URP_FRAME_SHA256_SIZE)) {
         free(source);
         return -1;
     }
@@ -491,8 +499,8 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
         || source[4] != 2U
         || source[5] != 1U
         || source[6] != URP_ELF_VERSION_CURRENT
-        || urp_read_u16_le(source + 16U) != URP_TYPE_DYN
-        || urp_read_u16_le(source + 18U) != URP_MACHINE_AARCH64
+        || urp_read_u16_le(source + 16U) != URP_FRAME_TYPE_DYN
+        || urp_read_u16_le(source + 18U) != URP_FRAME_MACHINE_AARCH64
         || urp_read_u32_le(source + 20U) != URP_ELF_VERSION_CURRENT
         || urp_read_u16_le(source + 52U) != 64U
         || urp_read_u16_le(source + 54U) != 56U) {
@@ -514,6 +522,7 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
     int has_load = 0;
     int has_executable_entry = 0;
     int has_interpreter = 0;
+    int has_dynamic = 0;
     for (uint16_t index = 0; index < program_header_count; ++index) {
         uint64_t current_offset;
         if (!urp_checked_add_u64(program_header_offset, (uint64_t)index * 56U, &current_offset)) {
@@ -561,9 +570,11 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
                 return 0;
             }
             has_interpreter = 1;
+        } else if (type == 2U) {
+            has_dynamic = 1;
         }
     }
-    return has_load && has_executable_entry && has_interpreter;
+    return has_load && has_executable_entry && (!has_dynamic || has_interpreter);
 }
 
 static int urp_write_payload_and_exec(
@@ -578,7 +589,7 @@ static int urp_write_payload_and_exec(
         return urp_report(URP_EXIT_VALIDATION, "InvalidArgument", "the command line is outside the supported bounds");
     }
 
-    char source_name[URP_MAX_SOURCE_NAME + 1U];
+    char source_name[URP_FRAME_MAX_SOURCE_NAME + 1U];
     memcpy(source_name, frame->source_name, frame->source_name_size);
     source_name[frame->source_name_size] = '\0';
 
@@ -649,7 +660,7 @@ int main(int argc, char **argv, char **envp)
     urp_frame_view frame;
     if (!urp_parse_frame(wrapper, wrapper_size, &frame)) {
         free(wrapper);
-        return urp_report(URP_EXIT_VALIDATION, "WrapperMalformed", "the v1 payload frame or trailer is malformed");
+        return urp_report(URP_EXIT_VALIDATION, "WrapperMalformed", "the current payload frame or trailer is malformed");
     }
 
     uint8_t *source = NULL;

@@ -9,7 +9,9 @@ namespace UrProtect.Core.Pack;
 public sealed record ElfPackOptions(
     PayloadCompression Compression = PayloadCompression.Deflate,
     PayloadFrameLimits? Limits = null,
-    bool AnalyzeInstructions = false)
+    bool AnalyzeInstructions = false,
+    PayloadDispatchProfile Profile = PayloadDispatchProfile.OuterExecveat,
+    string EntrySymbol = HostContextContract.EntrySymbol)
 {
     public PayloadFrameLimits EffectiveLimits => Limits ?? new PayloadFrameLimits();
 }
@@ -23,8 +25,9 @@ public sealed record ElfPackResult(
     string? WrapperSha256,
     IReadOnlyList<Diagnostic> Diagnostics,
     string? LauncherSha256 = null,
-    ushort FrameVersion = PayloadFrameCodec.FormatVersion,
-    ushort LauncherAbiVersion = LauncherContract.AbiVersion)
+    ushort FrameVersion = PayloadFrameCodec.CurrentFormatVersion,
+    ushort LauncherAbiVersion = LauncherContract.AbiVersion,
+    PayloadDispatchProfile Profile = PayloadDispatchProfile.OuterExecveat)
 {
     public bool IsSuccess => OutputPath is not null && Diagnostics.All(diagnostic => !diagnostic.IsError);
 }
@@ -102,16 +105,21 @@ public sealed class ElfPackService
             return Failure(diagnostics, sourceBytes.Length);
         }
 
-        if (!IsPackableExecutable(sourceValidation.File, sourceBytes, diagnostics))
+        if (!IsPackableInput(
+                sourceValidation.File,
+                sourceBytes,
+                options.Profile,
+                options.EntrySymbol,
+                diagnostics))
         {
             return Failure(diagnostics, sourceBytes.Length);
         }
 
-        if (!LauncherContract.HasMarker(launcherBytes))
+        if (!LauncherContract.HasMarker(launcherBytes, options.Profile))
         {
             diagnostics.Error(
                 DiagnosticCode.LauncherUnavailable,
-                $"The launcher does not contain the Wrapper 0.2 ABI marker '{LauncherContract.Marker}'.");
+                $"The launcher does not contain the {options.Profile.ToCliValue()} ABI marker.");
             return Failure(diagnostics, sourceBytes.Length);
         }
 
@@ -123,24 +131,33 @@ public sealed class ElfPackService
             return Failure(diagnostics, sourceBytes.Length);
         }
 
-        if (launcherValidation.File.Kind != ElfFileKind.StaticPieExecutable)
+        if (options.Profile == PayloadDispatchProfile.OuterExecveat
+            && launcherValidation.File.Kind != ElfFileKind.StaticPieExecutable)
         {
             diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher is not a static ET_DYN PIE executable.");
             return Failure(diagnostics, sourceBytes.Length);
         }
 
-        if (launcherValidation.File.DynamicEntries.Any(entry => entry.Tag == ElfConstants.DtNeeded))
+        if (options.Profile == PayloadDispatchProfile.OuterExecveat
+            && launcherValidation.File.DynamicEntries.Any(entry => entry.Tag == ElfConstants.DtNeeded))
         {
             diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher has an unexpected shared-library dependency.");
             return Failure(diagnostics, sourceBytes.Length);
         }
 
-        if (!PayloadFrameCodec.TryEncode(
+        HostContextFrameMetadata? hostContextMetadata = options.Profile == PayloadDispatchProfile.HostContextEntry
+            ? new HostContextFrameMetadata(
+                HostContextContract.AbiVersion,
+                HostContextContract.MandatoryCapabilities,
+                options.EntrySymbol)
+            : null;
+        if (!PayloadFrameCodec.TryEncodeCurrent(
                 sourceBytes,
-                (ulong)launcherBytes.Length,
                 options.Compression,
                 options.EffectiveLimits,
                 Path.GetFileName(inputFullPath),
+                options.Profile,
+                hostContextMetadata,
                 out var encoding,
                 out var frameDiagnostics)
             || encoding is null)
@@ -166,7 +183,10 @@ public sealed class ElfPackService
         Buffer.BlockCopy(trailer, 0, wrapper, launcherBytes.Length + encoding.FrameBytes.Length, trailer.Length);
 
         var wrapperValidation = pipeline.Validate(wrapper, analyzeInstructions: false);
-        if (!wrapperValidation.IsSuccess || wrapperValidation.File?.Kind != ElfFileKind.StaticPieExecutable)
+        var expectedWrapperKind = options.Profile == PayloadDispatchProfile.OuterExecveat
+            ? ElfFileKind.StaticPieExecutable
+            : ElfFileKind.PieExecutable;
+        if (!wrapperValidation.IsSuccess || wrapperValidation.File?.Kind != expectedWrapperKind)
         {
             diagnostics.Error(DiagnosticCode.WrapperMalformed, "The generated wrapper is not a valid AArch64 PIE executable.");
             diagnostics.AddRange(wrapperValidation.Diagnostics);
@@ -253,11 +273,53 @@ public sealed class ElfPackService
             encodedHash,
             wrapperHash,
             diagnostics.ToArray(),
-            launcherHash);
+            launcherHash,
+            encoding.FrameVersion,
+            LauncherContract.AbiVersion,
+            options.Profile);
     }
 
-    private static bool IsPackableExecutable(ElfFile file, byte[] source, DiagnosticBag diagnostics)
+    private static bool IsPackableInput(
+        ElfFile file,
+        byte[] source,
+        PayloadDispatchProfile profile,
+        string entrySymbol,
+        DiagnosticBag diagnostics)
     {
+        if (profile == PayloadDispatchProfile.HostContextEntry)
+        {
+            if (file.Kind != ElfFileKind.SharedObject)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnsupportedPackInput,
+                    "The host-context-entry profile requires an AArch64 ET_DYN entry image without a process interpreter.");
+                return false;
+            }
+
+            if (!HostContextContract.TryValidateEntryName(entrySymbol, out var entryError))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnsupportedPackInput,
+                    entryError ?? "The HostContext entry symbol is invalid.");
+                return false;
+            }
+
+            return true;
+        }
+
+        if (file.Kind == ElfFileKind.StaticPieExecutable)
+        {
+            if (file.DynamicEntries.Any(entry => entry.Tag == ElfConstants.DtNeeded))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnsupportedPackInput,
+                    "A static PIE with DT_NEEDED dependencies is outside the outer-execveat contract.");
+                return false;
+            }
+
+            return true;
+        }
+
         if (file.Kind != ElfFileKind.PieExecutable)
         {
             diagnostics.Error(

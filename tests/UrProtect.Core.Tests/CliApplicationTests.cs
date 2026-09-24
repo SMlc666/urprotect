@@ -219,8 +219,9 @@ public sealed class CliApplicationTests
         Assert.True(document.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal("deflate", document.RootElement.GetProperty("payload").GetProperty("compression").GetString());
         Assert.True(document.RootElement.GetProperty("output").GetProperty("published").GetBoolean());
-        Assert.Equal(1, document.RootElement.GetProperty("payload").GetProperty("launcherAbiVersion").GetInt32());
-        Assert.Equal(1, document.RootElement.GetProperty("payload").GetProperty("frameVersion").GetInt32());
+        Assert.Equal(LauncherContract.AbiVersion, document.RootElement.GetProperty("payload").GetProperty("launcherAbiVersion").GetInt32());
+        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, document.RootElement.GetProperty("payload").GetProperty("frameVersion").GetInt32());
+        Assert.Equal("outer-execveat", document.RootElement.GetProperty("payload").GetProperty("profile").GetString());
         Assert.Equal(LauncherContract.Marker, document.RootElement.GetProperty("payload").GetProperty("launcherMarker").GetString());
         Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("payload").GetProperty("launcherSha256").GetString()));
     }

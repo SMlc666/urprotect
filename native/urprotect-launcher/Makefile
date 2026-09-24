@@ -24,7 +24,7 @@ MUSL_LINK_SPECS :=
 endif
 MUSL_LINK_CC_BIN := $(firstword $(MUSL_LINK_CC))
 
-CPPFLAGS := -I. -I../../third_party/miniz
+CPPFLAGS := -I. -I../urprotect-runtime/include -I../../third_party/miniz
 CFLAGS := -std=c11 -O2 -g0 -fPIE -ffunction-sections -fdata-sections \
           -fno-ident -fno-asynchronous-unwind-tables -fno-stack-protector \
           -Wall -Wextra -Werror -Wshadow -Wconversion -Wstrict-prototypes
@@ -86,11 +86,11 @@ $(SELF_TEST): $(SELF_TEST_OBJECTS) $(MUSL_STATIC_PIE_SPECS)
 	$(MUSL_LINK_CC) $(CFLAGS) $(MUSL_LINK_SPECS) $(LDFLAGS) $(SELF_TEST_OBJECTS) -o "$@"
 	chmod 0755 "$@"
 
-$(BUILD_DIR)/launcher_main.o: launcher_main.c sha256.h ../../third_party/miniz/miniz_tinfl.h
+$(BUILD_DIR)/launcher_main.o: launcher_main.c sha256.h ../urprotect-runtime/include/urp/payload_frame.h ../../third_party/miniz/miniz_tinfl.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
-$(BUILD_DIR)/self_test.o: self_test.c sha256.h ../../third_party/miniz/miniz_tinfl.h
+$(BUILD_DIR)/self_test.o: self_test.c sha256.h ../urprotect-runtime/include/urp/payload_frame.h ../../third_party/miniz/miniz_tinfl.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
@@ -107,7 +107,7 @@ $(BUILD_DIR)/miniz_tinfl.o: ../../third_party/miniz/miniz_tinfl.c \
 
 check-elf: $(LAUNCHER)
 	@file "$<"
-	@grep -a -q 'URPROTECT-AARCH64-LAUNCHER-V1' "$<"
+	@grep -a -q 'URPROTECT-AARCH64-LAUNCHER-V3' "$<"
 	@"$(READELF)" -hW "$<" | grep -q 'Class:.*ELF64'
 	@"$(READELF)" -hW "$<" | grep -q 'Data:.*little endian'
 	@"$(READELF)" -hW "$<" | grep -q 'Machine:.*AArch64'

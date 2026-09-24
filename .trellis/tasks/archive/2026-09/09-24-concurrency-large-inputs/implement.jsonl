@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Preserve bounded binary reads, byte identity, stable diagnostics, and focused malformed/limit coverage."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse existing fixture builders, limits, pipeline helpers, and test harnesses instead of creating parallel infrastructure."}

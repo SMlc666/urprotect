@@ -59,6 +59,10 @@ data = bytearray(pathlib.Path(input_path).read_bytes())
 if len(data) < 24:
     raise SystemExit("wrapper is too short")
 frame_offset = int.from_bytes(data[-16:-8], "little")
+header_size = int.from_bytes(data[frame_offset + 10:frame_offset + 12], "little")
+frame_version = int.from_bytes(data[frame_offset + 8:frame_offset + 10], "little")
+encoded_value = int.from_bytes(data[frame_offset + 40:frame_offset + 48], "little")
+encoded_absolute = frame_offset + encoded_value if frame_version >= 2 else encoded_value
 if mutation == "version":
     data[frame_offset + 8:frame_offset + 10] = (2).to_bytes(2, "little")
 elif mutation == "flags":
@@ -66,13 +70,13 @@ elif mutation == "flags":
 elif mutation == "architecture":
     data[frame_offset + 16:frame_offset + 18] = (62).to_bytes(2, "little")
 elif mutation == "basename":
-    encoded_offset = int.from_bytes(data[frame_offset + 40:frame_offset + 48], "little")
+    encoded_offset = encoded_absolute
     encoded_size = int.from_bytes(data[frame_offset + 32:frame_offset + 40], "little")
     encoded = bytes(data[encoded_offset:encoded_offset + encoded_size])
-    header = bytearray(data[frame_offset:frame_offset + 112])
+    header = bytearray(data[frame_offset:frame_offset + header_size])
     name = b".."
     header[20:24] = len(name).to_bytes(4, "little")
-    header[40:48] = (frame_offset + 112 + len(name)).to_bytes(8, "little")
+    header[40:48] = (header_size + len(name)).to_bytes(8, "little")
     frame = bytes(header) + name + encoded
     trailer = bytearray(data[-24:])
     trailer[16:24] = len(frame).to_bytes(8, "little")
@@ -80,7 +84,7 @@ elif mutation == "basename":
 elif mutation == "source-digest":
     data[frame_offset + 48] ^= 1
 elif mutation == "invalid-deflate":
-    encoded_offset = int.from_bytes(data[frame_offset + 40:frame_offset + 48], "little")
+    encoded_offset = encoded_absolute
     encoded_size = int.from_bytes(data[frame_offset + 32:frame_offset + 40], "little")
     data[encoded_offset:encoded_offset + encoded_size] = b"\x00" * encoded_size
     digest = hashlib.sha256(data[encoded_offset:encoded_offset + encoded_size]).digest()
@@ -89,7 +93,7 @@ elif mutation in ("invalid-interpreter", "missing-interpreter"):
     import zlib
 
     name_size = int.from_bytes(data[frame_offset + 20:frame_offset + 24], "little")
-    encoded_offset = int.from_bytes(data[frame_offset + 40:frame_offset + 48], "little")
+    encoded_offset = encoded_absolute
     encoded_size = int.from_bytes(data[frame_offset + 32:frame_offset + 40], "little")
     encoded = bytes(data[encoded_offset:encoded_offset + encoded_size])
     source = bytearray(zlib.decompress(encoded, wbits=-15))
@@ -114,11 +118,11 @@ elif mutation in ("invalid-interpreter", "missing-interpreter"):
         replacement + b"\x00" * (interpreter_size - len(replacement)))
     compressor = zlib.compressobj(level=9, wbits=-15)
     encoded = compressor.compress(bytes(source)) + compressor.flush()
-    header = bytearray(data[frame_offset:frame_offset + 112])
+    header = bytearray(data[frame_offset:frame_offset + header_size])
     header[32:40] = len(encoded).to_bytes(8, "little")
     header[48:80] = hashlib.sha256(source).digest()
     header[80:112] = hashlib.sha256(encoded).digest()
-    name = bytes(data[frame_offset + 112:frame_offset + 112 + name_size])
+    name = bytes(data[frame_offset + header_size:frame_offset + header_size + name_size])
     frame = bytes(header) + name + encoded
     trailer = bytearray(data[-24:])
     trailer[16:24] = len(frame).to_bytes(8, "little")
@@ -136,7 +140,7 @@ elif mutation == "source-name-size":
     data[frame_offset + 20:frame_offset + 24] = (4096).to_bytes(4, "little")
 elif mutation == "trailing-deflate":
     trailer_offset = len(data) - 24
-    encoded_offset = int.from_bytes(data[frame_offset + 40:frame_offset + 48], "little")
+    encoded_offset = encoded_absolute
     encoded_size = int.from_bytes(data[frame_offset + 32:frame_offset + 40], "little")
     data[trailer_offset:trailer_offset] = b"\x00"
     encoded_size += 1
