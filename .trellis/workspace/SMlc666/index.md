@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
-- **Last Active**: 2026-09-24
+- **Total Sessions**: 4
+- **Last Active**: 2026-09-25
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~92 | Active |
+| `journal-1.md` | ~114 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-09-25 | Complete public real-sample CI corpus | `c5285924bf02d518162b935394387e160b37e940` | `chore/session-journal-public-real-sample` |
 | 3 | 2026-09-24 | Complete AArch64 ELF compatibility roadmap and PR | `95c4c64`, `d559a58`, `2d46e53`, `a1c3942`, `1007567` | `main` |
 | 2 | 2026-09-24 | Complete test infrastructure and regression coverage | `6ff7c43` | `main` |
 | 1 | 2026-09-24 | Finalize unified HostContext compatibility and CI evidence | `57a0d1f`, `27c226e` | `feat/host-context-gnu-stack-boundary` |
