@@ -63,4 +63,32 @@ sha256sum "${output}" "${script_dir}/build/host-context-entry-fixture.so" \
   >"${artifact_root}/sha256.txt"
 printf 'profile=host-context-entry\nframe_version=3\nentry_status=%s\n' "${status}" \
   >"${artifact_root}/result.txt"
+
+make -C "${script_dir}" symbol-fixture >>"${artifact_root}/build.log" 2>&1
+make -C "${script_dir}" symbol-self-test >>"${artifact_root}/build.log" 2>&1
+"${script_dir}/build/host-context-symbol-self-test" \
+  "${script_dir}/build/host-context-symbol-fixture.so" \
+  >"${artifact_root}/symbol-self-test.log" 2>&1
+symbol_output="${artifact_root}/host-context-symbol-packed"
+symbol_report="${artifact_root}/host-context-symbol-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${script_dir}/build/host-context-symbol-fixture.so" \
+  --output "${symbol_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry \
+  --json "${symbol_report}" \
+  >"${artifact_root}/symbol-pack.log" 2>&1
+set +e
+"${symbol_output}" >"${artifact_root}/symbol.stdout" 2>"${artifact_root}/symbol.stderr"
+symbol_status=$?
+set -e
+if [[ "${symbol_status}" -ne 29 ]]; then
+  echo "GLOB_DAT symbol fixture returned ${symbol_status}, expected 29" >&2
+  exit 1
+fi
+printf 'symbol_profile=host-context-entry\nsymbol_relocation=GLOB_DAT\nsymbol_status=%s\n' "${symbol_status}" \
+  >"${artifact_root}/symbol-result.txt"
+sha256sum "${symbol_output}" "${script_dir}/build/host-context-symbol-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
 echo "managed HostContext handoff: PASS"

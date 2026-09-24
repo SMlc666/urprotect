@@ -307,6 +307,19 @@ public sealed class ElfPackService
             return true;
         }
 
+        if (file.Kind == ElfFileKind.StaticPieExecutable)
+        {
+            if (file.DynamicEntries.Any(entry => entry.Tag == ElfConstants.DtNeeded))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnsupportedPackInput,
+                    "A static PIE with DT_NEEDED dependencies is outside the outer-execveat contract.");
+                return false;
+            }
+
+            return true;
+        }
+
         if (file.Kind != ElfFileKind.PieExecutable)
         {
             diagnostics.Error(

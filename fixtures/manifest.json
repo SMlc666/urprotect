@@ -71,6 +71,27 @@
       ]
     },
     {
+      "id": "elf.relocation.aarch64-symbolic",
+      "status": "validated",
+      "obligation": "The HostContext adapter accepts the bounded AArch64 GLOB_DAT symbolic relocation form with a checked dynamic symbol table entry and writable relocation target",
+      "witness": "native/urprotect-runtime/host_context_symbol_fixture.c",
+      "oracle": "native/urprotect-runtime/host_adapter.c",
+      "evidence": [
+        "native/urprotect-runtime/host_context_symbol_fixture.c",
+        "native/urprotect-runtime/host_context_symbol_self_test.c",
+        "native/urprotect-runtime/host_context_launcher.c",
+        "native/urprotect-runtime/host_adapter.c",
+        "native/urprotect-runtime/test_managed_host_context.sh",
+        ".artifacts/host-context/managed/symbol-self-test.log",
+        ".artifacts/host-context/managed/symbol-result.txt"
+      ],
+      "constraints": [
+        "The first symbolic slice accepts R_AARCH64_GLOB_DAT with a nonzero symbol index, DT_SYMTAB/DT_SYMENT metadata, a file-backed symbol entry, and an aligned writable relocation target.",
+        "The system loader remains responsible for resolving and applying the relocation; the retained oracle proves the real profile-matched entry dispatch returns status 29.",
+        "Other symbol-binding, versioned, PLT, and dependency semantics remain explicit boundaries until separately defined."
+      ]
+    },
+    {
       "id": "elf.sectionless-program-headers",
       "status": "proven",
       "obligation": "A valid ET_DYN remains parseable when section headers are absent; program headers remain authoritative",

@@ -71,9 +71,12 @@ before loader handoff. The test-visible adapter invariant checks those seals
 on the live image handle, then verifies entry dispatch and release ordering
 without an executable temporary pathname. This upgrades only the narrow
 adapter slice to `validated`; it accepts checked AArch64 `RELATIVE`/`RELR`
-targets while the system loader applies them. Dependencies, TLS, constructors,
-GNU properties, and the rejected unsupported-relocation-table feature remains
-outside that claim.
+targets while the system loader applies them. The bounded
+`elf.relocation.aarch64-symbolic` slice additionally accepts a checked
+`R_AARCH64_GLOB_DAT` entry with a file-backed dynamic symbol table record and
+writable target; its managed v3 profile oracle returns status 29. Dependencies,
+TLS, constructors, GNU properties, and the rejected unsupported-relocation-table
+feature remain outside that claim.
 
 The first expanded ELF slice is sectionless `ET_DYN`: section headers are
 optional metadata, so the parser and validator use bounded program headers and

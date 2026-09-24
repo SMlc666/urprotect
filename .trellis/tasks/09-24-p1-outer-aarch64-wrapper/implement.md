@@ -1,10 +1,11 @@
 # P1 Implementation Plan
 
-- [ ] Inventory current pack rejection reasons and producer fixture layouts.
-- [ ] Add stripped/sectionless positive and malformed fixtures.
-- [ ] Add baseline/wrapped argv, envp, stream, status, signal, cwd, and file
+- [x] Inventory current pack rejection reasons and producer fixture layouts.
+- [x] Add stripped/sectionless positive and malformed fixtures.
+- [x] Add baseline/wrapped argv, envp, stream, status, signal, cwd, and file
       observation comparisons.
-- [ ] Add one new executable class at a time with a declared launch contract.
+- [x] Add the static PIE executable class with a declared outer launch
+      contract; shared objects remain explicit entry-profile inputs.
 - [ ] Update parser/validator, fixture manifest, matrix renderer, README, and
       retained evidence paths together.
 - [ ] Run the full managed, fixture, packed-fixture, and evidence gates.

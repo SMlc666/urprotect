@@ -7,10 +7,12 @@ profile and after P1 has supplied the common fixture/evidence shape.
 
 ## First slice
 
-Use real AArch64 producer fixtures to select the first family. The default
-candidate order is `GLOB_DAT`, `JUMP_SLOT`, and `ABS64`, but the child must
-select only a family whose target permissions and symbol lookup behavior can be
-specified and observed on the supported loader environments.
+Use a real AArch64 weak-symbol fixture for the first family:
+`R_AARCH64_GLOB_DAT`. The adapter requires a nonzero symbol index,
+`DT_SYMTAB`/`DT_SYMENT == 24`, a file-backed symbol record, and an aligned
+writable relocation target before delegating application to the system loader.
+The managed v3 profile oracle observes the entry status produced by the weak
+symbol resolution.
 
 The contract records symbol scope, visibility, weak-symbol behavior, conflict
 resolution, binding timing, version policy, relocation target mapping, and

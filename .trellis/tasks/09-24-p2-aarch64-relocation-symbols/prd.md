@@ -15,7 +15,9 @@ Extend the `host-context-entry` profile beyond the current checked
 ## Requirements
 
 - Select the first relocation family from real AArch64 fixtures and document
-  the selection rationale before implementation.
+  the selection rationale before implementation. The initial slice is
+  `R_AARCH64_GLOB_DAT` with checked `DT_SYMTAB`/`DT_SYMENT` metadata and a
+  writable target.
 - Define symbol lookup scope, visibility, binding timing, weak-symbol behavior,
   conflict handling, version handling, relocation target permissions, and
   stable failures.

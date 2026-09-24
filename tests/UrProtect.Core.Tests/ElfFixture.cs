@@ -87,6 +87,13 @@ internal static class ElfFixture
         return bytes.Concat(Encoding.ASCII.GetBytes(LauncherContract.Marker)).ToArray();
     }
 
+    public static byte[] StaticPiePayload()
+    {
+        var bytes = MinimalPie();
+        bytes.AsSpan(InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        return bytes;
+    }
+
     private static void WriteProgramHeader(
         Span<byte> destination,
         int offset,

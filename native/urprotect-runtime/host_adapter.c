@@ -40,6 +40,9 @@
 #define URP_DT_RELAENT 9U
 #define URP_DT_STRSZ 10U
 #define URP_DT_SYMENT 11U
+#define URP_R_AARCH64_ABS64 257U
+#define URP_R_AARCH64_GLOB_DAT 1025U
+#define URP_R_AARCH64_JUMP_SLOT 1026U
 #define URP_DT_INIT 12U
 #define URP_DT_FINI 13U
 #define URP_DT_SONAME 14U
@@ -113,6 +116,8 @@ typedef struct urp_fd_image {
 } urp_fd_image;
 
 typedef struct urp_dynamic_values {
+    uint64_t symtab;
+    uint64_t syment;
     uint64_t rela;
     uint64_t relasz;
     uint64_t relaent;
@@ -120,6 +125,8 @@ typedef struct urp_dynamic_values {
     uint64_t relrsz;
     uint64_t relrent;
     int has_rela;
+    int has_symtab;
+    int has_syment;
     int has_relasz;
     int has_relaent;
     int has_relr;
@@ -353,8 +360,34 @@ static urp_status urp_validate_rela(
         uint64_t info = urp_read_u64_le(entry + 8U);
         uint32_t type = (uint32_t)info;
         uint64_t symbol = info >> 32U;
-        if ((type != 0U && type != URP_R_AARCH64_RELATIVE)
-            || symbol != 0U
+        int symbolic = type == URP_R_AARCH64_ABS64
+            || type == URP_R_AARCH64_GLOB_DAT
+            || type == URP_R_AARCH64_JUMP_SLOT;
+        uint64_t symbol_delta = 0U;
+        uint64_t symbol_address = 0U;
+        int symbol_range_valid = 1;
+        if (symbolic) {
+            symbol_range_valid = dynamic->has_symtab
+                && dynamic->has_syment
+                && dynamic->syment == 24U
+                && symbol != 0U
+                && urp_checked_mul_u64(symbol, dynamic->syment, &symbol_delta)
+                && urp_checked_add_u64(dynamic->symtab, symbol_delta, &symbol_address)
+                && urp_find_load_range(
+                    image,
+                    image_size,
+                    program_header_offset,
+                    program_header_count,
+                    symbol_address,
+                    dynamic->syment,
+                    0U,
+                    1,
+                    NULL);
+        }
+        if ((type != 0U && type != URP_R_AARCH64_RELATIVE && !symbolic)
+            || (type == 0U && symbol != 0U)
+            || (type == URP_R_AARCH64_RELATIVE && symbol != 0U)
+            || (symbolic && !symbol_range_valid)
             || !urp_validate_relocation_target(
                 image,
                 image_size,
@@ -544,6 +577,20 @@ static urp_status urp_validate_dynamic_segment(
             }
             values.rela = urp_read_u64_le(entry + 8U);
             values.has_rela = 1;
+            break;
+        case URP_DT_SYMTAB:
+            if (values.has_symtab) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            values.symtab = urp_read_u64_le(entry + 8U);
+            values.has_symtab = 1;
+            break;
+        case URP_DT_SYMENT:
+            if (values.has_syment) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            values.syment = urp_read_u64_le(entry + 8U);
+            values.has_syment = 1;
             break;
         case URP_DT_RELASZ:
             if (values.has_relasz) {

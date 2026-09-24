@@ -522,6 +522,7 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
     int has_load = 0;
     int has_executable_entry = 0;
     int has_interpreter = 0;
+    int has_dynamic = 0;
     for (uint16_t index = 0; index < program_header_count; ++index) {
         uint64_t current_offset;
         if (!urp_checked_add_u64(program_header_offset, (uint64_t)index * 56U, &current_offset)) {
@@ -569,9 +570,11 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
                 return 0;
             }
             has_interpreter = 1;
+        } else if (type == 2U) {
+            has_dynamic = 1;
         }
     }
-    return has_load && has_executable_entry && has_interpreter;
+    return has_load && has_executable_entry && (!has_dynamic || has_interpreter);
 }
 
 static int urp_write_payload_and_exec(

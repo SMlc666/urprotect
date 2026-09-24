@@ -14,12 +14,16 @@ SELF_TEST := $(BUILD_DIR)/host-context-self-test
 HOST_CONTEXT_LAUNCHER := $(BUILD_DIR)/host-context-launcher
 ENTRY_FIXTURE := $(BUILD_DIR)/host-context-entry-fixture.so
 ENTRY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-entry-fixture.o
+SYMBOL_FIXTURE := $(BUILD_DIR)/host-context-symbol-fixture.so
+SYMBOL_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-symbol-fixture.o
+SYMBOL_SELF_TEST := $(BUILD_DIR)/host-context-symbol-self-test
+SYMBOL_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_symbol_self_test.o
 RUNTIME_OBJECTS := $(BUILD_DIR)/runtime.o $(BUILD_DIR)/sha256.o $(BUILD_DIR)/miniz_tinfl.o
 RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl
 
-.PHONY: all test test-adapter runtime self-test host-context-launcher contract-probe contract-check clean check-host
+.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -36,6 +40,11 @@ self-test: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
 
 host-context-launcher: $(HOST_CONTEXT_LAUNCHER)
+
+symbol-fixture: $(SYMBOL_FIXTURE)
+
+symbol-self-test: $(SYMBOL_SELF_TEST)
+	"$(SYMBOL_SELF_TEST)" "$(SYMBOL_FIXTURE)"
 
 test: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
@@ -57,11 +66,23 @@ $(HOST_CONTEXT_LAUNCHER): $(BUILD_DIR)/host_context_launcher.o $(RUNTIME_OBJECTS
 	$(CC) $(CFLAGS) $(BUILD_DIR)/host_context_launcher.o $(RUNTIME_OBJECTS) $(LDLIBS) -o "$@"
 	chmod 0755 "$@"
 
+$(SYMBOL_SELF_TEST): $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o -ldl -o "$@"
+
 $(ENTRY_FIXTURE): $(ENTRY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
 	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
 
+$(SYMBOL_FIXTURE): $(SYMBOL_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
+
 $(ENTRY_FIXTURE_OBJECT): host_context_entry_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
+
+$(SYMBOL_FIXTURE_OBJECT): host_context_symbol_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
 
@@ -70,6 +91,10 @@ $(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c include/urp/host
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
 $(BUILD_DIR)/host_context_launcher.o: host_context_launcher.c include/urp/host_context.h include/urp/runtime.h include/urp/host_adapter.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+
+$(SYMBOL_SELF_TEST_OBJECT): host_context_symbol_self_test.c include/urp/host_context.h include/urp/host_adapter.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 

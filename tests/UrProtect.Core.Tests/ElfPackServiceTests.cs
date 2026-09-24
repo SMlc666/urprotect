@@ -87,6 +87,26 @@ public sealed class ElfPackServiceTests
     }
 
     [Fact]
+    [Trait("Category", "PackWrapper")]
+    public void PacksStaticPieThroughTheOuterProfile()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("static-pie.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.StaticPiePayload());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var decoded = PayloadFrameCodec.ReadWrapper(File.ReadAllBytes(outputPath), new PayloadFrameLimits());
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        Assert.Equal(ElfFixture.StaticPiePayload(), decoded.SourceBytes);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, decoded.Frame!.Profile);
+    }
+
+    [Fact]
     [Trait("Category", "PackMalformed")]
     public void RejectsSharedObjectInputWithoutPublishingOutput()
     {

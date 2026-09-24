@@ -145,9 +145,12 @@ executable pathname.
 - AArch64 program headers and `LoadMap` define runtime layout; section headers
   may be absent. Unknown relocation or lifecycle semantics remain `unknown` or
   `rejected` until an invariant and oracle exist. The first native adapter
-  slice accepts only checked `RELATIVE`/`RELR` targets, permits only immediate
-  binding dynamic flags, and delegates relocation application to the system
-  loader.
+  slice accepts checked `RELATIVE`/`RELR` targets and the bounded
+  `R_AARCH64_GLOB_DAT` symbolic form when `DT_SYMTAB`/`DT_SYMENT` identify a
+  file-backed symbol record and the relocation target is aligned and writable.
+  It permits only immediate binding dynamic flags and delegates relocation
+  application to the system loader. Other symbol binding, PLT, version, and
+  dependency semantics remain explicit boundaries.
 - The constructor/destructor lifecycle boundary is the rejected feature row
   `runtime.host-context.constructor-destructor`. The first native adapter
   rejects `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`,
