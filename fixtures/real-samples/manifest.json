@@ -2217,7 +2217,7 @@
           "static": {
             "applicable": true,
             "required": true,
-            "expectedResult": "expected-rejected",
+            "expectedResult": "accepted-and-runs",
             "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
           },
           "baseline": {
@@ -2247,7 +2247,7 @@
           }
         },
         "expectedResults": {
-          "static": "expected-rejected",
+          "static": "accepted-and-runs",
           "baseline": "not-applicable",
           "outerWrapper": "not-applicable",
           "hostContext": "not-applicable"
@@ -2302,7 +2302,7 @@
           "elfClass": "ELF64",
           "data": "little-endian",
           "machine": "AArch64",
-          "type": "ET_DYN",
+          "type": "ET_EXEC",
           "interpreter": "/lib/ld-linux-aarch64.so.1",
           "ptLoadLayout": {
             "source": "ci-generated",
@@ -2358,7 +2358,7 @@
           "static": {
             "applicable": true,
             "required": true,
-            "expectedResult": "accepted-and-runs",
+            "expectedResult": "expected-rejected",
             "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
           },
           "baseline": {
@@ -2388,7 +2388,7 @@
           }
         },
         "expectedResults": {
-          "static": "accepted-and-runs",
+          "static": "expected-rejected",
           "baseline": "not-applicable",
           "outerWrapper": "not-applicable",
           "hostContext": "not-applicable"
@@ -2725,7 +2725,7 @@
           "elfClass": "ELF64",
           "data": "little-endian",
           "machine": "AArch64",
-          "type": "ET_DYN",
+          "type": "ET_EXEC",
           "interpreter": "/lib/ld-linux-aarch64.so.1",
           "ptLoadLayout": {
             "source": "ci-generated",
@@ -2781,7 +2781,7 @@
           "static": {
             "applicable": true,
             "required": true,
-            "expectedResult": "accepted-and-runs",
+            "expectedResult": "expected-rejected",
             "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
           },
           "baseline": {
@@ -2811,7 +2811,7 @@
           }
         },
         "expectedResults": {
-          "static": "accepted-and-runs",
+          "static": "expected-rejected",
           "baseline": "not-applicable",
           "outerWrapper": "not-applicable",
           "hostContext": "not-applicable"

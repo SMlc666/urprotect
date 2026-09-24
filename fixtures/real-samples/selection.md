@@ -22,8 +22,8 @@ project is executable by every UrProtect profile.
 | CMake | Debian `cmake` | glibc | C++ application with a larger dependency and read-only data surface |
 | FFmpeg | Debian `ffmpeg` | glibc | Large multimedia dependency graph and dynamic table |
 | Nginx | Debian `nginx` | glibc | Server executable and system-service style layout |
-| Node.js | Public Termux `nodejs` package | bionic | Android/bionic loader fact and explicit rejected validator boundary |
-| CPython | Debian `python3.11-minimal` | glibc | Language runtime executable with interpreter metadata |
+| Node.js | Public Termux `nodejs` package | bionic | Android/bionic loader fact and public dynamic-PIE observation |
+| CPython | Debian `python3.11-minimal` | glibc | Language runtime executable and an explicit ET_EXEC rejection boundary |
 | PostgreSQL | Debian `postgresql-client-15` (`psql`) | glibc | Database client and larger runtime dependency shape |
 | Redis | Debian `redis-server` | glibc | Long-running service executable and package/runtime distinction |
 | Caddy | Debian `caddy` | glibc | Go-produced server executable with a different binary profile |
@@ -46,10 +46,10 @@ project is executable by every UrProtect profile.
 
 Normal public programs are `not-applicable` to HostContext because they do not
 declare the `urp_entry` ABI. The Termux/bionic Node.js artifact is retained as
-an explicit `expected-rejected` static boundary until the declared production
-profile defines bionic interpreter semantics. This preserves a useful real
-observation without upgrading the bionic fixture lane or the HostContext
-claim.
+a real bionic dynamic-PIE observation; its static validator result is recorded
+as accepted without upgrading the bionic fixture lane, outer packaging, or
+HostContext claim. The Debian CPython and Caddy artifacts are real ET_EXEC
+rejection boundaries because the current product accepts only ET_DYN inputs.
 
 The BusyBox record is the one currently applicable dynamic oracle: its
 `executionPolicy.baseline.command` is `["/bin/busybox", "true"]`, and the

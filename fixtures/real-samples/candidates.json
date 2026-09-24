@@ -1310,7 +1310,7 @@
         "elfClass": "ELF64",
         "data": "little-endian",
         "machine": "AArch64",
-        "type": "ET_DYN",
+        "type": "ET_EXEC",
         "interpreter": "/lib/ld-linux-aarch64.so.1",
         "ptLoadLayout": {
           "source": "ci-generated",
@@ -1550,7 +1550,7 @@
         "elfClass": "ELF64",
         "data": "little-endian",
         "machine": "AArch64",
-        "type": "ET_DYN",
+        "type": "ET_EXEC",
         "interpreter": "/lib/ld-linux-aarch64.so.1",
         "ptLoadLayout": {
           "source": "ci-generated",

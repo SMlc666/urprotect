@@ -44,7 +44,8 @@ The selection is deliberately cross-ecosystem:
 - compact and alternate producers: BusyBox, jq, ripgrep, and CMake;
 - larger dependency/loader shapes: FFmpeg, Nginx, Node.js, PostgreSQL, and
   Redis;
-- one Termux/bionic artifact and one musl rootfs artifact as runtime facts.
+- one Termux/bionic artifact and one musl rootfs artifact as runtime facts;
+  CPython and Caddy provide real ET_EXEC rejection boundaries.
 
 The final support claim still belongs to the ELF/HostContext contract. A real
 sample observation does not promote a feature automatically.

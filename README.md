@@ -269,8 +269,8 @@ benchmark, and Android evidence is uploaded even when the job fails.
 The repository also tracks a locked ecology corpus in
 [`fixtures/real-samples/manifest.json`](fixtures/real-samples/manifest.json). It
 contains exactly 20 distinct public AArch64 project identities, including
-Debian/glibc applications, an Alpine/musl BusyBox rootfs, and a public
-Termux/bionic Node.js artifact. `candidates.json` retains rejected/deferred
+Debian/glibc applications, an Alpine/musl BusyBox rootfs, a public
+Termux/bionic Node.js artifact, and real ET_EXEC boundaries. `candidates.json` retains rejected/deferred
 public candidates and `selection.md` explains the feature/runtime covering
 rationale. No raw archive or ELF binary is committed.
 

@@ -90,8 +90,6 @@ def main() -> int:
         "--unshare-pid",
         "--unshare-ipc",
         "--unshare-uts",
-        "--unshare-user",
-        "--disable-userns",
         "--clearenv",
         "--cap-drop", "ALL",
         "--ro-bind", str(rootfs), "/",

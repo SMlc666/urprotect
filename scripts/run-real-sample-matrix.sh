@@ -118,6 +118,36 @@ PYISO
     --process-limit 32 --output-limit 1048576 -- "${command_parts[@]}"
 }
 
+resolve_artifact() {
+  local root="$1" relative="$2" candidate link target
+  candidate="${root}/${relative}"
+  for _ in 1 2 3 4 5 6 7 8; do
+    if [[ ! -L "${candidate}" ]]; then
+      if [[ -f "${candidate}" ]]; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
+      return 1
+    fi
+    link="$(readlink -- "${candidate}")"
+    if [[ "${link}" = /* ]]; then
+      target="${root}/${link#/}"
+    else
+      target="$(dirname -- "${candidate}")/${link}"
+    fi
+    candidate="$(python3 - "${root}" "${target}" <<'PY'
+import os, sys
+root = os.path.realpath(sys.argv[1])
+candidate = os.path.normpath(sys.argv[2])
+if os.path.commonpath((root, candidate)) != root:
+    raise SystemExit(1)
+print(candidate)
+PY
+)" || return 1
+  done
+  return 1
+}
+
 process_project() {
   local json_record="$1"
   local id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 runtime loader
@@ -164,8 +194,8 @@ process_project() {
     write_failure_evidence "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable "archive extraction failed"
     return 1
   fi
-  local artifact="${extract_root}/${artifact_path}"
-  if [[ -L "${artifact}" || ! -f "${artifact}" ]]; then
+  local artifact
+  if ! artifact="$(resolve_artifact "${extract_root}" "${artifact_path}")"; then
     write_failure_evidence "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable "declared artifact path is missing or a symlink"
     return 1
   fi
