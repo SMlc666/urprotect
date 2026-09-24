@@ -8,6 +8,7 @@ stdout/stderr without uploading the rootfs or executable.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import errno
 import os
 from pathlib import Path
@@ -35,6 +36,13 @@ def parse_args() -> argparse.Namespace:
 
 def bounded_preexec(timeout_seconds: int, memory_bytes: int, process_limit: int, output_limit: int) -> None:
     os.setsid()
+    # PR_SET_NO_NEW_PRIVS=38, PR_SET_NO_NEW_PRIVS_ON=1.  Keep this in the
+    # child before bubblewrap starts so the target cannot gain privileges even
+    # on hosts whose bubblewrap predates --disable-setuid.
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(38, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, "prctl(PR_SET_NO_NEW_PRIVS) failed")
     resource.setrlimit(resource.RLIMIT_CPU, (timeout_seconds + 1, timeout_seconds + 1))
     resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
     resource.setrlimit(resource.RLIMIT_NPROC, (process_limit, process_limit))
@@ -82,7 +90,8 @@ def main() -> int:
         "--unshare-pid",
         "--unshare-ipc",
         "--unshare-uts",
-        "--disable-setuid",
+        "--unshare-user",
+        "--disable-userns",
         "--clearenv",
         "--cap-drop", "ALL",
         "--ro-bind", str(rootfs), "/",

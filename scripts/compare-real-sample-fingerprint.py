@@ -15,7 +15,8 @@ def normal(field, value):
         value = str(value).lower()
         return 'little-endian' if 'little' in value else value
     if field == 'type':
-        return str(value).split(' ', 1)[0].upper()
+        value = str(value).split(' ', 1)[0].upper()
+        return 'ET_DYN' if value in {'DYN', 'ET_DYN'} else value
     if field == 'machine':
         return 'AArch64' if 'aarch64' in str(value).lower() or 'arm64' in str(value).lower() else str(value)
     return value

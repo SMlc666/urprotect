@@ -19,7 +19,10 @@ import sys
 from typing import Any
 
 MAX_INPUT_BYTES = 512 * 1024 * 1024
-MAX_READELF_BYTES = 8 * 1024 * 1024
+# Do not request the full dynamic symbol table here: large real-world
+# runtimes can make `readelf -sW` unbounded for evidence purposes. Version
+# records are collected with `-V`; 16 MiB is still a hard evidence bound.
+MAX_READELF_BYTES = 16 * 1024 * 1024
 
 
 class InspectionError(Exception):
@@ -50,8 +53,8 @@ def readelf_report(path: Path, executable: str) -> str:
                 "-lW",
                 "-dW",
                 "-rW",
-                "-sW",
                 "-nW",
+                "-VW",
                 str(path),
             ],
             check=False,
