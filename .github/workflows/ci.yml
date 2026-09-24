@@ -163,6 +163,72 @@ jobs:
             /tmp/urprotect-*.err
           if-no-files-found: warn
 
+  # The public real-sample corpus is a required full-20 gate on every PR.
+  # Scheduled and release runs reuse the exact registry/orchestrator and only
+  # change the tier's retention/repeat policy; they never select a subset.
+  real-sample-matrix:
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      REAL_SAMPLE_CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select locked real-sample tier
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request) echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV" ;;
+            release) echo 'REAL_SAMPLE_TIER=release' >> "$GITHUB_ENV" ;;
+            schedule) echo 'REAL_SAMPLE_TIER=nightly' >> "$GITHUB_ENV" ;;
+            *) echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV" ;;
+          esac
+      - name: Record isolated ARM64 runner environment
+        run: |
+          mkdir -p .artifacts/real-samples/runner
+          ./.github/scripts/record-environment.sh \
+            .artifacts/real-samples/runner/environment.txt \
+            aarch64 public-real-sample-${REAL_SAMPLE_TIER}
+      - name: Install bounded isolation and inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap binutils curl dpkg-dev
+          {
+            echo "bubblewrap=$(bwrap --version)"
+            echo "readelf=$(readelf --version | head -n 1)"
+            echo "runner_arch=$(uname -m)"
+          } | tee -a .artifacts/real-samples/runner/environment.txt
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+      - name: Restore product
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build product
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Recheck metadata without acquisition
+        run: |
+          python3 scripts/validate-real-samples.py \
+            fixtures/real-samples/manifest.json \
+            --candidates fixtures/real-samples/candidates.json \
+            --tier "${REAL_SAMPLE_TIER}"
+      - name: Run required full 20-project real-sample suite
+        run: |
+          ./scripts/run-real-sample-matrix.sh --tier "${REAL_SAMPLE_TIER}"
+      - name: Upload real-sample evidence (never raw inputs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-samples-${{ env.REAL_SAMPLE_TIER }}-${{ github.run_id }}
+          path: .artifacts/real-samples/
+          if-no-files-found: error
+
   bionic-native-arm64:
     if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     runs-on: ubuntu-24.04-arm

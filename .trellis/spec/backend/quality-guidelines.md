@@ -115,3 +115,47 @@ ASLR addresses and timing.
   snapshots rather than assertions on incidental console formatting.
 - `native/urprotect-launcher/Makefile` demonstrates the pinned static-PIE
   compile/link contract and strict AArch64 build checks.
+
+## Public real-sample CI corpus
+
+`fixtures/real-samples/manifest.json` is a separate ecology evidence layer from
+`fixtures/manifest.json`. It locks exactly 20 distinct public AArch64 upstream
+project identities, archive/version/file hashes, extracted paths, runtime facts,
+and layer policies. A libc/build variant is an attribute of one identity and
+never another corpus count. The candidate ledger and selection report retain
+why selected, rejected, and deferred public candidates differ.
+
+Local developer commands for this layer are metadata-only:
+
+```sh
+python3 scripts/validate-real-samples.py fixtures/real-samples/manifest.json \
+  --candidates fixtures/real-samples/candidates.json --tier pr
+python3 tests/test_real_sample_manifest.py
+```
+
+The real-sample runner rejects non-GitHub-Actions or non-AArch64 invocation
+before network access. CI downloads into `RUNNER_TEMP`, checks immutable
+archive SHA-256, rejects archive traversal/special links, checks the declared
+extracted-file path, and deletes the temporary tree after each run. Raw input
+archives, ELF files, and rootfs contents are never uploaded. Every PR runs all
+20 projects; no diff-path, label, or affected-sample filter is allowed.
+Nightly and release reuse the exact registry and oracle implementation and may
+only add repetition/retention/environment strength.
+
+Static evidence is mandatory for all 20. An applicable dynamic oracle must run
+in a networkless bounded isolation root with read-only inputs, temporary output,
+dropped privileges/no-new-privileges behavior, bounded wall time, memory,
+process count, output, and cleanup. A missing isolation capability is
+`environment-unavailable` and fails the gate. A layer without its declared
+contract is an explicit `not-applicable` result, never a silent skip. The
+runner and `check-real-sample-evidence.py` retain normalized fingerprint,
+bounded readelf output, UrProtect JSON, hashes, environment facts, result
+classification, per-sample logs, and aggregate coverage.
+
+Real observations do not promote support. A parser/validator, packer, launcher,
+native-runtime, fixture-contract, or compatibility-document change must list
+its affected real-sample project IDs, tier, layer-specific oracle, expected
+result, and evidence path in the plan. A new support claim still needs a
+controlled positive fixture, nearest-negative fixture, stable diagnostic, and
+updated contract/docs. `unexpected-rejection` and `unexpected-acceptance`
+keep the compatibility task open until classified and resolved.

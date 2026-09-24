@@ -1,0 +1,2841 @@
+{
+  "schemaVersion": 1,
+  "registryName": "public-real-aarch64-20",
+  "corpus": {
+    "requiredProjectCount": 20,
+    "tiers": [
+      "pr",
+      "nightly",
+      "release"
+    ],
+    "selectionPolicy": "Freeze exactly 20 distinct public upstream project identities selected for producer, runtime, language, dependency, hardening, and ELF-feature diversity. Every PR runs all 20; variants never add count. Binary fingerprints are CI-generated and compared against only the locked identity/class/data/machine/type/interpreter invariants.",
+    "candidateLedger": "fixtures/real-samples/candidates.json",
+    "projects": [
+      {
+        "projectId": "gnu-bash",
+        "displayName": "GNU Bash",
+        "identityKey": "GNU Bash",
+        "upstreamUrl": "https://www.gnu.org/software/bash/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/b/bash/bash_5.2.15-2+b13_arm64.deb",
+          "version": "5.2.15-2+b13",
+          "archivePath": "pool/main/b/bash/bash_5.2.15-2+b13_arm64.deb",
+          "archiveSha256": "fdb470b5ec1773b90014138bfc1deda4505c1c23e7f5731e8b527c636ac03385",
+          "artifactPath": "bin/bash",
+          "archiveFormat": "deb",
+          "license": "GPL-3.0-or-later",
+          "licenseSource": "https://www.gnu.org/software/bash/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "shell-runtime",
+            "gnu.relro",
+            "gnu.stack"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for shell-runtime, gnu.relro, gnu.stack coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "shell-runtime",
+            "gnu.relro",
+            "gnu.stack"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "busybox",
+        "displayName": "BusyBox",
+        "identityKey": "BusyBox",
+        "upstreamUrl": "https://busybox.net/",
+        "provenance": {
+          "sourceKind": "alpine-minirootfs",
+          "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz",
+          "version": "3.20.3",
+          "archivePath": "releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz",
+          "archiveSha256": "041fa34a81788242df9e78fa69b97ab45b8ec47ddbf88864755610414a7bf3de",
+          "artifactPath": "bin/busybox",
+          "archiveFormat": "tar.gz",
+          "license": "GPL-2.0-only",
+          "licenseSource": "https://busybox.net/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "musl",
+          "loader": "/lib/ld-musl-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "alpine-musl-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-musl-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "musl-rootfs",
+            "multi-call",
+            "gnu.relro",
+            "gnu.stack"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for musl-rootfs, multi-call, gnu.relro, gnu.stack coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "musl-rootfs",
+            "multi-call",
+            "gnu.relro",
+            "gnu.stack"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "The pinned Alpine minirootfs is the complete declared musl rootfs; run only its extracted BusyBox artifact inside the isolated read-only rootfs.",
+            "mode": "bubblewrap-rootfs",
+            "command": [
+              "/bin/busybox",
+              "true"
+            ],
+            "rootfs": "provenance-archive"
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "accepted-and-runs",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "gnu-coreutils",
+        "displayName": "GNU coreutils",
+        "identityKey": "GNU coreutils",
+        "upstreamUrl": "https://www.gnu.org/software/coreutils/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/c/coreutils/coreutils_9.1-1_arm64.deb",
+          "version": "9.1-1",
+          "archivePath": "pool/main/c/coreutils/coreutils_9.1-1_arm64.deb",
+          "archiveSha256": "ec8f090a14c684879dce251254d8d9ed0876d4480f750d5807ef04e5435e1c4d",
+          "artifactPath": "bin/ls",
+          "archiveFormat": "deb",
+          "license": "GPL-3.0-or-later",
+          "licenseSource": "https://www.gnu.org/software/coreutils/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "large-utility-producer",
+            "gnu.relro",
+            "gnu.stack"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for large-utility-producer, gnu.relro, gnu.stack coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "large-utility-producer",
+            "gnu.relro",
+            "gnu.stack"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "curl",
+        "displayName": "curl",
+        "identityKey": "curl",
+        "upstreamUrl": "https://curl.se/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/c/curl/curl_7.88.1-10+deb12u15_arm64.deb",
+          "version": "7.88.1-10+deb12u15",
+          "archivePath": "pool/main/c/curl/curl_7.88.1-10+deb12u15_arm64.deb",
+          "archiveSha256": "880d20cb636d2c36b2f57c58ab284b442a1680365b488d3e696c147c4d84ef25",
+          "artifactPath": "usr/bin/curl",
+          "archiveFormat": "deb",
+          "license": "curl license",
+          "licenseSource": "https://curl.se/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "network-client",
+            "complex-dependencies",
+            "gnu.relro"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for network-client, complex-dependencies, gnu.relro coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "network-client",
+            "complex-dependencies",
+            "gnu.relro"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "git",
+        "displayName": "Git",
+        "identityKey": "Git",
+        "upstreamUrl": "https://git-scm.com/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/g/git/git_2.39.5-0+deb12u3_arm64.deb",
+          "version": "2.39.5-0+deb12u3",
+          "archivePath": "pool/main/g/git/git_2.39.5-0+deb12u3_arm64.deb",
+          "archiveSha256": "435176549a9f5c8bbadaa126b64a036b38ea34ad9f3eb128dc40b8407a5b5620",
+          "artifactPath": "usr/bin/git",
+          "archiveFormat": "deb",
+          "license": "GPL-2.0-only",
+          "licenseSource": "https://git-scm.com/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "make-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "large-application",
+            "complex-dependencies",
+            "symbol-versions"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for large-application, complex-dependencies, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "large-application",
+            "complex-dependencies",
+            "symbol-versions"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "openssl",
+        "displayName": "OpenSSL",
+        "identityKey": "OpenSSL",
+        "upstreamUrl": "https://www.openssl.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/o/openssl/openssl_3.0.20-1~deb12u2_arm64.deb",
+          "version": "3.0.20-1~deb12u2",
+          "archivePath": "pool/main/o/openssl/openssl_3.0.20-1~deb12u2_arm64.deb",
+          "archiveSha256": "e7ba824de1e659c12e81f885bc0757a50c4d7a9f71de02687ad63d5a9e936e00",
+          "artifactPath": "usr/bin/openssl",
+          "archiveFormat": "deb",
+          "license": "Apache-2.0",
+          "licenseSource": "https://www.openssl.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "security-library",
+            "large-dynamic-table",
+            "symbol-versions"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for security-library, large-dynamic-table, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "security-library",
+            "large-dynamic-table",
+            "symbol-versions"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "perl",
+        "displayName": "Perl",
+        "identityKey": "Perl",
+        "upstreamUrl": "https://www.perl.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/p/perl/perl-base_5.36.0-7+deb12u3_arm64.deb",
+          "version": "5.36.0-7+deb12u3",
+          "archivePath": "pool/main/p/perl/perl-base_5.36.0-7+deb12u3_arm64.deb",
+          "archiveSha256": "8257ca5f2debe0b4229d98667fe0ed24a8b3b9421c96f847f4f48e9012659174",
+          "artifactPath": "usr/bin/perl",
+          "archiveFormat": "deb",
+          "license": "Artistic-1.0 OR GPL-1.0-or-later",
+          "licenseSource": "https://www.perl.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "language-runtime",
+            "interpreter-startup",
+            "symbol-versions"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for language-runtime, interpreter-startup, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "language-runtime",
+            "interpreter-startup",
+            "symbol-versions"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "sqlite",
+        "displayName": "SQLite",
+        "identityKey": "SQLite",
+        "upstreamUrl": "https://www.sqlite.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/s/sqlite3/sqlite3_3.40.1-2+deb12u2_arm64.deb",
+          "version": "3.40.1-2+deb12u2",
+          "archivePath": "pool/main/s/sqlite3/sqlite3_3.40.1-2+deb12u2_arm64.deb",
+          "archiveSha256": "1f14747c3e019164bc6ed4c1aba47d9705fd7ec990594669b073cd8e3ddc737d",
+          "artifactPath": "usr/bin/sqlite3",
+          "archiveFormat": "deb",
+          "license": "Public-domain blessing",
+          "licenseSource": "https://www.sqlite.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "embedded-database",
+            "compact-dynamic"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for embedded-database, compact-dynamic coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "embedded-database",
+            "compact-dynamic"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "vim",
+        "displayName": "Vim",
+        "identityKey": "Vim",
+        "upstreamUrl": "https://www.vim.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/v/vim/vim-tiny_9.0.1378-2+deb12u2_arm64.deb",
+          "version": "9.0.1378-2+deb12u2",
+          "archivePath": "pool/main/v/vim/vim-tiny_9.0.1378-2+deb12u2_arm64.deb",
+          "archiveSha256": "f5978404b9f661e634523910cabbb43d658ef032b76631580c624cc01c6551b7",
+          "artifactPath": "usr/bin/vim.tiny",
+          "archiveFormat": "deb",
+          "license": "Vim license",
+          "licenseSource": "https://www.vim.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "terminal-application",
+            "variant-tiny",
+            "dynamic-dependencies"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for terminal-application, variant-tiny, dynamic-dependencies coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "terminal-application",
+            "variant-tiny",
+            "dynamic-dependencies"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "nano",
+        "displayName": "GNU nano",
+        "identityKey": "GNU nano",
+        "upstreamUrl": "https://www.nano-editor.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/n/nano/nano_7.2-1+deb12u1_arm64.deb",
+          "version": "7.2-1+deb12u1",
+          "archivePath": "pool/main/n/nano/nano_7.2-1+deb12u1_arm64.deb",
+          "archiveSha256": "5bff6e5ebceacca19a3df4777ac967aedaf6fe1148bbb51c2ed4b14a93d4a858",
+          "artifactPath": "bin/nano",
+          "archiveFormat": "deb",
+          "license": "GPL-3.0-or-later",
+          "licenseSource": "https://www.nano-editor.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "terminal-application",
+            "ncurses-dependency"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for terminal-application, ncurses-dependency coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "terminal-application",
+            "ncurses-dependency"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "jq",
+        "displayName": "jq",
+        "identityKey": "jq",
+        "upstreamUrl": "https://jqlang.github.io/jq/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/j/jq/jq_1.6-2.1+deb12u2_arm64.deb",
+          "version": "1.6-2.1+deb12u2",
+          "archivePath": "pool/main/j/jq/jq_1.6-2.1+deb12u2_arm64.deb",
+          "archiveSha256": "c232e9407e0f47006dd6077804c1274fd2e4f8be02efc78822db748ed65bea99",
+          "artifactPath": "usr/bin/jq",
+          "archiveFormat": "deb",
+          "license": "MIT",
+          "licenseSource": "https://jqlang.github.io/jq/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "json-cli",
+            "compact-dynamic",
+            "symbol-versions"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for json-cli, compact-dynamic, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "json-cli",
+            "compact-dynamic",
+            "symbol-versions"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "ripgrep",
+        "displayName": "ripgrep",
+        "identityKey": "ripgrep",
+        "upstreamUrl": "https://github.com/BurntSushi/ripgrep",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/r/rust-ripgrep/ripgrep_13.0.0-4+b2_arm64.deb",
+          "version": "13.0.0-4+b2",
+          "archivePath": "pool/main/r/rust-ripgrep/ripgrep_13.0.0-4+b2_arm64.deb",
+          "archiveSha256": "82bd2ff67cedf892c1906d7ecd2831605ec1f8ad74825f576f5519a9c82a02a3",
+          "artifactPath": "usr/bin/rg",
+          "archiveFormat": "deb",
+          "license": "MIT OR Unlicense",
+          "licenseSource": "https://github.com/BurntSushi/ripgrep (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "rustc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "rust-producer",
+            "regex-engine",
+            "symbol-versions"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for rust-producer, regex-engine, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "rust-producer",
+            "regex-engine",
+            "symbol-versions"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "cmake",
+        "displayName": "CMake",
+        "identityKey": "CMake",
+        "upstreamUrl": "https://cmake.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/c/cmake/cmake_3.25.1-1_arm64.deb",
+          "version": "3.25.1-1",
+          "archivePath": "pool/main/c/cmake/cmake_3.25.1-1_arm64.deb",
+          "archiveSha256": "457c1e246b50bbfc2cd6f0f0d1da09889c8bc24677b9acb8946c4c778eaa74e5",
+          "artifactPath": "usr/bin/cmake",
+          "archiveFormat": "deb",
+          "license": "BSD-3-Clause",
+          "licenseSource": "https://cmake.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "cmake-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "large-cpp-tool",
+            "complex-dependencies",
+            "libstdc++"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for large-cpp-tool, complex-dependencies, libstdc++ coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "large-cpp-tool",
+            "complex-dependencies",
+            "libstdc++"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "ffmpeg",
+        "displayName": "FFmpeg",
+        "identityKey": "FFmpeg",
+        "upstreamUrl": "https://ffmpeg.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/f/ffmpeg/ffmpeg_5.1.9-0+deb12u1_arm64.deb",
+          "version": "7:5.1.9-0+deb12u1",
+          "archivePath": "pool/main/f/ffmpeg/ffmpeg_5.1.9-0+deb12u1_arm64.deb",
+          "archiveSha256": "7890aeb19a94d73e5d9281afa5ca07005804c1fca4f10791f4f2ce0df741b610",
+          "artifactPath": "usr/bin/ffmpeg",
+          "archiveFormat": "deb",
+          "license": "LGPL-2.1-or-later / GPL-2.0-or-later",
+          "licenseSource": "https://ffmpeg.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "configure-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "media-stack",
+            "many-dependencies",
+            "large-dynamic-table"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for media-stack, many-dependencies, large-dynamic-table coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "media-stack",
+            "many-dependencies",
+            "large-dynamic-table"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "nginx",
+        "displayName": "nginx",
+        "identityKey": "nginx",
+        "upstreamUrl": "https://nginx.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/n/nginx/nginx_1.22.1-9+deb12u9_arm64.deb",
+          "version": "1.22.1-9+deb12u9",
+          "archivePath": "pool/main/n/nginx/nginx_1.22.1-9+deb12u9_arm64.deb",
+          "archiveSha256": "c50ba73501e353702a748a57aab4817bfe7d1e8d6cc7a2e24c97248bd91462de",
+          "artifactPath": "usr/sbin/nginx",
+          "archiveFormat": "deb",
+          "license": "BSD-2-Clause",
+          "licenseSource": "https://nginx.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "configure-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "server-daemon",
+            "openssl-dependency",
+            "relro"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for server-daemon, openssl-dependency, relro coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "server-daemon",
+            "openssl-dependency",
+            "relro"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "nodejs",
+        "displayName": "Node.js",
+        "identityKey": "Node.js",
+        "upstreamUrl": "https://nodejs.org/",
+        "provenance": {
+          "sourceKind": "termux-package",
+          "archiveUrl": "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+          "version": "26.4.0-1",
+          "archivePath": "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+          "archiveSha256": "eaf3ed8a6e4b72ebaa8c2cb3bad778c577cdf9ea87ca91761213d8a3940fc090",
+          "artifactPath": "data/data/com.termux/files/usr/bin/node",
+          "archiveFormat": "deb",
+          "license": "Node.js license",
+          "licenseSource": "https://nodejs.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "bionic",
+          "loader": "/system/bin/linker64",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "termux-clang",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/system/bin/linker64",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "bionic-runtime",
+            "javascript-runtime",
+            "large-dynamic-table"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for bionic-runtime, javascript-runtime, large-dynamic-table coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "bionic-runtime",
+            "javascript-runtime",
+            "large-dynamic-table"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "expected-rejected",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "expected-rejected",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "python",
+        "displayName": "CPython",
+        "identityKey": "CPython",
+        "upstreamUrl": "https://www.python.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/p/python3.11/python3.11-minimal_3.11.2-6+deb12u8_arm64.deb",
+          "version": "3.11.2-6+deb12u8",
+          "archivePath": "pool/main/p/python3.11/python3.11-minimal_3.11.2-6+deb12u8_arm64.deb",
+          "archiveSha256": "6a07dd571f1a15af2f855d64571766fe44b73a57cc3b5ca79502bc89156a5e12",
+          "artifactPath": "usr/bin/python3.11",
+          "archiveFormat": "deb",
+          "license": "PSF-2.0",
+          "licenseSource": "https://www.python.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "language-runtime",
+            "interpreter-startup",
+            "symbol-versions"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for language-runtime, interpreter-startup, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "language-runtime",
+            "interpreter-startup",
+            "symbol-versions"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "postgresql",
+        "displayName": "PostgreSQL",
+        "identityKey": "PostgreSQL",
+        "upstreamUrl": "https://www.postgresql.org/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/p/postgresql-15/postgresql-client-15_15.18-0+deb12u1_arm64.deb",
+          "version": "15.18-0+deb12u1",
+          "archivePath": "pool/main/p/postgresql-15/postgresql-client-15_15.18-0+deb12u1_arm64.deb",
+          "archiveSha256": "06559d42ee971439e6def8e4359e84577455f3172214b78bcb7d2a3ab74f9efd",
+          "artifactPath": "usr/lib/postgresql/15/bin/psql",
+          "archiveFormat": "deb",
+          "license": "PostgreSQL license",
+          "licenseSource": "https://www.postgresql.org/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "autotools-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "database-client",
+            "deep-dependencies",
+            "symbol-versions"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for database-client, deep-dependencies, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "database-client",
+            "deep-dependencies",
+            "symbol-versions"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "redis",
+        "displayName": "Redis",
+        "identityKey": "Redis",
+        "upstreamUrl": "https://redis.io/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/r/redis/redis-server_7.0.15-1~deb12u7_arm64.deb",
+          "version": "5:7.0.15-1~deb12u7",
+          "archivePath": "pool/main/r/redis/redis-server_7.0.15-1~deb12u7_arm64.deb",
+          "archiveSha256": "ebde2a3c6b8d65fe655cc2cd24f7feaf30df538226e61df6941f966acef75415",
+          "artifactPath": "usr/bin/redis-server",
+          "archiveFormat": "deb",
+          "license": "BSD-3-Clause",
+          "licenseSource": "https://redis.io/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "make-gcc",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "server-daemon",
+            "compact-dynamic",
+            "relro"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for server-daemon, compact-dynamic, relro coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "server-daemon",
+            "compact-dynamic",
+            "relro"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      },
+      {
+        "projectId": "caddy",
+        "displayName": "Caddy",
+        "identityKey": "Caddy",
+        "upstreamUrl": "https://caddyserver.com/",
+        "provenance": {
+          "sourceKind": "debian-bookworm-arm64-package",
+          "archiveUrl": "https://deb.debian.org/debian/pool/main/c/caddy/caddy_2.6.2-5_arm64.deb",
+          "version": "2.6.2-5",
+          "archivePath": "pool/main/c/caddy/caddy_2.6.2-5_arm64.deb",
+          "archiveSha256": "84fe201ea3c869bb23144e72e3f643b7d00395704ba98d958a4f780ce15b79ff",
+          "artifactPath": "usr/bin/caddy",
+          "archiveFormat": "deb",
+          "license": "Apache-2.0",
+          "licenseSource": "https://caddyserver.com/ (upstream/package license metadata)",
+          "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+        },
+        "target": {
+          "architecture": "aarch64",
+          "os": "linux",
+          "runtime": "glibc",
+          "loader": "/lib/ld-linux-aarch64.so.1",
+          "artifactKind": "elf-executable",
+          "pageSize": 4096
+        },
+        "featureFingerprint": {
+          "producer": "go",
+          "elfClass": "ELF64",
+          "data": "little-endian",
+          "machine": "AArch64",
+          "type": "ET_DYN",
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "ptLoadLayout": {
+            "source": "ci-generated",
+            "required": "bounded-congruent"
+          },
+          "dynamicNeeded": [],
+          "relocations": {
+            "source": "ci-generated"
+          },
+          "symbolVersions": {
+            "source": "ci-generated"
+          },
+          "tls": {
+            "source": "ci-generated"
+          },
+          "gnuProperty": {
+            "source": "ci-generated"
+          },
+          "relro": {
+            "source": "ci-generated"
+          },
+          "gnuStack": {
+            "source": "ci-generated"
+          },
+          "stripped": {
+            "source": "ci-generated"
+          },
+          "fileSizeBytes": "ci-generated",
+          "featureTags": [],
+          "expectedFeatureTags": [
+            "go-producer",
+            "server-daemon",
+            "large-static-data"
+          ]
+        },
+        "selection": {
+          "rationale": "Selected for go-producer, server-daemon, large-static-data coverage; this is a distinct public upstream identity and does not multiply libc/build variants.",
+          "featureCoverage": [
+            "go-producer",
+            "server-daemon",
+            "large-static-data"
+          ],
+          "distinctFrom": [
+            "Distinct upstream project identity; variants are attributes and never increase the 20-project count."
+          ]
+        },
+        "tiers": [
+          "pr",
+          "nightly",
+          "release"
+        ],
+        "executionPolicy": {
+          "static": {
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+          },
+          "baseline": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+          },
+          "outerWrapper": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+          },
+          "hostContext": {
+            "applicable": false,
+            "expectedResult": "not-applicable",
+            "reason": "Ordinary public programs do not declare the urp_entry HostContext ABI."
+          },
+          "isolation": {
+            "network": "none",
+            "filesystem": "read-only-rootfs-temp-output",
+            "privileges": "drop-all-no-new-privileges",
+            "cleanup": "delete-runner-temp-after-each-sample",
+            "timeoutSeconds": 30,
+            "memoryBytes": 536870912,
+            "processLimit": 32,
+            "outputBytes": 1048576
+          }
+        },
+        "expectedResults": {
+          "static": "accepted-and-runs",
+          "baseline": "not-applicable",
+          "outerWrapper": "not-applicable",
+          "hostContext": "not-applicable"
+        },
+        "acquisition": {
+          "ciOnly": true,
+          "networkPhase": "download-hash-extract",
+          "rawArtifactsUploaded": false,
+          "maxArchiveBytes": 67108864,
+          "maxExtractedBytes": 2147483648
+        },
+        "fingerprintPolicy": {
+          "mode": "ci-discovery-lock",
+          "compare": [
+            "elfClass",
+            "data",
+            "machine",
+            "type",
+            "interpreter"
+          ],
+          "featureTags": "record-only",
+          "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
+        }
+      }
+    ]
+  }
+}
