@@ -77,15 +77,15 @@
 
 ## Acceptance Criteria
 
-- [ ] 仓库包含独立的公开样本 registry、schema validator 和候选扫描/筛选工具；registry 不包含需要开发者本机执行的真实样本二进制。
-- [ ] 候选筛选报告冻结恰好 20 个不同上游项目，并给出每个样本的公开 provenance、精确版本、hash、目标运行时、feature fingerprint、入选理由和预期层级结果。
-- [ ] CI 能在固定 AArch64 runner 上下载并验证样本，且本机默认路径不会下载或启动真实样本。
-- [ ] 每个 PR 的 required gate 对全部 20 个样本完成静态分析，并对 policy 允许的样本完成隔离的 baseline/pack 或 HostContext oracle；不因 diff 路径、标签或 affected-sample 选择缩减集合。
-- [ ] Nightly 和 release 重用同一份 20 样本 registry 与 oracle contract；额外 tier 只增加重复/环境/证据强度，不将 PR 全量 gate 降级为局部样本测试。
-- [ ] 真实样本执行阶段具有可审计的网络关闭、权限、资源、文件系统和清理证据；执行失败、环境缺失和预期拒绝不会被混为成功。
-- [ ] CI 产出逐样本证据和聚合覆盖报告，`check-evidence.py` 或等价门禁能验证其完整性。
-- [ ] 至少有一个后续兼容性变更流程示例证明：计划声明受影响样本，CI 产生结果，unexpected outcome 阻断完成，contract/fixture/docs/evidence 同步后才可通过。
-- [ ] 项目 spec 或 workflow 文档记录 CI-first 兼容性开发规则，并明确 PR、nightly、release 三类 tier 的职责。
+- [x] 仓库包含独立的公开样本 registry、schema validator 和候选扫描/筛选工具；registry 不包含需要开发者本机执行的真实样本二进制。
+- [x] 候选筛选报告冻结恰好 20 个不同上游项目，并给出每个样本的公开 provenance、精确版本、hash、目标运行时、feature fingerprint、入选理由和预期层级结果。
+- [x] CI 能在固定 AArch64 runner 上下载并验证样本，且本机默认路径不会下载或启动真实样本。
+- [x] 每个 PR 的 required gate 对全部 20 个样本完成静态分析，并对 policy 允许的样本完成隔离的 baseline/pack 或 HostContext oracle；不因 diff 路径、标签或 affected-sample 选择缩减集合。
+- [x] Nightly 和 release 重用同一份 20 样本 registry 与 oracle contract；额外 tier 只增加重复/环境/证据强度，不将 PR 全量 gate 降级为局部样本测试。
+- [x] 真实样本执行阶段具有可审计的网络关闭、权限、资源、文件系统和清理证据；执行失败、环境缺失和预期拒绝不会被混为成功。
+- [x] CI 产出逐样本证据和聚合覆盖报告，`check-evidence.py` 或等价门禁能验证其完整性。
+- [x] 至少有一个后续兼容性变更流程示例证明：计划声明受影响样本，CI 产生结果，unexpected outcome 阻断完成，contract/fixture/docs/evidence 同步后才可通过。
+- [x] 项目 spec 或 workflow 文档记录 CI-first 兼容性开发规则，并明确 PR、nightly、release 三类 tier 的职责。
 
 ## CI tier contract
 
