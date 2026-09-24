@@ -25,7 +25,7 @@ project is executable by every UrProtect profile.
 | Node.js | Public Termux `nodejs` package | bionic | Android/bionic loader fact and public dynamic-PIE observation |
 | CPython | Debian `python3.11-minimal` | glibc | Language runtime executable and an explicit ET_EXEC rejection boundary |
 | PostgreSQL | Debian `postgresql-client-15` (`psql`) | glibc | Database client and larger runtime dependency shape |
-| Redis | Debian `redis-server` | glibc | Long-running service executable and package/runtime distinction |
+| Redis | Debian `redis-tools` (`redis-check-rdb`) | glibc | Redis utility executable and package/runtime distinction |
 | Caddy | Debian `caddy` | glibc | Go-produced server executable with a different binary profile |
 
 ## Coverage notes
