@@ -196,6 +196,8 @@ process_project() {
   fi
   local artifact
   if ! artifact="$(resolve_artifact "${extract_root}" "${artifact_path}")"; then
+    find "${extract_root}" -maxdepth 5 \( -name '*redis*' -o -name '*server*' \) -ls \
+      > "${sample_root}/logs/declared-artifact-search.log" 2>&1 || true
     write_failure_evidence "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable "declared artifact path is missing or a symlink"
     return 1
   fi
