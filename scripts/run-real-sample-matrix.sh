@@ -122,7 +122,10 @@ process_project() {
   local json_record="$1"
   local id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 runtime loader
   IFS=$'\t' read -r id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 runtime loader < <(project_fields "${json_record}")
-  local sample_root="${artifact_root}/${id}" sample_tmp="${temp_root}/${id}" archive="${sample_tmp}/source.archive" extract_root="${sample_tmp}/extract"
+  local sample_root="${artifact_root}/${id}" sample_tmp archive extract_root
+  sample_tmp="${temp_root}/${id}"
+  archive="${sample_tmp}/source.archive"
+  extract_root="${sample_tmp}/extract"
   rm -rf -- "${sample_root}" "${sample_tmp}"; mkdir -p "${sample_root}/logs" "${sample_tmp}"
   {
     printf 'projectId=%s\nversion=%s\narchiveUrl=%s\narchivePath=%s\narchiveSha256=%s\nartifactPath=%s\narchiveFormat=%s\n' \
