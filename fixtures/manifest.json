@@ -52,6 +52,30 @@
       ]
     },
     {
+      "id": "elf.symbol-version.definitions",
+      "status": "proven",
+      "obligation": "The managed ELF parser bounds and models DT_VERDEF/DT_VERDEFNUM records and their dynamic-string-table auxiliaries as parser observation only.",
+      "witness": "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+      "oracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "evidence": [
+        "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+        "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so",
+        "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/README.md",
+        "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+        "src/UrProtect.Core/Elf/ElfTypes.cs",
+        "src/UrProtect.Core/Elf/ElfParserUtilities.cs",
+        "src/UrProtect.Cli/ProductReport.cs"
+      ],
+      "negativeWitness": "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+      "negativeOracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "constraints": [
+        "The registry-baseline declaredFeatureCoverage cue is symbol-versions: 7; it is expected-tag coverage, not confirmed ELF prevalence or product support evidence.",
+        "The checked-in positive fixture path is tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so with SHA-256 4fb8ffa362ce8a18590eff735c971aaf217eb4dcd338bf071810fe0b3c971ae8.",
+        "The checked-in registry-baseline featureHistogram contains only identity and loader facts; actual CI fingerprint histogram evidence remains required for later frequency-based selection or promotion.",
+        "This row proves only bounded parser/model observation. It does not define symbol-version resolution or change outer-execveat or HostContext support; runtime.host-context.symbol-version remains rejected."
+      ]
+    },
+    {
       "id": "elf.relocation.aarch64-relative",
       "status": "validated",
       "obligation": "The narrow HostContext adapter accepts AArch64 RELATIVE/RELR relocation targets in writable load segments and delegates application to the native loader",

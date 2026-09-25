@@ -85,6 +85,18 @@ the load map as the runtime authority. `ElfParserTests` provides the positive
 witness and the malformed corpus keeps a paired alignment rejection; this
 proves the parser boundary, not arbitrary loader behavior.
 
+The managed parser also has a parser-only model row,
+`elf.symbol-version.definitions`, for bounded `DT_VERDEF`/`DT_VERDEFNUM`
+records and their dynamic-string-table auxiliaries. Its linker-produced AArch64
+fixture proves the version-definition model and malformed-chain diagnostics;
+it does not define symbol-version resolution. The checked-in registry baseline
+lists `symbol-versions: 7` under declared feature coverage, but its
+`featureHistogram` contains only identity and loader facts. That declaration was
+a prioritization cue only; actual CI fingerprint histogram evidence remains a
+separate gate for later frequency-based selection or promotion. The independent
+HostContext row `runtime.host-context.symbol-version` remains rejected, and no
+outer-execveat or runtime support claim changes.
+
 The HostContext production slice now includes a bounded native-glibc dependency
 and lifecycle witness. A single `DT_NEEDED` system-libc basename is accepted
 with bounded string-table metadata and no RPATH/RUNPATH; the system loader's

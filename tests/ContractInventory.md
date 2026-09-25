@@ -8,6 +8,7 @@ offset or limit.
 | Contract | Owner | Consumers / checks | Classification |
 | --- | --- | --- | --- |
 | ELF64 class, machine, type, program-header sizes and dynamic tags | `src/UrProtect.Core/Elf/ElfTypes.cs` | `ElfParser`, `ElfValidator`, `ElfFixture`, parser tests | production ELF contract |
+| ELF symbol-version definition model and parser-summary count | `src/UrProtect.Core/Elf/ElfTypes.cs`, `src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs`, and `src/UrProtect.Cli/ProductReport.cs` | parser/report tests and CLI JSON consumers | parser observation only; no HostContext or outer-profile support claim |
 | Frame v1/v2 migration layouts plus current v3 profile header, trailer, digest and field offsets | `native/urprotect-runtime/include/urp/payload_frame.h` and `PayloadFrameCodec` | native runtime, profile launchers, frame tests, contract probe | cross-language wire contract |
 | HostContext ABI, capabilities, minimum structure sizes | `native/urprotect-runtime/include/urp/host_context.h` and `HostContextContract` | runtime, adapter, frame tests, contract probe | cross-language ABI contract |
 | HostContext image preflight and bounded ELF feature rejection | `native/urprotect-runtime/host_image_validation.c` | `host_adapter.c`, native self-test, fixture matrix | native preflight owner; runs before image-handle creation |

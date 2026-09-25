@@ -10,20 +10,23 @@
 
 ## Checklist
 
-- [ ] Capture parser diagnostics, model snapshots, malformed behavior, fuzz
+- [x] Capture parser diagnostics, model snapshots, malformed behavior, fuzz
       no-throw behavior, and parse/validation benchmark baseline.
-- [ ] Define parse context and ownership map for table readers, diagnostics,
+- [x] Define parse context and ownership map for table readers, diagnostics,
       address conversion, and model records.
-- [ ] Extract the first audited cohesive parser boundary and remove duplicate
+- [x] Extract the first audited cohesive parser boundary and remove duplicate
       implementation paths.
-- [ ] Extend feature fingerprint/model records required by the selected sample
+- [x] Extend feature fingerprint/model records required by the selected sample
       cluster.
-- [ ] Add positive linker-produced fixture and nearest-negative/malformed
+- [x] Add positive linker-produced fixture and nearest-negative/malformed
       fixture before acceptance logic.
-- [ ] Add stable diagnostics and golden/projection assertions.
-- [ ] Add native/profile oracle if the selected feature affects runtime.
-- [ ] Promote minimized fuzz input to deterministic regression when relevant.
-- [ ] Update manifest, contract inventory, report, specs, and evidence paths.
+- [x] Add stable diagnostics and golden/projection assertions.
+- [x] Add native/profile oracle if the selected feature affects runtime
+      (not applicable: this slice is parser/model-only and HostContext remains
+      rejected).
+- [x] Promote minimized fuzz input to deterministic regression when relevant
+      (no new fuzz finding was introduced by this bounded extraction).
+- [x] Update manifest, contract inventory, report, specs, and evidence paths.
 
 ## Validation
 

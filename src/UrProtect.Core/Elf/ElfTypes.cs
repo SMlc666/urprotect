@@ -68,6 +68,8 @@ public static class ElfConstants
     public const ulong Df1Pie = 0x08000000;
     public const ulong DtGnuHash = 0x6FFFFEF5;
     public const ulong DtVersym = 0x6FFFFFF0;
+    public const ulong DtVerdef = 0x6FFFFFFC;
+    public const ulong DtVerdefNum = 0x6FFFFFFD;
     public const ulong DtVerneed = 0x6FFFFFFE;
     public const ulong DtVerneedNum = 0x6FFFFFFF;
     public const ulong DtRelr = 36;
@@ -274,6 +276,24 @@ public sealed record VersionNeed(
     IReadOnlyList<VersionNeedAuxiliary> Auxiliaries,
     ReadOnlyMemory<byte> RawBytes);
 
+public readonly record struct VersionDefinitionAuxiliary(
+    uint NameOffset,
+    uint NextOffset,
+    string Name,
+    ReadOnlyMemory<byte> RawBytes);
+
+public sealed record VersionDefinition(
+    ushort Version,
+    ushort Flags,
+    ushort Index,
+    ushort AuxiliaryCount,
+    uint Hash,
+    uint AuxiliaryOffset,
+    uint NextOffset,
+    string Name,
+    IReadOnlyList<VersionDefinitionAuxiliary> Auxiliaries,
+    ReadOnlyMemory<byte> RawBytes);
+
 public sealed record ElfSymbolVersionMetadata(
     ulong VersionTableAddress,
     ReadOnlyMemory<byte> VersionTableBytes,
@@ -282,6 +302,12 @@ public sealed record ElfSymbolVersionMetadata(
     ReadOnlyMemory<byte> VersionNeedBytes,
     IReadOnlyList<VersionNeed> NeededVersions)
 {
+    public VirtualAddress VersionDefinitionAddress { get; init; }
+
+    public ReadOnlyMemory<byte> VersionDefinitionBytes { get; init; }
+
+    public IReadOnlyList<VersionDefinition> DefinedVersions { get; init; } = Array.Empty<VersionDefinition>();
+
     public static ElfSymbolVersionMetadata Empty { get; } = new(
         0,
         ReadOnlyMemory<byte>.Empty,

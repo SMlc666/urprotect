@@ -21,8 +21,8 @@ ordered aggregation while result records carry diagnostics to the caller.
 Important parser categories include `InputTooSmall`, `InvalidHeader`,
 `TableOutOfBounds`, `InvalidProgramHeader`, `InvalidSegment`,
 `DynamicTableMalformed`, `DynamicPointerUnmapped`, `AddressOverflow`,
-`AddressUnmapped`, `SymbolVersionTableMalformed`, and
-`VersionNeedTableMalformed`.
+`AddressUnmapped`, `SymbolVersionTableMalformed`,
+`VersionDefinitionTableMalformed`, and `VersionNeedTableMalformed`.
 
 Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 `LauncherUnavailable`, `PayloadMalformed`, `PayloadUnsupported`,

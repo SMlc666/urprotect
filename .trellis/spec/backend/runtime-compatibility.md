@@ -214,6 +214,12 @@ executable pathname.
   `URP_STATUS_UNSUPPORTED` with a zero output handle. The unchanged
   `RELATIVE`/`RELR`, unversioned entry fixture remains the positive baseline;
   no version negotiation or Android packed relocation support is claimed.
+- The managed parser has a separate observation-only row,
+  `elf.symbol-version.definitions`, for bounded `DT_VERDEF`/`DT_VERDEFNUM`
+  records and their dynamic-string-table auxiliaries. A linker-produced
+  AArch64 fixture and nearest malformed mutations prove the model and stable
+  diagnostics. This row does not define symbol-version resolution and does
+  not promote `runtime.host-context.symbol-version`, which remains rejected.
 - A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
   when that range is inside the image and `p_memsz >= p_filesz`; the real
   adapter must still dispatch the entry. The native system loader owns the

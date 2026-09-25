@@ -53,6 +53,7 @@ public enum DiagnosticCode
     WrapperMalformed,
     AsmStoneUnavailable,
     InvalidArgument,
+    VersionDefinitionTableMalformed,
 }
 
 public readonly record struct Diagnostic(

@@ -29,12 +29,12 @@ feature slices without weakening bounded reads or fail-closed validation.
 
 ## Acceptance Criteria
 
-- [ ] Parser/model ownership map has no duplicated active address arithmetic or
+- [x] Parser/model ownership map has no duplicated active address arithmetic or
       dynamic-table interpretation.
-- [ ] First selected feature slice has positive, nearest-negative, malformed,
+- [x] First selected feature slice has positive, nearest-negative, malformed,
       property/model, and diagnostic tests.
-- [ ] Existing parser, malformed corpus, property, golden, and fuzz tests pass.
-- [ ] Any new acceptance is reflected only at the proven layer and retains a
+- [x] Existing parser, malformed corpus, property, golden, and fuzz tests pass.
+- [x] Any new acceptance is reflected only at the proven layer and retains a
       separate runtime/profile claim where required.
-- [ ] Refactored code has a documented rollback and no unbounded binary read or
+- [x] Refactored code has a documented rollback and no unbounded binary read or
       speculative recovery path.

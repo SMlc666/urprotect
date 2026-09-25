@@ -41,6 +41,7 @@ public sealed record ProductSummaryReport(
     int DynamicSymbols,
     int SymbolVersionIndices,
     int VersionNeeds,
+    int VersionDefinitions,
     int Notes,
     int RelaRelocations,
     int RelrWords,
@@ -144,7 +145,7 @@ public static class ProductReportFactory
             new ProductInputReport(null, null),
             null,
             null,
-            new ProductSummaryReport(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            new ProductSummaryReport(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             new[] { diagnostic },
             null);
 
@@ -207,6 +208,7 @@ public static class ProductReportFactory
             file?.DynamicSymbols.Count ?? 0,
             file?.SymbolVersions.VersionIndices.Count ?? 0,
             file?.SymbolVersions.NeededVersions.Count ?? 0,
+            file?.SymbolVersions.DefinedVersions.Count ?? 0,
             file?.Notes.Count ?? 0,
             file?.RelaRelocations.Count ?? 0,
             file?.RelrWords.Count ?? 0,

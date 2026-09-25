@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -475,6 +476,42 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertTrue(any("positive" in item for item in feature["constraints"]))
 
+    def test_symbol_version_fixture_path_and_hash_are_pinned(self) -> None:
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "elf.symbol-version.definitions"
+        )
+        fixture_path = Path("tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so")
+        fixture = REPO_ROOT / fixture_path
+        self.assertIn(fixture_path.as_posix(), feature["evidence"])
+        self.assertTrue(fixture.is_file())
+        digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
+        constraints = " ".join(feature["constraints"])
+        self.assertIn(digest, constraints)
+        self.assertIn(digest, (REPO_ROOT / "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/README.md").read_text())
+
+    def test_symbol_version_parser_observation_does_not_promote_runtime_support(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        features = {feature["id"]: feature for feature in self.data["features"]}
+        parser = features["elf.symbol-version.definitions"]
+        host_context = features["runtime.host-context.symbol-version"]
+
+        self.assertEqual(parser["status"], "proven")
+        self.assertEqual(
+            parser["witness"],
+            "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+        )
+        self.assertIn(
+            "liburp-versioned.so",
+            " ".join(parser["evidence"]),
+        )
+        self.assertTrue(any("not confirmed ELF prevalence" in item for item in parser["constraints"]))
+        self.assertTrue(any("actual CI fingerprint histogram" in item for item in parser["constraints"]))
+        self.assertEqual(host_context["status"], "rejected")
+        self.assertIn("DT_VERDEF", host_context["obligation"])
+
     def test_symbol_versions_are_an_explicit_rejected_host_context_boundary(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
@@ -646,6 +683,7 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.unsupported-relocation-table | rejected", rendered)
             self.assertIn("runtime.host-context.android-packed-relocation | rejected", rendered)
             self.assertIn("runtime.host-context.symbol-version | rejected", rendered)
+            self.assertIn("elf.symbol-version.definitions | proven", rendered)
             self.assertIn("runtime.wrapper-v1-baseline | validated", rendered)
 
 
