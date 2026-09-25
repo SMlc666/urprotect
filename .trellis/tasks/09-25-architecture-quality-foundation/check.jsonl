@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review every extraction for checked arithmetic, tests, analyzer quality, benchmarks, and regression coverage."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Verify the extracted code respects managed, native, fixture, script, and CLI boundaries."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify preserved diagnostic order/codes, report behavior, publication atomicity, and no fallback regressions."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check that each contract has one active owner and extraction did not introduce duplicate implementations."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check all managed/native/test/CI consumers and ABI layout drift gates after refactoring."}

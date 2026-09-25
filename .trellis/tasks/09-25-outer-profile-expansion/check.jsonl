@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Check outer claims do not inherit HostContext or parser-only evidence."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify complete behavior comparison, native evidence, and selected tier gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check stable diagnostics, exit behavior, and no silent fallback for unsupported executable classes."}

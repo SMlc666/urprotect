@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Follow the public-corpus CI-only, hash/provenance, isolation, evidence retention, and test contracts."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Preserve the distinction between real-sample observations, feature proof, execution layers, and runtime claims."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Keep unavailable environments, expected rejections, unexpected results, and acquisition failures distinct."}
+{"file":"fixtures/real-samples/README.md","reason":"Extend the existing registry, CI runner, evidence schema, and contributor impact-table contract rather than replacing it."}
+{"file":"fixtures/real-samples/selection.md","reason":"Preserve identity counting and selection rationale while growing toward 100 projects."}

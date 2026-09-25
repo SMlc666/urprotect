@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Use existing HostContext and dependency/path boundaries while defining deterministic expanded search semantics."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply source/provenance, tests, native runtime evidence, and explicit environment requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Define deterministic partial-load rollback and stable missing/invalid dependency failures."}
+{"file":"native/urprotect-runtime/README.md","reason":"Preserve existing sealed-memfd/system-loader adapter behavior and update its declared scope coherently."}

@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Preserve current validated TLS/lifecycle slices and define runtime-specific HostContext ownership boundaries."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply concurrency, stress, native oracle, malformed-boundary, and evidence requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Define image release and cleanup behavior on entry, constructor, TLS, thread, and callback failures."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace TLS/lifetime semantics through frame capabilities, native adapter, entry fixtures, runtimes, and reports."}

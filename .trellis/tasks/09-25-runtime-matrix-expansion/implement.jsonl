@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Define runtime facts, separate profile claims, and preserve the evidence status vocabulary."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Follow native AArch64, toolchain pinning, runtime tier, artifact, and reproducibility requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep runner/environment metadata consistent across manifests, jobs, evidence validators, and release reports."}
+{"file":"tests/regression-matrix.json","reason":"Extend E2E case selection, platform, budget, tier, and artifact ownership from the existing regression matrix."}
