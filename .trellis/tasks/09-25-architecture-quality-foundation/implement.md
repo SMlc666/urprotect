@@ -87,10 +87,10 @@ The native AArch64 implementation was validated after a clean rebuild with
 `host-context-launcher` build. Python fixture, regression, real-sample, and
 security/metadata suites passed. The explicit available AArch64 `cc` launcher
 self-test passed, while the default musl launcher integration is gated by the
-missing local `musl-gcc` and `dotnet` prerequisites. The first PR CI run on the
-planning commit passed its managed, real-sample, and bionic jobs; the refactor
-commit must receive a fresh full required CI run before this child is marked
-complete.
+missing local `musl-gcc` and `dotnet` prerequisites. The refactor commit
+`59b9b0c` received fresh passing required PR CI: managed `build-and-test`, full
+20-project `real-sample-matrix`, and native ARM64 `bionic-native-arm64` jobs.
+Scheduled/release-only jobs were explicitly skipped by the PR event.
 
 ## Validation commands
 
