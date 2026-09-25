@@ -25,7 +25,7 @@
 - [x] Review and add public candidates in increments; preserve licenses,
       archive/extracted hashes, internal paths, and selection rationale.
 - [x] Run metadata validation after each increment.
-- [ ] Run CI-only sample execution on native ARM64 and verify evidence gates.
+- [x] Run CI-only sample execution on native ARM64 and verify evidence gates.
 - [x] Publish the histogram/disposition artifact for the next feature children.
 
 ## Validation
@@ -59,6 +59,14 @@ python3 scripts/check-real-sample-evidence.py \
 
 The exact evidence command and generated artifact paths must be recorded after
 the runner changes; local environments never substitute for the CI oracle.
+
+The native ARM64 PR oracle completed on GitHub Actions run
+`36097042633` for commit `f707a1247643b6fb84c31100224dde5225b8c817`.
+The retained artifact `real-samples-pr-36097042633` contains the runner
+environment, 20 project directories, schema-2 fingerprints/results, the
+aggregate JSON/Markdown, and cleanup markers. Its aggregate records
+`identityCount=20`, `approvedTargetProjectCount=100`, `shortfall=80`, zero
+unexpected outcomes, and the evidence gate passed after the matrix.
 
 ## Quality and rollback gates
 
