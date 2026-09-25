@@ -56,6 +56,15 @@
   override because `musl-gcc` is absent in this environment. This run proves
   the native AArch64 glibc outer cell only. Recognizing the musl loader path is
   not a musl runtime claim.
+- The early `--execution native-linux` evidence gate points the new case at its
+  fixture-smoke artifact; the GitHub workflow separately gates
+  `elf.outer.dynamic-et-exec` after packed-fixture smoke so the packaged
+  process-probe artifact exists before inspection.
+- CI runs `36118272640` and `36118276208` exposed the original ordering
+  defect: the case evidence path pointed at the packed artifact before that
+  step had run. The case path
+  now targets the fixture-smoke directory and the packed feature artifact is
+  checked after `Packed fixture smoke`; both gates pass locally.
 - GitHub CI for this child is pending after its implementation commit. The
   previous parser-child CI passed, and its real-sample artifact supplied the
   selection evidence above.

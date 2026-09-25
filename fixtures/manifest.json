@@ -714,7 +714,7 @@
       "required": true,
       "execution": "native-linux",
       "oracle": "scripts/run-packed-fixture-matrix.sh",
-      "evidence": ".artifacts/packed/pr/c-gcc-glibc-et-exec",
+      "evidence": ".artifacts/fixtures/pr/c-gcc-glibc-et-exec",
       "host": {
         "environment": "native-arm64-linux",
         "libc": "glibc"

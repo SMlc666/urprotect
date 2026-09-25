@@ -99,6 +99,7 @@ jobs:
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.wrapper-v1-baseline
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.outer.dynamic-et-exec
       - name: HostContext runtime contract smoke
         run: |
           mkdir -p .artifacts/host-context/pr

@@ -42,7 +42,8 @@ make -C native/urprotect-launcher test
 ./scripts/run-fixture-matrix.sh --tier pr
 ./scripts/run-packed-fixture-matrix.sh --tier pr
 python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
-python3 scripts/check-evidence.py fixtures/manifest.json --tier pr
+python3 scripts/check-evidence.py fixtures/manifest.json --tier pr --execution native-linux
+python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.outer.dynamic-et-exec
 ```
 
 ## Rollback
