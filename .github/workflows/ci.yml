@@ -163,7 +163,7 @@ jobs:
             /tmp/urprotect-*.err
           if-no-files-found: warn
 
-  # The public real-sample corpus is a required full-20 gate on every PR.
+  # The current approved public real-sample slice is a required full-corpus gate on every PR.
   # Scheduled and release runs reuse the exact registry/orchestrator and only
   # change the tier's retention/repeat policy; they never select a subset.
   real-sample-matrix:
@@ -218,9 +218,17 @@ jobs:
             fixtures/real-samples/manifest.json \
             --candidates fixtures/real-samples/candidates.json \
             --tier "${REAL_SAMPLE_TIER}"
-      - name: Run required full 20-project real-sample suite
+      - name: Run required full approved real-sample suite
         run: |
           ./scripts/run-real-sample-matrix.sh --tier "${REAL_SAMPLE_TIER}"
+      - name: Recheck retained real-sample evidence
+        if: always()
+        run: |
+          python3 scripts/check-real-sample-evidence.py \
+            fixtures/real-samples/manifest.json \
+            --candidates fixtures/real-samples/candidates.json \
+            --tier "${REAL_SAMPLE_TIER}" \
+            --artifact-root ".artifacts/real-samples/${REAL_SAMPLE_TIER}"
       - name: Upload real-sample evidence (never raw inputs)
         if: always()
         uses: actions/upload-artifact@v4

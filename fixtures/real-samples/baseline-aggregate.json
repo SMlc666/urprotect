@@ -1,0 +1,1643 @@
+{
+  "coverage": {
+    "approvedTargetProjectCount": 100,
+    "currentIdentityCount": 20,
+    "shortfall": 80
+  },
+  "declaredFeatureCoverage": {
+    "bionic-runtime": 1,
+    "compact-dynamic": 3,
+    "complex-dependencies": 3,
+    "database-client": 1,
+    "deep-dependencies": 1,
+    "dynamic-dependencies": 1,
+    "embedded-database": 1,
+    "gnu.relro": 4,
+    "gnu.stack": 3,
+    "go-producer": 1,
+    "interpreter-startup": 2,
+    "javascript-runtime": 1,
+    "json-cli": 1,
+    "language-runtime": 2,
+    "large-application": 1,
+    "large-cpp-tool": 1,
+    "large-dynamic-table": 3,
+    "large-static-data": 1,
+    "large-utility-producer": 1,
+    "libstdc++": 1,
+    "many-dependencies": 1,
+    "media-stack": 1,
+    "multi-call": 1,
+    "musl-rootfs": 1,
+    "ncurses-dependency": 1,
+    "network-client": 1,
+    "openssl-dependency": 1,
+    "regex-engine": 1,
+    "relro": 2,
+    "rust-producer": 1,
+    "security-library": 1,
+    "server-daemon": 3,
+    "shell-runtime": 1,
+    "symbol-versions": 7,
+    "terminal-application": 2,
+    "variant-tiny": 1
+  },
+  "diagnosticCoverage": {},
+  "evidenceMode": "registry-baseline",
+  "featureCoverage": {
+    "elf.class.ELF64": 20,
+    "elf.data.little-endian": 20,
+    "elf.machine.AArch64": 20,
+    "elf.type.ET_DYN": 18,
+    "elf.type.ET_EXEC": 2,
+    "loader./lib/ld-linux-aarch64.so.1": 18,
+    "loader./lib/ld-musl-aarch64.so.1": 1,
+    "loader./system/bin/linker64": 1
+  },
+  "featureHistogram": [
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "Identity invariant is already locked by the static registry; no separate support claim is derived from the histogram.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "elf.class.ELF64",
+      "firstFailureLayers": {},
+      "identityCount": 20,
+      "identityKeys": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "cpython",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu bash",
+        "gnu coreutils",
+        "gnu nano",
+        "jq",
+        "nginx",
+        "node.js",
+        "openssl",
+        "perl",
+        "postgresql",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "identityPercent": 100.0,
+      "producerCoverage": {
+        "alpine-musl-gcc": 1,
+        "autotools-gcc": 11,
+        "cmake-gcc": 1,
+        "configure-gcc": 2,
+        "go": 1,
+        "make-gcc": 2,
+        "rustc": 1,
+        "termux-clang": 1
+      },
+      "projectIds": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "runtimeCoverage": {
+        "bionic": 1,
+        "glibc": 18,
+        "musl": 1
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ]
+    },
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "Little-endian AArch64 is an identity invariant; feature work remains owned by the parser contract.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "elf.data.little-endian",
+      "firstFailureLayers": {},
+      "identityCount": 20,
+      "identityKeys": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "cpython",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu bash",
+        "gnu coreutils",
+        "gnu nano",
+        "jq",
+        "nginx",
+        "node.js",
+        "openssl",
+        "perl",
+        "postgresql",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "identityPercent": 100.0,
+      "producerCoverage": {
+        "alpine-musl-gcc": 1,
+        "autotools-gcc": 11,
+        "cmake-gcc": 1,
+        "configure-gcc": 2,
+        "go": 1,
+        "make-gcc": 2,
+        "rustc": 1,
+        "termux-clang": 1
+      },
+      "projectIds": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "runtimeCoverage": {
+        "bionic": 1,
+        "glibc": 18,
+        "musl": 1
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ]
+    },
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "AArch64 identity is the product boundary and is not promoted by ecology frequency.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "elf.machine.AArch64",
+      "firstFailureLayers": {},
+      "identityCount": 20,
+      "identityKeys": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "cpython",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu bash",
+        "gnu coreutils",
+        "gnu nano",
+        "jq",
+        "nginx",
+        "node.js",
+        "openssl",
+        "perl",
+        "postgresql",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "identityPercent": 100.0,
+      "producerCoverage": {
+        "alpine-musl-gcc": 1,
+        "autotools-gcc": 11,
+        "cmake-gcc": 1,
+        "configure-gcc": 2,
+        "go": 1,
+        "make-gcc": 2,
+        "rustc": 1,
+        "termux-clang": 1
+      },
+      "projectIds": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "runtimeCoverage": {
+        "bionic": 1,
+        "glibc": 18,
+        "musl": 1
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "busybox",
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ]
+    },
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "Dynamic PIE observations feed layer-specific parser and outer-profile planning; they do not widen a support row by themselves.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "elf.type.ET_DYN",
+      "firstFailureLayers": {},
+      "identityCount": 18,
+      "identityKeys": [
+        "busybox",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu bash",
+        "gnu coreutils",
+        "gnu nano",
+        "jq",
+        "nginx",
+        "node.js",
+        "openssl",
+        "perl",
+        "postgresql",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "identityPercent": 90.0,
+      "producerCoverage": {
+        "alpine-musl-gcc": 1,
+        "autotools-gcc": 10,
+        "cmake-gcc": 1,
+        "configure-gcc": 2,
+        "make-gcc": 2,
+        "rustc": 1,
+        "termux-clang": 1
+      },
+      "projectIds": [
+        "busybox",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "runtimeCoverage": {
+        "bionic": 1,
+        "glibc": 16,
+        "musl": 1
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "busybox",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "nodejs",
+        "openssl",
+        "perl",
+        "postgresql",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ]
+    },
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "ET_EXEC remains a retained rejection boundary; any future change requires a separate outer-profile contract.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "elf.type.ET_EXEC",
+      "firstFailureLayers": {},
+      "identityCount": 2,
+      "identityKeys": [
+        "caddy",
+        "cpython"
+      ],
+      "identityPercent": 10.0,
+      "producerCoverage": {
+        "autotools-gcc": 1,
+        "go": 1
+      },
+      "projectIds": [
+        "caddy",
+        "python"
+      ],
+      "runtimeCoverage": {
+        "glibc": 2
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "caddy",
+        "python"
+      ]
+    },
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "The loader identity is runtime evidence; glibc semantics require the runtime matrix and an explicit oracle.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "loader./lib/ld-linux-aarch64.so.1",
+      "firstFailureLayers": {},
+      "identityCount": 18,
+      "identityKeys": [
+        "caddy",
+        "cmake",
+        "cpython",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu bash",
+        "gnu coreutils",
+        "gnu nano",
+        "jq",
+        "nginx",
+        "openssl",
+        "perl",
+        "postgresql",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "identityPercent": 90.0,
+      "producerCoverage": {
+        "autotools-gcc": 11,
+        "cmake-gcc": 1,
+        "configure-gcc": 2,
+        "go": 1,
+        "make-gcc": 2,
+        "rustc": 1
+      },
+      "projectIds": [
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ],
+      "runtimeCoverage": {
+        "glibc": 18
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "caddy",
+        "cmake",
+        "curl",
+        "ffmpeg",
+        "git",
+        "gnu-bash",
+        "gnu-coreutils",
+        "jq",
+        "nano",
+        "nginx",
+        "openssl",
+        "perl",
+        "postgresql",
+        "python",
+        "redis",
+        "ripgrep",
+        "sqlite",
+        "vim"
+      ]
+    },
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "The musl loader identity is retained as an environment fact until a reviewed runtime lane proves a broader claim.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "loader./lib/ld-musl-aarch64.so.1",
+      "firstFailureLayers": {},
+      "identityCount": 1,
+      "identityKeys": [
+        "busybox"
+      ],
+      "identityPercent": 5.0,
+      "producerCoverage": {
+        "alpine-musl-gcc": 1
+      },
+      "projectIds": [
+        "busybox"
+      ],
+      "runtimeCoverage": {
+        "musl": 1
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "busybox"
+      ]
+    },
+    {
+      "diagnostics": {},
+      "disposition": {
+        "reason": "The bionic loader identity is retained as an environment fact and does not promote Android packaging support.",
+        "source": "reviewed-feature-dispositions",
+        "status": "deferred"
+      },
+      "feature": "loader./system/bin/linker64",
+      "firstFailureLayers": {},
+      "identityCount": 1,
+      "identityKeys": [
+        "node.js"
+      ],
+      "identityPercent": 5.0,
+      "producerCoverage": {
+        "termux-clang": 1
+      },
+      "projectIds": [
+        "nodejs"
+      ],
+      "runtimeCoverage": {
+        "bionic": 1
+      },
+      "thresholdTriggered": true,
+      "variants": [
+        "nodejs"
+      ]
+    }
+  ],
+  "firstFailureLayers": {},
+  "firstFailures": [],
+  "identityCount": 20,
+  "identityKeys": [
+    "busybox",
+    "caddy",
+    "cmake",
+    "curl",
+    "ffmpeg",
+    "git",
+    "gnu-bash",
+    "gnu-coreutils",
+    "jq",
+    "nano",
+    "nginx",
+    "nodejs",
+    "openssl",
+    "perl",
+    "postgresql",
+    "python",
+    "redis",
+    "ripgrep",
+    "sqlite",
+    "vim"
+  ],
+  "layerCounts": {
+    "baseline": {
+      "accepted-and-runs": 1,
+      "not-applicable": 19
+    },
+    "hostContext": {
+      "not-applicable": 20
+    },
+    "outerWrapper": {
+      "not-applicable": 20
+    },
+    "static": {
+      "accepted-and-runs": 18,
+      "expected-rejected": 2
+    }
+  },
+  "loaderCoverage": {
+    "/lib/ld-linux-aarch64.so.1": 18,
+    "/lib/ld-musl-aarch64.so.1": 1,
+    "/system/bin/linker64": 1
+  },
+  "observationSources": {
+    "registry-baseline": 20
+  },
+  "observedProjectCount": 20,
+  "pageSizeCoverage": {
+    "4096": 20
+  },
+  "producerCoverage": {
+    "alpine-musl-gcc": 1,
+    "autotools-gcc": 11,
+    "cmake-gcc": 1,
+    "configure-gcc": 2,
+    "go": 1,
+    "make-gcc": 2,
+    "rustc": 1,
+    "termux-clang": 1
+  },
+  "projectIdentityGroups": {
+    "busybox": [
+      "busybox"
+    ],
+    "caddy": [
+      "caddy"
+    ],
+    "cmake": [
+      "cmake"
+    ],
+    "cpython": [
+      "python"
+    ],
+    "curl": [
+      "curl"
+    ],
+    "ffmpeg": [
+      "ffmpeg"
+    ],
+    "git": [
+      "git"
+    ],
+    "gnu bash": [
+      "gnu-bash"
+    ],
+    "gnu coreutils": [
+      "gnu-coreutils"
+    ],
+    "gnu nano": [
+      "nano"
+    ],
+    "jq": [
+      "jq"
+    ],
+    "nginx": [
+      "nginx"
+    ],
+    "node.js": [
+      "nodejs"
+    ],
+    "openssl": [
+      "openssl"
+    ],
+    "perl": [
+      "perl"
+    ],
+    "postgresql": [
+      "postgresql"
+    ],
+    "redis": [
+      "redis"
+    ],
+    "ripgrep": [
+      "ripgrep"
+    ],
+    "sqlite": [
+      "sqlite"
+    ],
+    "vim": [
+      "vim"
+    ]
+  },
+  "projectIds": [
+    "busybox",
+    "caddy",
+    "cmake",
+    "curl",
+    "ffmpeg",
+    "git",
+    "gnu-bash",
+    "gnu-coreutils",
+    "jq",
+    "nano",
+    "nginx",
+    "nodejs",
+    "openssl",
+    "perl",
+    "postgresql",
+    "python",
+    "redis",
+    "ripgrep",
+    "sqlite",
+    "vim"
+  ],
+  "records": [
+    {
+      "artifact": "gnu-bash/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "GNU Bash",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "gnu-bash",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "busybox/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-musl-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "BusyBox",
+      "layers": {
+        "baseline": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-musl-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "alpine-musl-gcc",
+      "projectId": "busybox",
+      "runtime": "musl"
+    },
+    {
+      "artifact": "gnu-coreutils/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "GNU coreutils",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "gnu-coreutils",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "curl/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "curl",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "curl",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "git/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "Git",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "make-gcc",
+      "projectId": "git",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "openssl/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "OpenSSL",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "openssl",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "perl/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "Perl",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "perl",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "sqlite/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "SQLite",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "sqlite",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "vim/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "Vim",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "vim",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "nano/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "GNU nano",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "nano",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "jq/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "jq",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "jq",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "ripgrep/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "ripgrep",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "rustc",
+      "projectId": "ripgrep",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "cmake/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "CMake",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "cmake-gcc",
+      "projectId": "cmake",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "ffmpeg/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "FFmpeg",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "configure-gcc",
+      "projectId": "ffmpeg",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "nginx/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "nginx",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "configure-gcc",
+      "projectId": "nginx",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "nodejs/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./system/bin/linker64"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "Node.js",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/system/bin/linker64",
+      "pageSize": "4096",
+      "producer": "termux-clang",
+      "projectId": "nodejs",
+      "runtime": "bionic"
+    },
+    {
+      "artifact": "python/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_EXEC",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "CPython",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "expected-rejected",
+          "expected": "expected-rejected",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "python",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "postgresql/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "PostgreSQL",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "autotools-gcc",
+      "projectId": "postgresql",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "redis/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_DYN",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "Redis",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "make-gcc",
+      "projectId": "redis",
+      "runtime": "glibc"
+    },
+    {
+      "artifact": "caddy/result.json",
+      "features": [
+        "elf.class.ELF64",
+        "elf.data.little-endian",
+        "elf.machine.AArch64",
+        "elf.type.ET_EXEC",
+        "loader./lib/ld-linux-aarch64.so.1"
+      ],
+      "fingerprintSource": "registry-baseline",
+      "firstFailureLayer": null,
+      "identityKey": "Caddy",
+      "layers": {
+        "baseline": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "hostContext": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "outerWrapper": {
+          "actual": "not-applicable",
+          "expected": "not-applicable",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        },
+        "static": {
+          "actual": "expected-rejected",
+          "expected": "expected-rejected",
+          "reason": "Registry policy baseline; CI oracle has not been acquired.",
+          "status": "metadata-only"
+        }
+      },
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "pageSize": "4096",
+      "producer": "go",
+      "projectId": "caddy",
+      "runtime": "glibc"
+    }
+  ],
+  "requiredProjectCount": 20,
+  "resultClassification": {
+    "accepted-and-runs": 19,
+    "expected-rejected": 2,
+    "not-applicable": 59
+  },
+  "runtimeCoverage": {
+    "bionic": 1,
+    "glibc": 18,
+    "musl": 1
+  },
+  "schemaVersion": 2,
+  "tier": "pr",
+  "unexpectedOutcomes": []
+}

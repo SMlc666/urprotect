@@ -43,6 +43,9 @@ class RealSampleManifestTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         projects = self.manifest["corpus"]["projects"]
         self.assertEqual(len(projects), 20)
+        self.assertEqual(self.manifest["corpus"]["targetProjectCount"], 100)
+        self.assertEqual(self.manifest["corpus"]["expansion"]["currentApproved"], 20)
+        self.assertEqual(self.manifest["corpus"]["expansion"]["approvedTarget"], 100)
         self.assertEqual(len({project["projectId"] for project in projects}), 20)
         self.assertEqual(len({project["identityKey"] for project in projects}), 20)
         self.assertEqual(
@@ -51,7 +54,8 @@ class RealSampleManifestTests(unittest.TestCase):
         )
 
     def test_candidate_ledger_is_broader_than_locked_selection(self) -> None:
-        self.assertGreaterEqual(len(self.candidates["candidates"]), 20)
+        self.assertGreaterEqual(len(self.candidates["candidates"]), 40)
+        self.assertTrue(all(len(candidate["provenance"]["archiveSha256"]) == 64 for candidate in self.candidates["candidates"]))
         selected = {
             candidate["projectId"]
             for candidate in self.candidates["candidates"]
@@ -59,6 +63,13 @@ class RealSampleManifestTests(unittest.TestCase):
         }
         self.assertEqual(selected, {project["projectId"] for project in self.manifest["corpus"]["projects"]})
         self.assertTrue(any(candidate["disposition"] in {"rejected", "deferred"} for candidate in self.candidates["candidates"]))
+
+    def test_duplicate_candidate_identity_is_rejected(self) -> None:
+        candidates = copy.deepcopy(self.candidates)
+        candidates["candidates"][20]["identityKey"] = candidates["candidates"][0]["identityKey"]
+        result = self.validate(candidates=candidates)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("distinct upstream project", result.stderr or result.stdout)
 
     def test_malformed_archive_hash_is_rejected(self) -> None:
         data = copy.deepcopy(self.manifest)

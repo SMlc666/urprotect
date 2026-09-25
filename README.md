@@ -268,11 +268,14 @@ benchmark, and Android evidence is uploaded even when the job fails.
 
 The repository also tracks a locked ecology corpus in
 [`fixtures/real-samples/manifest.json`](fixtures/real-samples/manifest.json). It
-contains exactly 20 distinct public AArch64 project identities, including
-Debian/glibc applications, an Alpine/musl BusyBox rootfs, a public
-Termux/bionic Node.js artifact, and real ET_EXEC boundaries. `candidates.json` retains rejected/deferred
-public candidates and `selection.md` explains the feature/runtime covering
-rationale. No raw archive or ELF binary is committed.
+contains the current approved slice of exactly 20 distinct public AArch64
+project identities and an approved target of 100, including Debian/glibc
+applications, an Alpine/musl BusyBox rootfs, a public Termux/bionic Node.js
+artifact, and real ET_EXEC boundaries. `candidates.json` retains exact
+hash-locked, license-labelled rejected/deferred public candidates and
+`selection.md` explains the feature/runtime covering rationale and the
+current evidence-backed shortfall of 80 identities. No raw archive or ELF
+binary is committed.
 
 Local validation remains metadata-only and sample-free:
 
@@ -281,9 +284,18 @@ python3 scripts/validate-real-samples.py \
   fixtures/real-samples/manifest.json \
   --candidates fixtures/real-samples/candidates.json --tier pr
 python3 tests/test_real_sample_manifest.py
+python3 tests/test_real_sample_fingerprint.py
+python3 tests/test_real_sample_evidence.py
+python3 tests/test_real_sample_security.py
 ```
 
-Every pull request runs the full 20-project suite on the native
+The checked-in metadata-only baseline aggregate is
+[`fixtures/real-samples/baseline-aggregate.json`](fixtures/real-samples/baseline-aggregate.json).
+CI renders schema-2 aggregate evidence with distinct-identity feature
+frequencies, producer/runtime/loader/page-size coverage, diagnostics, and
+first-failure layers. Baseline metadata does not promote product support.
+
+Every pull request runs the full currently approved 20-project suite on the native
 `ubuntu-24.04-arm` runner; no affected-path or sample filter can reduce it.
 Scheduled runs use the same registry and runner as `nightly`, and published
 releases use it as `release`, adding retention/repeat strength without

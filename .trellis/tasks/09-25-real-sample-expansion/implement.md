@@ -10,23 +10,23 @@
 
 ## Checklist
 
-- [ ] Baseline current registry, candidate ledger, fingerprint, evidence, and
+- [x] Baseline current registry, candidate ledger, fingerprint, evidence, and
       result schemas.
-- [ ] Capture current 20-project aggregate and identify missing fingerprint
+- [x] Capture current 20-project aggregate and identify missing fingerprint
       fields.
-- [ ] Extend bounded inspection and normalized schema for relocation/PLT/GOT,
+- [x] Extend bounded inspection and normalized schema for relocation/PLT/GOT,
       dependency graph/path tags, symbol versions, TLS, GNU properties,
       hardening, producer, loader, and page size.
-- [ ] Add schema and security tests for missing/unknown/oversized fields.
-- [ ] Add shared first-failure/result normalization without duplicating runner
+- [x] Add schema and security tests for missing/unknown/oversized fields.
+- [x] Add shared first-failure/result normalization without duplicating runner
       policy logic.
-- [ ] Add feature-frequency aggregation over distinct project identities.
-- [ ] Add report fixtures/golden output and stable schema versioning.
-- [ ] Review and add public candidates in increments; preserve licenses,
+- [x] Add feature-frequency aggregation over distinct project identities.
+- [x] Add report fixtures/golden output and stable schema versioning.
+- [x] Review and add public candidates in increments; preserve licenses,
       archive/extracted hashes, internal paths, and selection rationale.
-- [ ] Run metadata validation after each increment.
+- [x] Run metadata validation after each increment.
 - [ ] Run CI-only sample execution on native ARM64 and verify evidence gates.
-- [ ] Publish the histogram/disposition artifact for the next feature children.
+- [x] Publish the histogram/disposition artifact for the next feature children.
 
 ## Validation
 
@@ -37,6 +37,9 @@ python3 tests/test_real_sample_manifest.py
 python3 tests/test_real_sample_fingerprint.py
 python3 tests/test_real_sample_evidence.py
 python3 tests/test_real_sample_security.py
+python3 tests/test_real_sample_aggregate.py
+python3 -m py_compile scripts/*.py
+bash -n scripts/run-real-sample-matrix.sh
 python3 scripts/check-real-sample-evidence.py \
   fixtures/real-samples/manifest.json \
   --candidates fixtures/real-samples/candidates.json \

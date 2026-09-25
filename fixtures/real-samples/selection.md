@@ -1,6 +1,6 @@
 # Selected public AArch64 sample projects
 
-The registry freezes exactly 20 distinct upstream project identities. The
+The registry freezes the current approved slice at exactly 20 distinct upstream project identities and preserves an approved target of 100. The target is not met by counting build/runtime variants. The
 artifacts are public, versioned, and SHA-256 locked in `manifest.json` and
 `candidates.json`. The table is a selection rationale, not a claim that every
 project is executable by every UrProtect profile.
@@ -28,6 +28,14 @@ project is executable by every UrProtect profile.
 | Redis | Debian `redis-tools` (`redis-check-rdb`) | glibc | Redis utility executable and package/runtime distinction |
 | Caddy | Debian `caddy` | glibc | Go-produced server executable with a different binary profile |
 
+## Expansion disposition
+
+- Current approved identities: **20**.
+- Approved target: **100**.
+- Evidence-backed shortfall: **80**.
+- `candidates.json` contains 26 deferred/rejected public candidates with exact archive SHA-256 values, extracted paths, upstream license/reuse facts, and selection reasons. The reviewed Debian ARM64 wave is intentionally not promoted until native CI retains static fingerprints and first-failure evidence, and until runtime/producer diversity is sustained.
+- The next wave may promote only distinct `identityKey` values; a libc, distribution, package build, or version variant remains nested metadata. If provenance, license, extraction, or runtime evidence cannot be maintained, the candidate remains deferred and this exact shortfall is reported instead of inventing coverage.
+
 ## Coverage notes
 
 - Project identity, not package count, determines the 20 total.
@@ -41,6 +49,8 @@ project is executable by every UrProtect profile.
   tags are retained as observed evidence; they are not guessed support claims.
 - Candidates that duplicate the same producer/runtime shape or lack a stable
   public hash remain in `candidates.json` with a rejected/deferred reason.
+- The checked-in baseline aggregate is a metadata-only histogram; it has no raw
+  archives or ELF files and must not be read as a support-status update.
 
 ## Deliberate boundaries
 

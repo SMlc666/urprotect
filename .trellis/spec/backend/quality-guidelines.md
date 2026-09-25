@@ -119,8 +119,9 @@ ASLR addresses and timing.
 ## Public real-sample CI corpus
 
 `fixtures/real-samples/manifest.json` is a separate ecology evidence layer from
-`fixtures/manifest.json`. It locks exactly 20 distinct public AArch64 upstream
-project identities, archive/version/file hashes, extracted paths, runtime facts,
+`fixtures/manifest.json`. It locks the current approved slice of exactly 20
+distinct public AArch64 upstream project identities, records an approved target
+of 100, and retains archive/version/file hashes, extracted paths, runtime facts,
 and layer policies. A libc/build variant is an attribute of one identity and
 never another corpus count. The candidate ledger and selection report retain
 why selected, rejected, and deferred public candidates differ.
@@ -138,7 +139,7 @@ before network access. CI downloads into `RUNNER_TEMP`, checks immutable
 archive SHA-256, rejects archive traversal/special links, checks the declared
 extracted-file path, and deletes the temporary tree after each run. Raw input
 archives, ELF files, and rootfs contents are never uploaded. Every PR runs all
-20 projects; no diff-path, label, or affected-sample filter is allowed.
+approved projects; no diff-path, label, or affected-sample filter is allowed.
 Nightly and release reuse the exact registry and oracle implementation and may
 only add repetition/retention/environment strength.
 
@@ -150,7 +151,9 @@ process count, output, and cleanup. A missing isolation capability is
 contract is an explicit `not-applicable` result, never a silent skip. The
 runner and `check-real-sample-evidence.py` retain normalized fingerprint,
 bounded readelf output, UrProtect JSON, hashes, environment facts, result
-classification, per-sample logs, and aggregate coverage.
+classification, per-sample logs, and schema-2 aggregate coverage. The shared
+first-failure taxonomy is `acquisition`, `fingerprint`, `parse-model`,
+`static-validation`, `outer`, `host-context`, or `environment`.
 
 Real observations do not promote support. A parser/validator, packer, launcher,
 native-runtime, fixture-contract, or compatibility-document change must list
@@ -159,3 +162,84 @@ result, and evidence path in the plan. A new support claim still needs a
 controlled positive fixture, nearest-negative fixture, stable diagnostic, and
 updated contract/docs. `unexpected-rejection` and `unexpected-acceptance`
 keep the compatibility task open until classified and resolved.
+
+### Scenario: schema-2 real-sample evidence and aggregate contract
+
+#### 1. Scope / Trigger
+
+Changes to the public real-sample inspector, CI runner, evidence gate,
+aggregate renderer, registry validator, or candidate ledger must preserve one
+bounded schema across `pr`, `nightly`, and `release`. The checked-in baseline
+is metadata-only; only the native CI artifact root is execution evidence.
+
+#### 2. Signatures
+
+```sh
+python3 scripts/inspect-real-sample.py \
+  --input ELF --output FINGERPRINT_JSON --readelf-output READELF_TXT \
+  --project-id PROJECT_ID --producer PRODUCER --runtime RUNTIME
+python3 scripts/render-real-sample-report.py MANIFEST --tier TIER \
+  --artifact-root ARTIFACT_ROOT --require-evidence
+python3 scripts/check-real-sample-evidence.py MANIFEST --tier TIER \
+  --artifact-root ARTIFACT_ROOT
+```
+
+#### 3. Contracts
+
+- Fingerprints and per-sample results use schema version `2`; normalized
+  feature objects are bounded and retain `unknownFields` instead of guessing.
+- Results contain all four layers (`static`, `baseline`, `outerWrapper`, and
+  `hostContext`) and use only the shared result vocabulary. `firstFailureLayer`
+  is one of `acquisition`, `fingerprint`, `parse-model`,
+  `static-validation`, `outer`, `host-context`, or `environment`.
+- Schema-2 aggregate output contains `identityCount`, `coverage` with target,
+  current count, and shortfall, `featureHistogram`, `firstFailureLayers`, and
+  project IDs. Feature frequency is counted by distinct `identityKey`, not by
+  variants.
+- Features at or above 5% require a matching entry in
+  `fixtures/real-samples/feature-dispositions.json`; a disposition never
+  changes product support status.
+- Raw archives, ELF files, extracted roots, and temporary runner paths are
+  removed or sanitized before artifact upload. `raw-inputs-removed.txt` is a
+  required postcondition for each schema-2 sample.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| schema-1 sample/result/aggregate evidence | evidence gate rejects it |
+| duplicate `identityKey` or candidate provenance drift | registry validator rejects it |
+| missing layer or unsupported result vocabulary | evidence gate rejects it |
+| missing target/shortfall consistency | evidence gate rejects aggregate |
+| threshold feature without reviewed disposition | evidence gate rejects aggregate |
+| bounded tool output or unknown field | retain bounded evidence with `unknownFields` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: native CI writes schema-2 evidence, sanitizes runner paths, renders a
+  distinct-identity histogram, and the post-run gate verifies every record.
+- Base: the metadata-only baseline reports the current 20/100 coverage and is
+  clearly labeled `registry-baseline`.
+- Bad: a report infers support from a feature tag, counts a libc variant as a
+  new identity, or uploads a raw archive/temp-root path.
+
+#### 6. Tests Required
+
+- Manifest tests assert identity uniqueness, provenance equality, target count,
+  candidate hashes, and variant non-inflation.
+- Fingerprint tests assert schema-2 fields, canonical ELF names, and output
+  bounds against a real local ELF without acquiring a corpus sample.
+- Aggregate tests assert deterministic baseline regeneration, feature
+  projection, first-failure normalization, and required-evidence failure.
+- Evidence/security tests assert all-layer coverage, threshold dispositions,
+  cleanup markers, raw-file rejection, and archive traversal rejection.
+- Native CI must run the full approved registry, render the aggregate, then run
+  the evidence gate; local metadata tests never substitute for that oracle.
+
+#### 7. Wrong vs Correct
+
+```text
+Wrong: accept a schema-1 result because its directory and JSON are non-empty.
+Correct: require schema-2 fields, all layer results, cleanup marker, and a
+         target-consistent aggregate before upload can pass.
+```
