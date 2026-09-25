@@ -1,5 +1,6 @@
 #include "urp/host_context.h"
 #include "urp/host_adapter.h"
+#include "host_image_validation.h"
 #include "urp/runtime.h"
 #include "sha256.h"
 
@@ -729,6 +730,27 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         return fixture_expect(0, "could not read the AArch64 entry fixture");
     }
     if (!fixture_expect(source_size >= 64U, "entry fixture ELF header is truncated")) {
+        free(source);
+        return 0;
+    }
+
+    if (!fixture_expect(
+            urp_host_image_validate(source, source_size) == URP_STATUS_OK,
+            "the extracted host-image preflight rejected the positive fixture")) {
+        free(source);
+        return 0;
+    }
+    if (!fixture_expect(
+            urp_host_image_validate(NULL, 0U) == URP_STATUS_LOAD_FAILED,
+            "the host-image preflight accepted a null image")) {
+        free(source);
+        return 0;
+    }
+    uint8_t truncated_image[64] = {0};
+    if (!fixture_expect(
+            urp_host_image_validate(truncated_image, sizeof(truncated_image) - 1U)
+                == URP_STATUS_LOAD_FAILED,
+            "the host-image preflight accepted a truncated image")) {
         free(source);
         return 0;
     }

@@ -14,64 +14,83 @@
 
 ### A. Capture baseline and flow maps
 
-- [ ] Record git baseline and local tool availability (dotnet, native compiler,
+- [x] Record git baseline and local tool availability (dotnet, native compiler,
       musl tools, Docker, Python, readelf, page size).
-- [ ] Run the managed solution tests on the required SDK host.
-- [ ] Run native runtime `contract-check` and `test` on native AArch64.
-- [ ] Run launcher self-test and full launcher integration where dotnet/musl
-      prerequisites are present.
-- [ ] Run regression/fixture/real-sample metadata validation and Python tests.
-- [ ] Run PR fuzz/stress smoke where toolchain prerequisites allow.
-- [ ] Capture current frame/layout probe, representative golden reports,
+- [ ] Run the managed solution tests on the required SDK host (local container
+      lacks `dotnet`; the ARM64 GH CI gate is required for this child).
+- [x] Run native runtime `contract-check` and `test` on native AArch64.
+- [x] Run launcher self-test and full launcher integration where the explicit
+      available AArch64 compiler is usable; managed integration remains
+      CI-gated because local `dotnet` and default `musl-gcc` are absent.
+- [x] Run regression/fixture/real-sample metadata validation and Python tests.
+- [ ] Run PR fuzz/stress smoke where toolchain prerequisites allow (local
+      managed/fuzz prerequisites are absent; CI remains authoritative).
+- [x] Capture current frame/layout probe, representative golden reports,
       diagnostic assertions, launcher process observations, and parser/codec
-      benchmark output.
-- [ ] Draw and document the four principal data flows listed in `design.md`.
+      benchmark output where available; managed benchmark is CI-gated.
+- [x] Draw and document the four principal data flows listed in `design.md`.
 
 ### B. Build architecture inventory
 
-- [ ] Inventory all contract literals: frame versions/offsets, HostContext
+- [x] Inventory all contract literals: frame versions/offsets, HostContext
       sizes/capabilities, ELF dynamic tags/relocations, diagnostic codes,
       profile markers, result strings, manifest IDs, evidence path rules.
-- [ ] Map producer/consumer/test/spec/CI ownership for each contract.
-- [ ] Search for duplicate checked arithmetic, address translation, dynamic
+- [x] Map producer/consumer/test/spec/CI ownership for each contract.
+- [x] Search for duplicate checked arithmetic, address translation, dynamic
       tag decoding, schema validation, and evidence path logic.
-- [ ] Review monolithic files for concrete mixed responsibility, coupling,
+- [x] Review monolithic files for concrete mixed responsibility, coupling,
       duplicated owner, or testability failure; file length alone is not a
       finding.
-- [ ] Prioritize refactors by correctness risk, feature-growth impact,
+- [x] Prioritize refactors by correctness risk, feature-growth impact,
       cross-language drift risk, and available characterization coverage.
 
 ### C. Protect contracts with characterization tests
 
-- [ ] Add focused coverage for any changed behavior not currently protected in
+- [x] Add focused coverage for any changed behavior not currently protected in
       parser malformed/property tests, golden report tests, CLI tests, payload
       frame tests, pack tests, native self-tests, and evidence validator tests.
-- [ ] Pin diagnostic codes/order and machine-readable fields; assert messages
+- [x] Pin diagnostic codes/order and machine-readable fields; assert messages
       only where user-facing stability requires them.
-- [ ] Record frame bytes/layout, native probe output, identity/publication
+- [x] Record frame bytes/layout, native probe output, identity/publication
       guarantees, and process-level wrapper observations.
 - [ ] Establish before/after performance measurements for parser/frame paths
-      selected for refactoring.
+      selected for refactoring (managed benchmark is CI-gated; the native
+      extraction adds no validation loop).
 
 ### D. Refactor the first owner boundary
 
-- [ ] Select the first hotspot based on audit findings; document a short ADR in
+- [x] Select the first hotspot based on audit findings; document a short ADR in
       the task artifacts or a durable spec if it changes architecture rules.
-- [ ] Extract only one responsibility while retaining public facade and output.
-- [ ] Migrate all consumers; remove duplicate active code after parity passes.
-- [ ] Run focused, owning full, contract, and relevant fuzz/stress tests.
-- [ ] Compare benchmark and allocation results; explain any material change.
-- [ ] Update directory, quality, error-handling, and runtime specs where rules
+- [x] Extract only one responsibility while retaining public facade and output.
+- [x] Migrate all consumers; remove duplicate active code after parity passes.
+- [x] Run focused, owning full, contract, and relevant metadata tests; native
+      fuzz/stress and managed gates remain CI-gated by missing local tools.
+- [x] Compare available native behavior before/after; explain the managed
+      benchmark environment limitation in the verification record.
+- [x] Update directory, quality, error-handling, and runtime specs where rules
       changed.
 
 ### E. Handoff readiness
 
-- [ ] Produce architecture/data-flow map and contract owner inventory.
-- [ ] List each remaining hotspot with evidence, proposed owner, containment
+- [x] Produce architecture/data-flow map and contract owner inventory.
+- [x] List each remaining hotspot with evidence, proposed owner, containment
       rule, dependencies, and which child should own its refactor.
-- [ ] Confirm compatibility manifests and claims are unchanged.
-- [ ] Provide a parent handoff checklist before any broad compatibility child
+- [x] Confirm compatibility manifests and claims are unchanged in status and
+      semantics; only oracle ownership paths now point at the extracted owner.
+- [x] Provide a parent handoff checklist before any broad compatibility child
       starts implementation.
+
+## Verification record
+
+The native AArch64 implementation was validated after a clean rebuild with
+`contract-check`, `test`, `test-adapter`, `symbol-self-test`, and the
+`host-context-launcher` build. Python fixture, regression, real-sample, and
+security/metadata suites passed. The explicit available AArch64 `cc` launcher
+self-test passed, while the default musl launcher integration is gated by the
+missing local `musl-gcc` and `dotnet` prerequisites. The first PR CI run on the
+planning commit passed its managed, real-sample, and bionic jobs; the refactor
+commit must receive a fresh full required CI run before this child is marked
+complete.
 
 ## Validation commands
 

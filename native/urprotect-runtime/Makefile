@@ -26,6 +26,7 @@ PROPERTY_FIXTURE := $(BUILD_DIR)/host-context-property-fixture.so
 PROPERTY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-property-fixture.o
 RUNTIME_OBJECTS := $(BUILD_DIR)/runtime.o $(BUILD_DIR)/sha256.o $(BUILD_DIR)/miniz_tinfl.o
 RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
+RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl
 
@@ -78,9 +79,9 @@ $(HOST_CONTEXT_LAUNCHER): $(BUILD_DIR)/host_context_launcher.o $(RUNTIME_OBJECTS
 	$(CC) $(CFLAGS) $(BUILD_DIR)/host_context_launcher.o $(RUNTIME_OBJECTS) $(LDLIBS) -o "$@"
 	chmod 0755 "$@"
 
-$(SYMBOL_SELF_TEST): $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o
+$(SYMBOL_SELF_TEST): $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CFLAGS) $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o -ldl -o "$@"
+	$(CC) $(CFLAGS) $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -o "$@"
 
 $(ENTRY_FIXTURE): $(ENTRY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
@@ -122,7 +123,7 @@ $(PROPERTY_FIXTURE_OBJECT): host_context_property_fixture.c include/urp/host_con
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -mbranch-protection=bti -c "$<" -o "$@"
 
-$(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c include/urp/host_context.h include/urp/runtime.h
+$(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c host_image_validation.h include/urp/host_context.h include/urp/runtime.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
@@ -142,9 +143,13 @@ $(BUILD_DIR)/runtime.o: runtime.c include/urp/host_context.h include/urp/runtime
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
-$(BUILD_DIR)/host_adapter.o: host_adapter.c include/urp/host_context.h include/urp/host_adapter.h
+$(BUILD_DIR)/host_adapter.o: host_adapter.c host_image_validation.h include/urp/host_context.h include/urp/host_adapter.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
+
+$(BUILD_DIR)/host_image_validation.o: host_image_validation.c host_image_validation.h include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
 $(BUILD_DIR)/sha256.o: ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h
 	@mkdir -p "$(BUILD_DIR)"

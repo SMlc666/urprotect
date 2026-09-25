@@ -143,7 +143,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["witness"],
             "native/urprotect-runtime/host_context_tls_fixture.c",
         )
-        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn(
             "native/urprotect-runtime/host_context_tls_fixture.c",
             feature["evidence"],
@@ -183,7 +183,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["witness"],
             "native/urprotect-runtime/host_context_property_fixture.c",
         )
-        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn(
             ".artifacts/host-context/managed/property-result.txt",
             feature["evidence"],
@@ -312,7 +312,7 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertEqual(
             feature["oracle"],
-            "native/urprotect-runtime/host_adapter.c",
+            "native/urprotect-runtime/host_image_validation.c",
         )
         self.assertIn("DT_TEXTREL", feature["obligation"])
         self.assertIn("writable-text relocation", feature["reason"])
@@ -323,7 +323,7 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertEqual(
             feature["negativeOracle"],
-            "native/urprotect-runtime/host_adapter.c",
+            "native/urprotect-runtime/host_image_validation.c",
         )
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertIn(
@@ -386,7 +386,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["witness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_image_validation.c")
         for relocation_tag in (
             "DT_REL",
             "DT_RELSZ",
@@ -404,7 +404,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["negativeWitness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertIn(
             ".trellis/spec/backend/runtime-compatibility.md",
@@ -464,7 +464,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["negativeWitness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
         self.assertTrue(
@@ -497,7 +497,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["negativeWitness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
         self.assertTrue(

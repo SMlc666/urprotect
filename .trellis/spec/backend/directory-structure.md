@@ -24,7 +24,9 @@ fixtures/
 └── samples/                     # C, C++, Rust, Go, Zig, NativeAOT, Android
 scripts/                         # fixture, fuzz, release, and CI helpers
 .github/scripts/                 # CI environment and Android probes
-native/urprotect-launcher/       # static AArch64 Wrapper 0.2 runtime
+native/
+├── urprotect-launcher/          # static AArch64 Wrapper 0.2 runtime
+└── urprotect-runtime/           # HostContext ABI, preflight, and native adapter
 third_party/                     # pinned AsmStone and miniz source/notices
 ```
 
@@ -47,6 +49,13 @@ host. Do not create those directories as part of a parser or packer change.
   write to stdout or stderr.
 - Keep fixture generation and external tool invocation in `scripts/` and
   `fixtures/`, never in parser or model code.
+- Keep bounded HostContext ELF preflight in
+  `native/urprotect-runtime/host_image_validation.c`; it owns checked image
+  metadata, dynamic-table, relocation, and program-header validation before
+  loader handoff.
+- Keep memfd, sealing, loader, symbol lookup, and image-release ownership in
+  `native/urprotect-runtime/host_adapter.c`; it calls the preflight boundary
+  before creating an image handle and must not duplicate its byte validation.
 
 ## Naming
 

@@ -10,6 +10,8 @@ offset or limit.
 | ELF64 class, machine, type, program-header sizes and dynamic tags | `src/UrProtect.Core/Elf/ElfTypes.cs` | `ElfParser`, `ElfValidator`, `ElfFixture`, parser tests | production ELF contract |
 | Frame v1/v2 migration layouts plus current v3 profile header, trailer, digest and field offsets | `native/urprotect-runtime/include/urp/payload_frame.h` and `PayloadFrameCodec` | native runtime, profile launchers, frame tests, contract probe | cross-language wire contract |
 | HostContext ABI, capabilities, minimum structure sizes | `native/urprotect-runtime/include/urp/host_context.h` and `HostContextContract` | runtime, adapter, frame tests, contract probe | cross-language ABI contract |
+| HostContext image preflight and bounded ELF feature rejection | `native/urprotect-runtime/host_image_validation.c` | `host_adapter.c`, native self-test, fixture matrix | native preflight owner; runs before image-handle creation |
+| Sealed image resource lifetime, loader handoff, symbol lookup, release | `native/urprotect-runtime/host_adapter.c` | runtime, native self-tests, fixture matrix | native adapter lifecycle owner; delegates byte validation |
 | Native frame limits | `payload_frame.h` / `PayloadFrameLimits` | launcher, runtime, codec tests | shared safety limit |
 | Profile-specific launcher ABI markers and managed launcher validation | `src/UrProtect.Core/Pack/LauncherContract.cs` | `ElfPackService`, profile launcher tests | launcher contract |
 | Synthetic ELF offsets and segment layout | `tests/UrProtect.Core.Tests/ElfFixture.cs` | parser, pack, and property tests | named fixture data |

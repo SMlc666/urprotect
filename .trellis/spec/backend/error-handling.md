@@ -8,6 +8,10 @@ address conversion, and dynamic-table traversal must be checked before a read,
 allocation, or conversion. The parser reports structured diagnostics instead
 of repairing bytes or guessing code/data boundaries.
 
+Native HostContext image validation follows the same fail-closed rule in
+`native/urprotect-runtime/host_image_validation.c`; `host_adapter.c` performs
+no memfd or loader handoff until that preflight succeeds.
+
 ## Error Types
 
 Use `DiagnosticCode` for stable machine-readable categories and `Diagnostic` for

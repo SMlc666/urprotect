@@ -7,6 +7,14 @@ verifies the selected frame and both payload digests, asks the host for an
 immutable image, resolves the declared entry symbol, invokes it, and releases
 the image before returning. v1/v2 remain isolated migration-test layouts.
 
+The native implementation has two deliberate ownership boundaries:
+`host_image_validation.c` owns bounded in-memory AArch64 ELF preflight (program
+headers, dynamic metadata, relocation targets, TLS, GNU properties, and
+unsupported-feature rejection), while `host_adapter.c` owns sealed-memfd
+creation, loader handoff, symbol lookup, and image release. The adapter invokes
+the preflight before it can create an image handle; it does not carry a second
+validation path.
+
 The native evidence adapter implements the contract with an anonymous memfd
 created with `MFD_ALLOW_SEALING` and the host's `dlopen`/`dlsym` loader through
 the generated virtual `/proc/self/fd/<N>` reference. After the verified source
