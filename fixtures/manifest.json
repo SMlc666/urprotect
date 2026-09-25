@@ -28,6 +28,24 @@
       ]
     },
     {
+      "id": "elf.identity.aarch64-et-exec",
+      "status": "proven",
+      "obligation": "The ELF parser classifies bounded AArch64 ET_EXEC images as observation data without implying outer launch or HostContext support.",
+      "witness": "c-gcc-glibc-et-exec",
+      "oracle": "src/UrProtect.Core/Elf/ElfValidator.cs",
+      "evidence": [
+        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/ElfFixture.cs",
+        "src/UrProtect.Core/Elf/ElfTypes.cs",
+        "src/UrProtect.Core/Elf/ElfValidator.cs"
+      ],
+      "negativeWitness": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs",
+      "negativeOracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "constraints": [
+        "This row proves parser/model observation only. Outer acceptance is separately recorded as elf.outer.dynamic-et-exec; static ET_EXEC remains un-packable and HostContext remains ET_DYN-only."
+      ]
+    },
+    {
       "id": "elf.load-layout.alignment-congruence",
       "status": "proven",
       "obligation": "Each AArch64 ET_DYN PT_LOAD with p_align greater than one uses a power-of-two alignment and congruent p_offset and p_vaddr residues, including non-page-sized alignment",
@@ -40,6 +58,25 @@
       ],
       "negativeWitness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
       "negativeOracle": "tests/UrProtect.Core.Tests/ElfParserTests.cs"
+    },
+    {
+      "id": "elf.outer.dynamic-et-exec",
+      "status": "validated",
+      "obligation": "outer-execveat accepts only dynamic AArch64 ET_EXEC executables with a supported native interpreter and preserves native process behavior through anonymous execveat handoff",
+      "witness": "c-gcc-glibc-et-exec",
+      "oracle": "scripts/run-packed-fixture-matrix.sh",
+      "evidence": [
+        "scripts/run-fixture-matrix.sh",
+        "scripts/run-packed-fixture-matrix.sh",
+        ".artifacts/packed/pr/c-gcc-glibc-et-exec"
+      ],
+      "negativeWitness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+      "negativeOracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "constraints": [
+        "Accepted predicate: AArch64 ELF64 little-endian ET_EXEC, executable entry in PT_LOAD, PT_DYNAMIC, PT_INTERP with an absolute path ending in ld-linux-aarch64.so.1 or ld-musl-aarch64.so.1, and no RPATH/RUNPATH.",
+        "Shared objects, static ET_EXEC, missing PT_INTERP, and unrecognized interpreters remain rejected.",
+        "This is outer-wrapper evidence only; HostContext semantics and frame ABI are unchanged."
+      ]
     },
     {
       "id": "elf.dynamic",
@@ -648,6 +685,36 @@
       "execution": "native-linux",
       "oracle": "scripts/run-fixture-matrix.sh",
       "evidence": ".artifacts/fixtures/pr/c-gcc-glibc-pie",
+      "host": {
+        "environment": "native-arm64-linux",
+        "libc": "glibc"
+      }
+    },
+    {
+      "id": "c-gcc-glibc-et-exec",
+      "features": [
+        "elf.outer.dynamic-et-exec",
+        "elf.identity.aarch64-et-exec",
+        "elf.dynamic",
+        "runtime.glibc"
+      ],
+      "language": "c",
+      "toolchain": "gcc",
+      "builder": "gcc-c-exec",
+      "runtime": "glibc",
+      "target": "aarch64-linux-gnu",
+      "artifact": "et-exec",
+      "source": "fixtures/samples/c/outer_exec_probe.c",
+      "processProbe": true,
+      "processArguments": [
+        "outer-probe",
+        "argument with spaces"
+      ],
+      "tier": "pr",
+      "required": true,
+      "execution": "native-linux",
+      "oracle": "scripts/run-packed-fixture-matrix.sh",
+      "evidence": ".artifacts/packed/pr/c-gcc-glibc-et-exec",
       "host": {
         "environment": "native-arm64-linux",
         "libc": "glibc"

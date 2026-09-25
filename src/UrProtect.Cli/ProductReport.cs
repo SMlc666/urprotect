@@ -194,7 +194,7 @@ public static class ProductReportFactory
             header.HeaderSize == ElfConstants.HeaderSize64 ? "ELF64" : $"0x{header.HeaderSize:X}",
             "little",
             header.Machine == ElfConstants.MachineAarch64 ? "AArch64" : $"0x{header.Machine:X}",
-            header.Type == ElfConstants.TypeDyn ? "ET_DYN" : $"0x{header.Type:X}",
+            header.TypeName,
             result.File.Kind.ToString());
     }
 

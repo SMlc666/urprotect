@@ -43,6 +43,39 @@ public sealed class CliApplicationTests
 
     [Fact]
     [Trait("Category", "Cli")]
+    public void ReportsEtExecTypeAndKindInJsonAndHumanOutput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input-exec.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.DynamicExecPayload());
+        using var jsonStdout = new StringWriter();
+        using var jsonStderr = new StringWriter();
+
+        var jsonExitCode = CliApplication.Run(
+            new[] { "validate", inputPath, "--json", "-", "--no-analysis" },
+            jsonStdout,
+            jsonStderr);
+
+        Assert.Equal((int)ProductExitCode.Success, jsonExitCode);
+        Assert.Empty(jsonStderr.ToString());
+        using var document = JsonDocument.Parse(jsonStdout.ToString());
+        Assert.Equal("ET_EXEC", document.RootElement.GetProperty("elf").GetProperty("type").GetString());
+        Assert.Equal("DynamicExecutable", document.RootElement.GetProperty("elf").GetProperty("kind").GetString());
+
+        using var humanStdout = new StringWriter();
+        using var humanStderr = new StringWriter();
+        var humanExitCode = CliApplication.Run(
+            new[] { "validate", inputPath, "--no-analysis" },
+            humanStdout,
+            humanStderr);
+
+        Assert.Equal((int)ProductExitCode.Success, humanExitCode);
+        Assert.Empty(humanStderr.ToString());
+        Assert.Contains("Validated AArch64 ET_EXEC DynamicExecutable", humanStdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "Cli")]
     public void WritesAtomicJsonReportAndByteIdenticalCopy()
     {
         using var directory = new TemporaryDirectory();
@@ -224,6 +257,29 @@ public sealed class CliApplicationTests
         Assert.Equal("outer-execveat", document.RootElement.GetProperty("payload").GetProperty("profile").GetString());
         Assert.Equal(LauncherContract.Marker, document.RootElement.GetProperty("payload").GetProperty("launcherMarker").GetString());
         Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("payload").GetProperty("launcherSha256").GetString()));
+    }
+
+    [Fact]
+    [Trait("Category", "PackCli")]
+    public void UsesProfileAwareHumanSummaryWhenPackingDynamicEtExec()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input-exec.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped-exec.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.DynamicExecPayload());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[] { "pack", inputPath, "--output", outputPath, "--launcher", launcherPath },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Success, exitCode);
+        Assert.Empty(stderr.ToString());
+        Assert.Contains("Packed AArch64 payload for outer-execveat", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

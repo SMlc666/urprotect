@@ -320,11 +320,11 @@ public sealed class ElfPackService
             return true;
         }
 
-        if (file.Kind != ElfFileKind.PieExecutable)
+        if (file.Kind is not (ElfFileKind.PieExecutable or ElfFileKind.DynamicExecutable))
         {
             diagnostics.Error(
                 DiagnosticCode.UnsupportedPackInput,
-                "Only ET_DYN PIE executables with PT_INTERP can be packed; shared objects are not supported.");
+                "Only dynamic ET_DYN PIE or dynamic ET_EXEC executables with PT_INTERP can be packed; shared objects and static ET_EXEC are not supported.");
             return false;
         }
 

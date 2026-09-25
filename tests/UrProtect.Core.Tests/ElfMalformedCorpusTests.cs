@@ -29,7 +29,7 @@ public sealed class ElfMalformedCorpusTests
         yield return Case("unsupported-machine", invalidMachine, DiagnosticCode.UnsupportedMachine);
 
         var invalidType = ElfFixture.MinimalPie();
-        BinaryPrimitives.WriteUInt16LittleEndian(invalidType.AsSpan(16), 2);
+        BinaryPrimitives.WriteUInt16LittleEndian(invalidType.AsSpan(16), ushort.MaxValue);
         yield return Case("unsupported-file-type", invalidType, DiagnosticCode.UnsupportedFileType);
 
         var overflowingProgramHeaders = ElfFixture.MinimalPie();

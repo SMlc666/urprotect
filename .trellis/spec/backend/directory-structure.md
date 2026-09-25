@@ -37,6 +37,11 @@ host. Do not create those directories as part of a parser or packer change.
 
 - Keep untrusted byte access in `Binary/` and `Elf/`. `ElfParser.Parse` returns
   an `ElfParseResult`; it does not throw to report malformed input.
+- Keep ELF class observation separate from launch policy: the parser/model may
+  represent `ET_DYN` and `ET_EXEC`, while `Pack/ElfPackService.cs` decides
+  class support under the explicitly selected profile and the native launcher
+  validates the recovered image before `execveat`. A successful parse never
+  implies outer launchability or HostContext support.
 - Keep address arithmetic in `Elf/LoadMap.cs` and use the explicit
   `FileOffset`, `VirtualAddress`, and `RuntimeAddress` types from
   `Elf/AddressTypes.cs`.

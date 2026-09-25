@@ -207,6 +207,24 @@ peer runtime fact and does not silently promote the glibc production row.
 The bionic evidence intentionally excludes Android framework, OEM, SELinux,
 device-kernel, AVD, Waydroid, QEMU, and native-bridge claims.
 
+The outer-execveat profile now has a separate dynamic `ET_EXEC` compatibility
+slice. Its exact acceptance predicate is ELF64 little-endian AArch64 with an
+executable entry in `PT_LOAD`, `PT_DYNAMIC`, a terminated absolute `PT_INTERP`
+ending in `/ld-linux-aarch64.so.1` or `/ld-musl-aarch64.so.1`, and no
+`DT_RPATH` or `DT_RUNPATH`. `ElfParser` and `ElfValidator` model the class;
+parser/model observation is recorded separately as
+`elf.identity.aarch64-et-exec`; `ElfPackService` owns the outer-profile
+decision recorded as `elf.outer.dynamic-et-exec`; the unchanged v3 frame
+carries the source; and the existing static launcher recovers it and hands it to
+`execveat(AT_EMPTY_PATH)`. Shared objects, static `ET_EXEC`, missing or
+duplicate `PT_INTERP` entries, and unrecognized interpreters remain rejected.
+The native glibc fixture compares baseline and wrapped status, stdout/stderr,
+source-name `argv[0]`, arguments, environment, cwd, an inherited descriptor,
+a declared-file side effect, and signal termination. This row establishes a
+native AArch64 glibc outer-profile claim only; the packer's recognized musl
+interpreter path does not independently validate a musl runtime. HostContext
+semantics remain unchanged.
+
 The production managed pack path now uses current frame v3 with explicit
 `outer-execveat` and `host-context-entry` profiles. The outer profile retains
 the static launcher and `execveat(AT_EMPTY_PATH)` behavior. The HostContext

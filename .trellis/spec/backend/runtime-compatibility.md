@@ -32,10 +32,12 @@ internal production path.
 
 The production runtime should converge on one current versioned packaging
 contract with explicit execution profiles. The current profiles are
-`outer-execveat` for standalone PIE recovery and `host-context-entry` for an
-entry image loaded through HostContext. These profiles have different image
-lifetime and launch semantics, so a profile-specific launcher or adapter is
-explicitly selected and validated rather than inferred from loader behavior.
+`outer-execveat` for standalone AArch64 executable recovery and
+`host-context-entry` for an entry image loaded through HostContext. The outer
+profile includes the existing ET_DYN PIE/static-PIE slices and the separately
+validated dynamic ET_EXEC slice. These profiles have different image lifetime
+and launch semantics, so a profile-specific launcher or adapter is explicitly
+selected and validated rather than inferred from loader behavior.
 During migration, an older path may remain as explicitly named historical
 evidence, but new packaging must not select it silently and the compatibility
 matrix must not count it as current support. A stale version or profile/
@@ -116,6 +118,33 @@ loader handoff; the virtual proc reference is not a payload-controlled
 executable pathname.
 
 ### 3. Contracts
+
+#### Outer-execveat
+
+- The validated dynamic `ET_EXEC` slice is recorded as
+  `elf.outer.dynamic-et-exec`. Its exact pack predicate is ELF64,
+  little-endian AArch64 `ET_EXEC`, an entry point within an executable
+  `PT_LOAD`, a bounded `PT_DYNAMIC`, one terminated absolute `PT_INTERP` whose
+  path ends in a recognized AArch64 glibc or musl loader name, and no
+  `DT_RPATH` or `DT_RUNPATH`.
+- `ElfParser`/`ElfValidator` may classify ET_EXEC images for observation, but
+  that layer is recorded separately as `elf.identity.aarch64-et-exec`;
+  parser success does not establish packability or launchability. The
+  `ElfPackService` owns the profile decision, which is separately recorded as
+  `elf.outer.dynamic-et-exec`. Dynamic ET_EXEC is supported only by
+  `outer-execveat`; shared objects, static ET_EXEC, and missing or unrecognized
+  interpreters remain rejected. HostContext continues to require a declared
+  ET_DYN shared-object entry image.
+- The launcher validates that recovered ET_EXEC images have both `PT_DYNAMIC`
+  and a supported `PT_INTERP`, then preserves the existing anonymous memfd
+  plus `execveat(AT_EMPTY_PATH)` handoff. No frame ABI field or HostContext
+  semantic changes follow from this slice.
+- The retained native glibc fixture compares baseline and wrapped status,
+  stdout/stderr, arguments and source-name `argv[0]`, environment, cwd, an
+  inherited descriptor, a declared file, and signal termination. The current
+  validated runtime cell is native AArch64 glibc; accepting a musl interpreter
+  path is not a musl runtime claim without its own native oracle and retained
+  evidence.
 
 #### HostContext
 

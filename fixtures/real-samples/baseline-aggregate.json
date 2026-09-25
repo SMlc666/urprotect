@@ -427,7 +427,7 @@
     {
       "diagnostics": {},
       "disposition": {
-        "reason": "ET_EXEC remains a retained rejection boundary; any future change requires a separate outer-profile contract.",
+        "reason": "Dynamic AArch64 ET_EXEC is now proven as parser observation and validated for native glibc outer-execveat separately; static ET_EXEC and unvalidated interpreter/runtime combinations remain deferred.",
         "source": "reviewed-feature-dispositions",
         "status": "deferred"
       },
@@ -634,8 +634,7 @@
       "not-applicable": 20
     },
     "static": {
-      "accepted-and-runs": 18,
-      "expected-rejected": 2
+      "accepted-and-runs": 20
     }
   },
   "loaderCoverage": {
@@ -1481,8 +1480,8 @@
           "status": "metadata-only"
         },
         "static": {
-          "actual": "expected-rejected",
-          "expected": "expected-rejected",
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
           "reason": "Registry policy baseline; CI oracle has not been acquired.",
           "status": "metadata-only"
         }
@@ -1613,8 +1612,8 @@
           "status": "metadata-only"
         },
         "static": {
-          "actual": "expected-rejected",
-          "expected": "expected-rejected",
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
           "reason": "Registry policy baseline; CI oracle has not been acquired.",
           "status": "metadata-only"
         }
@@ -1628,8 +1627,7 @@
   ],
   "requiredProjectCount": 20,
   "resultClassification": {
-    "accepted-and-runs": 19,
-    "expected-rejected": 2,
+    "accepted-and-runs": 21,
     "not-applicable": 59
   },
   "runtimeCoverage": {

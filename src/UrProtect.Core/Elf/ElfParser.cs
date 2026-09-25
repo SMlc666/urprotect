@@ -68,11 +68,11 @@ public static class ElfParser
                 ElfHeaderOffsets.Machine);
         }
 
-        if (header.Type != ElfConstants.TypeDyn)
+        if (header.Type is not (ElfConstants.TypeDyn or ElfConstants.TypeExec))
         {
             diagnostics.Error(
                 DiagnosticCode.UnsupportedFileType,
-                $"ELF type {header.Type} is not the supported ET_DYN type.",
+                $"ELF type {header.Type} is not a supported ET_DYN or ET_EXEC type.",
                 ElfHeaderOffsets.Type);
         }
 

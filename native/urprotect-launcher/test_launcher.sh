@@ -89,7 +89,7 @@ elif mutation == "invalid-deflate":
     data[encoded_offset:encoded_offset + encoded_size] = b"\x00" * encoded_size
     digest = hashlib.sha256(data[encoded_offset:encoded_offset + encoded_size]).digest()
     data[frame_offset + 80:frame_offset + 112] = digest
-elif mutation in ("invalid-interpreter", "missing-interpreter"):
+elif mutation in ("invalid-interpreter", "missing-interpreter", "static-exec"):
     import zlib
 
     name_size = int.from_bytes(data[frame_offset + 20:frame_offset + 24], "little")
@@ -100,22 +100,30 @@ elif mutation in ("invalid-interpreter", "missing-interpreter"):
     phoff = int.from_bytes(source[32:40], "little")
     phentsize = int.from_bytes(source[54:56], "little")
     phnum = int.from_bytes(source[56:58], "little")
-    interpreter_offset = None
-    interpreter_size = None
-    for index in range(phnum):
-        program = phoff + index * phentsize
-        if int.from_bytes(source[program:program + 4], "little") == 3:
-            interpreter_offset = int.from_bytes(source[program + 8:program + 16], "little")
-            interpreter_size = int.from_bytes(source[program + 32:program + 40], "little")
-            break
-    if interpreter_offset is None or interpreter_size is None:
-        raise SystemExit("source has no PT_INTERP")
-    replacement = (b"/bad/ld-linux-aarch64.so.1\x00"
-                   if mutation == "missing-interpreter" else b"/invalid\x00")
-    if len(replacement) > interpreter_size:
-        raise SystemExit("replacement interpreter is too long")
-    source[interpreter_offset:interpreter_offset + interpreter_size] = (
-        replacement + b"\x00" * (interpreter_size - len(replacement)))
+    if mutation == "static-exec":
+        source[16:18] = (2).to_bytes(2, "little")
+        for index in range(phnum):
+            program = phoff + index * phentsize
+            program_type = int.from_bytes(source[program:program + 4], "little")
+            if program_type in (2, 3):
+                source[program:program + phentsize] = b"\x00" * phentsize
+    else:
+        interpreter_offset = None
+        interpreter_size = None
+        for index in range(phnum):
+            program = phoff + index * phentsize
+            if int.from_bytes(source[program:program + 4], "little") == 3:
+                interpreter_offset = int.from_bytes(source[program + 8:program + 16], "little")
+                interpreter_size = int.from_bytes(source[program + 32:program + 40], "little")
+                break
+        if interpreter_offset is None or interpreter_size is None:
+            raise SystemExit("source has no PT_INTERP")
+        replacement = (b"/bad/ld-linux-aarch64.so.1\x00"
+                       if mutation == "missing-interpreter" else b"/invalid\x00")
+        if len(replacement) > interpreter_size:
+            raise SystemExit("replacement interpreter is too long")
+        source[interpreter_offset:interpreter_offset + interpreter_size] = (
+            replacement + b"\x00" * (interpreter_size - len(replacement)))
     compressor = zlib.compressobj(level=9, wbits=-15)
     encoded = compressor.compress(bytes(source)) + compressor.flush()
     header = bytearray(data[frame_offset:frame_offset + header_size])
@@ -268,6 +276,10 @@ run_expected_failure "${invalid_deflate}" 4 PayloadMalformed invalid-deflate
 invalid_interpreter="${temporary_directory}/invalid-interpreter.wrapped"
 mutate_wrapper "${true_wrapper}" "${invalid_interpreter}" invalid-interpreter
 run_expected_failure "${invalid_interpreter}" 4 UnsupportedPackInput invalid-interpreter
+
+static_exec="${temporary_directory}/static-exec.wrapped"
+mutate_wrapper "${true_wrapper}" "${static_exec}" static-exec
+run_expected_failure "${static_exec}" 4 UnsupportedPackInput static-exec
 
 missing_interpreter="${temporary_directory}/missing-interpreter.wrapped"
 mutate_wrapper "${true_wrapper}" "${missing_interpreter}" missing-interpreter

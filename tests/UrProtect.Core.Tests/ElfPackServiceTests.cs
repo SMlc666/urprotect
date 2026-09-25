@@ -107,6 +107,111 @@ public sealed class ElfPackServiceTests
     }
 
     [Fact]
+    [Trait("Category", "PackWrapper")]
+    public void PacksDynamicEtExecThroughTheOuterProfile()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input-exec.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped-exec.elf");
+        var source = ElfFixture.DynamicExecPayload();
+        File.WriteAllBytes(inputPath, source);
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var decoded = PayloadFrameCodec.ReadWrapper(File.ReadAllBytes(outputPath), new PayloadFrameLimits());
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        Assert.Equal(source, decoded.SourceBytes);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, decoded.Frame!.Profile);
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsStaticEtExecInputWithoutPublishingOutput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("static-exec.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.StaticExecPayload());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnsupportedPackInput);
+        Assert.False(File.Exists(outputPath));
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsDynamicEtExecWithoutInterpreterWithoutPublishingOutput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("missing-interpreter.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        var source = ElfFixture.DynamicExecPayload();
+        source.AsSpan(ElfFixture.InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        File.WriteAllBytes(inputPath, source);
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnsupportedPackInput);
+        Assert.False(File.Exists(outputPath));
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsDynamicEtExecWithUnsupportedInterpreterWithoutPublishingOutput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("unsupported-interpreter.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        var source = ElfFixture.DynamicExecPayload();
+        var interpreterSize = checked((int)System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(
+            source.AsSpan(ElfFixture.InterpreterProgramHeaderOffset + ElfProgramHeaderOffsets.FileSize)));
+        var replacement = System.Text.Encoding.ASCII.GetBytes("/lib/ld-invalid.so.1\0");
+        Assert.True(replacement.Length <= interpreterSize);
+        var interpreterBytes = source.AsSpan(ElfFixture.InterpreterOffset, interpreterSize);
+        interpreterBytes.Clear();
+        replacement.CopyTo(interpreterBytes);
+        File.WriteAllBytes(inputPath, source);
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnsupportedInterpreter);
+        Assert.False(File.Exists(outputPath));
+    }
+
+    [Theory]
+    [InlineData(ElfConstants.DtRpath)]
+    [InlineData(ElfConstants.DtRunPath)]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsDynamicEtExecWithPayloadControlledSearchPathWithoutPublishingOutput(ulong searchPathTag)
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("path-search.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.DynamicExecWithSearchPath(searchPathTag));
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnsupportedPackInput);
+        Assert.False(File.Exists(outputPath));
+    }
+
+    [Fact]
     [Trait("Category", "PackMalformed")]
     public void RejectsSharedObjectInputWithoutPublishingOutput()
     {

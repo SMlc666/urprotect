@@ -21,7 +21,7 @@
     },
     "elf.type.ET_EXEC": {
       "status": "deferred",
-      "reason": "ET_EXEC remains a retained rejection boundary; any future change requires a separate outer-profile contract."
+      "reason": "Dynamic AArch64 ET_EXEC is now proven as parser observation and validated for native glibc outer-execveat separately; static ET_EXEC and unvalidated interpreter/runtime combinations remain deferred."
     },
     "loader./lib/ld-linux-aarch64.so.1": {
       "status": "deferred",
@@ -101,7 +101,7 @@
     },
     "et-exec": {
       "status": "deferred",
-      "reason": "The raw fingerprint tag records a rejection boundary and does not alter the current product contract."
+      "reason": "The raw ET_EXEC observation is linked to separate parser and native-glibc outer-profile rows; other executable classes and runtime cells remain deferred."
     },
     "relocations.rela": {
       "status": "deferred",

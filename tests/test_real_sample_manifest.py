@@ -64,6 +64,19 @@ class RealSampleManifestTests(unittest.TestCase):
         self.assertEqual(selected, {project["projectId"] for project in self.manifest["corpus"]["projects"]})
         self.assertTrue(any(candidate["disposition"] in {"rejected", "deferred"} for candidate in self.candidates["candidates"]))
 
+    def test_dynamic_et_exec_samples_have_parser_only_static_policy(self) -> None:
+        projects = {project["projectId"]: project for project in self.manifest["corpus"]["projects"]}
+        for project_id in ("caddy", "python"):
+            project = projects[project_id]
+            self.assertEqual(project["featureFingerprint"]["type"], "ET_EXEC")
+            self.assertEqual(
+                project["featureFingerprint"]["interpreter"],
+                "/lib/ld-linux-aarch64.so.1",
+            )
+            self.assertEqual(project["executionPolicy"]["static"]["expectedResult"], "accepted-and-runs")
+            self.assertEqual(project["executionPolicy"]["outerWrapper"]["expectedResult"], "not-applicable")
+            self.assertEqual(project["executionPolicy"]["hostContext"]["expectedResult"], "not-applicable")
+
     def test_duplicate_candidate_identity_is_rejected(self) -> None:
         candidates = copy.deepcopy(self.candidates)
         candidates["candidates"][20]["identityKey"] = candidates["candidates"][0]["identityKey"]

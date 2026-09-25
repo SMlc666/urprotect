@@ -18,6 +18,10 @@
 - Use `BoundedReader` and checked arithmetic for all untrusted binary reads.
 - Use program headers as the authoritative ELF runtime layout; section headers
   may be absent or stripped.
+- Keep parser classification separate from profile acceptance. The parser may
+  model ET_EXEC as well as ET_DYN, but each new executable class needs an
+  explicit `ElfPackService` profile rule, a native baseline/wrapper oracle, and
+  a paired rejected boundary before a launch claim is recorded.
 - Use `FileOffset`, `VirtualAddress`, and `RuntimeAddress` instead of mixing
   address domains as raw integers.
 - Keep `DiagnosticCode` stable and machine-readable. Preserve unknown ELF data

@@ -27,12 +27,12 @@ family included in the support claim.
 
 ## Acceptance Criteria
 
-- [ ] Each broadened executable class has an exact acceptance rule and a paired
+- [x] Each broadened executable class has an exact acceptance rule and a paired
       rejected/negative boundary.
 - [ ] Native baseline and wrapper behavior comparisons pass for the recorded
       runtime cells and retain complete evidence.
-- [ ] No ordinary shared object or unsupported executable class is treated as
+- [x] No ordinary shared object or unsupported executable class is treated as
       launchable solely because it parses.
-- [ ] Stale frame/profile mismatch continues to fail with stable diagnostics.
-- [ ] Outer compatibility rows remain separate from HostContext and parser
+- [x] Stale frame/profile mismatch continues to fail with stable diagnostics.
+- [x] Outer compatibility rows remain separate from HostContext and parser
       support rows.

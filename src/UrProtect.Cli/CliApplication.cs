@@ -738,7 +738,7 @@ public sealed class CliApplication
             if (result.IsSuccess)
             {
                 stdout.WriteLine(
-                    $"Packed AArch64 ET_DYN PIE: {result.SourceSize} source bytes, "
+                    $"Packed AArch64 payload for {result.Profile.ToCliValue()}: {result.SourceSize} source bytes, "
                     + $"{result.EncodedSize} compressed bytes.");
                 stdout.WriteLine($"Wrapper written to {result.OutputPath}.");
             }
@@ -792,7 +792,7 @@ public sealed class CliApplication
         if (result.File is not null)
         {
             stdout.WriteLine(
-                $"Validated ET_DYN AArch64 {result.File.Kind}: "
+                $"Validated AArch64 {result.File.Header.TypeName} {result.File.Kind}: "
                 + $"{result.File.ProgramHeaders.Count} program headers, "
                 + $"{result.File.DynamicEntries.Count} dynamic entries, "
                 + $"{result.File.RelaRelocations.Count} RELA relocations.");

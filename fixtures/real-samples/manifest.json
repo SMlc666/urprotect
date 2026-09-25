@@ -2358,8 +2358,8 @@
           "static": {
             "applicable": true,
             "required": true,
-            "expectedResult": "expected-rejected",
-            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+            "expectedResult": "accepted-and-runs",
+            "reason": "AArch64 ET_EXEC parser/model acceptance is proven separately; this static result does not claim outer execution."
           },
           "baseline": {
             "applicable": false,
@@ -2388,7 +2388,7 @@
           }
         },
         "expectedResults": {
-          "static": "expected-rejected",
+          "static": "accepted-and-runs",
           "baseline": "not-applicable",
           "outerWrapper": "not-applicable",
           "hostContext": "not-applicable"
@@ -2781,8 +2781,8 @@
           "static": {
             "applicable": true,
             "required": true,
-            "expectedResult": "expected-rejected",
-            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+            "expectedResult": "accepted-and-runs",
+            "reason": "AArch64 ET_EXEC parser/model acceptance is proven separately; this static result does not claim outer execution."
           },
           "baseline": {
             "applicable": false,
@@ -2811,7 +2811,7 @@
           }
         },
         "expectedResults": {
-          "static": "expected-rejected",
+          "static": "accepted-and-runs",
           "baseline": "not-applicable",
           "outerWrapper": "not-applicable",
           "hostContext": "not-applicable"
