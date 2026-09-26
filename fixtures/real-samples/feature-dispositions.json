@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 1,
+  "thresholdPercent": 5,
+  "policy": "A feature observed in at least 5% of distinct identities receives an explicit roadmap disposition. These dispositions are evidence-planning records and do not change product support status.",
+  "dispositions": {
+    "elf.class.ELF64": {
+      "status": "deferred",
+      "reason": "Identity invariant is already locked by the static registry; no separate support claim is derived from the histogram."
+    },
+    "elf.data.little-endian": {
+      "status": "deferred",
+      "reason": "Little-endian AArch64 is an identity invariant; feature work remains owned by the parser contract."
+    },
+    "elf.machine.AArch64": {
+      "status": "deferred",
+      "reason": "AArch64 identity is the product boundary and is not promoted by ecology frequency."
+    },
+    "elf.type.ET_DYN": {
+      "status": "deferred",
+      "reason": "Dynamic PIE observations feed layer-specific parser and outer-profile planning; they do not widen a support row by themselves."
+    },
+    "elf.type.ET_EXEC": {
+      "status": "deferred",
+      "reason": "Dynamic AArch64 ET_EXEC is now proven as parser observation and validated for native glibc outer-execveat separately; static ET_EXEC and unvalidated interpreter/runtime combinations remain deferred."
+    },
+    "loader./lib/ld-linux-aarch64.so.1": {
+      "status": "deferred",
+      "reason": "The loader identity is runtime evidence; glibc semantics require the runtime matrix and an explicit oracle."
+    },
+    "loader./lib/ld-musl-aarch64.so.1": {
+      "status": "deferred",
+      "reason": "The musl loader identity is retained as an environment fact until a reviewed runtime lane proves a broader claim."
+    },
+    "loader./system/bin/linker64": {
+      "status": "deferred",
+      "reason": "The bionic loader identity is retained as an environment fact and does not promote Android packaging support."
+    },
+    "rela": {
+      "status": "deferred",
+      "reason": "Relocation prevalence informs the ELF parser child; acceptance requires controlled positive and nearest-negative fixtures."
+    },
+    "relr": {
+      "status": "deferred",
+      "reason": "RELR prevalence is collected for prioritization and remains outside this corpus task's support boundary."
+    },
+    "plt-relocations": {
+      "status": "deferred",
+      "reason": "PLT observations feed relocation/symbol ownership and do not change HostContext support status."
+    },
+    "got": {
+      "status": "deferred",
+      "reason": "GOT observations feed relocation/symbol ownership and require a profile-specific oracle."
+    },
+    "symbol-versions": {
+      "status": "deferred",
+      "reason": "A bounded libc.so.6 DT_VERNEED import subset is validated on native AArch64 glibc; the 19/20 observation does not promote versioned definitions, entry selection, arbitrary dependency graphs, or musl/bionic runtime cells."
+    },
+    "pt-tls": {
+      "status": "deferred",
+      "reason": "TLS observations feed the lifecycle/TLS child and require explicit model and thread semantics."
+    },
+    "gnu-property": {
+      "status": "deferred",
+      "reason": "GNU property notes are retained as observations until feature-mask and host-state oracles are selected."
+    },
+    "gnu-relro": {
+      "status": "deferred",
+      "reason": "RELRO is hardening evidence delegated to the loader; the controlled fixture matrix owns any implementation claim."
+    },
+    "gnu-stack-noexec": {
+      "status": "deferred",
+      "reason": "GNU_STACK facts inform the hardening boundary and are not a new support status."
+    },
+    "gnu-stack-exec": {
+      "status": "deferred",
+      "reason": "Executable-stack observations remain a negative/hardening boundary requiring an explicit contract."
+    },
+    "stripped": {
+      "status": "deferred",
+      "reason": "Stripped state is an observed parser input shape; sectionless/stripped behavior needs dedicated fixtures."
+    },
+    "dynamic-needed": {
+      "status": "deferred",
+      "reason": "Dependency observations feed the dependency/path child and are not a claim of arbitrary graph support."
+    },
+    "load-layout-congruent": {
+      "status": "deferred",
+      "reason": "Load-map congruence remains a parser invariant and is counted independently from product status."
+    },
+    "load-layout-noncongruent": {
+      "status": "deferred",
+      "reason": "Non-congruent load layouts remain a parser rejection boundary requiring explicit negative fixtures."
+    },
+    "missing-load-layout": {
+      "status": "deferred",
+      "reason": "Missing program-load observations remain an explicit bounded unknown rather than inferred support."
+    },
+    "et-dyn": {
+      "status": "deferred",
+      "reason": "The raw fingerprint tag is retained for compatibility with older evidence; the typed ELF feature row owns prioritization."
+    },
+    "et-exec": {
+      "status": "deferred",
+      "reason": "The raw ET_EXEC observation is linked to separate parser and native-glibc outer-profile rows; other executable classes and runtime cells remain deferred."
+    },
+    "relocations.rela": {
+      "status": "deferred",
+      "reason": "RELA prevalence informs the ELF parser and relocation children; acceptance requires controlled positive and nearest-negative fixtures."
+    },
+    "relocations.relr": {
+      "status": "deferred",
+      "reason": "RELR observations are retained for prioritization and remain outside this corpus task's support boundary."
+    },
+    "relocations.plt": {
+      "status": "deferred",
+      "reason": "PLT observations feed relocation/symbol ownership and do not change HostContext support status."
+    },
+    "relocations.got": {
+      "status": "deferred",
+      "reason": "GOT observations feed relocation/symbol ownership and require a profile-specific oracle."
+    },
+    "relocations.androidPacked": {
+      "status": "deferred",
+      "reason": "Android packed relocation observations remain a negative boundary until a dedicated contract and oracle exist."
+    },
+    "relocations.family.relative": {
+      "status": "deferred",
+      "reason": "Relative relocation family frequency informs the relocation child; the histogram does not promote loader support."
+    },
+    "relocations.family.rela": {
+      "status": "deferred",
+      "reason": "RELA table frequency informs the relocation child; the histogram does not promote loader support."
+    },
+    "relocations.family.plt": {
+      "status": "deferred",
+      "reason": "PLT relocation family frequency informs the relocation/symbol child and remains an observation only."
+    },
+    "relocations.family.got": {
+      "status": "deferred",
+      "reason": "GOT relocation family frequency informs the relocation/symbol child and remains an observation only."
+    },
+    "relocations.family.other": {
+      "status": "deferred",
+      "reason": "Other relocation families require typed parser and oracle coverage before any support claim."
+    },
+    "relocations.family.relr": {
+      "status": "deferred",
+      "reason": "RELR table frequency informs the relocation child; the histogram does not promote loader support."
+    },
+    "relocations.family.tls": {
+      "status": "deferred",
+      "reason": "TLS relocation family frequency informs lifecycle/TLS planning and requires explicit model semantics."
+    },
+    "relocations.family.ifunc": {
+      "status": "deferred",
+      "reason": "IFUNC relocation observations require dedicated symbol and loader oracle coverage before support claims."
+    },
+    "dependencies.needed": {
+      "status": "deferred",
+      "reason": "DT_NEEDED observations feed dependency/path planning and are not a claim of arbitrary graph support."
+    },
+    "dependencies.rpath": {
+      "status": "deferred",
+      "reason": "RPATH remains a payload-controlled search-path boundary and requires an explicit policy contract."
+    },
+    "dependencies.runpath": {
+      "status": "deferred",
+      "reason": "RUNPATH remains a payload-controlled search-path boundary and requires an explicit policy contract."
+    },
+    "tls": {
+      "status": "deferred",
+      "reason": "TLS observations feed lifecycle/TLS planning and require explicit model and thread semantics."
+    },
+    "hardening.relro.partial": {
+      "status": "deferred",
+      "reason": "Partial RELRO is hardening evidence delegated to the loader; the controlled fixture matrix owns implementation claims."
+    },
+    "hardening.relro.full": {
+      "status": "deferred",
+      "reason": "Full RELRO is hardening evidence delegated to the loader; the controlled fixture matrix owns implementation claims."
+    },
+    "hardening.gnu-stack-noexec": {
+      "status": "deferred",
+      "reason": "Non-executable GNU_STACK facts inform the hardening boundary and are not a new support status."
+    },
+    "hardening.gnu-stack-exec": {
+      "status": "deferred",
+      "reason": "Executable GNU_STACK observations remain a negative hardening boundary requiring an explicit contract."
+    },
+    "hardening.bind-now": {
+      "status": "deferred",
+      "reason": "BIND_NOW observations inform hardening coverage and do not promote custom loader semantics."
+    },
+    "hardening.textrel": {
+      "status": "deferred",
+      "reason": "Text-relocation metadata remains a rejected hardening boundary in HostContext v1."
+    },
+    "has-symbol-table": {
+      "status": "deferred",
+      "reason": "Unstripped state is an observed parser input shape; it requires dedicated fixture coverage."
+    },
+    "sectionless": {
+      "status": "deferred",
+      "reason": "Sectionless ELF observations require dedicated bounded parser fixtures before support claims."
+    },
+    "textrel": {
+      "status": "deferred",
+      "reason": "Text-relocation metadata remains a rejected hardening boundary in HostContext v1."
+    },
+    "android-packed-relocations": {
+      "status": "deferred",
+      "reason": "Android packed relocation observations remain a negative boundary until a dedicated contract and oracle exist."
+    },
+    "rpath": {
+      "status": "deferred",
+      "reason": "RPATH remains a payload-controlled search-path boundary and requires an explicit policy contract."
+    },
+    "runpath": {
+      "status": "deferred",
+      "reason": "RUNPATH remains a payload-controlled search-path boundary and requires an explicit policy contract."
+    },
+    "bind-now": {
+      "status": "deferred",
+      "reason": "BIND_NOW observations inform hardening coverage and do not promote custom loader semantics."
+    }
+  }
+}

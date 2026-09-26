@@ -1440,8 +1440,8 @@
       "disposition": "selected",
       "dispositionReason": "Selected for database-client, deep-dependencies, symbol-versions coverage; this is a distinct public upstream identity and does not multiply libc/build variants."
     },
-      {
-        "projectId": "redis",
+    {
+      "projectId": "redis",
       "displayName": "Redis",
       "identityKey": "Redis",
       "upstreamUrl": "https://redis.io/",
@@ -1903,6 +1903,1724 @@
       },
       "disposition": "rejected",
       "dispositionReason": "Retained as a public candidate but not selected: runtime/producer coverage is already represented or its dependency closure exceeds the first locked slice."
+    },
+    {
+      "projectId": "gawk",
+      "displayName": "GNU Awk",
+      "identityKey": "GNU Awk",
+      "upstreamUrl": "https://www.gnu.org/software/gawk/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/g/gawk/gawk_5.2.1-2_arm64.deb",
+        "version": "1:5.2.1-2",
+        "archivePath": "pool/main/g/gawk/gawk_5.2.1-2_arm64.deb",
+        "archiveSha256": "38f1cfc73847954dd2a0a94e414472a0d6ea0d1bb0c399d1f6e1948e15ff5880",
+        "artifactPath": "usr/bin/gawk",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/gawk/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "awk-interpreter",
+          "gnu-tool"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for awk-interpreter, gnu-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "awk-interpreter",
+          "gnu-tool"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for awk-interpreter, gnu-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "grep",
+      "displayName": "GNU grep",
+      "identityKey": "GNU grep",
+      "upstreamUrl": "https://www.gnu.org/software/grep/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/g/grep/grep_3.8-5_arm64.deb",
+        "version": "3.8-5",
+        "archivePath": "pool/main/g/grep/grep_3.8-5_arm64.deb",
+        "archiveSha256": "2caf08393ef6ea18a52e7e4609a7bd13811ff53733b4e45d2c7b0957e8d592cf",
+        "artifactPath": "bin/grep",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/grep/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "gnu-tool",
+          "text-filter"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for gnu-tool, text-filter; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "gnu-tool",
+          "text-filter"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for gnu-tool, text-filter; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "sed",
+      "displayName": "GNU sed",
+      "identityKey": "GNU sed",
+      "upstreamUrl": "https://www.gnu.org/software/sed/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/s/sed/sed_4.9-1+deb12u1_arm64.deb",
+        "version": "4.9-1+deb12u1",
+        "archivePath": "pool/main/s/sed/sed_4.9-1+deb12u1_arm64.deb",
+        "archiveSha256": "a0ba2ac0e2f4fe2bfe9d74793b66061dbdf3a89a007e85c5277d6232e087e4e4",
+        "artifactPath": "bin/sed",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/sed/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "gnu-tool",
+          "text-filter"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for gnu-tool, text-filter; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "gnu-tool",
+          "text-filter"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for gnu-tool, text-filter; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "findutils",
+      "displayName": "GNU Findutils",
+      "identityKey": "GNU Findutils",
+      "upstreamUrl": "https://www.gnu.org/software/findutils/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/f/findutils/findutils_4.9.0-4_arm64.deb",
+        "version": "4.9.0-4",
+        "archivePath": "pool/main/f/findutils/findutils_4.9.0-4_arm64.deb",
+        "archiveSha256": "cc8792e769ff4a1280ff1a43b11a1858a72d858fb6eb871ec327ec8eebe99eaa",
+        "artifactPath": "usr/bin/find",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/findutils/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "gnu-tool",
+          "filesystem-traversal"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for gnu-tool, filesystem-traversal; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "gnu-tool",
+          "filesystem-traversal"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for gnu-tool, filesystem-traversal; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "gnu-tar",
+      "displayName": "GNU tar",
+      "identityKey": "GNU tar",
+      "upstreamUrl": "https://www.gnu.org/software/tar/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/t/tar/tar_1.34+dfsg-1.2+deb12u1_arm64.deb",
+        "version": "1.34+dfsg-1.2+deb12u1",
+        "archivePath": "pool/main/t/tar/tar_1.34+dfsg-1.2+deb12u1_arm64.deb",
+        "archiveSha256": "04a945d4f24068f9d4c44294014ef5a33fc6179a57021978afc7d08358e13df3",
+        "artifactPath": "bin/tar",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/tar/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "gnu-tool",
+          "archive-utility"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for gnu-tool, archive-utility; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "gnu-tool",
+          "archive-utility"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for gnu-tool, archive-utility; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "gnu-gzip",
+      "displayName": "GNU gzip",
+      "identityKey": "GNU gzip",
+      "upstreamUrl": "https://www.gnu.org/software/gzip/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/g/gzip/gzip_1.12-1_arm64.deb",
+        "version": "1.12-1",
+        "archivePath": "pool/main/g/gzip/gzip_1.12-1_arm64.deb",
+        "archiveSha256": "cf0f383667fb65f0b0fd730198efc67c8c23582542bcb3c2b61f240c62e43ba9",
+        "artifactPath": "bin/gzip",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/gzip/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "gnu-tool",
+          "compression"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for gnu-tool, compression; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "gnu-tool",
+          "compression"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for gnu-tool, compression; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "less",
+      "displayName": "less",
+      "identityKey": "less",
+      "upstreamUrl": "https://www.greenwoodsoftware.com/less/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/l/less/less_590-2.1~deb12u2_arm64.deb",
+        "version": "590-2.1~deb12u2",
+        "archivePath": "pool/main/l/less/less_590-2.1~deb12u2_arm64.deb",
+        "archiveSha256": "eb430d92921f98b163031ee3ac81a96110d1f20bd84f67faab06dad50c75d744",
+        "artifactPath": "usr/bin/less",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.greenwoodsoftware.com/less/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "terminal-application",
+          "pager"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for terminal-application, pager; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "terminal-application",
+          "pager"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for terminal-application, pager; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "screen",
+      "displayName": "GNU Screen",
+      "identityKey": "GNU Screen",
+      "upstreamUrl": "https://www.gnu.org/software/screen/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/s/screen/screen_4.9.0-4_arm64.deb",
+        "version": "4.9.0-4",
+        "archivePath": "pool/main/s/screen/screen_4.9.0-4_arm64.deb",
+        "archiveSha256": "ebfe508503384aeae0578bf70a90556f9d3e0b78156ec73e2c6c172ec80c5c06",
+        "artifactPath": "usr/bin/screen",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/screen/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "terminal-application",
+          "session-manager"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for terminal-application, session-manager; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "terminal-application",
+          "session-manager"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for terminal-application, session-manager; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "tmux",
+      "displayName": "tmux",
+      "identityKey": "tmux",
+      "upstreamUrl": "https://tmux.github.io/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/t/tmux/tmux_3.3a-3_arm64.deb",
+        "version": "3.3a-3",
+        "archivePath": "pool/main/t/tmux/tmux_3.3a-3_arm64.deb",
+        "archiveSha256": "bbf91233312841253fb0c79c28d28d08680d23056674b4499aac14bd4831ac28",
+        "artifactPath": "usr/bin/tmux",
+        "archiveFormat": "deb",
+        "license": "ISC",
+        "licenseSource": "https://tmux.github.io/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "terminal-application",
+          "session-manager"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for terminal-application, session-manager; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "terminal-application",
+          "session-manager"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for terminal-application, session-manager; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "rsync",
+      "displayName": "rsync",
+      "identityKey": "rsync",
+      "upstreamUrl": "https://rsync.samba.org/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/r/rsync/rsync_3.2.7-1+deb12u6_arm64.deb",
+        "version": "3.2.7-1+deb12u6",
+        "archivePath": "pool/main/r/rsync/rsync_3.2.7-1+deb12u6_arm64.deb",
+        "archiveSha256": "217a855088547e384e67c3a3ff2f8f57b159f9f829be1f78d552b3da15796484",
+        "artifactPath": "usr/bin/rsync",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://rsync.samba.org/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "network-tool",
+          "filesystem-transfer"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for network-tool, filesystem-transfer; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "network-tool",
+          "filesystem-transfer"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for network-tool, filesystem-transfer; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "wget",
+      "displayName": "GNU Wget",
+      "identityKey": "GNU Wget",
+      "upstreamUrl": "https://www.gnu.org/software/wget/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/w/wget/wget_1.21.3-1+deb12u1_arm64.deb",
+        "version": "1.21.3-1+deb12u1",
+        "archivePath": "pool/main/w/wget/wget_1.21.3-1+deb12u1_arm64.deb",
+        "archiveSha256": "a5ff67df5132ab6792524b18b7139833d5fabc85512976bdd1ebf9eac695921c",
+        "artifactPath": "usr/bin/wget",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/wget/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "network-client",
+          "gnu-tool"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for network-client, gnu-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "network-client",
+          "gnu-tool"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for network-client, gnu-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "lua",
+      "displayName": "Lua",
+      "identityKey": "Lua",
+      "upstreamUrl": "https://www.lua.org/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/l/lua5.4/lua5.4_5.4.4-3+deb12u1_arm64.deb",
+        "version": "5.4.4-3+deb12u1",
+        "archivePath": "pool/main/l/lua5.4/lua5.4_5.4.4-3+deb12u1_arm64.deb",
+        "archiveSha256": "fbcf06f6b3b6c61f7dad18ddbbd1e4c01f96a676554165fd6a96d77683e8381b",
+        "artifactPath": "usr/bin/lua5.4",
+        "archiveFormat": "deb",
+        "license": "MIT",
+        "licenseSource": "https://www.lua.org/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "language-runtime",
+          "interpreter-startup"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for language-runtime, interpreter-startup; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "language-runtime",
+          "interpreter-startup"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for language-runtime, interpreter-startup; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "php",
+      "displayName": "PHP",
+      "identityKey": "PHP",
+      "upstreamUrl": "https://www.php.net/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/p/php8.2/php8.2-cli_8.2.32-1~deb12u1_arm64.deb",
+        "version": "8.2.32-1~deb12u1",
+        "archivePath": "pool/main/p/php8.2/php8.2-cli_8.2.32-1~deb12u1_arm64.deb",
+        "archiveSha256": "adbd3c9ba7a301f04711a4d0afdb7930541388320a8f4d3d067b8666294cd0da",
+        "artifactPath": "usr/bin/php8.2",
+        "archiveFormat": "deb",
+        "license": "PHP-3.01",
+        "licenseSource": "https://www.php.net/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "language-runtime",
+          "interpreter-startup",
+          "dynamic-dependencies"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for language-runtime, interpreter-startup, dynamic-dependencies; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "language-runtime",
+          "interpreter-startup",
+          "dynamic-dependencies"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for language-runtime, interpreter-startup, dynamic-dependencies; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "graphviz",
+      "displayName": "Graphviz",
+      "identityKey": "Graphviz",
+      "upstreamUrl": "https://graphviz.org/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/g/graphviz/graphviz_2.42.2-7+deb12u1_arm64.deb",
+        "version": "2.42.2-7+deb12u1",
+        "archivePath": "pool/main/g/graphviz/graphviz_2.42.2-7+deb12u1_arm64.deb",
+        "archiveSha256": "74f3147ffdf33c58ee70189b350d6f719c387806aff6c6786c7975bb0b6f91d4",
+        "artifactPath": "usr/bin/dot",
+        "archiveFormat": "deb",
+        "license": "EPL-1.0",
+        "licenseSource": "https://graphviz.org/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "graph-tool",
+          "complex-dependencies"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for graph-tool, complex-dependencies; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "graph-tool",
+          "complex-dependencies"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for graph-tool, complex-dependencies; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "strace",
+      "displayName": "strace",
+      "identityKey": "strace",
+      "upstreamUrl": "https://strace.io/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/s/strace/strace_6.1-0.1_arm64.deb",
+        "version": "6.1-0.1",
+        "archivePath": "pool/main/s/strace/strace_6.1-0.1_arm64.deb",
+        "archiveSha256": "751817724af91cb95df566a21a154f9a7dcdd938e700e5cb9a5a47eb19752ea2",
+        "artifactPath": "usr/bin/strace",
+        "archiveFormat": "deb",
+        "license": "LGPL-3.0-or-later",
+        "licenseSource": "https://strace.io/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "diagnostic-tool",
+          "ptrace-runtime"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for diagnostic-tool, ptrace-runtime; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "diagnostic-tool",
+          "ptrace-runtime"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for diagnostic-tool, ptrace-runtime; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "file",
+      "displayName": "file",
+      "identityKey": "file",
+      "upstreamUrl": "https://www.darwinsys.com/file/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/f/file/file_5.44-3_arm64.deb",
+        "version": "5.44-3",
+        "archivePath": "pool/main/f/file/file_5.44-3_arm64.deb",
+        "archiveSha256": "de027231666482a8ae108f7f9c64711e08382b23476bb1f67979f9e3c39905c6",
+        "artifactPath": "usr/bin/file",
+        "archiveFormat": "deb",
+        "license": "BSD-2-Clause",
+        "licenseSource": "https://www.darwinsys.com/file/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "diagnostic-tool",
+          "compact-dynamic"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for diagnostic-tool, compact-dynamic; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "diagnostic-tool",
+          "compact-dynamic"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for diagnostic-tool, compact-dynamic; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "m4",
+      "displayName": "GNU M4",
+      "identityKey": "GNU M4",
+      "upstreamUrl": "https://www.gnu.org/software/m4/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/m/m4/m4_1.4.19-3_arm64.deb",
+        "version": "1.4.19-3",
+        "archivePath": "pool/main/m/m4/m4_1.4.19-3_arm64.deb",
+        "archiveSha256": "54238d48d2b7b90c9146d156cfa0d80254c4892730c5b57fce8dee0747127228",
+        "artifactPath": "usr/bin/m4",
+        "archiveFormat": "deb",
+        "license": "GPL-3.0-or-later",
+        "licenseSource": "https://www.gnu.org/software/m4/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "autotools-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "macro-processor",
+          "gnu-tool"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for macro-processor, gnu-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "macro-processor",
+          "gnu-tool"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for macro-processor, gnu-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "bzip2",
+      "displayName": "bzip2",
+      "identityKey": "bzip2",
+      "upstreamUrl": "https://sourceware.org/bzip2/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/b/bzip2/bzip2_1.0.8-5+b1_arm64.deb",
+        "version": "1.0.8-5+b1",
+        "archivePath": "pool/main/b/bzip2/bzip2_1.0.8-5+b1_arm64.deb",
+        "archiveSha256": "7624d678ce308bc301f2932fb5c60392de09c569b9be4f2ae2dfe9a59cd73868",
+        "artifactPath": "bin/bzip2",
+        "archiveFormat": "deb",
+        "license": "bzip2-1.0.8",
+        "licenseSource": "https://sourceware.org/bzip2/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "make-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "compression",
+          "compact-dynamic"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for compression, compact-dynamic; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "compression",
+          "compact-dynamic"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for compression, compact-dynamic; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "ncdu",
+      "displayName": "ncdu",
+      "identityKey": "ncdu",
+      "upstreamUrl": "https://dev.yorhel.nl/ncdu",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/n/ncdu/ncdu_1.18-0.2_arm64.deb",
+        "version": "1.18-0.2",
+        "archivePath": "pool/main/n/ncdu/ncdu_1.18-0.2_arm64.deb",
+        "archiveSha256": "ccab8e1edffe96f6b6e4a8159779d6a5c9480d2aa0a166a88128f4b0da42bf43",
+        "artifactPath": "usr/bin/ncdu",
+        "archiveFormat": "deb",
+        "license": "MIT",
+        "licenseSource": "https://dev.yorhel.nl/ncdu (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "make-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "terminal-application",
+          "filesystem-tool"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for terminal-application, filesystem-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "terminal-application",
+          "filesystem-tool"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for terminal-application, filesystem-tool; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "htop",
+      "displayName": "htop",
+      "identityKey": "htop",
+      "upstreamUrl": "https://htop.dev/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/h/htop/htop_3.2.2-2_arm64.deb",
+        "version": "3.2.2-2",
+        "archivePath": "pool/main/h/htop/htop_3.2.2-2_arm64.deb",
+        "archiveSha256": "3cd8f5612c694a1748fbf661f71d83ca3d8b6d71e629dd492f3ef6ab641c3b0a",
+        "artifactPath": "usr/bin/htop",
+        "archiveFormat": "deb",
+        "license": "GPL-2.0-or-later",
+        "licenseSource": "https://htop.dev/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "terminal-application",
+          "process-monitor"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for terminal-application, process-monitor; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "terminal-application",
+          "process-monitor"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for terminal-application, process-monitor; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "nmap",
+      "displayName": "Nmap",
+      "identityKey": "Nmap",
+      "upstreamUrl": "https://nmap.org/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/n/nmap/nmap_7.93+dfsg1-1_arm64.deb",
+        "version": "7.93+dfsg1-1",
+        "archivePath": "pool/main/n/nmap/nmap_7.93+dfsg1-1_arm64.deb",
+        "archiveSha256": "5ca4664fa66d56eae827b9c8c481916244f778c6649b8fba59def665dd74779c",
+        "artifactPath": "usr/bin/nmap",
+        "archiveFormat": "deb",
+        "license": "NPSL-0.92",
+        "licenseSource": "https://nmap.org/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "network-tool",
+          "large-dynamic-table"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for network-tool, large-dynamic-table; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "network-tool",
+          "large-dynamic-table"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for network-tool, large-dynamic-table; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
+    },
+    {
+      "projectId": "socat",
+      "displayName": "socat",
+      "identityKey": "socat",
+      "upstreamUrl": "https://www.dest-unreach.org/socat/",
+      "provenance": {
+        "sourceKind": "debian-bookworm-arm64-package",
+        "archiveUrl": "https://deb.debian.org/debian/pool/main/s/socat/socat_1.7.4.4-2_arm64.deb",
+        "version": "1.7.4.4-2",
+        "archivePath": "pool/main/s/socat/socat_1.7.4.4-2_arm64.deb",
+        "archiveSha256": "068a29cfeefee80d5b96b13049d15f7e76e1ff86db39e55a33cbcdf7fff543b3",
+        "artifactPath": "usr/bin/socat",
+        "archiveFormat": "deb",
+        "license": "GPL-2.0-or-later",
+        "licenseSource": "https://www.dest-unreach.org/socat/ (upstream/package license metadata)",
+        "redistribution": "Public archive/package redistribution follows the declared upstream license; raw inputs stay in runner temporary storage and are never uploaded."
+      },
+      "target": {
+        "architecture": "aarch64",
+        "os": "linux",
+        "runtime": "glibc",
+        "loader": "/lib/ld-linux-aarch64.so.1",
+        "artifactKind": "elf-executable",
+        "pageSize": 4096
+      },
+      "featureFingerprint": {
+        "producer": "configure-gcc",
+        "elfClass": "ELF64",
+        "data": "little-endian",
+        "machine": "AArch64",
+        "type": "ET_DYN",
+        "interpreter": "/lib/ld-linux-aarch64.so.1",
+        "ptLoadLayout": {
+          "source": "ci-generated",
+          "required": "bounded-congruent"
+        },
+        "dynamicNeeded": [],
+        "relocations": {
+          "source": "ci-generated"
+        },
+        "symbolVersions": {
+          "source": "ci-generated"
+        },
+        "tls": {
+          "source": "ci-generated"
+        },
+        "gnuProperty": {
+          "source": "ci-generated"
+        },
+        "relro": {
+          "source": "ci-generated"
+        },
+        "gnuStack": {
+          "source": "ci-generated"
+        },
+        "stripped": {
+          "source": "ci-generated"
+        },
+        "fileSizeBytes": "ci-generated",
+        "featureTags": [],
+        "expectedFeatureTags": [
+          "network-tool",
+          "multiplexer"
+        ]
+      },
+      "selection": {
+        "rationale": "Deferred expansion candidate for network-tool, multiplexer; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained.",
+        "featureCoverage": [
+          "network-tool",
+          "multiplexer"
+        ],
+        "distinctFrom": [
+          "Distinct upstream identity; libc/distribution/build variants remain attributes and never add identity count."
+        ]
+      },
+      "disposition": "deferred",
+      "dispositionReason": "Deferred expansion candidate for network-tool, multiplexer; exact Debian bookworm arm64 archive and license metadata are locked, but no approved corpus slot is promoted until native CI fingerprint and runtime-diversity evidence is retained."
     }
   ]
 }

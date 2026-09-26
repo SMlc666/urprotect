@@ -17,16 +17,10 @@ import subprocess
 import sys
 from typing import Any
 
-RESULTS = {
-    "accepted-and-runs",
-    "expected-rejected",
-    "unexpected-rejection",
-    "unexpected-acceptance",
-    "runtime-failure",
-    "environment-unavailable",
-    "not-applicable",
-}
-LAYERS = ("static", "baseline", "outerWrapper", "hostContext")
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from real_sample_schema import FIRST_FAILURE_LAYERS, LAYERS, RESULTS
 REQUIRED_FILES = (
     "source.txt",
     "hashes.txt",
@@ -67,6 +61,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tier", required=True, choices=("pr", "nightly", "release"))
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--candidates", type=Path)
+    parser.add_argument(
+        "--dispositions",
+        type=Path,
+        help="reviewed feature dispositions; defaults beside the manifest",
+    )
     return parser.parse_args()
 
 
@@ -132,8 +131,11 @@ def manifest_projects(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(corpus, dict) or not isinstance(corpus.get("projects"), list):
         raise EvidenceError("manifest corpus.projects must be an array")
     projects = [project for project in corpus["projects"] if isinstance(project, dict)]
-    if len(projects) != 20:
-        raise EvidenceError(f"manifest must contain exactly 20 projects, found {len(projects)}")
+    required = corpus.get("requiredProjectCount")
+    if not isinstance(required, int) or required <= 0:
+        raise EvidenceError("manifest requiredProjectCount must be a positive integer")
+    if len(projects) != required:
+        raise EvidenceError(f"manifest must contain exactly {required} projects, found {len(projects)}")
     return projects
 
 
@@ -148,6 +150,45 @@ def layer_expectations(project: dict[str, Any]) -> dict[str, str]:
             raise EvidenceError(f"{project.get('projectId', '<unknown>')} has no valid {layer} policy")
         result[layer] = value["expectedResult"]
     return result
+
+
+def check_fingerprint_shape(fingerprint: dict[str, Any], project_id: str) -> list[str]:
+    """Validate the normalized schema without interpreting feature support."""
+    errors: list[str] = []
+    if fingerprint.get("schemaVersion") != 2:
+        return errors
+    if "error" in fingerprint:
+        unknown = fingerprint.get("unknownFields")
+        if not isinstance(unknown, list) or not unknown:
+            errors.append(f"{project_id}: failed fingerprint must declare unknownFields")
+        return errors
+    if fingerprint.get("featureSchemaVersion") != 2:
+        errors.append(f"{project_id}: schema-2 fingerprint must declare featureSchemaVersion=2")
+    for key in (
+        "producer",
+        "runtime",
+        "loader",
+        "dependencies",
+        "relocations",
+        "symbolVersions",
+        "tls",
+        "gnuProperty",
+        "hardening",
+        "unknownFields",
+        "inspection",
+    ):
+        if key not in fingerprint:
+            errors.append(f"{project_id}: fingerprint is missing normalized field {key}")
+    for key in ("dependencies", "relocations", "symbolVersions", "tls", "gnuProperty", "hardening", "inspection"):
+        if key in fingerprint and not isinstance(fingerprint[key], dict):
+            errors.append(f"{project_id}: fingerprint.{key} must be an object")
+    unknown = fingerprint.get("unknownFields")
+    if not isinstance(unknown, list) or len(unknown) > 256 or not all(isinstance(value, str) for value in unknown):
+        errors.append(f"{project_id}: fingerprint.unknownFields must be a bounded string array")
+    inspection = fingerprint.get("inspection")
+    if isinstance(inspection, dict) and inspection.get("bounded") is not True:
+        errors.append(f"{project_id}: fingerprint inspection must assert bounded=true")
+    return errors
 
 
 def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
@@ -182,8 +223,11 @@ def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
     if not isinstance(result, dict):
         errors.append(f"{project_id}: result root must be an object")
         return errors
-    if result.get("schemaVersion") != 1:
-        errors.append(f"{project_id}: result schemaVersion must be 1")
+    if result.get("schemaVersion") != 2:
+        errors.append(f"{project_id}: result schemaVersion must be 2")
+    failure = result.get("firstFailureLayer")
+    if failure is not None and failure not in FIRST_FAILURE_LAYERS:
+        errors.append(f"{project_id}: unsupported firstFailureLayer {failure!r}")
     if result.get("tier") != tier:
         errors.append(f"{project_id}: result tier does not match {tier}")
     if result.get("projectId") != project_id:
@@ -216,6 +260,10 @@ def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
             fingerprint = read_json(fingerprint_path, f"{project_id}/elf-fingerprint.json")
             if not isinstance(fingerprint, dict) or fingerprint.get("projectId") != project_id:
                 errors.append(f"{project_id}: fingerprint projectId does not match directory")
+            elif isinstance(fingerprint, dict):
+                if fingerprint.get("schemaVersion") != 2:
+                    errors.append(f"{project_id}: fingerprint schemaVersion must be 2")
+                errors.extend(check_fingerprint_shape(fingerprint, project_id))
             result_hash = result.get("artifactSha256")
             fingerprint_hash = fingerprint.get("fileSha256") if isinstance(fingerprint, dict) else None
             if result_hash and result_hash != fingerprint_hash:
@@ -228,7 +276,9 @@ def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
             comparison = read_json(comparison_path, f"{project_id}/fingerprint-comparison.json")
             if not isinstance(comparison, dict) or comparison.get("projectId") != project_id:
                 errors.append(f"{project_id}: fingerprint comparison projectId does not match directory")
-            elif comparison.get("status") != "passed":
+            elif comparison.get("schemaVersion") != 2:
+                errors.append(f"{project_id}: fingerprint comparison schemaVersion must be 2")
+            elif comparison.get("status") not in {"passed", "not-applicable"}:
                 errors.append(f"{project_id}: locked fingerprint comparison did not pass")
         except EvidenceError as error:
             errors.append(str(error))
@@ -240,7 +290,26 @@ def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
                 errors.append(f"{project_id}: raw input cleanup marker is invalid")
         except (OSError, UnicodeError) as error:
             errors.append(f"{project_id}: raw input cleanup marker is unreadable: {error}")
+    elif result.get("schemaVersion") == 2:
+        errors.append(f"{project_id}: schema-2 evidence must retain the raw input cleanup marker")
     return errors
+
+
+def load_dispositions(path: Path) -> dict[str, dict[str, Any]]:
+    value = read_json(path, "feature dispositions")
+    raw = value.get("dispositions", value)
+    if not isinstance(raw, dict):
+        raise EvidenceError("feature dispositions must be an object")
+    dispositions: dict[str, dict[str, Any]] = {}
+    for feature, disposition in raw.items():
+        if not isinstance(feature, str) or not isinstance(disposition, dict):
+            raise EvidenceError("feature dispositions contain an invalid entry")
+        status = disposition.get("status")
+        reason = disposition.get("reason")
+        if status not in {"support-candidate", "rejected", "deferred"} or not isinstance(reason, str) or not reason.strip():
+            raise EvidenceError(f"feature disposition for {feature!r} is incomplete")
+        dispositions[feature] = disposition
+    return dispositions
 
 
 def main() -> int:
@@ -250,10 +319,16 @@ def main() -> int:
     if candidates is None:
         sibling = manifest.with_name("candidates.json")
         candidates = sibling if sibling.is_file() else None
+    dispositions_path = arguments.dispositions
+    if dispositions_path is None:
+        sibling = manifest.with_name("feature-dispositions.json")
+        dispositions_path = sibling if sibling.is_file() else None
     root = (arguments.artifact_root or Path(".artifacts/real-samples") / arguments.tier).resolve()
     try:
         run_validator(manifest, candidates)
-        projects = manifest_projects(read_json(manifest, "manifest"))
+        manifest_data = read_json(manifest, "manifest")
+        projects = manifest_projects(manifest_data)
+        dispositions = load_dispositions(dispositions_path) if dispositions_path is not None else {}
         if not root.is_dir():
             raise EvidenceError(f"artifact root is missing: {root}")
         ensure_tree_is_text(root)
@@ -271,19 +346,78 @@ def main() -> int:
         else:
             if aggregate.get("tier") != arguments.tier:
                 errors.append("aggregate.json tier does not match requested tier")
-            if aggregate.get("requiredProjectCount") != 20:
-                errors.append("aggregate.json requiredProjectCount must be 20")
+            required_count = len(projects)
+            if aggregate.get("requiredProjectCount") != required_count:
+                errors.append(f"aggregate.json requiredProjectCount must be {required_count}")
             aggregate_ids = set(aggregate.get("projectIds", [])) if isinstance(aggregate.get("projectIds"), list) else set()
             if aggregate_ids != project_ids:
                 errors.append("aggregate.json projectIds do not match the locked registry")
-            if aggregate.get("observedProjectCount") != 20:
-                errors.append("aggregate.json observedProjectCount must be 20")
+            if aggregate.get("observedProjectCount") != required_count:
+                errors.append(f"aggregate.json observedProjectCount must be {required_count}")
+            if aggregate.get("schemaVersion") != 2:
+                errors.append("aggregate.json schemaVersion must be 2")
+            else:
+                if aggregate.get("identityCount") != required_count:
+                    errors.append("aggregate.json identityCount must equal the locked distinct identity count")
+                coverage = aggregate.get("coverage")
+                target = manifest_data.get("corpus", {}).get("targetProjectCount")
+                if not isinstance(coverage, dict) or not isinstance(coverage.get("approvedTargetProjectCount"), int):
+                    errors.append("aggregate.json coverage must declare approvedTargetProjectCount")
+                elif coverage.get("approvedTargetProjectCount") != target:
+                    errors.append("aggregate.json coverage target does not match the manifest target")
+                elif coverage.get("currentIdentityCount") != aggregate.get("identityCount"):
+                    errors.append("aggregate.json coverage currentIdentityCount is inconsistent")
+                elif coverage.get("shortfall") != max(0, target - aggregate.get("identityCount", 0)):
+                    errors.append("aggregate.json coverage shortfall is inconsistent")
+                histogram = aggregate.get("featureHistogram")
+                if not isinstance(histogram, list):
+                    errors.append("aggregate.json featureHistogram must be an array")
+                else:
+                    for index, item in enumerate(histogram):
+                        if not isinstance(item, dict):
+                            errors.append(f"aggregate.json featureHistogram[{index}] must be an object")
+                            continue
+                        disposition = item.get("disposition")
+                        if not isinstance(disposition, dict) or not isinstance(disposition.get("status"), str) or not isinstance(disposition.get("reason"), str):
+                            errors.append(f"aggregate.json featureHistogram[{index}] must record a disposition and reason")
+                        feature = item.get("feature")
+                        identity_count = item.get("identityCount")
+                        identity_keys = item.get("identityKeys")
+                        identity_percent = item.get("identityPercent")
+                        if (
+                            not isinstance(identity_count, int)
+                            or identity_count <= 0
+                            or not isinstance(identity_keys, list)
+                            or len(identity_keys) != identity_count
+                            or len(set(identity_keys)) != identity_count
+                            or not all(isinstance(key, str) and key for key in identity_keys)
+                        ):
+                            errors.append(f"aggregate.json featureHistogram[{index}] has inconsistent identity counts")
+                        elif (
+                            not isinstance(identity_percent, (int, float))
+                            or not isinstance(aggregate.get("identityCount"), int)
+                            or round(identity_count * 100.0 / aggregate["identityCount"], 2) != identity_percent
+                        ):
+                            errors.append(f"aggregate.json featureHistogram[{index}] has inconsistent identityPercent")
+                        if item.get("thresholdTriggered") is True:
+                            reviewed = dispositions.get(feature)
+                            if reviewed is None:
+                                errors.append(f"aggregate.json featureHistogram[{index}] lacks a reviewed disposition for {feature!r}")
+                            elif (
+                                not isinstance(item.get("disposition"), dict)
+                                or item["disposition"].get("status") != reviewed.get("status")
+                                or item["disposition"].get("reason") != reviewed.get("reason")
+                            ):
+                                errors.append(f"aggregate.json featureHistogram[{index}] disposition does not match the reviewed record for {feature!r}")
+                first_failure = aggregate.get("firstFailureLayers")
+                if not isinstance(first_failure, dict) or not set(first_failure).issubset(set(FIRST_FAILURE_LAYERS)):
+                    errors.append("aggregate.json firstFailureLayers contains an unsupported taxonomy layer")
         if errors:
             raise EvidenceError("\n  ".join(errors))
     except EvidenceError as error:
         print(f"FAIL real-sample evidence gate: {error}", file=sys.stderr)
         return 1
-    print(f"PASS real-sample evidence gate: tier={arguments.tier}; checked 20 projects and all layers")
+    print(f"PASS real-sample evidence gate: tier={arguments.tier}; checked {len(projects)} projects and all layers")
     return 0
 
 

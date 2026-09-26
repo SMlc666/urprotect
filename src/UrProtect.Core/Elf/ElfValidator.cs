@@ -13,9 +13,9 @@ public static class ElfValidator
             diagnostics.Error(DiagnosticCode.UnsupportedMachine, "The ELF machine is not AArch64.");
         }
 
-        if (!file.Header.IsDynamic)
+        if (file.Header.Type is not (ElfConstants.TypeDyn or ElfConstants.TypeExec))
         {
-            diagnostics.Error(DiagnosticCode.UnsupportedFileType, "Only ET_DYN is supported.");
+            diagnostics.Error(DiagnosticCode.UnsupportedFileType, "Only ET_DYN and ET_EXEC are supported.");
         }
 
         if (file.LoadMap.Segments.Count == 0)
@@ -23,20 +23,34 @@ public static class ElfValidator
             diagnostics.Error(DiagnosticCode.MissingLoadSegment, "The ELF has no PT_LOAD segment.");
         }
 
-        if (!file.ProgramHeaders.Any(header => header.Type == ElfConstants.PtDynamic))
+        if (file.ProgramHeaders.Count(header => header.Type == ElfConstants.PtInterp) > 1)
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidProgramHeader,
+                "The ELF has multiple PT_INTERP segments.");
+        }
+
+        var requiresDynamicSegment = file.Kind is ElfFileKind.PieExecutable
+            or ElfFileKind.StaticPieExecutable
+            or ElfFileKind.DynamicExecutable
+            or ElfFileKind.SharedObject;
+        if (requiresDynamicSegment && !file.ProgramHeaders.Any(header => header.Type == ElfConstants.PtDynamic))
         {
             diagnostics.Error(
                 DiagnosticCode.MissingDynamicSegment,
-                "The supported ET_DYN contract requires a PT_DYNAMIC segment.");
+                "A dynamic executable or shared object requires a PT_DYNAMIC segment.");
         }
 
-        if (file.Kind is ElfFileKind.PieExecutable or ElfFileKind.StaticPieExecutable
+        if ((file.Kind is ElfFileKind.PieExecutable
+            or ElfFileKind.StaticPieExecutable
+            or ElfFileKind.DynamicExecutable
+            or ElfFileKind.StaticExecutable)
             && !file.LoadMap.Segments.Any(segment =>
                 segment.IsExecutable && segment.ContainsVirtualAddress(file.Header.Entry, sizeof(uint))))
         {
             diagnostics.Error(
                 DiagnosticCode.AddressUnmapped,
-                "The PIE entry point is not inside an executable PT_LOAD segment.",
+                "The executable entry point is not inside an executable PT_LOAD segment.",
                 file.Header.Entry);
         }
 

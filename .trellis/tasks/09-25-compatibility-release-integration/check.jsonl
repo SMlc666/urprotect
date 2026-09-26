@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Audit each final matrix claim against its proof layer and evidence postconditions."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Perform final architecture, contract ownership, testing, CI, and release quality review."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check no unsupported, unavailable, or unexpected result is mislabeled as success."}
+{"file":"COMPATIBILITY.md","reason":"Verify published compatibility text matches the machine-readable matrix and retained artifacts."}

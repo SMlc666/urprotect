@@ -99,11 +99,13 @@ for case_json in "${cases[@]}"; do
 
   file "${binary}" > "${case_root}/baseline.file.txt"
   readelf -hW -lW -dW "${binary}" > "${case_root}/baseline.readelf.txt"
-  if ! python3 - "${case_root}/baseline.readelf.txt" <<'PY'
+  if ! python3 - "${case_root}/baseline.readelf.txt" "${case_json}" <<'PY'
+import json
 import pathlib
 import sys
 
 report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+case = json.loads(sys.argv[2])
 fields = {}
 for line in report.splitlines():
     if ":" in line:
@@ -111,8 +113,9 @@ for line in report.splitlines():
         fields[name.strip()] = value.strip()
 if fields.get("Class") != "ELF64" or fields.get("Machine") != "AArch64":
     raise SystemExit("fixture is not ELF64 AArch64")
-if not fields.get("Type", "").startswith("DYN"):
-    raise SystemExit("fixture is not ET_DYN")
+expected_type = "EXEC" if case.get("artifact") == "et-exec" else "DYN"
+if not fields.get("Type", "").startswith(expected_type):
+    raise SystemExit(f"fixture is not ET_{expected_type}")
 PY
   then
     echo "FAIL ${id}: baseline structural oracle rejected the fixture" >&2
@@ -177,6 +180,83 @@ PY
   fi
   cmp -- "${case_root}/baseline.stdout" "${case_root}/wrapped.stdout"
   cmp -- "${case_root}/baseline.stderr" "${case_root}/wrapped.stderr"
+
+  if [[ "$(case_value "${case_json}" processProbe)" == "true" ]]; then
+    probe_marker="${case_root}/inherited-fd.txt"
+    printf 'inherited-descriptor-content\n' > "${probe_marker}"
+    mapfile -t fixture_arguments < <(python3 - "${case_json}" <<'PY'
+import json
+import sys
+
+case = json.loads(sys.argv[1])
+arguments = case.get("processArguments", [])
+if not isinstance(arguments, list) or any(
+    not isinstance(argument, str) or "\n" in argument for argument in arguments
+):
+    raise SystemExit("processArguments must contain newline-free strings")
+for argument in arguments:
+    print(argument)
+PY
+)
+
+    set +e
+    (
+      cd "${case_root}"
+      exec 3< "${probe_marker}"
+      URPROTECT_PROCESS_PROBE=1 URPROTECT_PROCESS_ENV=preserved \
+        timeout "${run_timeout}" "${binary}" "${fixture_arguments[@]}"
+    ) > "${case_root}/process-baseline.stdout" 2> "${case_root}/process-baseline.stderr"
+    baseline_process_status=$?
+    set -e
+    printf '%s\n' "${baseline_process_status}" > "${case_root}/process-baseline.status"
+    cp -- "${case_root}/declared-artifact.txt" "${case_root}/process-baseline.declared-artifact.txt"
+    rm -- "${case_root}/declared-artifact.txt"
+
+    set +e
+    (
+      cd "${case_root}"
+      exec 3< "${probe_marker}"
+      URPROTECT_PROCESS_PROBE=1 URPROTECT_PROCESS_ENV=preserved \
+        timeout "${run_timeout}" "${wrapper}" "${fixture_arguments[@]}"
+    ) > "${case_root}/process-wrapped.stdout" 2> "${case_root}/process-wrapped.stderr"
+    wrapped_process_status=$?
+    set -e
+    printf '%s\n' "${wrapped_process_status}" > "${case_root}/process-wrapped.status"
+    if [[ "${baseline_process_status}" -ne "${wrapped_process_status}" ]]; then
+      echo "FAIL ${id}: process probe status ${baseline_process_status} != ${wrapped_process_status}" >&2
+      exit 1
+    fi
+    cmp -- "${case_root}/process-baseline.stdout" "${case_root}/process-wrapped.stdout"
+    cmp -- "${case_root}/process-baseline.stderr" "${case_root}/process-wrapped.stderr"
+    cmp -- "${case_root}/process-baseline.declared-artifact.txt" "${case_root}/declared-artifact.txt"
+
+    set +e
+    (
+      cd "${case_root}"
+      exec 3< "${probe_marker}"
+      URPROTECT_PROCESS_PROBE=1 URPROTECT_PROCESS_ENV=preserved \
+        URPROTECT_PROCESS_SIGNAL=1 timeout "${run_timeout}" "${binary}" "${fixture_arguments[@]}"
+    ) > "${case_root}/signal-baseline.stdout" 2> "${case_root}/signal-baseline.stderr"
+    baseline_signal_status=$?
+    (
+      cd "${case_root}"
+      exec 3< "${probe_marker}"
+      URPROTECT_PROCESS_PROBE=1 URPROTECT_PROCESS_ENV=preserved \
+        URPROTECT_PROCESS_SIGNAL=1 timeout "${run_timeout}" "${wrapper}" "${fixture_arguments[@]}"
+    ) > "${case_root}/signal-wrapped.stdout" 2> "${case_root}/signal-wrapped.stderr"
+    wrapped_signal_status=$?
+    set -e
+    printf '%s\n' "${baseline_signal_status}" > "${case_root}/signal-baseline.status"
+    printf '%s\n' "${wrapped_signal_status}" > "${case_root}/signal-wrapped.status"
+    if [[ "${baseline_signal_status}" -ne "${wrapped_signal_status}"
+      || ( "${baseline_signal_status}" -ne 15 && "${baseline_signal_status}" -ne 143 ) ]]; then
+      echo "FAIL ${id}: signal status ${baseline_signal_status} != ${wrapped_signal_status}" >&2
+      exit 1
+    fi
+    cmp -- "${case_root}/signal-baseline.stdout" "${case_root}/signal-wrapped.stdout"
+    cmp -- "${case_root}/signal-baseline.stderr" "${case_root}/signal-wrapped.stderr"
+  fi
+
   echo "PASS ${id}: packed wrapper preserved native baseline behavior"
 done
 

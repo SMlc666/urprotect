@@ -52,8 +52,9 @@ sample observation does not promote a feature automatically.
 
 ## CI execution and evidence
 
-Every pull request runs all 20 projects. Scheduled and release runs reuse the
-same registry and runner and may add repeatability or release evidence. A
+Every pull request runs all currently approved projects (20 in this slice).
+Scheduled and release runs reuse the same registry and runner and may add
+repeatability or release evidence. A
 sample that is not applicable to a layer receives an explicit
 `not-applicable` result; it is not silently omitted.
 
@@ -81,7 +82,30 @@ not-applicable
 The evidence root is `.artifacts/real-samples/<tier>/`. It contains normalized
 fingerprints, readelf output, reports, hashes, environment facts, result JSON,
 logs, and an aggregate report. It does not contain source archives, ELF
-executables, shared objects, or runtime rootfs contents.
+executables, shared objects, or runtime rootfs contents. Aggregate schema 2
+reports include distinct-identity feature histograms, producer/runtime/loader
+and page-size coverage, diagnostics, result classifications, and the fixed
+first-failure taxonomy (`acquisition`, `fingerprint`, `parse-model`,
+`static-validation`, `outer`, `host-context`, `environment`).
+
+A metadata-only baseline is retained at
+`fixtures/real-samples/baseline-aggregate.json` and
+`fixtures/real-samples/baseline-aggregate.md`. It is generated without network
+or ELF acquisition:
+
+```sh
+python3 scripts/render-real-sample-report.py \
+  fixtures/real-samples/manifest.json --tier pr --registry-only \
+  --artifact-root fixtures/real-samples \
+  --output-json fixtures/real-samples/baseline-aggregate.json \
+  --output-markdown fixtures/real-samples/baseline-aggregate.md
+```
+
+Baseline fields are labelled registry metadata; only the CI aggregate produced
+from acquired, hash-verified samples is an observation report. Features at or
+above the 5% identity threshold carry an explicit roadmap disposition in
+`feature-dispositions.json`; this evidence record does not promote product
+support.
 
 The post-run gate checks all 20 project directories, all four layers, registry
 expectations, aggregate project IDs, non-empty evidence, and the absence of

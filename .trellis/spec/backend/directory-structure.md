@@ -24,7 +24,9 @@ fixtures/
 └── samples/                     # C, C++, Rust, Go, Zig, NativeAOT, Android
 scripts/                         # fixture, fuzz, release, and CI helpers
 .github/scripts/                 # CI environment and Android probes
-native/urprotect-launcher/       # static AArch64 Wrapper 0.2 runtime
+native/
+├── urprotect-launcher/          # static AArch64 Wrapper 0.2 runtime
+└── urprotect-runtime/           # HostContext ABI, preflight, and native adapter
 third_party/                     # pinned AsmStone and miniz source/notices
 ```
 
@@ -35,6 +37,11 @@ host. Do not create those directories as part of a parser or packer change.
 
 - Keep untrusted byte access in `Binary/` and `Elf/`. `ElfParser.Parse` returns
   an `ElfParseResult`; it does not throw to report malformed input.
+- Keep ELF class observation separate from launch policy: the parser/model may
+  represent `ET_DYN` and `ET_EXEC`, while `Pack/ElfPackService.cs` decides
+  class support under the explicitly selected profile and the native launcher
+  validates the recovered image before `execveat`. A successful parse never
+  implies outer launchability or HostContext support.
 - Keep address arithmetic in `Elf/LoadMap.cs` and use the explicit
   `FileOffset`, `VirtualAddress`, and `RuntimeAddress` types from
   `Elf/AddressTypes.cs`.
@@ -47,6 +54,13 @@ host. Do not create those directories as part of a parser or packer change.
   write to stdout or stderr.
 - Keep fixture generation and external tool invocation in `scripts/` and
   `fixtures/`, never in parser or model code.
+- Keep bounded HostContext ELF preflight in
+  `native/urprotect-runtime/host_image_validation.c`; it owns checked image
+  metadata, dynamic-table, relocation, and program-header validation before
+  loader handoff.
+- Keep memfd, sealing, loader, symbol lookup, and image-release ownership in
+  `native/urprotect-runtime/host_adapter.c`; it calls the preflight boundary
+  before creating an image handle and must not duplicate its byte validation.
 
 ## Naming
 

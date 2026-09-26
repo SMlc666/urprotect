@@ -37,7 +37,31 @@ fi
 mkdir -p "${runner_temp}"
 temp_root="$(mktemp -d "${runner_temp%/}/urprotect-real-samples-${requested_tier}.XXXXXX")"
 chmod 700 "${temp_root}"
-cleanup() { rm -rf -- "${temp_root}"; }
+sanitize_evidence() {
+  [[ -d "${artifact_root}" ]] || return 0
+  python3 - "${artifact_root}" "${temp_root}" <<'PYSANITIZE'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+temporary = sys.argv[2].encode("utf-8")
+replacement = b"<runner-temp>"
+for path in root.rglob("*"):
+    if not path.is_file() or path.is_symlink():
+        continue
+    try:
+        data = path.read_bytes()
+    except OSError:
+        continue
+    if b"\0" in data[:4096] or temporary not in data:
+        continue
+    path.write_bytes(data.replace(temporary, replacement))
+PYSANITIZE
+}
+cleanup() {
+  sanitize_evidence || true
+  rm -rf -- "${temp_root}"
+}
 trap cleanup EXIT HUP INT TERM
 
 manifest_sha="$(sha256sum "${manifest}" | awk '{print $1}')"
@@ -63,31 +87,41 @@ write_result() {
   local sample_root="$1" id="$2" expected_static="$3" expected_baseline="$4" expected_outer="$5" expected_host="$6"
   local actual_static="$7" actual_baseline="$8" actual_outer="$9" actual_host="${10}" artifact_sha="${11}" reason_static="${12}" reason_baseline="${13}"
   SAMPLE_ROOT="${sample_root}" SAMPLE_ID="${id}" SAMPLE_TIER="${requested_tier}" \
+  REPO_ROOT="${repo_root}" \
   EXPECTED_STATIC="${expected_static}" EXPECTED_BASELINE="${expected_baseline}" EXPECTED_OUTER="${expected_outer}" EXPECTED_HOST="${expected_host}" \
   ACTUAL_STATIC="${actual_static}" ACTUAL_BASELINE="${actual_baseline}" ACTUAL_OUTER="${actual_outer}" ACTUAL_HOST="${actual_host}" \
   ARTIFACT_SHA="${artifact_sha}" REASON_STATIC="${reason_static}" REASON_BASELINE="${reason_baseline}" \
+  FIRST_FAILURE_LAYER="${FIRST_FAILURE_LAYER:-}" \
   python3 - <<'PY'
-import json, os
+import json, os, sys
+sys.path.insert(0, os.path.join(os.environ['REPO_ROOT'], 'scripts'))
+from real_sample_schema import first_failure_layer
+
 root=os.environ['SAMPLE_ROOT']
 expected={'static':os.environ['EXPECTED_STATIC'],'baseline':os.environ['EXPECTED_BASELINE'],'outerWrapper':os.environ['EXPECTED_OUTER'],'hostContext':os.environ['EXPECTED_HOST']}
 actual={'static':os.environ['ACTUAL_STATIC'],'baseline':os.environ['ACTUAL_BASELINE'],'outerWrapper':os.environ['ACTUAL_OUTER'],'hostContext':os.environ['ACTUAL_HOST']}
 reasons={'static':os.environ.get('REASON_STATIC',''),'baseline':os.environ.get('REASON_BASELINE',''),'outerWrapper':'Policy did not apply an outer-wrapper oracle.','hostContext':'Policy did not apply a HostContext oracle.'}
-result={'schemaVersion':1,'tier':os.environ['SAMPLE_TIER'],'projectId':os.environ['SAMPLE_ID'],'artifactSha256':os.environ.get('ARTIFACT_SHA',''),'layers':{}}
+result={'schemaVersion':2,'tier':os.environ['SAMPLE_TIER'],'projectId':os.environ['SAMPLE_ID'],'artifactSha256':os.environ.get('ARTIFACT_SHA',''),'layers':{}}
 for layer in ('static','baseline','outerWrapper','hostContext'):
  result['layers'][layer]={'expected':expected[layer],'actual':actual[layer],'status':'passed' if expected[layer]==actual[layer] else 'failed','reason':reasons[layer]}
+explicit=os.environ.get('FIRST_FAILURE_LAYER','')
+result['firstFailureLayer']=first_failure_layer(result['layers'], explicit or None)
 json.dump(result,open(os.path.join(root,'result.json'),'w'),indent=2,sort_keys=True); open(os.path.join(root,'result.json'),'a').write('\n')
 PY
 }
 
 write_failure_evidence() {
   local sample_root="$1" id="$2" expected_static="$3" expected_baseline="$4"
-  local expected_outer="$5" expected_host="$6" reason="$7"
+  local expected_outer="$5" expected_host="$6" reason="$7" first_failure="${8:-acquisition}"
   printf 'evidence unavailable: %s\n' "${reason}" > "${sample_root}/readelf.txt"
-  printf '{"schemaVersion":1,"projectId":"%s","error":%s}\n' "${id}" "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "${reason}")" > "${sample_root}/elf-fingerprint.json"
-  printf '{"schemaVersion":1,"status":"environment-unavailable","reason":%s}\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "${reason}")" > "${sample_root}/urprotect-report.json"
+  printf '{"schemaVersion":2,"projectId":"%s","error":%s,"unknownFields":["all"]}\n' "${id}" "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "${reason}")" > "${sample_root}/elf-fingerprint.json"
+  printf '{"schemaVersion":2,"projectId":"%s","status":"not-applicable","reason":%s}\n' "${id}" "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "${reason}")" > "${sample_root}/fingerprint-comparison.json"
+  printf '{"schemaVersion":2,"status":"environment-unavailable","reason":%s,"unknownFields":["all"]}\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "${reason}")" > "${sample_root}/urprotect-report.json"
   printf 'failure=%s\n' "${reason}" > "${sample_root}/hashes.txt"
-  write_result "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" "${expected_outer}" "${expected_host}" \
+  FIRST_FAILURE_LAYER="${first_failure}" write_result "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" "${expected_outer}" "${expected_host}" \
     environment-unavailable environment-unavailable environment-unavailable environment-unavailable '' "${reason}" "${reason}"
+  rm -rf -- "${temp_root}/${id}"
+  printf 'raw-inputs-removed=true\n' > "${sample_root}/raw-inputs-removed.txt"
 }
 
 run_isolated_baseline() {
@@ -205,9 +239,9 @@ process_project() {
   printf 'artifactSha256=%s\n' "${artifact_sha}" >> "${sample_root}/hashes.txt"
   local inspect_status=0
   if python3 "${repo_root}/scripts/inspect-real-sample.py" --input "${artifact}" --output "${sample_root}/elf-fingerprint.json" \
-      --readelf-output "${sample_root}/readelf.txt" --project-id "${id}" --producer "${producer}" > "${sample_root}/logs/inspect.log" 2>&1; then :; else inspect_status=$?; fi
+      --readelf-output "${sample_root}/readelf.txt" --project-id "${id}" --producer "${producer}" --runtime "${runtime}" > "${sample_root}/logs/inspect.log" 2>&1; then :; else inspect_status=$?; fi
   if [[ "${inspect_status}" -ne 0 ]]; then
-    write_failure_evidence "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable "ELF fingerprint inspection failed"
+    write_failure_evidence "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable "ELF fingerprint inspection failed" fingerprint
     return 1
   fi
   local fingerprint_status=0
@@ -232,9 +266,19 @@ process_project() {
     else actual_baseline=environment-unavailable; reason_baseline='unknown isolation policy mode'; fi
   fi
   local actual_outer=not-applicable actual_host=not-applicable
-  write_result "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable \
+  local first_failure=""
+  if [[ "${fingerprint_status}" -ne 0 ]]; then
+    first_failure=fingerprint
+  elif [[ "${actual_static}" != "${expected_static}" ]]; then
+    first_failure="static-validation"
+  elif [[ "${actual_baseline}" != "${expected_baseline}" ]]; then
+    first_failure=environment
+  fi
+  FIRST_FAILURE_LAYER="${first_failure}" write_result "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable \
     "${actual_static}" "${actual_baseline}" "${actual_outer}" "${actual_host}" "${artifact_sha}" \
     "fingerprintStatus=${fingerprint_status}; validatorStatus=${validator_status}" "${reason_baseline}"
+  printf 'raw-inputs-removed=true\n' > "${sample_root}/raw-inputs-removed.txt"
+  rm -rf -- "${sample_tmp}"
   local result_status=0
   [[ "${actual_static}" == "${expected_static}" ]] || result_status=1
   [[ "${actual_baseline}" == "${expected_baseline}" ]] || result_status=1
@@ -246,9 +290,10 @@ while IFS= read -r project_json; do
   if process_project "${project_json}"; then :; else overall_status=1; fi
 done < <(python3 "${repo_root}/scripts/validate-real-samples.py" "${manifest}" --candidates "${candidates}" --tier "${requested_tier}" --emit | tail -n +2)
 
+sanitize_evidence
 python3 "${repo_root}/scripts/render-real-sample-report.py" "${manifest}" --tier "${requested_tier}" \
   --artifact-root "${artifact_root}" --output-json "${artifact_root}/aggregate.json" \
-  --output-markdown "${artifact_root}/aggregate.md" || overall_status=1
+  --output-markdown "${artifact_root}/aggregate.md" --require-evidence || overall_status=1
 python3 "${repo_root}/scripts/check-real-sample-evidence.py" "${manifest}" --candidates "${candidates}" \
   --tier "${requested_tier}" --artifact-root "${artifact_root}" || overall_status=1
 printf 'real-sample tier %s completed with status %s; raw inputs were under %s and removed on exit\n' "${requested_tier}" "${overall_status}" "${temp_root}"

@@ -17,19 +17,15 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from real_sample_schema import LAYERS, RESULTS  # noqa: E402
+
 
 TIERS = ("pr", "nightly", "release")
 RUNTIMES = {"glibc", "musl", "bionic"}
-LAYERS = ("static", "baseline", "outerWrapper", "hostContext")
-RESULTS = {
-    "accepted-and-runs",
-    "expected-rejected",
-    "unexpected-rejection",
-    "unexpected-acceptance",
-    "runtime-failure",
-    "environment-unavailable",
-    "not-applicable",
-}
 ARCHIVE_FORMATS = {"deb", "tar.gz", "tar", "zip", "apk"}
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,79}$")
@@ -214,6 +210,34 @@ def validate_target(validator: Validator, project: dict[str, Any], location: str
     return runtime if isinstance(runtime, str) else None
 
 
+def _validate_string_array(
+    validator: Validator,
+    value: Any,
+    location: str,
+    *,
+    maximum: int = 256,
+) -> None:
+    values = validator.sequence(value, location)
+    if values is None:
+        return
+    validator.require(len(values) <= maximum, location, f"must contain at most {maximum} values")
+    for index, item in enumerate(values):
+        validator.string(item, f"{location}[{index}]")
+
+
+def _validate_bounded_mapping(
+    validator: Validator,
+    value: Any,
+    location: str,
+    *,
+    maximum: int = 256,
+) -> None:
+    mapping = validator.mapping(value, location)
+    if mapping is None:
+        return
+    validator.require(len(mapping) <= maximum, location, f"must contain at most {maximum} fields")
+
+
 def validate_fingerprint(validator: Validator, project: dict[str, Any], location: str) -> None:
     fingerprint = validator.mapping(
         project.get("featureFingerprint"), f"{location}.featureFingerprint"
@@ -242,12 +266,30 @@ def validate_fingerprint(validator: Validator, project: dict[str, Any], location
     for key in required:
         if key not in fingerprint:
             validator.error(f"{location}.featureFingerprint.{key}", "is required")
-    for key in ("tls", "gnuProperty", "relro", "stripped"):
-        if key in fingerprint:
-            value = fingerprint[key]
-            if isinstance(value, dict) and value.get("source") == "ci-generated":
-                continue
-            validator.boolean(value, f"{location}.featureFingerprint.{key}")
+
+    validator.string(fingerprint.get("producer"), f"{location}.featureFingerprint.producer")
+    for key in ("elfClass", "data", "machine", "type"):
+        validator.string(fingerprint.get(key), f"{location}.featureFingerprint.{key}")
+    interpreter = fingerprint.get("interpreter")
+    validator.require(
+        interpreter is None or isinstance(interpreter, str),
+        f"{location}.featureFingerprint.interpreter",
+        "must be a string or null",
+    )
+    for key in ("tls", "gnuProperty", "relro", "gnuStack", "stripped"):
+        if key not in fingerprint:
+            continue
+        value = fingerprint[key]
+        # Registry rows use a source marker while CI rows contain the concrete
+        # normalized object.  Both are metadata; neither is a support claim.
+        if isinstance(value, dict):
+            validator.require(
+                len(value) <= 256,
+                f"{location}.featureFingerprint.{key}",
+                "must contain at most 256 fields",
+            )
+            continue
+        validator.boolean(value, f"{location}.featureFingerprint.{key}")
     if "fileSizeBytes" in fingerprint:
         value = fingerprint["fileSizeBytes"]
         validator.require(
@@ -256,19 +298,61 @@ def validate_fingerprint(validator: Validator, project: dict[str, Any], location
             f"{location}.featureFingerprint.fileSizeBytes",
             "must be a positive integer or ci-generated",
         )
-    for key in ("dynamicNeeded", "featureTags"):
-        values = validator.sequence(fingerprint.get(key), f"{location}.featureFingerprint.{key}")
-        if values is not None:
-            for index, value in enumerate(values):
-                validator.string(value, f"{location}.featureFingerprint.{key}[{index}]")
-    validator.mapping(fingerprint.get("ptLoadLayout"), f"{location}.featureFingerprint.ptLoadLayout")
-    validator.mapping(fingerprint.get("relocations"), f"{location}.featureFingerprint.relocations")
-    expected_tags = fingerprint.get("expectedFeatureTags")
-    if expected_tags is not None:
-        values = validator.sequence(expected_tags, f"{location}.featureFingerprint.expectedFeatureTags")
-        if values is not None:
-            for index, value in enumerate(values):
-                validator.string(value, f"{location}.featureFingerprint.expectedFeatureTags[{index}]")
+    for key in ("dynamicNeeded", "featureTags", "expectedFeatureTags", "unknownFields"):
+        if key in fingerprint:
+            _validate_string_array(
+                validator,
+                fingerprint[key],
+                f"{location}.featureFingerprint.{key}",
+                maximum=1024 if key == "dynamicNeeded" else 256,
+            )
+    pt_load = fingerprint.get("ptLoadLayout")
+    validator.require(
+        isinstance(pt_load, (dict, list)),
+        f"{location}.featureFingerprint.ptLoadLayout",
+        "must be an object or bounded array",
+    )
+    if isinstance(pt_load, list):
+        validator.require(
+            len(pt_load) <= 128,
+            f"{location}.featureFingerprint.ptLoadLayout",
+            "must contain at most 128 load segments",
+        )
+    for key in (
+        "relocations",
+        "dependencies",
+        "dynamic",
+        "symbolVersions",
+        "tls",
+        "gnuProperty",
+        "relro",
+        "gnuStack",
+        "hardening",
+        "sections",
+        "inspection",
+    ):
+        if key in fingerprint:
+            _validate_bounded_mapping(
+                validator,
+                fingerprint[key],
+                f"{location}.featureFingerprint.{key}",
+            )
+    for key in ("pageSize", "programHeaderCount", "dynamicSymbolCount"):
+        if key not in fingerprint:
+            continue
+        value = fingerprint[key]
+        validator.require(
+            value is None or (isinstance(value, int) and not isinstance(value, bool) and value > 0),
+            f"{location}.featureFingerprint.{key}",
+            "must be a positive integer or null",
+        )
+    schema_version = fingerprint.get("schemaVersion")
+    if schema_version is not None:
+        validator.require(
+            schema_version in {1, 2},
+            f"{location}.featureFingerprint.schemaVersion",
+            "must be 1 or 2",
+        )
 
 
 def validate_selection(validator: Validator, project: dict[str, Any], location: str) -> None:
@@ -419,6 +503,7 @@ def validate_candidates(validator: Validator, data: dict[str, Any]) -> dict[str,
     validator.string(data.get("discoveryPolicy"), "candidates.discoveryPolicy")
     candidates = validator.sequence(data.get("candidates"), "candidates.candidates")
     result: dict[str, dict[str, Any]] = {}
+    seen_identities: set[str] = set()
     if candidates is None:
         return result
     validator.require(len(candidates) >= 20, "candidates.candidates", "must retain at least the locked corpus size")
@@ -439,6 +524,13 @@ def validate_candidates(validator: Validator, data: dict[str, Any]) -> dict[str,
             validator.require(bool(value.get("dispositionReason")), f"{location}.dispositionReason", "is required for rejected/deferred candidates")
         if identity is not None:
             validator.require(identity.strip() != "", f"{location}.identityKey", "must identify one upstream project")
+            normalized_identity = identity.casefold()
+            validator.require(
+                normalized_identity not in seen_identities,
+                f"{location}.identityKey",
+                "must identify a distinct upstream project; variants belong in variants",
+            )
+            seen_identities.add(normalized_identity)
     return result
 
 
@@ -452,15 +544,55 @@ def validate_registry(
     if corpus is None:
         return validator, []
     count = corpus.get("requiredProjectCount")
-    validator.require(count == 20, "manifest.corpus.requiredProjectCount", "must be exactly 20")
+    validator.require(
+        isinstance(count, int) and not isinstance(count, bool) and count > 0,
+        "manifest.corpus.requiredProjectCount",
+        "must be a positive integer",
+    )
+    target_count = corpus.get("targetProjectCount", 100)
+    validator.require(
+        isinstance(target_count, int) and not isinstance(target_count, bool) and target_count >= 100,
+        "manifest.corpus.targetProjectCount",
+        "must be an integer of at least the approved target 100",
+    )
+    if isinstance(count, int) and isinstance(target_count, int):
+        validator.require(
+            count <= target_count,
+            "manifest.corpus.requiredProjectCount",
+            "must not exceed targetProjectCount",
+        )
     validator.string(corpus.get("selectionPolicy"), "manifest.corpus.selectionPolicy")
+    expansion = corpus.get("expansion")
+    if expansion is not None:
+        expansion_map = validator.mapping(expansion, "manifest.corpus.expansion")
+        if expansion_map is not None:
+            validator.require(
+                expansion_map.get("approvedTarget") == 100,
+                "manifest.corpus.expansion.approvedTarget",
+                "must remain 100 distinct identities",
+            )
+            validator.require(
+                expansion_map.get("currentApproved") == count,
+                "manifest.corpus.expansion.currentApproved",
+                "must match requiredProjectCount",
+            )
+            validator.string(expansion_map.get("status"), "manifest.corpus.expansion.status")
+            validator.string(expansion_map.get("shortfallEvidence"), "manifest.corpus.expansion.shortfallEvidence")
+            backlog = expansion_map.get("candidateBacklog")
+            if backlog is not None:
+                _validate_string_array(validator, backlog, "manifest.corpus.expansion.candidateBacklog", maximum=256)
     tiers = validator.sequence(corpus.get("tiers"), "manifest.corpus.tiers")
     if tiers is not None:
         validator.require({value for value in tiers if isinstance(value, str)} == set(TIERS), "manifest.corpus.tiers", "must include exactly pr, nightly, and release")
     projects = validator.sequence(corpus.get("projects"), "manifest.corpus.projects")
     if projects is None:
         return validator, []
-    validator.require(len(projects) == 20, "manifest.corpus.projects", "must contain exactly 20 project records")
+    if isinstance(count, int):
+        validator.require(
+            len(projects) == count,
+            "manifest.corpus.projects",
+            f"must contain exactly {count} project records",
+        )
     seen_ids: set[str] = set()
     seen_identities: set[str] = set()
     runtimes: set[str] = set()
@@ -478,7 +610,22 @@ def validate_registry(
                     selected_prov = project.get("provenance")
                     candidate_prov = candidate.get("provenance")
                     if isinstance(selected_prov, dict) and isinstance(candidate_prov, dict):
-                        validator.require(selected_prov.get("archiveSha256") == candidate_prov.get("archiveSha256"), f"manifest.corpus.projects[{index}].provenance.archiveSha256", "must match candidate ledger")
+                        for provenance_key in (
+                            "archiveUrl",
+                            "version",
+                            "archivePath",
+                            "archiveSha256",
+                            "archiveFormat",
+                            "artifactPath",
+                            "license",
+                            "licenseSource",
+                        ):
+                            validator.require(
+                                selected_prov.get(provenance_key)
+                                == candidate_prov.get(provenance_key),
+                                f"manifest.corpus.projects[{index}].provenance.{provenance_key}",
+                                "must match candidate ledger",
+                            )
             if identity is not None:
                 normalized_identity = identity.casefold()
                 validator.require(normalized_identity not in seen_identities, f"manifest.corpus.projects[{index}].identityKey", "must identify a distinct upstream project")
@@ -498,7 +645,7 @@ def parse_args() -> argparse.Namespace:
         nargs="?",
         type=Path,
         default=Path("fixtures/real-samples/manifest.json"),
-        help="selected 20-project registry",
+        help="selected public AArch64 registry",
     )
     parser.add_argument(
         "--candidates",
@@ -508,7 +655,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tier",
         choices=TIERS,
-        help="validate that a tier is declared; all tiers remain locked to the same 20 projects",
+        help="validate that a tier is declared; all tiers use the same locked registry",
     )
     parser.add_argument(
         "--emit",

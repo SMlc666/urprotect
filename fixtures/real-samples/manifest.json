@@ -2358,8 +2358,8 @@
           "static": {
             "applicable": true,
             "required": true,
-            "expectedResult": "expected-rejected",
-            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+            "expectedResult": "accepted-and-runs",
+            "reason": "AArch64 ET_EXEC parser/model acceptance is proven separately; this static result does not claim outer execution."
           },
           "baseline": {
             "applicable": false,
@@ -2388,7 +2388,7 @@
           }
         },
         "expectedResults": {
-          "static": "expected-rejected",
+          "static": "accepted-and-runs",
           "baseline": "not-applicable",
           "outerWrapper": "not-applicable",
           "hostContext": "not-applicable"
@@ -2781,8 +2781,8 @@
           "static": {
             "applicable": true,
             "required": true,
-            "expectedResult": "expected-rejected",
-            "reason": "Every one of the locked 20 receives static ELF and UrProtect evidence before any dynamic oracle."
+            "expectedResult": "accepted-and-runs",
+            "reason": "AArch64 ET_EXEC parser/model acceptance is proven separately; this static result does not claim outer execution."
           },
           "baseline": {
             "applicable": false,
@@ -2811,7 +2811,7 @@
           }
         },
         "expectedResults": {
-          "static": "expected-rejected",
+          "static": "accepted-and-runs",
           "baseline": "not-applicable",
           "outerWrapper": "not-applicable",
           "hostContext": "not-applicable"
@@ -2836,6 +2836,42 @@
           "source": "AArch64 CI readelf/UrProtect scan; registry does not guess binary size or relocation counts."
         }
       }
-    ]
+    ],
+    "targetProjectCount": 100,
+    "expansion": {
+      "approvedTarget": 100,
+      "currentApproved": 20,
+      "status": "baseline-20-with-reviewed-backlog",
+      "shortfallEvidence": "The approved slice remains 20 identities because only those records have complete cross-runtime policy and CI gate coverage. The exact-hash candidate ledger contains additional Debian ARM64 candidates, but native fingerprint/oracle evidence and runtime diversity are not yet sustained for a 100-identity promotion.",
+      "candidateBacklog": [
+        "gawk",
+        "grep",
+        "sed",
+        "findutils",
+        "gnu-tar",
+        "gnu-gzip",
+        "less",
+        "screen",
+        "tmux",
+        "rsync",
+        "wget",
+        "lua",
+        "php",
+        "graphviz",
+        "strace",
+        "file",
+        "m4",
+        "bzip2",
+        "ncdu",
+        "htop",
+        "nmap",
+        "socat",
+        "gnu-xz",
+        "lighttpd",
+        "ruby",
+        "mariadb"
+      ],
+      "nextWave": "Promote only reviewed increments after native AArch64 CI retains static fingerprints, first-failure results, and at least one non-glibc/runtime-diverse witness per increment."
+    }
   }
 }

@@ -77,6 +77,44 @@ public sealed class ElfParserTests
     }
 
     [Fact]
+    public void ParsesDynamicEtExecAsASeparateExecutableClass()
+    {
+        var result = ElfParser.Parse(ElfFixture.DynamicExecPayload());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Equal(ElfFileKind.DynamicExecutable, result.File!.Kind);
+        Assert.Equal(ElfConstants.TypeExec, result.File.Header.Type);
+    }
+
+    [Fact]
+    public void ParsesStaticEtExecAsObservationWithoutImplyingPackSupport()
+    {
+        var result = ElfParser.Parse(ElfFixture.StaticExecPayload());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Equal(ElfFileKind.StaticExecutable, result.File!.Kind);
+        Assert.Equal(ElfConstants.TypeExec, result.File.Header.Type);
+    }
+
+    [Fact]
+    public void RejectsDuplicateInterpreterProgramHeaders()
+    {
+        var bytes = ElfFixture.DynamicExecPayload();
+        bytes.AsSpan(ElfFixture.InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64)
+            .CopyTo(bytes.AsSpan(288, ElfConstants.ProgramHeaderSize64));
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(ElfHeaderOffsets.ProgramHeaderCount), 5);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.InvalidProgramHeader);
+    }
+
+    [Fact]
     public void DistinguishesSharedObjectWithoutAnInterpreterFromPie()
     {
         var bytes = ElfFixture.MinimalPie();
@@ -98,6 +136,18 @@ public sealed class ElfParserTests
         Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.NotNull(result.File);
         Assert.Equal(ElfFileKind.StaticPieExecutable, result.File!.Kind);
+    }
+
+    [Fact]
+    public void PreservesStaticPieDynamicSegmentRequirement()
+    {
+        var bytes = ElfFixture.StaticPiePayload();
+        bytes.AsSpan(ElfFixture.DynamicProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.MissingDynamicSegment);
     }
 
     [Fact]
@@ -306,11 +356,13 @@ public sealed class ElfParserTests
     public void ClassifiesCommonAarch64RelocationKindsWithoutApplyingThem()
     {
         var relative = new RelaRelocation(0, ElfConstants.RArm64Relative, 0, 0x1000, false);
+        var jumpSlot = new RelaRelocation(0, ElfConstants.RArm64JumpSlot, 1, 0x1000, true);
         var branch = new RelaRelocation(0, ElfConstants.RArm64Call26, 0, 0x1004, false);
         var loadStore = new RelaRelocation(0, ElfConstants.RArm64Ldst64AbsLo12Nc, 0, 0x1008, false);
         var unknown = new RelaRelocation(0, 0xFFFF, 0, 0x100C, false);
 
         Assert.Equal(Aarch64RelocationKind.Relative, relative.Kind);
+        Assert.Equal(Aarch64RelocationKind.JumpSlot, jumpSlot.Kind);
         Assert.Equal(Aarch64RelocationKind.Call26, branch.Kind);
         Assert.Equal(Aarch64RelocationKind.LoadStore, loadStore.Kind);
         Assert.Equal(Aarch64RelocationKind.Unknown, unknown.Kind);

@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Preserve profile-specific semantics and layered outer-wrapper compatibility claims."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Follow AArch64 native runner, fixture matrix, baseline/wrapper observation, provenance, and evidence requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve stable packer/launcher errors, process status, output streams, and fail-closed behavior."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Keep profile orchestration in Core/CLI and runtime behavior in the launcher/test boundary."}

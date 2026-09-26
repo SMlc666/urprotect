@@ -90,6 +90,18 @@ urprotect pack ./entry-image.so \
   --json ./entry-image.pack.json
 ```
 
+The optional registered-worker lifecycle is explicitly requested with
+`--thread-lifetime`; it is available only for the native AArch64 glibc
+HostContext contract and remains off by default:
+
+```sh
+urprotect pack ./threaded-entry.so \
+  --output ./threaded-entry.host.wrapped \
+  --launcher ./host-context-launcher \
+  --profile host-context-entry \
+  --thread-lifetime
+```
+
 Build the small native launcher on a native AArch64 host with the pinned musl
 toolchain used by CI:
 
@@ -116,7 +128,28 @@ custom in-process loading remain rejected or deferred. The frame stores a source
 path separators are rejected and no payload directory is taken from the
 environment. Both the native launcher and the managed self-contained host use
 the same anonymous memfd handoff; the managed handoff has a dedicated ARM64
-integration smoke.
+integration smoke. Its bounded symbolic rows retain GLOB_DAT status 29 and
+cover one additional native-glibc-only PLT subset: a complete NOW-bound RELA
+PLT table containing only JUMP_SLOT for an undefined weak, default-visible
+function, with no dependencies or symbol-version tags. The managed fixture
+observes the unresolved function pointer as zero and returns status 53. This is
+not generic PLT or cross-libc HostContext support; malformed and out-of-subset
+tables are rejected before loader handoff. The existing `libc.so.6` dependency
+slice separately accepts `DT_GNU_HASH` and a complete, bounded `DT_VERSYM`/
+`DT_VERNEED`/`DT_VERNEEDNUM` import-requirement chain whose version-need file
+names match that `DT_NEEDED` library. The native loader resolves those
+imports under `RTLD_NOW`; versioned definitions and versioned HostContext entry
+selection remain unsupported. The managed dependency fixture exercises this
+slice on native AArch64 glibc and returns status 37. Versioned requirements
+attached to recognized musl/bionic sonames and SysV `DT_HASH` variants remain
+rejected by this slice. It also rejects `DT_SYMBOLIC`; `DT_GNU_HASH` and a
+bounded version-symbol table are required. A separate, narrow
+`runtime.host-context.bounded-glibc-loader-dependency` row accepts the unique
+direct pair `libc.so.6` + `ld-linux-aarch64.so.1` in either `DT_NEEDED` order
+on native AArch64 glibc. It requires `LD_LIBRARY_PATH`, `LD_PRELOAD`, and
+`LD_AUDIT` unset or empty before memfd handoff; unknown/duplicate/extra
+dependencies and payload path tags remain rejected. This pair does not promote
+arbitrary dependency graphs or musl/bionic HostContext support.
 
 Release bundles are produced only for native ARM64 glibc and musl runtime variants:
 
@@ -268,11 +301,14 @@ benchmark, and Android evidence is uploaded even when the job fails.
 
 The repository also tracks a locked ecology corpus in
 [`fixtures/real-samples/manifest.json`](fixtures/real-samples/manifest.json). It
-contains exactly 20 distinct public AArch64 project identities, including
-Debian/glibc applications, an Alpine/musl BusyBox rootfs, a public
-Termux/bionic Node.js artifact, and real ET_EXEC boundaries. `candidates.json` retains rejected/deferred
-public candidates and `selection.md` explains the feature/runtime covering
-rationale. No raw archive or ELF binary is committed.
+contains the current approved slice of exactly 20 distinct public AArch64
+project identities and an approved target of 100, including Debian/glibc
+applications, an Alpine/musl BusyBox rootfs, a public Termux/bionic Node.js
+artifact, and real ET_EXEC boundaries. `candidates.json` retains exact
+hash-locked, license-labelled rejected/deferred public candidates and
+`selection.md` explains the feature/runtime covering rationale and the
+current evidence-backed shortfall of 80 identities. No raw archive or ELF
+binary is committed.
 
 Local validation remains metadata-only and sample-free:
 
@@ -281,9 +317,18 @@ python3 scripts/validate-real-samples.py \
   fixtures/real-samples/manifest.json \
   --candidates fixtures/real-samples/candidates.json --tier pr
 python3 tests/test_real_sample_manifest.py
+python3 tests/test_real_sample_fingerprint.py
+python3 tests/test_real_sample_evidence.py
+python3 tests/test_real_sample_security.py
 ```
 
-Every pull request runs the full 20-project suite on the native
+The checked-in metadata-only baseline aggregate is
+[`fixtures/real-samples/baseline-aggregate.json`](fixtures/real-samples/baseline-aggregate.json).
+CI renders schema-2 aggregate evidence with distinct-identity feature
+frequencies, producer/runtime/loader/page-size coverage, diagnostics, and
+first-failure layers. Baseline metadata does not promote product support.
+
+Every pull request runs the full currently approved 20-project suite on the native
 `ubuntu-24.04-arm` runner; no affected-path or sample filter can reduce it.
 Scheduled runs use the same registry and runner as `nightly`, and published
 releases use it as `release`, adding retention/repeat strength without
