@@ -395,8 +395,12 @@ The image digest pins the base userspace. The lane retains the lock, hash
 verification, apt logs, package policy, before/after package inventories, and
 reports `packageIndex: live` with `packageInputsReproducible: true` to distinguish live
 artifact discovery from pinned package inputs. It must record both host and
-container kernel/page-size facts and refuse AVD, Waydroid, QEMU, native bridge,
-and non-ARM execution rather than silently falling back. The bionic lane now
+container kernel/page-size facts, require an AArch64 host and a Linux/arm64
+Docker server and container, and reject active Android/AVD/Waydroid host
+contexts or non-ARM execution rather than silently falling back. The pinned
+container must execute `/system/bin/linker64` directly and retain that
+identity witness; presence of an unused QEMU executable on the host is not
+treated as emulated execution. The bionic lane now
 builds and runs the native HostContext self-test: a current HostContext frame
 exercises the real bionic adapter, verifies required memfd seals, dispatches
 the entry, releases the image, and retains its log and fixture ELF. This makes

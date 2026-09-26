@@ -64,7 +64,15 @@ introduced.
 
 ## CI / PR
 
-The task's implementation commit and its PR/push runs are recorded here after
-the CI producer completes. The acceptance gate requires the native AArch64
-glibc HostContext feature evidence, the full public real-sample run, and the
-bionic adapter lane; bionic results do not promote the threaded row.
+The first CI attempt on implementation commit `0bdd835` passed the managed
+build/evidence job and the full real-sample matrix, but its bionic lane exited
+2 in `run-bionic-fixture.sh`'s runner preflight. The runner image now checks
+actual host and Docker-server architecture plus active Android runtime markers
+instead of treating an unused host-side emulator executable as proof that
+execution is emulated; it still requires and exercises the native AArch64
+Termux environment and direct `/system/bin/linker64` identity. This runner
+preflight correction is queued in the next commit and must be revalidated by
+both PR and push CI before archiving the child task. The acceptance gate
+requires the native AArch64 glibc HostContext feature evidence, the full public
+real-sample run, and the bionic adapter lane; bionic results do not promote the
+threaded row.

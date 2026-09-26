@@ -19,12 +19,16 @@ if ! command -v "${container_runtime}" >/dev/null 2>&1; then
   echo "${container_runtime} is required for the native bionic fixture; no fallback is permitted" >&2
   exit 127
 fi
-for forbidden in qemu-aarch64 qemu-aarch64-static qemu-system-aarch64 waydroid emulator; do
-  if command -v "${forbidden}" >/dev/null 2>&1; then
-    echo "bionic fixture refuses a host with ${forbidden}; use a native ARM64 container runner" >&2
-    exit 2
-  fi
-done
+docker_server_platform="$("${container_runtime}" version --format '{{.Server.Os}}/{{.Server.Arch}}')"
+if [[ "${docker_server_platform}" != "linux/arm64" ]]; then
+  echo "bionic fixture requires a native Linux/arm64 Docker engine; got ${docker_server_platform}" >&2
+  exit 2
+fi
+if [[ -n "${ANDROID_ROOT:-}" || -n "${ANDROID_DATA:-}" \
+  || -e /system/bin/linker64 || -e /dev/binder || -e /dev/vndbinder ]]; then
+  echo "bionic fixture refuses an Android, emulator, or Waydroid host context" >&2
+  exit 2
+fi
 for required_command in cmp file getconf readelf python3 sed sha256sum; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "${required_command} is required for bionic fixture evidence" >&2
@@ -355,6 +359,7 @@ printf '%s\n' \
   "host_arch=$(uname -m)" \
   "host_kernel=${host_kernel}" \
   "host_page_size=${host_page_size}" \
+  "docker_server_platform=${docker_server_platform}" \
   "container_arch=aarch64" \
   "container_kernel=${container_kernel}" \
   "container_page_size=${container_page_size}" \
