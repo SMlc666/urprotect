@@ -43,7 +43,24 @@ headers are not consulted by this adapter; bounded program headers and mapped
 dynamic metadata are authoritative for the sectionless image slice.
 
 The self-test includes both the deterministic fake host contract oracle and a
-real AArch64 `urp_entry` shared-object fixture loaded in-process. It directly
+real AArch64 `urp_entry` shared-object fixture loaded in-process. A separate
+linker-produced graph fixture declares exactly `libc.so.6` and
+`ld-linux-aarch64.so.1`; its native self-test checks dispatch status 37,
+release, both dependency orders, and all three loader-environment negatives,
+asserting that rejected environment values do not increment the memfd-create
+count; it also verifies that the prior singleton remains loadable under a
+nonempty `LD_LIBRARY_PATH`. A separate probe confirms that the controlled fake
+loader's constructor marker works; the managed oracle places that
+matching-SONAME object on `LD_LIBRARY_PATH` and requires status 4 with no
+fake-loader or entry marker.
+The graph self-test also loads a linker-produced pair image with an unresolved
+strong `R_AARCH64_GLOB_DAT` import: preflight accepts its exact dependency
+pair, `RTLD_NOW` fails with `URP_STATUS_LOAD_FAILED`, the output handle remains
+zero, and `/proc/self/fd` returns to its prior count. This proves rollback
+after memfd creation and loader handoff have begun.
+The managed oracle retains the pair's `readelf` facts, environment, status,
+streams, native self-test, and release marker.
+This dependency-pair claim is glibc-only and does not promote musl or bionic. It directly
 loads that fixture through the adapter, checks the test-visible seal invariant,
 and releases the image before exercising frame dispatch. It therefore
 validates this narrow adapter slice while leaving broader relocation, TLS,
@@ -57,9 +74,7 @@ AArch64 FEATURE_1 BTI/PAC bits, and rejects malformed or unknown bits. The
 BTI-instrumented fixture reaches the managed entry oracle with status 47.
 DT_NEEDED, DT_AUXILIARY, and DT_FILTER dependency metadata
 form the separately evidenced `runtime.host-context.dependency-resolution`
-boundary. The current positive fixture accepts only one recognized system-libc
-basename with fixed default loader roots; arbitrary dependency graphs, filters,
-auxiliary dependencies, and payload-controlled search paths remain rejected.
+boundary. The singleton fixture continues to accept one recognized system-libc basename. A separate pair fixture accepts only the unique direct glibc pair `libc.so.6` and `ld-linux-aarch64.so.1`; arbitrary dependency graphs, filters, auxiliary dependencies, and payload-controlled search paths remain rejected.
 The same `libc.so.6` slice has a separate validated
 `runtime.host-context.dependency-symbol-version-requirements` row: the adapter
 requires `DT_GNU_HASH`, rejects `DT_SYMBOLIC`, and requires a complete

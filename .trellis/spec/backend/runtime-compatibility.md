@@ -193,14 +193,36 @@ executable pathname.
   accepted only in the validated PLT tuple. Other PLT/symbol combinations
   remain rejected before handoff. The managed entry oracle returns status 53
   on native AArch64 glibc only.
-- The current HostContext dependency/lifecycle slice accepts one recognized
-  system-libc `DT_NEEDED` basename with bounded `DT_STRTAB`/`DT_STRSZ` metadata
-  and no RPATH/RUNPATH. The system loader's fixed default roots resolve it;
-  payload-controlled search paths and additional dependency graph forms remain
-  rejected. Nonzero constructor/destructor metadata follows the declared
-  system-loader order: constructors before `urp_entry`, destructors during
-  `release_image`. Zero-valued lifecycle mutations remain rejected, and
-  reentrancy/live-thread teardown is not claimed.
+- The existing HostContext singleton dependency slice remains one recognized
+  system-libc `DT_NEEDED` basename with bounded `DT_STRTAB`/`DT_STRSZ` metadata.
+  A separate validated row, `runtime.host-context.bounded-glibc-loader-dependency`,
+  accepts only the duplicate-free direct pair `{libc.so.6,
+  ld-linux-aarch64.so.1}` in either order and no third name. This closed graph is
+  validated on native AArch64 glibc only. The host process loader namespace
+  shares its already-loaded libc and loader objects; HostContext owns only the
+  sealed memfd-backed entry root and releases it through `release_image`.
+  Unknown/missing names, duplicates, excess nodes, and malformed pair metadata
+  fail pre-handoff. No recursion, cycle, arbitrary graph, configurable root, or
+  payload-controlled path policy is introduced. `LD_LIBRARY_PATH`,
+  `LD_PRELOAD`, and `LD_AUDIT` must be unset or empty for the pair; the adapter
+  checks them after metadata preflight and before memfd creation. The historical
+  singleton path is unchanged by this pair-specific gate. `DT_RPATH`,
+  `DT_RUNPATH`, `$ORIGIN`, `DT_AUXILIARY`, and `DT_FILTER` remain rejected.
+  Nonzero constructor/destructor metadata follows system-loader order:
+  constructors before `urp_entry`, destructors during `release_image`.
+  Zero-valued lifecycle mutations remain rejected, and reentrancy/live-thread
+  teardown is not claimed. Native tests exercise both dependency orders,
+  require unchanged memfd-create counts for all three environment rejections,
+  observe root-image destructor completion, and verify the historical singleton
+  still loads under a nonempty `LD_LIBRARY_PATH`. A controlled fake loader with
+  the matching SONAME is separately loaded by a probe to verify its marker;
+  when placed under `LD_LIBRARY_PATH`, the pair fixture returns unsupported
+  before memfd creation and neither the fake-loader nor entry marker appears.
+  A second pair fixture with an unresolved strong `R_AARCH64_GLOB_DAT` import
+  passes metadata preflight and fails at `RTLD_NOW`; the native oracle requires
+  `URP_STATUS_LOAD_FAILED`, a cleared image handle, one memfd attempt, and no
+  net descriptor increase after rollback.
+  The pair claim does not extend to musl or bionic.
 - The same `libc.so.6` dependency slice accepts only import-side GNU
   version requirements recorded as
   `runtime.host-context.dependency-symbol-version-requirements`: `DT_GNU_HASH`
@@ -300,10 +322,12 @@ executable pathname.
   the managed v3 entry oracle and returns status 47 on the native glibc lane;
   PAC negotiation beyond the note mask and host instruction-state conflicts
   remain outside the claim.
-  `runtime.host-context.dependency-resolution` is a separate bounded validated
-  slice for one recognized system-libc `DT_NEEDED` basename with bounded string
-  metadata and fixed native loader roots. RPATH/RUNPATH, auxiliary/filter
-  dependencies, arbitrary graphs, and payload-controlled search paths remain
+  `runtime.host-context.dependency-resolution` preserves the one recognized
+  system-libc singleton. The separate
+  `runtime.host-context.bounded-glibc-loader-dependency` row accepts only the
+  exact libc.so.6 + ld-linux-aarch64.so.1 pair on native AArch64 glibc, with an
+  empty/unset loader-influence environment and no payload path tags. RPATH,
+  RUNPATH, `$ORIGIN`, auxiliary/filter dependencies, and arbitrary graphs remain
   rejected. Imported GNU symbol-version requirements for `libc.so.6` are
   separately recorded as `runtime.host-context.dependency-symbol-version-requirements`;
   versioned definitions and entry selection remain rejected.

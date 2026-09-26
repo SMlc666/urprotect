@@ -131,7 +131,13 @@ selection remain unsupported. The managed dependency fixture exercises this
 slice on native AArch64 glibc and returns status 37. Versioned requirements
 attached to recognized musl/bionic sonames and SysV `DT_HASH` variants remain
 rejected by this slice. It also rejects `DT_SYMBOLIC`; `DT_GNU_HASH` and a
-bounded version-symbol table are required.
+bounded version-symbol table are required. A separate, narrow
+`runtime.host-context.bounded-glibc-loader-dependency` row accepts the unique
+direct pair `libc.so.6` + `ld-linux-aarch64.so.1` in either `DT_NEEDED` order
+on native AArch64 glibc. It requires `LD_LIBRARY_PATH`, `LD_PRELOAD`, and
+`LD_AUDIT` unset or empty before memfd handoff; unknown/duplicate/extra
+dependencies and payload path tags remain rejected. This pair does not promote
+arbitrary dependency graphs or musl/bionic HostContext support.
 
 Release bundles are produced only for native ARM64 glibc and musl runtime variants:
 

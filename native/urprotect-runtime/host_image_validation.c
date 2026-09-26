@@ -112,7 +112,7 @@ static void urp_trace_validation_failure(const char *stage, urp_status status)
 typedef struct urp_dynamic_values {
     uint64_t strtab;
     uint64_t strsz;
-    uint64_t needed_offset;
+    uint64_t needed_offsets[2];
     uint64_t gnu_hash;
     uint64_t symtab;
     uint64_t syment;
@@ -135,7 +135,7 @@ typedef struct urp_dynamic_values {
     int has_syment;
     int has_strtab;
     int has_strsz;
-    int has_needed;
+    size_t needed_count;
     int has_sysv_hash;
     int has_gnu_hash;
     int has_versym;
@@ -536,7 +536,7 @@ static urp_status urp_validate_plt_rela_table(
     if (dynamic->pltrelsz == 0U || dynamic->pltrelsz % 24U != 0U
         || dynamic->relaent != 24U || !dynamic->has_relaent
         || !dynamic->has_symtab || !dynamic->has_syment
-        || dynamic->syment != 24U || dynamic->has_needed
+        || dynamic->syment != 24U || dynamic->needed_count != 0U
         || dynamic->has_version_tags || dynamic->has_symbolic
         || !((dynamic->has_flags && (dynamic->flags & URP_DF_BIND_NOW) != 0U)
             || (dynamic->has_flags_1 && (dynamic->flags_1 & URP_DF_1_NOW) != 0U))) {
@@ -869,7 +869,7 @@ static urp_status urp_validate_symbol_version_needs(
     if (!any_version_tags) {
         return URP_STATUS_OK;
     }
-    if (!dynamic->has_needed || !dynamic->has_versym
+    if (dynamic->needed_count != 1U || !dynamic->has_versym
         || !dynamic->has_verneed || !dynamic->has_verneednum
         || dynamic->verneednum == 0U) {
         URP_TRACE_VALIDATION_FAILURE("incomplete symbol-version tuple", URP_STATUS_UNSUPPORTED);
@@ -884,7 +884,7 @@ static urp_status urp_validate_symbol_version_needs(
             dynamic,
             program_header_offset,
             program_header_count,
-            dynamic->needed_offset,
+            dynamic->needed_offsets[0],
             &needed_name,
             &needed_name_length)) {
         return URP_STATUS_LOAD_FAILED;
@@ -1157,10 +1157,15 @@ static urp_status urp_validate_dynamic_segment(
     uint64_t offset,
     uint64_t size,
     uint64_t program_header_offset,
-    uint16_t program_header_count)
+    uint16_t program_header_count,
+    size_t *out_dependency_count)
 {
     size_t dynamic_offset;
     size_t dynamic_size;
+    if (out_dependency_count == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    *out_dependency_count = 0U;
     if (size == 0U
         || size % URP_ELF_DYNAMIC_ENTRY_SIZE != 0U
         || size / URP_ELF_DYNAMIC_ENTRY_SIZE > URP_MAX_DYNAMIC_ENTRIES
@@ -1183,12 +1188,12 @@ static urp_status urp_validate_dynamic_segment(
 
         switch (tag) {
         case URP_DT_NEEDED:
-            /* P3 narrow slice: one system libc basename, no payload-controlled search path. */
-            if (values.has_needed || needed_count++ != 0U) {
+            /* Closed P3 graph: a libc singleton or exact two-name glibc pair. */
+            if (needed_count >= sizeof(values.needed_offsets) / sizeof(values.needed_offsets[0])) {
                 return URP_STATUS_UNSUPPORTED;
             }
-            values.needed_offset = urp_read_u64_le(entry + 8U);
-            values.has_needed = 1;
+            values.needed_offsets[needed_count++] = urp_read_u64_le(entry + 8U);
+            values.needed_count = needed_count;
             break;
         /* P3 bounded slice: the system loader owns constructor/destructor order; zero mutations remain rejected. */
         case URP_DT_INIT:
@@ -1392,11 +1397,9 @@ static urp_status urp_validate_dynamic_segment(
         return URP_STATUS_LOAD_FAILED;
     }
 
-    if (values.has_needed) {
+    if (values.needed_count != 0U) {
         if (!values.has_strtab || !values.has_strsz
-            || values.strsz == 0U
-            || values.needed_offset >= values.strsz
-            || values.strsz > (uint64_t)SIZE_MAX) {
+            || values.strsz == 0U || values.strsz > (uint64_t)SIZE_MAX) {
             return URP_STATUS_LOAD_FAILED;
         }
         size_t string_offset;
@@ -1411,26 +1414,44 @@ static urp_status urp_validate_dynamic_segment(
                 0U,
                 1,
                 &string_offset)
-            || !urp_u64_to_size(values.strsz - values.needed_offset, &string_size)) {
+            || !urp_u64_to_size(values.strsz, &string_size)) {
             return URP_STATUS_LOAD_FAILED;
         }
-        uint64_t needed_string_offset;
-        if (!urp_checked_add_u64(
-                (uint64_t)string_offset,
-                values.needed_offset,
-                &needed_string_offset)
-            || needed_string_offset > (uint64_t)image_size
-            || needed_string_offset > (uint64_t)SIZE_MAX) {
-            return URP_STATUS_LOAD_FAILED;
+        size_t libc_count = 0U;
+        size_t loader_count = 0U;
+        for (size_t index = 0U; index < values.needed_count; ++index) {
+            if (values.needed_offsets[index] >= values.strsz) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            uint64_t needed_string_offset;
+            if (!urp_checked_add_u64(
+                    (uint64_t)string_offset,
+                    values.needed_offsets[index],
+                    &needed_string_offset)
+                || needed_string_offset > (uint64_t)image_size
+                || needed_string_offset > (uint64_t)SIZE_MAX) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            size_t remaining = string_size - (size_t)values.needed_offsets[index];
+            const char *needed = (const char *)(image + (size_t)needed_string_offset);
+            if (strnlen(needed, remaining) == remaining) {
+                return URP_STATUS_LOAD_FAILED;
+            }
+            if (strcmp(needed, "libc.so.6") == 0) {
+                ++libc_count;
+            } else if (strcmp(needed, "ld-linux-aarch64.so.1") == 0) {
+                ++loader_count;
+            } else if (values.needed_count == 1U
+                && (strcmp(needed, "libc.so") == 0
+                    || strcmp(needed, "libc.musl-aarch64.so.1") == 0
+                    || strcmp(needed, "libc.so.1") == 0)) {
+                ++libc_count;
+            } else {
+                return URP_STATUS_UNSUPPORTED;
+            }
         }
-        const char *needed = (const char *)(image + (size_t)needed_string_offset);
-        size_t max_length = string_size;
-        size_t length = strnlen(needed, max_length);
-        if (length == max_length
-            || (strcmp(needed, "libc.so.6") != 0
-                && strcmp(needed, "libc.so") != 0
-                && strcmp(needed, "libc.musl-aarch64.so.1") != 0
-                && strcmp(needed, "libc.so.1") != 0)) {
+        if ((values.needed_count == 1U && libc_count != 1U)
+            || (values.needed_count == 2U && (libc_count != 1U || loader_count != 1U))) {
             return URP_STATUS_UNSUPPORTED;
         }
     }
@@ -1473,12 +1494,21 @@ static urp_status urp_validate_dynamic_segment(
         program_header_count);
     if (status != URP_STATUS_OK) {
         URP_TRACE_VALIDATION_FAILURE("RELR", status);
+    } else {
+        *out_dependency_count = values.needed_count;
     }
     return status;
 }
 
-urp_status urp_host_image_validate(const void *bytes, size_t image_size)
+urp_status urp_host_image_validate(
+    const void *bytes,
+    size_t image_size,
+    size_t *out_dependency_count)
 {
+    if (out_dependency_count == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    *out_dependency_count = 0U;
     const uint8_t *image = (const uint8_t *)bytes;
     if (image == NULL || image_size < URP_ELF_HEADER_SIZE) {
         return URP_STATUS_LOAD_FAILED;
@@ -1513,6 +1543,8 @@ urp_status urp_host_image_validate(const void *bytes, size_t image_size)
     }
 
     size_t load_count = 0U;
+    size_t dependency_count = 0U;
+    size_t dynamic_segment_count = 0U;
     int executable_load = 0;
     for (uint16_t index = 0; index < program_header_count; ++index) {
         uint64_t header_offset;
@@ -1550,13 +1582,17 @@ urp_status urp_host_image_validate(const void *bytes, size_t image_size)
             }
             break;
         case URP_PT_DYNAMIC: {
+            if (++dynamic_segment_count != 1U) {
+                return URP_STATUS_LOAD_FAILED;
+            }
             urp_status status = urp_validate_dynamic_segment(
                 image,
                 image_size,
                 file_offset,
                 file_size,
                 program_header_offset,
-                program_header_count);
+                program_header_count,
+                &dependency_count);
             if (status != URP_STATUS_OK) {
                 URP_TRACE_VALIDATION_FAILURE("PT_DYNAMIC", status);
                 return status;
@@ -1604,6 +1640,7 @@ urp_status urp_host_image_validate(const void *bytes, size_t image_size)
     if (load_count == 0U || !executable_load) {
         return URP_STATUS_LOAD_FAILED;
     }
+    *out_dependency_count = dependency_count;
     return URP_STATUS_OK;
 }
 

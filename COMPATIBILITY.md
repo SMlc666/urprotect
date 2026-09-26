@@ -106,14 +106,29 @@ dependency-side import slice is separately validated below. The checked-in
 registry baseline's `symbol-versions: 7` entry is a prioritization cue, not a
 runtime support claim.
 
-The HostContext production slice now includes a bounded native-glibc dependency
-and lifecycle witness. A single `DT_NEEDED` system-libc basename is accepted
-with bounded string-table metadata and no RPATH/RUNPATH; the system loader's
-fixed default roots resolve it. The fixture's constructor sets state observed
-by `urp_entry`, and its destructor writes a release marker, proving the
-declared constructor-before-entry and destructor-before-release ordering. This
-does not claim arbitrary dependency graphs, payload-controlled path search,
-reentrancy, or live-thread unload behavior.
+The HostContext production slice includes the preserved single-system-libc
+witness and a separate closed native-glibc pair witness. The existing singleton
+accepts one recognized libc basename with bounded string-table metadata. The
+new `runtime.host-context.bounded-glibc-loader-dependency` row accepts exactly
+the unique direct pair `libc.so.6` and `ld-linux-aarch64.so.1`, in either order,
+with no third or duplicate name. This pair is validated only on native AArch64
+glibc. The process loader namespace shares its already-loaded libc and loader
+objects; HostContext retains and releases only the sealed memfd-backed entry
+root. The pair requires `LD_LIBRARY_PATH`, `LD_PRELOAD`, and `LD_AUDIT` unset or
+empty, checked after ELF preflight and before memfd creation. Search roots are
+the native process namespace's fixed defaults; payload directories, RPATH,
+RUNPATH, `$ORIGIN`, arbitrary graphs, cycles, filters, and auxiliary dependencies
+remain rejected. The pair fixture's constructor is observed by `urp_entry`,
+and its destructor writes a release marker. Native tests cover both
+`DT_NEEDED` orders and verify that the environment gate leaves the memfd-create
+count unchanged, while a singleton regression still loads with a nonempty
+`LD_LIBRARY_PATH`. A controlled fake-loader probe verifies its marker before
+the managed oracle places it under `LD_LIBRARY_PATH`; the pair launch returns
+4 without the fake-loader or entry marker. No musl or bionic dependency-pair
+support is claimed. A separate valid-pair fixture with an unresolved strong
+`R_AARCH64_GLOB_DAT` proves a post-memfd `RTLD_NOW` failure returns
+`URP_STATUS_LOAD_FAILED`, clears the output handle, and leaves no descriptor
+increase after rollback.
 The associated import-side symbol-version slice is recorded as
 `runtime.host-context.dependency-symbol-version-requirements`: it requires the
 complete `DT_VERSYM`/`DT_VERNEED`/`DT_VERNEEDNUM` tuple, bounded and terminating

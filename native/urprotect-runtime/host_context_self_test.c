@@ -734,21 +734,23 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         return 0;
     }
 
+    size_t validated_dependency_count = 0U;
     if (!fixture_expect(
-            urp_host_image_validate(source, source_size) == URP_STATUS_OK,
+            urp_host_image_validate(source, source_size, &validated_dependency_count) == URP_STATUS_OK,
             "the extracted host-image preflight rejected the positive fixture")) {
         free(source);
         return 0;
     }
     if (!fixture_expect(
-            urp_host_image_validate(NULL, 0U) == URP_STATUS_LOAD_FAILED,
+            urp_host_image_validate(NULL, 0U, &validated_dependency_count) == URP_STATUS_LOAD_FAILED,
             "the host-image preflight accepted a null image")) {
         free(source);
         return 0;
     }
     uint8_t truncated_image[64] = {0};
     if (!fixture_expect(
-            urp_host_image_validate(truncated_image, sizeof(truncated_image) - 1U)
+            urp_host_image_validate(
+                truncated_image, sizeof(truncated_image) - 1U, &validated_dependency_count)
                 == URP_STATUS_LOAD_FAILED,
             "the host-image preflight accepted a truncated image")) {
         free(source);

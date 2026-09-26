@@ -111,6 +111,27 @@
       "artifacts": [".artifacts/host-context/", "native/urprotect-runtime/build/host-context-self-test"]
     },
     {
+      "id": "native.host-context-dependency-graph",
+      "class": "host-context",
+      "command": "native/urprotect-runtime/test_managed_host_context.sh",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 300,
+      "memoryMb": 2048,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/host-context/managed/dependency-graph-readelf.txt",
+        ".artifacts/host-context/managed/dependency-graph-reversed-readelf.txt",
+        ".artifacts/host-context/managed/graph-self-test.log",
+        ".artifacts/host-context/managed/graph-environment.txt",
+        ".artifacts/host-context/managed/graph-result.txt",
+        ".artifacts/host-context/managed/graph-lifecycle-marker.txt",
+        ".artifacts/host-context/managed/graph-env-result.txt",
+        ".artifacts/host-context/managed/fake-loader-probe.log"
+      ]
+    },
+    {
       "id": "fixture.native-linux",
       "class": "fixture-matrix",
       "command": "./scripts/run-fixture-matrix.sh --tier pr",

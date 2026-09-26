@@ -40,6 +40,10 @@ typedef struct urp_fd_image {
     int fd;
 } urp_fd_image;
 
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+static size_t urp_memfd_create_attempt_count;
+#endif
+
 static int urp_write_all(int fd, const void *bytes, size_t size)
 {
     const uint8_t *source = (const uint8_t *)bytes;
@@ -84,11 +88,30 @@ static urp_status urp_adapter_load_image(
         return URP_STATUS_INVALID_ARGUMENT;
     }
 
-    urp_status validation = urp_host_image_validate(bytes, size);
+    size_t dependency_count = 0U;
+    urp_status validation = urp_host_image_validate(bytes, size, &dependency_count);
     if (validation != URP_STATUS_OK) {
         return validation;
     }
+    if (dependency_count == 2U) {
+        static const char *const loader_variables[] = {
+            "LD_LIBRARY_PATH",
+            "LD_PRELOAD",
+            "LD_AUDIT"
+        };
+        for (size_t index = 0U;
+             index < sizeof(loader_variables) / sizeof(loader_variables[0]);
+             ++index) {
+            const char *value = getenv(loader_variables[index]);
+            if (value != NULL && value[0] != '\0') {
+                return URP_STATUS_UNSUPPORTED;
+            }
+        }
+    }
 
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+    ++urp_memfd_create_attempt_count;
+#endif
     long fd_result = syscall(
         SYS_memfd_create,
         "urprotect-host-image",
@@ -190,6 +213,13 @@ int urp_host_adapter_image_is_sealed(urp_image_handle handle)
     int seals = fcntl(image->fd, F_GET_SEALS);
     return seals >= 0 && (seals & URP_REQUIRED_IMAGE_SEALS) == URP_REQUIRED_IMAGE_SEALS;
 }
+
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+size_t urp_host_adapter_memfd_create_attempts(void)
+{
+    return urp_memfd_create_attempt_count;
+}
+#endif
 
 static urp_status urp_adapter_emit_diagnostic(
     void *userdata,

@@ -26,6 +26,16 @@ VERSION_SELF_TEST := $(BUILD_DIR)/host-context-version-self-test
 VERSION_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_version_self_test.o
 DEPENDENCY_FIXTURE := $(BUILD_DIR)/host-context-dependency-fixture.so
 DEPENDENCY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-dependency-fixture.o
+GRAPH_FIXTURE := $(BUILD_DIR)/host-context-graph-fixture.so
+GRAPH_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-graph-fixture.o
+GRAPH_REVERSED_FIXTURE := $(BUILD_DIR)/host-context-graph-reversed-fixture.so
+GRAPH_LOADER_FAILURE_FIXTURE := $(BUILD_DIR)/host-context-graph-loader-failure-fixture.so
+GRAPH_LOADER_FAILURE_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-graph-loader-failure-fixture.o
+FAKE_LOADER_FIXTURE := $(BUILD_DIR)/fake-loader-root/ld-linux-aarch64.so.1
+FAKE_LOADER_FIXTURE_OBJECT := $(BUILD_DIR)/host_context_fake_loader.o
+FAKE_LOADER_PROBE := $(BUILD_DIR)/host-context-fake-loader-probe
+GRAPH_SELF_TEST := $(BUILD_DIR)/host-context-graph-self-test
+GRAPH_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_graph_self_test.o
 TLS_FIXTURE := $(BUILD_DIR)/host-context-tls-fixture.so
 TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-tls-fixture.o
 PROPERTY_FIXTURE := $(BUILD_DIR)/host-context-property-fixture.so
@@ -36,7 +46,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl
 
-.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture property-fixture contract-probe contract-check clean check-host
+.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -73,10 +83,18 @@ tls-fixture: $(TLS_FIXTURE)
 
 property-fixture: $(PROPERTY_FIXTURE)
 
-test: check-host $(SELF_TEST) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE)
+graph-fixture: $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE)
+
+graph-self-test: $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(DEPENDENCY_FIXTURE)
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_REVERSED_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
+
+test: check-host $(SELF_TEST) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE) $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
 	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
 	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_REVERSED_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
 
 test-adapter: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)" --adapter-v2
@@ -124,6 +142,47 @@ $(PLT_FIXTURE): $(PLT_FIXTURE_OBJECT)
 $(DEPENDENCY_FIXTURE): $(DEPENDENCY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
 	$(LD) -shared --hash-style=gnu --build-id=none -z now "$<" -lc -o "$@"
+
+
+$(GRAPH_FIXTURE): $(GRAPH_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed "$<" -lc -l:ld-linux-aarch64.so.1 -o "$@"
+
+$(GRAPH_REVERSED_FIXTURE): $(GRAPH_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed "$<" -l:ld-linux-aarch64.so.1 -lc -o "$@"
+
+$(GRAPH_LOADER_FAILURE_FIXTURE): $(GRAPH_LOADER_FAILURE_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed --unresolved-symbols=ignore-all "$<" -lc -l:ld-linux-aarch64.so.1 -o "$@"
+
+$(FAKE_LOADER_FIXTURE): $(FAKE_LOADER_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)/fake-loader-root"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now -soname ld-linux-aarch64.so.1 "$<" -o "$@"
+
+$(FAKE_LOADER_PROBE): host_context_fake_loader_probe.c host_context_graph_fixture_contract.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) "$<" -ldl -o "$@"
+
+$(GRAPH_SELF_TEST): $(GRAPH_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) $(GRAPH_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -o "$@"
+
+$(GRAPH_FIXTURE_OBJECT): host_context_graph_fixture.c host_context_graph_fixture_contract.h include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -c "$<" -o "$@"
+
+$(GRAPH_LOADER_FAILURE_FIXTURE_OBJECT): host_context_graph_loader_failure_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -c "$<" -o "$@"
+
+$(FAKE_LOADER_FIXTURE_OBJECT): host_context_fake_loader.c
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -c "$<" -o "$@"
+
+$(GRAPH_SELF_TEST_OBJECT): host_context_graph_self_test.c host_context_graph_fixture_contract.h host_image_validation.h include/urp/host_context.h include/urp/host_adapter.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 
 # Direct linking avoids driver-injected weak PLT imports unrelated to these
 # TLS/property fixtures, keeping each positive oracle isolated to its feature.
