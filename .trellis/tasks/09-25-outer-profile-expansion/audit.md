@@ -50,8 +50,11 @@
   The launcher self-test, native launcher integration tests, managed anonymous
   handoff, and all packed fixtures passed. The ET_EXEC probe matched baseline
   and wrapper output exactly; both `DT_RPATH` and `DT_RUNPATH` no-publication
-  tests passed; both signal runs returned status 15; the declared-file outputs
-  matched.
+  tests passed; signal termination matched between baseline and wrapper. The
+  PR CI runner recorded status 143 through `timeout`, while local GNU timeout
+  returns status 15 for the same self-SIGTERM child; the oracle accepts these
+  two documented signal-status forms and rejects timeout status 124. The
+  declared-file outputs matched.
 - The packed-matrix static launcher was built with an explicit `CC=gcc`
   override because `musl-gcc` is absent in this environment. This run proves
   the native AArch64 glibc outer cell only. Recognizing the musl loader path is
@@ -65,9 +68,13 @@
   step had run. The case path
   now targets the fixture-smoke directory and the packed feature artifact is
   checked after `Packed fixture smoke`; both gates pass locally.
-- GitHub CI for this child is pending after its implementation commit. The
-  previous parser-child CI passed, and its real-sample artifact supplied the
-  selection evidence above.
+- GitHub run `36119338003` passed the managed build, real-sample, and bionic
+  jobs. Its retained packed log exposed that GNU `timeout` reports the
+  self-SIGTERM probe as 143 on the hosted runner, while local GNU `timeout`
+  reports 15. The signal oracle was normalized to accept these two direct
+  signal-result encodings while rejecting timeout status 124; the follow-up
+  CI after this correction remains pending. The run's real-sample artifact
+  supplies the Caddy/Python parser acceptance evidence above.
 
 ## Ownership and rollback
 

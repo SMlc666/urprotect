@@ -248,7 +248,8 @@ PY
     set -e
     printf '%s\n' "${baseline_signal_status}" > "${case_root}/signal-baseline.status"
     printf '%s\n' "${wrapped_signal_status}" > "${case_root}/signal-wrapped.status"
-    if [[ "${baseline_signal_status}" -ne 15 || "${wrapped_signal_status}" -ne 15 ]]; then
+    if [[ "${baseline_signal_status}" -ne "${wrapped_signal_status}"
+      || ( "${baseline_signal_status}" -ne 15 && "${baseline_signal_status}" -ne 143 ) ]]; then
       echo "FAIL ${id}: signal status ${baseline_signal_status} != ${wrapped_signal_status}" >&2
       exit 1
     fi
