@@ -258,6 +258,11 @@ run_shell -c '
     /artifacts/host-context/build-and-test.log
 ' -- "${compiler_package_specs[@]}"
 
+# The container's apt sandbox may leave its partial-download directory with
+# restrictive ownership; make the retained hash-locked archives readable by
+# the host evidence scanner/upload action.
+sudo chmod -R a+rX "${case_root}/apt-archives"
+
 python3 - "${case_root}/packages-before.txt" "${case_root}/packages.txt" \
   "${package_lock_json}" <<'PY'
 import json
