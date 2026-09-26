@@ -120,6 +120,10 @@ sha256sum "${plt_output}" "${script_dir}/build/host-context-plt-fixture.so" \
   >>"${artifact_root}/sha256.txt"
 
 make -C "${script_dir}" dependency-fixture >>"${artifact_root}/build.log" 2>&1
+cp "${script_dir}/build/host-context-dependency-fixture.so" \
+  "${artifact_root}/host-context-dependency-fixture.so"
+readelf -aW "${artifact_root}/host-context-dependency-fixture.so" \
+  >"${artifact_root}/dependency-fixture-readelf.txt"
 make -C "${script_dir}" version-self-test >"${artifact_root}/version-self-test.log" 2>&1
 cat "${artifact_root}/version-self-test.log" >>"${artifact_root}/build.log"
 readelf -dW --version-info "${script_dir}/build/host-context-dependency-fixture.so" \

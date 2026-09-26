@@ -102,6 +102,7 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.outer.dynamic-et-exec
       - name: HostContext runtime contract smoke
         run: |
+          set -o pipefail
           mkdir -p .artifacts/host-context/pr
           make -C native/urprotect-runtime test \
             2>&1 | tee .artifacts/host-context/pr/self-test.log

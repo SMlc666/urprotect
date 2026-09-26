@@ -1090,7 +1090,7 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         return 0;
     }
 
-    size_t dynamic_terminator_offset;
+    size_t dynamic_terminator_offset = 0U;
     if (!fixture_expect(
             fixture_find_dynamic_terminator(
                 source,
@@ -1315,7 +1315,7 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
     }
 
     uint64_t program_header_offset = fixture_read_u64_le(source + 32U);
-    size_t program_header_offset_as_size;
+    size_t program_header_offset_as_size = 0U;
     if (!fixture_expect(
             fixture_range_in_file(
                 source_size,
