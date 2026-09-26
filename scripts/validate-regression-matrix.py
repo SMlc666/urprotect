@@ -22,6 +22,7 @@ CLASSES = {
     "packed-fixture",
     "musl",
     "bionic",
+    "runtime-matrix",
     "android-native-bridge",
 }
 EXPECTED = {"pass", "pass-or-unavailable"}
@@ -88,7 +89,7 @@ def validate(
             if missing:
                 fail(f"{case_id} is missing artifact witnesses: {', '.join(missing)}")
 
-    required_classes = {"cli", "pack", "constants", "fuzz", "stress", "launcher", "managed-handoff", "host-context", "fixture-matrix", "packed-fixture"}
+    required_classes = {"cli", "pack", "constants", "fuzz", "stress", "launcher", "managed-handoff", "host-context", "fixture-matrix", "packed-fixture", "runtime-matrix"}
     missing = sorted(required_classes - seen_classes)
     if missing:
         fail(f"required regression classes are missing: {', '.join(missing)}")

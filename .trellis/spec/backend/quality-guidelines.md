@@ -90,7 +90,9 @@ ASLR addresses and timing.
 
 - Required native Linux jobs run on `aarch64` and retain an environment report.
 - `fixtures/manifest.json` is the source of truth for fixture IDs, tiers,
-  toolchains, runtimes, and execution facts.
+  toolchains, runtimes, and execution facts. `fixtures/runtime-matrix.json`
+  owns the named AArch64 runtime environment covering set and immutable OCI
+  pins; run `scripts/check-runtime-matrix-evidence.py` after each producer.
 - Required toolchain or runtime failures fail the job. Optional Android native
   bridge capability is reported explicitly and is not relabeled as native
   ARM64 hardware.

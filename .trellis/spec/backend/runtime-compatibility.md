@@ -546,3 +546,12 @@ requires real observation, controlled positive and nearest-negative fixtures,
 stable diagnostics, and synchronized contract, documentation, and evidence
 updates. Real-sample count is ecology evidence and cannot substitute for a
 feature invariant or controlled negative boundary.
+### Runtime environment covering array
+
+`fixtures/runtime-matrix.json` owns stable cell IDs, OCI pins, tier selection,
+and covering rationale. The evidence gate consumes the locked bionic producer;
+containers inherit the runner kernel. A non-16KiB native probe remains
+`environment-unavailable`/`unknown`; 16KiB `PT_LOAD.p_align` proves ELF shape,
+not a 16KiB kernel. Musl 1.2.4 uses SHA-256-pinned source and records its native
+compiler/runtime hashes and build logs; its temporary loader link is removed
+after the oracle.

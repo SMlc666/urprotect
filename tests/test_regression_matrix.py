@@ -38,6 +38,12 @@ class RegressionMatrixTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         self.assertIn("managed.coverage-guided-fuzz", {case["id"] for case in self.data["cases"]})
         self.assertIn("native.host-context-e2e", {case["id"] for case in self.data["cases"]})
+        runtime_cases = {case["id"] for case in self.data["cases"]}
+        self.assertTrue({
+            "fixture.runtime-covering-matrix-pr",
+            "fixture.runtime-covering-matrix-nightly",
+            "fixture.runtime-covering-matrix-release",
+        }.issubset(runtime_cases))
 
     def test_duplicate_case_id_is_rejected(self) -> None:
         data = copy.deepcopy(self.data)

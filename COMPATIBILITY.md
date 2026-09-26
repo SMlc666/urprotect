@@ -284,3 +284,37 @@ stale versions and profile/launcher mismatches.
 
 The claim therefore applies to every correctly implemented host satisfying the
 contract, not to an unqualified statistical majority of phone vendors.
+
+
+## AArch64 runtime environment covering set
+
+`fixtures/runtime-matrix.json` is the stable environment registry and documents
+the selected covering rationale. Native current glibc runs on every tier; the
+Ubuntu 22.04 ARM64/glibc 2.35 and Alpine 3.22.2/musl 1.2.5 digest-pinned
+containers plus Ubuntu ARM64 musl 1.2.4 run in nightly and release. The existing
+locked Termux/bionic lane remains a separate cell on all tiers. Container rows
+record the native runner's kernel and page size as inherited facts; container
+userland does not establish an independent kernel cell.
+
+The native runner links 4KiB and 16KiB `PT_LOAD.p_align` GNU fixtures; extended
+tiers additionally build 4KiB/16KiB musl fixtures and execute the 16KiB-aligned
+GNU and musl images across the selected loaders. These are ELF alignment
+observations, not a 16KiB kernel runtime claim. The `kernel-page.16k.native-aarch64`
+probe always records the actual native page size; on a non-16KiB host its result
+is `environment-unavailable` with support `unknown`. No emulator or container
+page-size inference substitutes for a native 16KiB kernel oracle.
+
+The musl 1.2.4 producer is built on native AArch64 from the release archive
+whose SHA-256 is locked in `fixtures/runtime-matrix-toolchains.json`; the
+runner GCC, resulting musl compiler/runtime hashes, version output, and build
+logs are retained. Its temporary `/lib/ld-musl-aarch64.so.1` link is only
+created when absent and is removed by the runtime runner on exit. The matrix
+job depends on the native bionic producer and rechecks all eight downloaded
+Termux package archives against their package lock, along with bionic linker
+identity and the HostContext fixture/self-test artifacts.
+
+Run and validate with `scripts/run-runtime-matrix.sh pr|nightly|release`; the
+post-run gate checks retained non-empty identity/oracle evidence and the page
+probe classification. OCI image references are pinned to the reviewed Ubuntu
+22.04 and Alpine 3.22.2 index digests in the registry, and image architecture
+is checked as `linux/arm64` before executing fixtures.

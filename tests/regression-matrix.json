@@ -1,120 +1,188 @@
 {
   "schemaVersion": 1,
-  "tiers": ["pr", "nightly", "release"],
+  "tiers": [
+    "pr",
+    "nightly",
+    "release"
+  ],
   "cases": [
     {
       "id": "managed.cli-contract",
       "class": "cli",
       "command": "dotnet test UrProtect.sln --configuration Release --no-restore --filter Category=Cli",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "any",
       "budgetSeconds": 120,
       "memoryMb": 1024,
       "required": true,
       "expected": "pass",
-      "artifacts": ["tests/**/TestResults/**"]
+      "artifacts": [
+        "tests/**/TestResults/**"
+      ]
     },
     {
       "id": "managed.pack-contract",
       "class": "pack",
       "command": "dotnet test UrProtect.sln --configuration Release --no-restore --filter Category=PackCli|Category=PackWrapper|Category=PackMalformed",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "any",
       "budgetSeconds": 120,
       "memoryMb": 1024,
       "required": true,
       "expected": "pass",
-      "artifacts": ["tests/**/TestResults/**"]
+      "artifacts": [
+        "tests/**/TestResults/**"
+      ]
     },
     {
       "id": "managed.contract-layout",
       "class": "constants",
       "command": "dotnet test tests/UrProtect.Core.Tests/UrProtect.Core.Tests.csproj --configuration Release --no-restore --filter Category=Contract",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "any",
       "budgetSeconds": 90,
       "memoryMb": 512,
       "required": true,
       "expected": "pass",
-      "artifacts": ["tests/**/TestResults/**", "native/urprotect-runtime/build/contract-probe"]
+      "artifacts": [
+        "tests/**/TestResults/**",
+        "native/urprotect-runtime/build/contract-probe"
+      ]
     },
     {
       "id": "managed.coverage-guided-fuzz",
       "class": "fuzz",
       "command": "./scripts/run-coverage-fuzz.sh --tier pr",
-      "tiers": ["pr"],
+      "tiers": [
+        "pr"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 90,
       "memoryMb": 1024,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/fuzz/pr/run-manifest.txt", ".artifacts/fuzz/pr/*.log", ".artifacts/fuzz/pr/crashes/"]
+      "artifacts": [
+        ".artifacts/fuzz/pr/run-manifest.txt",
+        ".artifacts/fuzz/pr/*.log",
+        ".artifacts/fuzz/pr/crashes/"
+      ]
     },
     {
       "id": "managed.coverage-guided-fuzz-nightly",
       "class": "fuzz",
       "command": "./scripts/run-coverage-fuzz.sh --tier nightly",
-      "tiers": ["nightly", "release"],
+      "tiers": [
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 300,
       "memoryMb": 2048,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/fuzz/nightly/run-manifest.txt", ".artifacts/fuzz/nightly/*.log", ".artifacts/fuzz/nightly/crashes/"]
+      "artifacts": [
+        ".artifacts/fuzz/nightly/run-manifest.txt",
+        ".artifacts/fuzz/nightly/*.log",
+        ".artifacts/fuzz/nightly/crashes/"
+      ]
     },
     {
       "id": "managed.concurrency-large-input",
       "class": "stress",
       "command": "./scripts/run-regression-stress.sh --tier pr",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "any",
       "budgetSeconds": 300,
       "memoryMb": 2048,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/stress/pr/run-manifest.txt", ".artifacts/stress/pr/run.log", ".artifacts/stress/pr/*.trx"]
+      "artifacts": [
+        ".artifacts/stress/pr/run-manifest.txt",
+        ".artifacts/stress/pr/run.log",
+        ".artifacts/stress/pr/*.trx"
+      ]
     },
     {
       "id": "native.launcher-e2e",
       "class": "launcher",
       "command": "make -C native/urprotect-launcher test",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 300,
       "memoryMb": 1024,
       "required": true,
       "expected": "pass",
-      "artifacts": ["native/urprotect-launcher/build/urprotect-launcher", ".artifacts/packed/"]
+      "artifacts": [
+        "native/urprotect-launcher/build/urprotect-launcher",
+        ".artifacts/packed/"
+      ]
     },
     {
       "id": "native.managed-handoff-e2e",
       "class": "managed-handoff",
       "command": "./native/urprotect-launcher/test_managed_handoff.sh native/urprotect-launcher/build/urprotect-launcher",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 300,
       "memoryMb": 2048,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/managed-handoff/"]
+      "artifacts": [
+        ".artifacts/managed-handoff/"
+      ]
     },
     {
       "id": "native.host-context-e2e",
       "class": "host-context",
       "command": "make -C native/urprotect-runtime test",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 180,
       "memoryMb": 1024,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/host-context/", "native/urprotect-runtime/build/host-context-self-test"]
+      "artifacts": [
+        ".artifacts/host-context/",
+        "native/urprotect-runtime/build/host-context-self-test"
+      ]
     },
     {
       "id": "native.host-context-dependency-graph",
       "class": "host-context",
       "command": "native/urprotect-runtime/test_managed_host_context.sh",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 300,
       "memoryMb": 2048,
@@ -135,67 +203,103 @@
       "id": "fixture.native-linux",
       "class": "fixture-matrix",
       "command": "./scripts/run-fixture-matrix.sh --tier pr",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 900,
       "memoryMb": 4096,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/fixtures/pr/", ".artifacts/fixtures/nightly/", ".artifacts/fixtures/release/"]
+      "artifacts": [
+        ".artifacts/fixtures/pr/",
+        ".artifacts/fixtures/nightly/",
+        ".artifacts/fixtures/release/"
+      ]
     },
     {
       "id": "fixture.packed-native-linux",
       "class": "packed-fixture",
       "command": "./scripts/run-packed-fixture-matrix.sh --tier pr",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 900,
       "memoryMb": 4096,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/packed/pr/", ".artifacts/packed/nightly/", ".artifacts/packed/release/"]
+      "artifacts": [
+        ".artifacts/packed/pr/",
+        ".artifacts/packed/nightly/",
+        ".artifacts/packed/release/"
+      ]
     },
     {
       "id": "fixture.musl-container",
       "class": "musl",
       "command": "./scripts/run-musl-container-smoke.sh",
-      "tiers": ["nightly", "release"],
+      "tiers": [
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64-container",
       "budgetSeconds": 900,
       "memoryMb": 4096,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/musl/"]
+      "artifacts": [
+        ".artifacts/musl/"
+      ]
     },
     {
       "id": "fixture.bionic-container",
       "class": "bionic",
       "command": "./scripts/run-bionic-fixture.sh",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64-container",
       "budgetSeconds": 1200,
       "memoryMb": 4096,
       "required": true,
       "expected": "pass",
-      "artifacts": [".artifacts/bionic/"]
+      "artifacts": [
+        ".artifacts/bionic/"
+      ]
     },
     {
       "id": "fixture.android-native-bridge",
       "class": "android-native-bridge",
       "command": "./scripts/run-android-avd.sh",
-      "tiers": ["nightly", "release"],
+      "tiers": [
+        "nightly",
+        "release"
+      ],
       "platform": "x86_64-android-native-bridge",
       "budgetSeconds": 5400,
       "memoryMb": 8192,
       "required": false,
       "expected": "pass-or-unavailable",
-      "artifacts": [".artifacts/android-arm64-native-bridge-on-x64/"]
+      "artifacts": [
+        ".artifacts/android-arm64-native-bridge-on-x64/"
+      ]
     },
     {
       "id": "native.host-context-threaded-tls",
       "class": "host-context",
       "command": "native/urprotect-runtime/test_managed_host_context.sh",
-      "tiers": ["pr", "nightly", "release"],
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
       "platform": "native-arm64",
       "budgetSeconds": 420,
       "memoryMb": 2048,
@@ -212,6 +316,73 @@
         ".artifacts/host-context/managed/thread-adapter-self-test.log",
         ".artifacts/host-context/managed/host-context-threaded-tls-packed.json",
         ".artifacts/host-context/managed/sha256.txt"
+      ]
+    },
+    {
+      "id": "fixture.runtime-covering-matrix-pr",
+      "class": "runtime-matrix",
+      "command": "RUNTIME_MATRIX_ARTIFACT_ROOT=.artifacts/runtime-matrix/pr BIONIC_MATRIX_ARTIFACT_ROOT=.artifacts/bionic/c-termux-bionic-pie ./scripts/run-runtime-matrix.sh pr",
+      "tiers": ["pr"],
+      "platform": "native-arm64",
+      "budgetSeconds": 900,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/runtime-matrix/pr/run-manifest.txt",
+        ".artifacts/runtime-matrix/pr/cells/glibc.current.native-arm64/result.json",
+        ".artifacts/runtime-matrix/pr/cells/glibc.current.native-arm64/fixture-identity.txt",
+        ".artifacts/runtime-matrix/pr/cells/glibc.current.native-arm64-16k/fixture-identity.txt",
+        ".artifacts/runtime-matrix/pr/cells/kernel-page.16k.native-aarch64.result.txt",
+        ".artifacts/runtime-matrix/pr/SHA256SUMS",
+        ".artifacts/bionic/c-termux-bionic-pie/result.json",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log"
+      ]
+    },
+    {
+      "id": "fixture.runtime-covering-matrix-nightly",
+      "class": "runtime-matrix",
+      "command": "RUNTIME_MATRIX_ARTIFACT_ROOT=.artifacts/runtime-matrix/nightly BIONIC_MATRIX_ARTIFACT_ROOT=.artifacts/bionic/c-termux-bionic-pie ./scripts/run-runtime-matrix.sh nightly",
+      "tiers": ["nightly"],
+      "platform": "native-arm64",
+      "budgetSeconds": 2400,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/runtime-matrix/nightly/run-manifest.txt",
+        ".artifacts/runtime-matrix/nightly/cells/glibc.current.native-arm64/result.json",
+        ".artifacts/runtime-matrix/nightly/cells/glibc.older.ubuntu-22.04-arm64/result.json",
+        ".artifacts/runtime-matrix/nightly/cells/musl.1.2.4.ubuntu-native/result.json",
+        ".artifacts/runtime-matrix/nightly/cells/musl.1.2.5.alpine-3.22.2/result.json",
+        ".artifacts/runtime-matrix/nightly/musl-1.2.4-smoke/packed-report.json",
+        ".artifacts/runtime-matrix/nightly/cells/kernel-page.16k.native-aarch64.result.txt",
+        ".artifacts/runtime-matrix/nightly/SHA256SUMS",
+        ".artifacts/bionic/c-termux-bionic-pie/result.json",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log"
+      ]
+    },
+    {
+      "id": "fixture.runtime-covering-matrix-release",
+      "class": "runtime-matrix",
+      "command": "RUNTIME_MATRIX_ARTIFACT_ROOT=.artifacts/runtime-matrix/release BIONIC_MATRIX_ARTIFACT_ROOT=.artifacts/bionic/c-termux-bionic-pie ./scripts/run-runtime-matrix.sh release",
+      "tiers": ["release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 2400,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/runtime-matrix/release/run-manifest.txt",
+        ".artifacts/runtime-matrix/release/cells/glibc.current.native-arm64/result.json",
+        ".artifacts/runtime-matrix/release/cells/glibc.older.ubuntu-22.04-arm64/result.json",
+        ".artifacts/runtime-matrix/release/cells/musl.1.2.4.ubuntu-native/result.json",
+        ".artifacts/runtime-matrix/release/cells/musl.1.2.5.alpine-3.22.2/result.json",
+        ".artifacts/runtime-matrix/release/musl-1.2.4-smoke/packed-report.json",
+        ".artifacts/runtime-matrix/release/cells/kernel-page.16k.native-aarch64.result.txt",
+        ".artifacts/runtime-matrix/release/SHA256SUMS",
+        ".artifacts/bionic/c-termux-bionic-pie/result.json",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log"
       ]
     }
   ]

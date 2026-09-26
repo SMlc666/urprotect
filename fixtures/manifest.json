@@ -313,7 +313,8 @@
         ".artifacts/bionic",
         ".artifacts/bionic/c-termux-bionic-pie/packages.txt",
         ".artifacts/bionic/c-termux-bionic-pie/compiler-package-lock.json",
-        ".artifacts/bionic/c-termux-bionic-pie/package-hash-verification.txt"
+        ".artifacts/bionic/c-termux-bionic-pie/package-hash-verification.txt",
+        ".artifacts/bionic/c-termux-bionic-pie/apt-archives"
       ],
       "constraints": [
         "The OCI image digest and Termux source revision are pinned.",

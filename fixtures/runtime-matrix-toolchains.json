@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "toolchains": [
+    {
+      "id": "musl.1.2.4.ubuntu-native",
+      "distribution": "Ubuntu 24.04 Noble",
+      "architecture": "aarch64",
+      "source": "https://musl.libc.org/releases/musl-1.2.4.tar.gz",
+      "sourceFilename": "musl-1.2.4.tar.gz",
+      "sourceSha256": "7a35eae33d5372a7c0da1188de798726f68825513b7ae3ebe97aaaa52114f039",
+      "version": "1.2.4",
+      "build": {
+        "target": "aarch64-linux-musl",
+        "compiler": "native AArch64 GCC",
+        "configureArgs": [
+          "--target=aarch64-linux-musl",
+          "--syslibdir=/lib",
+          "--enable-wrapper=gcc"
+        ],
+        "makeOverride": "CROSS_COMPILE=",
+        "runtimeInterpreter": "/lib/ld-musl-aarch64.so.1"
+      }
+    }
+  ]
+}

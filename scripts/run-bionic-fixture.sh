@@ -241,7 +241,6 @@ run_shell -c '
       printf "%s\n" "${installed_version}" > /artifacts/clang-package-version.txt
     fi
   done
-  rm -rf /artifacts/apt-archives
   dpkg-query -W -f="\${binary:Package}\t\${Version}\t\${Architecture}\t\${Status}\n" \
     | sort > /artifacts/packages.txt
   apt-cache policy clang > /artifacts/package-policy.txt
@@ -400,7 +399,7 @@ if [[ ! -s "${host_context_fixture}" ]]; then
   exit 1
 fi
 file "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-file.txt"
-readelf -hW -lW -dW "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-readelf.txt"
+readelf -hW -lW -dW -sW "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-readelf.txt"
 sha256sum "${host_context_fixture}" > "${case_root}/host-context/entry-fixture.sha256"
 printf '%s\n' \
   "status=validated" \
