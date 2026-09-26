@@ -116,9 +116,14 @@ The setup now finds a mapped GNU-hash chain boundary across file-backed
 positive preflight checks emit test-only stage diagnostics, and CI retains the
 controlled fixture plus full readelf output. The GCC warning in the runtime
 self-test's ELF-offset locals was fixed by initializing them before bounded
-helper assignment. Local native runtime and managed HostContext tests pass;
-this commit's CI must confirm the native AArch64 artifact and evidence gates.
-Only retained native AArch64 glibc artifacts satisfy the runtime evidence
-contract; local evidence is supplemental. The parent task remains active until
-all remaining child tasks, release integration, and the PR workflow are
-complete.
+helper assignment. Local native runtime and managed HostContext tests pass. PR
+run `36232680887` on `3c0340789ff4f1948e97570a21d28a928751944f` passed
+`build-and-test`, `real-sample-matrix`, and `bionic-native-arm64`; its HostContext
+feature evidence gate passed. The uploaded `test-evidence-36232680887` artifact
+retains `.artifacts/host-context/pr/dependency-fixture-readelf.txt`, the native
+self-test log, managed `version-self-test.log`, `dependency-result.txt`
+(status 37), and the controlled test ELF. The real-sample and bionic jobs also
+retained their required artifacts. These CI artifacts satisfy the native
+AArch64 glibc runtime evidence contract; local evidence remains supplemental.
+This child is complete; the parent remains active until its remaining child
+tasks, release integration, and PR workflow are complete.

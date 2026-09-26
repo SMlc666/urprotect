@@ -33,11 +33,11 @@ real-sample frequency and validated with native runtime oracles.
 
 ## Acceptance Criteria
 
-- [ ] Every newly accepted relocation/symbol family has a typed model rule,
+- [x] Every newly accepted relocation/symbol family has a typed model rule,
       positive fixture, negative fixture, stable diagnostic, and runtime oracle.
-- [ ] PLT/GOT and symbol versions have explicit semantics rather than implicit
+- [x] PLT/GOT and symbol versions have explicit semantics rather than implicit
       system-loader pass-through.
-- [ ] Unsupported or malformed variants fail before handoff with a zero output
+- [x] Unsupported or malformed variants fail before handoff with a zero output
       handle and no entry call.
-- [ ] Managed/native ABI and frame layout drift gates pass.
-- [ ] Only evidence-backed profile/runtime rows are promoted.
+- [x] Managed/native ABI and frame layout drift gates pass.
+- [x] Only evidence-backed profile/runtime rows are promoted.

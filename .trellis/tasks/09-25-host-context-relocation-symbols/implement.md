@@ -24,7 +24,12 @@
 - [x] Validate GNU-hash-derived VERSYM table bounds, version-need filenames/counts/chains, auxiliary strings/hashes/indices/flags, and zero-handle outcomes for nearest malformed or unsupported cases.
 - [x] Reject R_AARCH64_JUMP_SLOT in ordinary DT_RELA so it cannot bypass the dedicated PLT contract.
 - [x] Update manifest, docs, contract inventory, and runtime spec; no report schema change.
-- [ ] Push the implementation and confirm native AArch64 glibc PR CI retains and gates both managed runtime oracles.
+- [x] Push the implementation and confirm native AArch64 glibc PR CI retains
+      and gates both managed runtime oracles. PR run `36232680887` passed
+      `build-and-test`, `real-sample-matrix`, and `bionic-native-arm64`; its
+      uploaded `test-evidence-36232680887` includes the version self-test log,
+      GNU-hash-only fixture/readelf report, and managed dependency status 37,
+      with the HostContext evidence gate passing.
 
 ## Real-sample impact
 
