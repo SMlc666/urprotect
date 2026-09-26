@@ -35,12 +35,12 @@ initialization, and live-thread unload remain outside the contract. Failed
 adapter loads clear the output image handle before returning their stable
 status.
 The system loader remains the authority for applying relocation and memory
-protection. This adapter accepts only AArch64 `RELATIVE`/`RELR` relocation
-forms with checked writable targets, and permits only immediate-binding
-dynamic flags; other relocation or lifecycle forms remain outside the
-declared slice. Section headers are not consulted by this adapter; bounded
-program headers and mapped dynamic metadata are authoritative for the
-sectionless image slice.
+protection. This adapter accepts AArch64 `RELATIVE`/`RELR` forms with checked
+writable targets, the existing bounded GLOB_DAT form, and the exact
+weak-undefined JUMP_SLOT PLT subset described below. The PLT subset requires
+immediate binding; other PLT/symbol combinations remain rejected. Section
+headers are not consulted by this adapter; bounded program headers and mapped
+dynamic metadata are authoritative for the sectionless image slice.
 
 The self-test includes both the deterministic fake host contract oracle and a
 real AArch64 `urp_entry` shared-object fixture loaded in-process. It directly
@@ -60,6 +60,18 @@ form the separately evidenced `runtime.host-context.dependency-resolution`
 boundary. The current positive fixture accepts only one recognized system-libc
 basename with fixed default loader roots; arbitrary dependency graphs, filters,
 auxiliary dependencies, and payload-controlled search paths remain rejected.
+The same `libc.so.6` slice has a separate validated
+`runtime.host-context.dependency-symbol-version-requirements` row: the adapter
+requires `DT_GNU_HASH`, rejects `DT_SYMBOLIC`, and requires a complete
+`DT_VERSYM`/`DT_VERNEED`/`DT_VERNEEDNUM` tuple, bounds every
+version-need and auxiliary record, requires each `vn_file` to match the sole
+`DT_NEEDED` basename `libc.so.6`, and checks the version-name hash/index fields.
+SysV `DT_HASH` alone or combined with `DT_GNU_HASH` is outside this slice.
+`RTLD_NOW` delegates resolution of those imported libc versions to the native
+loader. The retained fixture has a versioned `libc.so.6` import and returns
+status 37 on native AArch64 glibc. `DT_VERDEF`/`DT_VERDEFNUM`, weak-version
+requirements, versioned imports from other libc names, mismatched dependency
+names, and versioned entry selection stay outside the contract.
 Constructor/destructor metadata is the separate bounded
 `runtime.host-context.constructor-destructor` slice. The system loader runs
 nonzero constructor metadata before `urp_entry` and destructor metadata during
@@ -89,17 +101,26 @@ baseline. Unsupported relocation-table tags use the separate
 AArch64 `RELATIVE`/`RELR` acceptance and system-loader application remain the
 validated relocation feature.
 
-Unsupported dynamic relocation-table tags are independently rejected by the
-HostContext v1 adapter under
-`runtime.host-context.unsupported-relocation-table`. The boundary covers
-`DT_REL`, `DT_RELSZ`, `DT_RELENT`, `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL`;
-the current system-loader contract defines only the checked AArch64
-`RELATIVE`/`RELR` path, so each tag is rejected before relocation processing
-or image-handle creation. The self-test mutates one bounded `DT_NULL` slot at a
-time, preserves surrounding bytes, initializes a nonzero handle sentinel, and
-requires `URP_STATUS_UNSUPPORTED` with a zero handle. The unchanged
-`RELATIVE`/`RELR` fixture remains the positive baseline, and no broader
-relocation-table support is claimed.
+HostContext accepts one exact PLT RELA subset recorded as
+`runtime.host-context.weak-undefined-jump-slot`: all of `DT_JMPREL`,
+`DT_PLTRELSZ`, and `DT_PLTREL=DT_RELA` must occur once; `DT_RELAENT` and
+`DT_SYMENT` must exactly match AArch64 ELF64 entry sizes; the bounded table may
+contain only aligned writable in-image `R_AARCH64_JUMP_SLOT` targets referring
+to file-backed `STB_WEAK`, `STT_FUNC`, `st_other == STV_DEFAULT`,
+`SHN_UNDEF` dynsym records. This subset has no `DT_NEEDED` or symbol-version
+tags and rejects
+`DT_SYMBOLIC`/non-preemptive flags. Binding is immediate (`DF_BIND_NOW` or
+`DF_1_NOW`) and the adapter opens with `RTLD_NOW`. Lookup follows the native
+loader's existing global scope and then the image's declared dependencies
+(none here); an unresolved weak function resolves to zero. The managed
+AArch64 glibc oracle observes zero from the entry and returns status 53. This
+is not generic PLT/JUMP_SLOT or arbitrary libc-import support.
+
+`runtime.host-context.unsupported-relocation-table` still rejects `DT_REL`,
+`DT_RELSZ`, and `DT_RELENT`, and rejects partial, duplicate, inconsistent,
+malformed, dependency-bearing, versioned, or other out-of-slice PLT metadata
+before loader handoff. Its self-test checks the zero-handle result. The
+unchanged RELATIVE/RELR and GLOB_DAT status-29 rows remain intact.
 
 Android packed relocation tags are a distinct rejected boundary recorded as
 `runtime.host-context.android-packed-relocation`. It covers `DT_ANDROID_REL`,
@@ -108,12 +129,13 @@ Android packed relocation tags are a distinct rejected boundary recorded as
 HostContext v1 defines only the checked AArch64 `RELATIVE`/`RELR` forms, so
 packed encodings fail with `URP_STATUS_UNSUPPORTED` before loader handoff.
 ELF symbol-version tags are a separate rejected boundary,
-`runtime.host-context.symbol-version`, covering
-`DT_VERSYM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERNEED`, and `DT_VERNEEDNUM`.
-HostContext v1 defines unversioned entry-symbol lookup only. The self-test
-mutates one bounded `DT_NULL` slot per tag, preserves surrounding bytes, uses a
-nonzero image-handle sentinel, and requires a zero handle on rejection; the
-unchanged unversioned `urp_entry` image remains the positive baseline.
+`runtime.host-context.symbol-version` for versioned definitions and out-of-slice
+requirements. The adapter always rejects `DT_VERDEF`/`DT_VERDEFNUM`; import
+requirements are accepted only for `libc.so.6` by the separate row above.
+HostContext v1 continues to select the declared entry with an unversioned
+symbol name. The no-dependency self-test mutates each version tag individually
+and requires a zero handle for unsupported forms; the versioned libc fixture
+separately verifies complete import requirements and nearest malformed cases.
 
 The runtime retains legacy frame v1 and HostContext frame v2 only for migration
 tests. The current v3 header is 144 bytes and appends, in order, the HostContext

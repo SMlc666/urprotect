@@ -53,7 +53,7 @@
     },
     "symbol-versions": {
       "status": "deferred",
-      "reason": "Version metadata is retained for the symbol-version child; no unversioned lookup claim is widened here."
+      "reason": "A bounded libc.so.6 DT_VERNEED import subset is validated on native AArch64 glibc; the 19/20 observation does not promote versioned definitions, entry selection, arbitrary dependency graphs, or musl/bionic runtime cells."
     },
     "pt-tls": {
       "status": "deferred",

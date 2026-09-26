@@ -356,11 +356,13 @@ public sealed class ElfParserTests
     public void ClassifiesCommonAarch64RelocationKindsWithoutApplyingThem()
     {
         var relative = new RelaRelocation(0, ElfConstants.RArm64Relative, 0, 0x1000, false);
+        var jumpSlot = new RelaRelocation(0, ElfConstants.RArm64JumpSlot, 1, 0x1000, true);
         var branch = new RelaRelocation(0, ElfConstants.RArm64Call26, 0, 0x1004, false);
         var loadStore = new RelaRelocation(0, ElfConstants.RArm64Ldst64AbsLo12Nc, 0, 0x1008, false);
         var unknown = new RelaRelocation(0, 0xFFFF, 0, 0x100C, false);
 
         Assert.Equal(Aarch64RelocationKind.Relative, relative.Kind);
+        Assert.Equal(Aarch64RelocationKind.JumpSlot, jumpSlot.Kind);
         Assert.Equal(Aarch64RelocationKind.Call26, branch.Kind);
         Assert.Equal(Aarch64RelocationKind.LoadStore, loadStore.Kind);
         Assert.Equal(Aarch64RelocationKind.Unknown, unknown.Kind);

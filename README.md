@@ -116,7 +116,22 @@ custom in-process loading remain rejected or deferred. The frame stores a source
 path separators are rejected and no payload directory is taken from the
 environment. Both the native launcher and the managed self-contained host use
 the same anonymous memfd handoff; the managed handoff has a dedicated ARM64
-integration smoke.
+integration smoke. Its bounded symbolic rows retain GLOB_DAT status 29 and
+cover one additional native-glibc-only PLT subset: a complete NOW-bound RELA
+PLT table containing only JUMP_SLOT for an undefined weak, default-visible
+function, with no dependencies or symbol-version tags. The managed fixture
+observes the unresolved function pointer as zero and returns status 53. This is
+not generic PLT or cross-libc HostContext support; malformed and out-of-subset
+tables are rejected before loader handoff. The existing `libc.so.6` dependency
+slice separately accepts `DT_GNU_HASH` and a complete, bounded `DT_VERSYM`/
+`DT_VERNEED`/`DT_VERNEEDNUM` import-requirement chain whose version-need file
+names match that `DT_NEEDED` library. The native loader resolves those
+imports under `RTLD_NOW`; versioned definitions and versioned HostContext entry
+selection remain unsupported. The managed dependency fixture exercises this
+slice on native AArch64 glibc and returns status 37. Versioned requirements
+attached to recognized musl/bionic sonames and SysV `DT_HASH` variants remain
+rejected by this slice. It also rejects `DT_SYMBOLIC`; `DT_GNU_HASH` and a
+bounded version-symbol table are required.
 
 Release bundles are produced only for native ARM64 glibc and musl runtime variants:
 

@@ -177,9 +177,22 @@ executable pathname.
   slice accepts checked `RELATIVE`/`RELR` targets and the bounded
   `R_AARCH64_GLOB_DAT` symbolic form when `DT_SYMTAB`/`DT_SYMENT` identify a
   file-backed symbol record and the relocation target is aligned and writable.
-  It permits only immediate binding dynamic flags and delegates relocation
-  application to the system loader. Other symbol binding, PLT, version, and
-  dependency semantics remain explicit boundaries.
+  It also accepts only the exact `runtime.host-context.weak-undefined-jump-slot`
+  subset: one complete, non-duplicated `DT_JMPREL`/`DT_PLTRELSZ`/
+  `DT_PLTREL=DT_RELA` tuple with exact RELA and dynsym entry sizes; every entry
+  is `R_AARCH64_JUMP_SLOT` with nonzero index, aligned writable in-image
+  target, and a bounded file-backed `STB_WEAK`, `STT_FUNC`, exact
+  `st_other == STV_DEFAULT`, `SHN_UNDEF` symbol. The slice requires
+  `DF_BIND_NOW` or `DF_1_NOW`, has no
+  `DT_NEEDED`, symbol-version tags, `DT_SYMBOLIC`, or non-preemptive local
+  flags, and stays separate from dependency-backed GLOB_DAT behavior. Lookup
+  uses the native loader's current global scope followed by this image's
+  declared dependencies (none here); unresolved weak functions resolve to
+  zero. The adapter opens with `RTLD_NOW` and delegates relocation application
+  to the system loader. A JUMP_SLOT in ordinary `DT_RELA` is rejected; it is
+  accepted only in the validated PLT tuple. Other PLT/symbol combinations
+  remain rejected before handoff. The managed entry oracle returns status 53
+  on native AArch64 glibc only.
 - The current HostContext dependency/lifecycle slice accepts one recognized
   system-libc `DT_NEEDED` basename with bounded `DT_STRTAB`/`DT_STRSZ` metadata
   and no RPATH/RUNPATH. The system loader's fixed default roots resolve it;
@@ -188,6 +201,22 @@ executable pathname.
   system-loader order: constructors before `urp_entry`, destructors during
   `release_image`. Zero-valued lifecycle mutations remain rejected, and
   reentrancy/live-thread teardown is not claimed.
+- The same `libc.so.6` dependency slice accepts only import-side GNU
+  version requirements recorded as
+  `runtime.host-context.dependency-symbol-version-requirements`: `DT_GNU_HASH`
+  is required, SysV `DT_HASH` and `DT_SYMBOLIC` are rejected, and `DT_VERSYM`, `DT_VERNEED`, and
+  `DT_VERNEEDNUM` must be complete; the bounded `Verneed` and
+  `Vernaux` chains must terminate at their declared counts, all version names
+  and hashes/indices must be valid, and every `vn_file` must exactly match the
+  `DT_NEEDED` basename `libc.so.6`. Weak-version requirement flags and version
+  requirements attached to recognized musl/bionic sonames are rejected. Native
+  preflight caps hash symbol counts, `Verneed` records, and aggregate auxiliary
+  records at 1,048,576. The native loader resolves the imported libc versions at
+  `RTLD_NOW`; the retained runtime cell is native AArch64 glibc and unavailable
+  required versions fail with `LOAD_FAILED`. `DT_VERDEF`/`DT_VERDEFNUM` and
+  versioned HostContext entry selection remain rejected; the declared entry is
+  looked up by its unversioned name. This does not add dependency graph or
+  search-path forms.
 - The constructor/destructor lifecycle slice is recorded as
   `runtime.host-context.constructor-destructor`. Nonzero `DT_INIT`, `DT_FINI`,
   `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`,
@@ -217,38 +246,36 @@ executable pathname.
   rejection boundary; checked AArch64 `RELATIVE`/`RELR` acceptance and
   system-loader application remain the validated `elf.relocation.aarch64-relative`
   feature.
-- Unsupported dynamic relocation-table tags are an independently rejected
-  HostContext v1 feature recorded as
-  `runtime.host-context.unsupported-relocation-table`. It covers `DT_REL`,
-  `DT_RELSZ`, `DT_RELENT`, `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL`; the
-  current system-loader contract defines only the checked AArch64
-  `RELATIVE`/`RELR` path, so these forms are rejected before relocation
-  processing or image-handle creation. The native self-test mutates one
-  bounded `DT_NULL` tag at a time, preserves surrounding bytes, initializes a
-  nonzero sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero output
-  handle. The unchanged `RELATIVE`/`RELR` fixture remains the positive
-  baseline; no broader relocation-table support is claimed.
+- Unsupported dynamic relocation-table metadata remains independently
+  rejected under `runtime.host-context.unsupported-relocation-table`: legacy
+  `DT_REL`, `DT_RELSZ`, and `DT_RELENT` are rejected, as are partial, duplicate,
+  inconsistent, malformed, versioned, dependency-bearing, or out-of-subset PLT
+  RELA tables. The exact weak-undefined JUMP_SLOT subset has its own validated
+  feature row. Its native negative oracle requires rejection and a zero image
+  handle before loader handoff. The unchanged RELATIVE/RELR and GLOB_DAT
+  status-29 fixtures remain positive baselines.
 - Android packed relocation encodings are separately rejected as
   `runtime.host-context.android-packed-relocation`. The adapter rejects
   `DT_ANDROID_REL`, `DT_ANDROID_RELSZ`, `DT_ANDROID_RELA`,
   `DT_ANDROID_RELASZ`, `DT_ANDROID_RELR`, `DT_ANDROID_RELRSZ`,
   `DT_ANDROID_RELRENT`, and `DT_ANDROID_RELRCOUNT` before loader handoff,
   because HostContext v1 defines only the checked AArch64 `RELATIVE`/`RELR`
-  path. ELF symbol-version metadata
-  is the separate rejected boundary `runtime.host-context.symbol-version`;
-  it covers `DT_VERSYM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERNEED`, and
-  `DT_VERNEEDNUM`, since the v1 entry lookup contract is unversioned. The
-  native self-test mutates one bounded `DT_NULL` tag at a time, preserves
-  surrounding bytes, initializes a nonzero sentinel, and requires
-  `URP_STATUS_UNSUPPORTED` with a zero output handle. The unchanged
-  `RELATIVE`/`RELR`, unversioned entry fixture remains the positive baseline;
-  no version negotiation or Android packed relocation support is claimed.
+  path. `runtime.host-context.symbol-version` remains the rejected boundary
+  for `DT_VERDEF`/`DT_VERDEFNUM`, versioned entry exports, and incomplete or
+  out-of-scope import requirements. The no-dependency native self-test mutates
+  individual version tags and requires a zero output handle; the separate
+  libc import-requirement row covers only the complete bounded
+  `DT_VERSYM`/`DT_VERNEED`/`DT_VERNEEDNUM` form whose version-need filenames
+  match the declared `libc.so.6`. No versioned entry selection or Android
+  packed relocation support is claimed.
 - The managed parser has a separate observation-only row,
   `elf.symbol-version.definitions`, for bounded `DT_VERDEF`/`DT_VERDEFNUM`
   records and their dynamic-string-table auxiliaries. A linker-produced
   AArch64 fixture and nearest malformed mutations prove the model and stable
-  diagnostics. This row does not define symbol-version resolution and does
-  not promote `runtime.host-context.symbol-version`, which remains rejected.
+  diagnostics. The parser also has the observation-only
+  `elf.symbol-version.requirements` row for bounded `DT_VERNEED` records and
+  auxiliaries; neither parser row defines runtime resolution. The only
+  HostContext import-resolution claim is the bounded single-libc row above.
 - A validated adapter image may retain a non-empty `PT_GNU_RELRO` file range
   when that range is inside the image and `p_memsz >= p_filesz`; the real
   adapter must still dispatch the entry. The native system loader owns the
@@ -277,7 +304,9 @@ executable pathname.
   slice for one recognized system-libc `DT_NEEDED` basename with bounded string
   metadata and fixed native loader roots. RPATH/RUNPATH, auxiliary/filter
   dependencies, arbitrary graphs, and payload-controlled search paths remain
-  rejected.
+  rejected. Imported GNU symbol-version requirements for `libc.so.6` are
+  separately recorded as `runtime.host-context.dependency-symbol-version-requirements`;
+  versioned definitions and entry selection remain rejected.
 - Each `PT_LOAD` with `p_align > 1` uses a power-of-two alignment and satisfies
   `p_offset % p_align == p_vaddr % p_align`; zero and one impose no stronger
   alignment requirement, and a non-page-sized power-of-two alignment is valid

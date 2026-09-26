@@ -12,6 +12,7 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
 fi
 command -v "${dotnet_command}" >/dev/null 2>&1
 command -v make >/dev/null 2>&1
+command -v readelf >/dev/null 2>&1
 
 mkdir -p "${artifact_root}"
 make -C "${script_dir}" host-context-launcher build/host-context-entry-fixture.so \
@@ -92,7 +93,49 @@ printf 'symbol_profile=host-context-entry\nsymbol_relocation=GLOB_DAT\nsymbol_st
 sha256sum "${symbol_output}" "${script_dir}/build/host-context-symbol-fixture.so" \
   >>"${artifact_root}/sha256.txt"
 
+make -C "${script_dir}" plt-fixture >>"${artifact_root}/build.log" 2>&1
+make -C "${script_dir}" plt-self-test >"${artifact_root}/plt-self-test.log" 2>&1
+cat "${artifact_root}/plt-self-test.log" >>"${artifact_root}/build.log"
+plt_output="${artifact_root}/host-context-plt-packed"
+plt_report="${artifact_root}/host-context-plt-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${script_dir}/build/host-context-plt-fixture.so" \
+  --output "${plt_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry \
+  --json "${plt_report}" \
+  >"${artifact_root}/plt-pack.log" 2>&1
+set +e
+"${plt_output}" >"${artifact_root}/plt.stdout" 2>"${artifact_root}/plt.stderr"
+plt_status=$?
+set -e
+if [[ "${plt_status}" -ne 53 ]]; then
+  echo "weak undefined JUMP_SLOT fixture returned ${plt_status}, expected 53" >&2
+  exit 1
+fi
+printf 'plt_profile=host-context-entry\nplt_relocation=weak-undefined-JUMP_SLOT\nplt_status=%s\n' "${plt_status}" \
+  >"${artifact_root}/plt-result.txt"
+sha256sum "${plt_output}" "${script_dir}/build/host-context-plt-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
+
 make -C "${script_dir}" dependency-fixture >>"${artifact_root}/build.log" 2>&1
+make -C "${script_dir}" version-self-test >"${artifact_root}/version-self-test.log" 2>&1
+cat "${artifact_root}/version-self-test.log" >>"${artifact_root}/build.log"
+readelf -dW --version-info "${script_dir}/build/host-context-dependency-fixture.so" \
+  >"${artifact_root}/dependency-version-metadata.txt"
+grep -Eq '\(NEEDED\).*Shared library: \[libc\.so\.6\]' \
+  "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(VERSYM)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(VERNEED)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(VERNEEDNUM)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(GNU_HASH)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq 'File: libc.so.6' "${artifact_root}/dependency-version-metadata.txt"
+grep -Eq 'GLIBC_[0-9]+\.[0-9]+' "${artifact_root}/dependency-version-metadata.txt"
+if grep -Eq '\((VERDEF|HASH)\)' "${artifact_root}/dependency-version-metadata.txt"; then
+  echo "dependency fixture used an unsupported version definition or SysV hash" >&2
+  exit 1
+fi
 dependency_output="${artifact_root}/host-context-dependency-packed"
 dependency_report="${artifact_root}/host-context-dependency-packed.json"
 "${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
@@ -116,7 +159,7 @@ if [[ "$(cat "${artifact_root}/lifecycle-marker.txt" 2>/dev/null || true)" != "r
   echo "dependency destructor did not run before HostContext release completed" >&2
   exit 1
 fi
-printf 'dependency=libc.so.6\ndependency_status=%s\n' "${dependency_status}" \
+printf 'dependency=libc.so.6\ndependency_versions=VERNEED\ndependency_status=%s\n' "${dependency_status}" \
   >"${artifact_root}/dependency-result.txt"
 sha256sum "${dependency_output}" "${script_dir}/build/host-context-dependency-fixture.so" \
   >>"${artifact_root}/sha256.txt"

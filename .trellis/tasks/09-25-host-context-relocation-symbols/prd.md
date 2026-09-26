@@ -14,6 +14,9 @@ real-sample frequency and validated with native runtime oracles.
   dependency, and release semantics; loader acceptance alone is insufficient.
 - Current validated RELATIVE/RELR/GLOB_DAT slices remain unchanged unless a
   coordinated replacement is independently proven.
+- Keep dependency-side import version requirements distinct from versioned
+  definitions and versioned HostContext entry-symbol selection; do not infer
+  either form from the other.
 - Unsupported forms must be rejected before loader handoff and entry side
   effects.
 

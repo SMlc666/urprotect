@@ -74,10 +74,21 @@ adapter slice to `validated`; it accepts checked AArch64 `RELATIVE`/`RELR`
 targets while the system loader applies them. The bounded
 `elf.relocation.aarch64-symbolic` slice additionally accepts a checked
 `R_AARCH64_GLOB_DAT` entry with a file-backed dynamic symbol table record and
-writable target; its managed v3 profile oracle returns status 29. Broader
-dependency graphs, dynamic TLS, live-thread lifecycle, and unknown GNU
-properties remain outside the bounded validated rows; unsupported relocation
-tables remain rejected.
+writable target; its managed v3 profile oracle returns status 29. A separate
+`runtime.host-context.weak-undefined-jump-slot` row accepts only a complete
+RELA PLT tuple whose entries are `R_AARCH64_JUMP_SLOT` for file-backed,
+undefined weak `STT_FUNC` symbols with `st_other == STV_DEFAULT` and
+`st_shndx == SHN_UNDEF`. It requires NOW binding and excludes `DT_NEEDED`,
+symbol-version metadata, and non-preemptive-local flags. The loader's
+current global scope is searched before the image's dependency scope (empty for
+this subset); unresolved weak functions resolve to zero. The real managed
+AArch64 glibc fixture observes zero and returns status 53. This does not claim
+generic PLT/JUMP_SLOT or cross-libc PLT resolution. Partial or malformed PLT
+tables and all out-of-slice symbol combinations remain pre-handoff rejections;
+legacy REL tables remain rejected. The exact `libc.so.6` dependency slice,
+including its import-version boundary, is specified separately below.
+Broader dependency graphs, dynamic TLS, live-thread lifecycle, and unknown GNU
+properties remain outside the bounded validated rows.
 
 The first expanded ELF slice is sectionless `ET_DYN`: section headers are
 optional metadata, so the parser and validator use bounded program headers and
@@ -85,17 +96,15 @@ the load map as the runtime authority. `ElfParserTests` provides the positive
 witness and the malformed corpus keeps a paired alignment rejection; this
 proves the parser boundary, not arbitrary loader behavior.
 
-The managed parser also has a parser-only model row,
-`elf.symbol-version.definitions`, for bounded `DT_VERDEF`/`DT_VERDEFNUM`
-records and their dynamic-string-table auxiliaries. Its linker-produced AArch64
-fixture proves the version-definition model and malformed-chain diagnostics;
-it does not define symbol-version resolution. The checked-in registry baseline
-lists `symbol-versions: 7` under declared feature coverage, but its
-`featureHistogram` contains only identity and loader facts. That declaration was
-a prioritization cue only; actual CI fingerprint histogram evidence remains a
-separate gate for later frequency-based selection or promotion. The independent
-HostContext row `runtime.host-context.symbol-version` remains rejected, and no
-outer-execveat or runtime support claim changes.
+The managed parser has parser-only rows `elf.symbol-version.definitions` and
+`elf.symbol-version.requirements` for bounded `DT_VERDEF` and `DT_VERNEED`
+records, respectively, including dynamic-string-table auxiliaries and malformed
+chain diagnostics. Parser observation does not define runtime symbol
+resolution. HostContext rejects versioned definitions and versioned entry
+selection under `runtime.host-context.symbol-version`; one narrower
+dependency-side import slice is separately validated below. The checked-in
+registry baseline's `symbol-versions: 7` entry is a prioritization cue, not a
+runtime support claim.
 
 The HostContext production slice now includes a bounded native-glibc dependency
 and lifecycle witness. A single `DT_NEEDED` system-libc basename is accepted
@@ -105,6 +114,19 @@ by `urp_entry`, and its destructor writes a release marker, proving the
 declared constructor-before-entry and destructor-before-release ordering. This
 does not claim arbitrary dependency graphs, payload-controlled path search,
 reentrancy, or live-thread unload behavior.
+The associated import-side symbol-version slice is recorded as
+`runtime.host-context.dependency-symbol-version-requirements`: it requires the
+complete `DT_VERSYM`/`DT_VERNEED`/`DT_VERNEEDNUM` tuple, bounded and terminating
+version-need/auxiliary chains, valid version-name hash/index fields, non-weak
+requirements, exact equality between every `vn_file` and the `DT_NEEDED`
+basename `libc.so.6`, and no versioned imports attached to recognized musl or
+bionic sonames. It requires `DT_GNU_HASH`, rejects `DT_SYMBOLIC`, and excludes
+SysV `DT_HASH` alone or combined. The native preflight bounds the hash-derived symbol count to
+1,048,576 and checks the file-backed version-symbol table. `RTLD_NOW` delegates
+resolution to the native loader; a
+linker-produced fixture with a `libc.so.6` `GLIBC_*` requirement
+returns status 37 on native AArch64 glibc. This does not add arbitrary
+versioned definitions, entry selection, dependency graphs, or search paths.
 
 PT_TLS has a bounded validated HostContext slice, recorded as
 `runtime.host-context.pt-tls` in the matrix. It covers AArch64 initial-exec TLS
@@ -158,17 +180,14 @@ use the separate `runtime.host-context.unsupported-relocation-table` rejection
 boundary; checked AArch64 `RELATIVE`/`RELR` acceptance and system-loader
 application remain the validated `elf.relocation.aarch64-relative` feature.
 
-Unsupported dynamic relocation-table tags are an independently rejected
-HostContext v1 feature recorded as
-`runtime.host-context.unsupported-relocation-table`. It covers `DT_REL`,
-`DT_RELSZ`, `DT_RELENT`, `DT_JMPREL`, `DT_PLTRELSZ`, and `DT_PLTREL`; the
-current system-loader contract defines only the checked AArch64
-`RELATIVE`/`RELR` path, so these forms are rejected before relocation
-processing or image-handle creation. The self-test mutates one bounded
-`DT_NULL` tag at a time, preserves surrounding bytes, initializes a nonzero
-output-handle sentinel, and requires `URP_STATUS_UNSUPPORTED` with a zero
-handle. The unchanged `RELATIVE`/`RELR` fixture remains the positive baseline;
-no broader relocation-table support is claimed.
+Unsupported dynamic relocation-table metadata remains recorded as
+`runtime.host-context.unsupported-relocation-table`: legacy `DT_REL`,
+`DT_RELSZ`, and `DT_RELENT` are rejected, as are partial, duplicate,
+inconsistent, malformed, dependency-bearing, versioned, or out-of-subset PLT
+RELA tables. The exact weak-undefined JUMP_SLOT subset has its own
+`runtime.host-context.weak-undefined-jump-slot` row. Its native negative oracle
+asserts rejection and a zero output handle before loader handoff; the unchanged
+RELATIVE/RELR and GLOB_DAT status-29 fixtures remain positive baselines.
 
 Android packed relocation encodings are separately rejected as
 `runtime.host-context.android-packed-relocation`. The adapter rejects
@@ -176,14 +195,14 @@ Android packed relocation encodings are separately rejected as
 `DT_ANDROID_RELR`, `DT_ANDROID_RELRSZ`, `DT_ANDROID_RELRENT`, and
 `DT_ANDROID_RELRCOUNT` before loader handoff because HostContext v1 defines
 only the checked AArch64 `RELATIVE`/`RELR` relocation path. ELF symbol-version
-metadata is a separate rejected boundary,
-`runtime.host-context.symbol-version`, covering
-`DT_VERSYM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERNEED`, and `DT_VERNEEDNUM`;
-the v1 entry lookup contract is unversioned. The native self-test mutates one
-bounded `DT_NULL` slot at a time, preserves surrounding bytes, and requires
-`URP_STATUS_UNSUPPORTED` with a zero image handle before loader handoff. The
-unchanged unversioned entry fixture remains the positive baseline; neither
-feature is implicitly supported by system-loader behavior.
+`runtime.host-context.symbol-version` rejects `DT_VERDEF`/`DT_VERDEFNUM`,
+versioned entry exports, and incomplete/out-of-scope import-version tables.
+The native no-dependency self-test mutates individual tags and requires
+`URP_STATUS_UNSUPPORTED` with a zero image handle. Only the complete
+single-libc import requirement defined by
+`runtime.host-context.dependency-symbol-version-requirements` is accepted;
+entry lookup remains unversioned and no other versioned symbol behavior is
+inferred from loader acceptance.
 
 The native Termux/bionic case is a peer runtime fact beside glibc and musl. It
 records native ARM64 container execution, `/system/bin/linker64`, kernel and
