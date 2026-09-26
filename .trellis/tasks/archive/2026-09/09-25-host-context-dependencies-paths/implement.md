@@ -33,8 +33,14 @@
       manifest; wire its evidence gate into PR CI; update README,
       `COMPATIBILITY.md`, native runtime docs, contract inventory, runtime spec,
       and regression matrix as needed.
-- [ ] Confirm the PR's native AArch64 glibc CI retains and passes both the old
+- [x] Confirm the PR's native AArch64 glibc CI retains and passes both the old
       singleton oracle and the new pair oracle; do not claim musl/bionic support.
+
+CI evidence: PR workflow run `36247881357` and push workflow run
+`36247879166` passed on commit `429f62e196bb0fdbd86b60572774c94e9afb5eb2`.
+The PR run's required `build-and-test`, native AArch64 `real-sample-matrix`,
+and `bionic-native-arm64` jobs passed; `test-evidence-36247881357` was retained
+and the bounded dependency feature gate passed in `build-and-test`.
 
 ## Real-sample impact
 

@@ -51,4 +51,4 @@ remain HostContext `not-applicable` because they do not declare `urp_entry`.
       the closed selected slice.
 - [x] Partial load failures roll back handles and resources deterministically.
 - [x] No unsupported path-search or dependency form reaches entry dispatch.
-- [ ] CI retains runtime identity, dependency facts, and complete evidence.
+- [x] CI retains runtime identity, dependency facts, and complete evidence.
