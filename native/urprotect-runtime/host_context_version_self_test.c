@@ -15,6 +15,7 @@
 #define DT_VERDEF UINT64_C(0x6ffffffc)
 #define DT_VERNEED UINT64_C(0x6ffffffe)
 #define DT_VERNEEDNUM UINT64_C(0x6fffffff)
+#define MAX_HASH_CHAIN_TEST_STEPS UINT64_C(1048576)
 
 typedef struct dynamic_tags {
     size_t version_symbol_tag_offset;
@@ -251,7 +252,9 @@ static int virtual_to_file(
         if ((uint64_t)length > (uint64_t)image_size - file_offset) {
             continue;
         }
-        *file_offset_out = (size_t)file_offset;
+        if (file_offset_out != NULL) {
+            *file_offset_out = (size_t)file_offset;
+        }
         return 1;
     }
     return 0;
@@ -374,37 +377,79 @@ static int find_gnu_hash_chain_layout(
     return 1;
 }
 
-static int find_last_contiguous_chain_word(
+static int find_unterminated_chain_boundary(
     const uint8_t *image,
     size_t image_size,
     uint64_t chain_address,
     uint64_t *last_chain_address_out,
     size_t *last_chain_file_offset_out)
 {
-    uint64_t maximum_steps = (uint64_t)(image_size / sizeof(uint32_t));
-    uint64_t current_address = chain_address;
-    int found_word = 0;
-    for (uint64_t step = 0U; step < maximum_steps; ++step) {
-        size_t file_offset;
-        if (!virtual_to_file(
-                image,
-                image_size,
-                current_address,
-                sizeof(uint32_t),
-                &file_offset)) {
-            if (found_word == 0) {
-                return 0;
-            }
-            *last_chain_address_out = current_address - sizeof(uint32_t);
-            return 1;
+    uint64_t program_header_offset = read_u64(image + 32U);
+    uint16_t program_header_count = read_u16(image + 56U);
+    if (program_header_offset > (uint64_t)image_size
+        || (uint64_t)program_header_count * 56U
+            > (uint64_t)image_size - program_header_offset) {
+        return 0;
+    }
+
+    uint64_t maximum_load_end = 0U;
+    for (uint16_t index = 0U; index < program_header_count; ++index) {
+        const uint8_t *header = image
+            + (size_t)(program_header_offset + (uint64_t)index * 56U);
+        if (read_u32(header) != 1U) {
+            continue;
         }
-        found_word = 1;
-        *last_chain_address_out = current_address;
-        *last_chain_file_offset_out = file_offset;
-        if (current_address > UINT64_MAX - sizeof(uint32_t)) {
+        uint64_t virtual_address = read_u64(header + 16U);
+        uint64_t file_offset = read_u64(header + 8U);
+        uint64_t file_size = read_u64(header + 32U);
+        if (file_offset > (uint64_t)image_size
+            || file_size > (uint64_t)image_size - file_offset
+            || file_size > UINT64_MAX - virtual_address) {
             return 0;
         }
-        current_address += sizeof(uint32_t);
+        uint64_t segment_end = virtual_address + file_size;
+        if (segment_end > maximum_load_end) {
+            maximum_load_end = segment_end;
+        }
+    }
+
+    if (maximum_load_end < sizeof(uint32_t)
+        || maximum_load_end - sizeof(uint32_t) < chain_address) {
+        return 0;
+    }
+    if (chain_address > UINT64_MAX - sizeof(uint32_t)) {
+        return 0;
+    }
+    uint64_t chain_address_next = chain_address + sizeof(uint32_t);
+    uint64_t candidate_address = maximum_load_end - sizeof(uint32_t);
+    uint64_t alignment_delta = (candidate_address - chain_address) % sizeof(uint32_t);
+    candidate_address -= alignment_delta;
+    for (uint64_t step = 0U; step < MAX_HASH_CHAIN_TEST_STEPS; ++step) {
+        if (virtual_to_file(
+                image,
+                image_size,
+                candidate_address,
+                sizeof(uint32_t),
+                NULL)
+            && candidate_address <= UINT64_MAX - sizeof(uint32_t)
+            && !virtual_to_file(
+                image,
+                image_size,
+                candidate_address + sizeof(uint32_t),
+                sizeof(uint32_t),
+                NULL)) {
+            *last_chain_address_out = candidate_address;
+            return virtual_to_file(
+                image,
+                image_size,
+                candidate_address,
+                sizeof(uint32_t),
+                last_chain_file_offset_out);
+        }
+        if (candidate_address < chain_address_next) {
+            break;
+        }
+        candidate_address -= sizeof(uint32_t);
     }
     return 0;
 }
@@ -465,6 +510,8 @@ static int expect_reject(
     size_t image_size,
     urp_status expected_status)
 {
+    static size_t negative_case_number;
+    ++negative_case_number;
     urp_image_handle handle = UINT64_C(0xfeedface);
     urp_status status = adapter->context.load_image(
         adapter->context.userdata,
@@ -472,7 +519,17 @@ static int expect_reject(
         image_size,
         URP_LOAD_IMAGE_IMMUTABLE,
         &handle);
-    return status == expected_status && handle == 0U;
+    if (status == expected_status && handle == 0U) {
+        return 1;
+    }
+    (void)fprintf(
+        stderr,
+        "version negative case %zu: status=%d, handle=%llu, expected status=%d and zero handle\n",
+        negative_case_number,
+        status,
+        (unsigned long long)handle,
+        expected_status);
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -484,11 +541,13 @@ int main(int argc, char **argv)
     uint8_t *source = NULL;
     size_t source_size = 0U;
     if (!read_file(argv[1], &source, &source_size)) {
+        (void)fputs("version self-test: failed to read fixture\n", stderr);
         return 1;
     }
 
     dynamic_tags tags;
     if (!find_dynamic_tags(source, source_size, &tags)) {
+        (void)fputs("version self-test: missing required dynamic tags\n", stderr);
         free(source);
         return 1;
     }
@@ -559,7 +618,7 @@ int main(int argc, char **argv)
             &first_hashed_symbol,
             &chain_address)
         || gnu_bucket_count == 0U
-        || !find_last_contiguous_chain_word(
+        || !find_unterminated_chain_boundary(
             source,
             source_size,
             chain_address,
@@ -567,6 +626,7 @@ int main(int argc, char **argv)
             &last_chain_file_offset)
         || last_chain_address < chain_address
         || (last_chain_address - chain_address) % sizeof(uint32_t) != 0U) {
+        (void)fputs("version self-test: failed to derive a mapped GNU-hash chain boundary\n", stderr);
         free(mutant);
         free(source);
         return 1;
@@ -574,7 +634,7 @@ int main(int argc, char **argv)
     uint64_t last_chain_symbol_index = first_hashed_symbol
         + (last_chain_address - chain_address) / sizeof(uint32_t);
     if (last_chain_symbol_index > UINT32_MAX
-        || last_chain_symbol_index > UINT64_C(1048576)) {
+        || last_chain_symbol_index > MAX_HASH_CHAIN_TEST_STEPS) {
         free(mutant);
         free(source);
         return 1;
@@ -600,6 +660,7 @@ int main(int argc, char **argv)
             source_size,
             dynamic_symbol_count * sizeof(uint16_t),
             &short_versym_address)) {
+        (void)fputs("version self-test: failed to derive bounded GNU-hash/VERSYM ranges\n", stderr);
         free(mutant);
         free(source);
         return 1;
@@ -615,6 +676,7 @@ int main(int argc, char **argv)
             sizeof("libc.so.6"),
             &needed_string_file_offset)
         || memcmp(source + needed_string_file_offset, "libc.so.6", sizeof("libc.so.6")) != 0) {
+        (void)fputs("version self-test: libc.so.6 dynamic-string mapping is invalid\n", stderr);
         free(mutant);
         free(source);
         return 1;
