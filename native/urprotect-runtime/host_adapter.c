@@ -61,7 +61,9 @@ typedef struct urp_fd_image {
 
 static pthread_mutex_t urp_image_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 static urp_fd_image *urp_image_registry;
+#if defined(__GLIBC__)
 static urp_image_thread_handle urp_next_thread_handle = 1U;
+#endif
 static urp_image_handle urp_next_image_handle = 1U;
 
 static urp_fd_image *urp_find_image_locked(urp_image_handle handle)
@@ -243,6 +245,7 @@ static urp_status urp_adapter_lookup_symbol(
     return URP_STATUS_OK;
 }
 
+#if defined(__GLIBC__)
 static urp_status urp_adapter_create_image_thread(
     void *userdata,
     urp_image_handle handle,
@@ -258,10 +261,6 @@ static urp_status urp_adapter_create_image_thread(
     if (handle == 0U || routine == NULL) {
         return URP_STATUS_INVALID_ARGUMENT;
     }
-#if !defined(__GLIBC__)
-    (void)argument;
-    return URP_STATUS_UNSUPPORTED;
-#else
     urp_image_thread_record *record = calloc(1U, sizeof(*record));
     if (record == NULL) {
         return URP_STATUS_LOAD_FAILED;
@@ -309,7 +308,6 @@ static urp_status urp_adapter_create_image_thread(
     *out_thread = record->handle;
     (void)pthread_mutex_unlock(&urp_image_registry_mutex);
     return URP_STATUS_OK;
-#endif
 }
 
 static urp_status urp_adapter_join_image_thread(
@@ -358,6 +356,7 @@ static urp_status urp_adapter_join_image_thread(
     (void)pthread_mutex_unlock(&urp_image_registry_mutex);
     return URP_STATUS_OK;
 }
+#endif
 
 static urp_status urp_adapter_release_image(void *userdata, urp_image_handle handle)
 {

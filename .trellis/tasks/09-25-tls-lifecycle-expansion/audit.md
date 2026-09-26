@@ -70,10 +70,17 @@ The runner preflight was tightened to assert an AArch64 host and a Linux/arm64
 Docker server rather than equating an installed host-side emulator executable
 with emulated execution. Follow-up PR run `36261267596` still exited 2 in the
 bionic job while build-and-test and real-sample jobs passed, so the runner/tool
-preflight was not confirmed as the root cause. The current follow-up adds
-explicit host/Docker identity output and dumps the retained apt/native-build
-logs when a Termux container phase fails. The bionic job must pass in both PR
-and push workflows before archiving this child. The acceptance gate requires
-the native AArch64 glibc HostContext feature evidence, the full public
-real-sample run, and the bionic adapter lane; bionic results do not promote the
-threaded row.
+preflight was not confirmed as the root cause. PR run `36261694499` retained
+the next diagnostic: host and Docker architecture preflight passed, then
+Bionic Clang `-Werror` rejected glibc-only callback functions and the thread
+handle sequence variable as unused. Those definitions are now guarded by
+`__GLIBC__`; Bionic continues compiling the base adapter but advertises no
+thread-lifetime capability or callbacks. The runner also prints host/Docker
+identity and dumps apt/native-build logs when a Termux container phase fails.
+PR #16 attempt `36261694499` still failed in the bionic job and its retained
+logs confirmed the unused glibc-only identifiers. This guard fix has passed
+locally on the native glibc host; its current PR and push runs are pending.
+Both CI triggers must pass before archiving this child. The
+acceptance gate requires the native AArch64 glibc HostContext feature evidence,
+the full public real-sample run, and the bionic adapter lane; bionic results do
+not promote the threaded row.
