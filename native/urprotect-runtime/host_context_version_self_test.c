@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "urp/host_adapter.h"
 
 #include <stdint.h>
@@ -554,12 +556,18 @@ int main(int argc, char **argv)
     urp_host_adapter_v1 adapter;
     urp_host_adapter_init(&adapter);
     urp_image_handle handle = 0U;
+    if (setenv("URP_HOST_VALIDATION_TRACE", "1", 1) != 0) {
+        (void)fputs("version self-test: failed to enable positive preflight trace\n", stderr);
+        free(source);
+        return 1;
+    }
     urp_status initial_load_status = adapter.context.load_image(
             adapter.context.userdata,
             source,
             source_size,
             URP_LOAD_IMAGE_IMMUTABLE,
             &handle);
+    (void)unsetenv("URP_HOST_VALIDATION_TRACE");
     if (initial_load_status != URP_STATUS_OK || handle == 0U) {
         (void)fprintf(
             stderr,

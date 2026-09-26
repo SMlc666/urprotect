@@ -65,7 +65,7 @@ plt-self-test: $(PLT_SELF_TEST) $(PLT_FIXTURE)
 	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
 
 version-self-test: $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE)
-	URP_HOST_VALIDATION_TRACE=1 "$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
+	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
 
 dependency-fixture: $(DEPENDENCY_FIXTURE)
 
@@ -76,7 +76,7 @@ property-fixture: $(PROPERTY_FIXTURE)
 test: check-host $(SELF_TEST) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
 	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
-	URP_HOST_VALIDATION_TRACE=1 "$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
+	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
 
 test-adapter: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)" --adapter-v2
@@ -123,7 +123,7 @@ $(PLT_FIXTURE): $(PLT_FIXTURE_OBJECT)
 # separately tested PLT slice owns JUMP_SLOT semantics.
 $(DEPENDENCY_FIXTURE): $(DEPENDENCY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none -z now "$<" -lc -o "$@"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now "$<" -lc -o "$@"
 
 # Direct linking avoids driver-injected weak PLT imports unrelated to these
 # TLS/property fixtures, keeping each positive oracle isolated to its feature.

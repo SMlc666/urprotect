@@ -105,19 +105,20 @@ The initial feature-branch run on `17ce404` (`36230780225`, PR; and
 `36230777141`, push) failed the HostContext evidence step because the managed
 script stopped in `version-self-test`; the expected downstream TLS artifact was
 therefore absent. Its retained log showed the failing Make target but no
-self-test diagnostic. A second run (`36231365350`) reproduced the issue. It
-also exposed that the workflow's `tee` pipelines masked command failures; the
-evidence gate caught the missing output later. Both HostContext CI pipelines
-now use `set -o pipefail`. The follow-up exposed two independent issues: the
-GNU-hash chain negative-test setup assumed a linker-specific gap, and the
-Ubuntu 24.04 positive fixture returns `URP_STATUS_UNSUPPORTED` in the current
-version preflight. The self-test now reports positive-load status and setup/
-mutation failures; the managed oracle retains the controlled ELF and full
-readelf output to identify the incompatible record. The CI compile warning in
-the runtime self-test's ELF-offset locals was also fixed by initializing the
-locals before bounded helper assignment. Local native runtime and managed
-HostContext tests pass; the exact Ubuntu 24.04 preflight rejection remains
-under investigation and CI must rerun before acceptance. Only retained native
-AArch64 glibc artifacts satisfy the runtime evidence contract; local evidence
-is supplemental. The parent task remains active until all remaining child
-tasks, release integration, and the PR workflow are complete.
+self-test diagnostic. Later runs exposed two independent issues: the GNU-hash
+chain negative-test setup assumed a linker-specific gap, and GNU ld on the
+Ubuntu 24.04 AArch64 runner emits both `DT_HASH` and `DT_GNU_HASH` by default.
+The validated import-version slice intentionally rejects SysV and combined
+hash metadata; the positive fixture now explicitly links with
+`--hash-style=gnu`, retaining the combined-hash mutation as a negative test.
+The setup now finds a mapped GNU-hash chain boundary across file-backed
+`PT_LOAD` ranges. HostContext CI pipelines use `set -o pipefail`; failed
+positive preflight checks emit test-only stage diagnostics, and CI retains the
+controlled fixture plus full readelf output. The GCC warning in the runtime
+self-test's ELF-offset locals was fixed by initializing them before bounded
+helper assignment. Local native runtime and managed HostContext tests pass;
+this commit's CI must confirm the native AArch64 artifact and evidence gates.
+Only retained native AArch64 glibc artifacts satisfy the runtime evidence
+contract; local evidence is supplemental. The parent task remains active until
+all remaining child tasks, release integration, and the PR workflow are
+complete.
