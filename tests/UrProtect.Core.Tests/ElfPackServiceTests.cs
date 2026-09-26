@@ -84,6 +84,60 @@ public sealed class ElfPackServiceTests
         Assert.True(payload.IsSuccess, string.Join(Environment.NewLine, payload.Diagnostics));
         Assert.Equal(PayloadDispatchProfile.HostContextEntry, payload.Frame!.Profile);
         Assert.Equal(HostContextContract.EntrySymbol, payload.Frame.HostContextMetadata!.EntryName);
+        Assert.Equal(
+            HostContextContract.MandatoryCapabilities,
+            payload.Frame.HostContextMetadata.RequiredCapabilities);
+    }
+
+    [Fact]
+    [Trait("Category", "PackHostContext")]
+    public void ThreadLifetimeOptInSetsOnlyTheRequiredFrameCapability()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("entry.so");
+        var launcherPath = directory.Path("host-launcher.elf");
+        var outputPath = directory.Path("host-threaded-packed.elf");
+        File.WriteAllBytes(inputPath, RemoveInterpreter(ElfFixture.MinimalPie()));
+        File.WriteAllBytes(
+            launcherPath,
+            ElfFixture.MinimalPie().Concat(System.Text.Encoding.ASCII.GetBytes(LauncherContract.HostContextMarker)).ToArray());
+
+        var result = new ElfPackService().Pack(
+            inputPath,
+            outputPath,
+            launcherPath,
+            new ElfPackOptions(
+                Profile: PayloadDispatchProfile.HostContextEntry,
+                RequireThreadLifetime: true));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var payload = PayloadFrameCodec.ReadWrapper(File.ReadAllBytes(outputPath), new PayloadFrameLimits());
+        Assert.True(payload.IsSuccess, string.Join(Environment.NewLine, payload.Diagnostics));
+        Assert.Equal(
+            HostContextContract.MandatoryCapabilities | HostContextCapability.ThreadLifetime,
+            payload.Frame!.HostContextMetadata!.RequiredCapabilities);
+    }
+
+    [Fact]
+    [Trait("Category", "PackWrapper")]
+    public void RejectsThreadLifetimeOptInForOuterProfile()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(
+            inputPath,
+            outputPath,
+            launcherPath,
+            new ElfPackOptions(RequireThreadLifetime: true));
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnsupportedPackInput);
+        Assert.False(File.Exists(outputPath));
     }
 
     [Fact]

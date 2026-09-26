@@ -147,9 +147,21 @@ PT_TLS has a bounded validated HostContext slice, recorded as
 `runtime.host-context.pt-tls` in the matrix. It covers AArch64 initial-exec TLS
 with a structurally bounded PT_TLS segment and `R_AARCH64_TLS_TPREL64`; the
 system loader owns module allocation and initialization. The managed v3 oracle
-uses a real TLS-backed entry and returns status 43. Dynamic TLS models,
-new-thread initialization, reentrancy, and unload with live TLS users remain
-outside the claim.
+uses a real TLS-backed entry and returns status 43. The separate
+`runtime.host-context.threaded-initial-exec-tls` row is opt-in through
+`pack --profile host-context-entry --thread-lifetime` and is validated only on
+native AArch64 glibc. The extension provides owner-thread `create_image_thread`
+and `join_image_thread` callbacks; routines must belong to the loaded root
+image. Release closes creation, joins every registered worker, waits for native
+TLS-key teardown, and only then invokes image destructors and unloads the sealed
+image. The linker-produced fixture observes initialized TLS data, zero-fill,
+constructor/entry ordering, worker completion, TLS teardown, and destructor
+ordering for both explicit join and automatic release join. The packed-wrapper
+harness uses inherited event/gate pipes; a native runtime harness exercises two
+concurrent independent dispatches. `--thread-lifetime` is absent by default and
+is invalid for `outer-execveat`. Dynamic/general-dynamic, local-dynamic,
+TLSDESC, unmanaged workers, worker-triggered recursive dispatch, and threaded
+musl/bionic claims remain outside scope.
 
 PT_GNU_PROPERTY has a bounded validated HostContext feature recorded as
 `runtime.host-context.gnu-property`. The adapter accepts a GNU property note
@@ -168,10 +180,13 @@ as `runtime.host-context.constructor-destructor`. Nonzero `DT_INIT`, `DT_FINI`,
 `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_INIT_ARRAYSZ`, `DT_FINI_ARRAYSZ`,
 `DT_PREINIT_ARRAY`, and `DT_PREINIT_ARRAYSZ` follow the system-loader ordering:
 constructors before entry and destructors during release. HostContext v1 and the current
-system-loader adapter define no callback or reentrancy behavior, live-thread
-teardown, or broader lifecycle ownership semantics. The dependency fixture
-observes constructor state in entry and writes a release marker from its
-destructor; zero-valued lifecycle mutations remain rejected by the native
+system-loader adapter define no callback or reentrancy behavior outside the
+explicit thread-lifetime extension. That extension is glibc-only and joins
+registered worker threads and waits for their TLS-key destructors before image
+destructors; unmanaged threads and reentrant dispatch remain unsupported. The
+dependency fixture observes constructor state in entry and writes a release
+marker from its destructor; the threaded fixture records the full worker
+lifetime order. Zero-valued lifecycle mutations remain rejected by the native
 self-test.
 
 RPATH/RUNPATH metadata is a separate rejected boundary recorded as

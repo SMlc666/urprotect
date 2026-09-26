@@ -30,8 +30,17 @@ entry slice does not define. The
 current bounded P3 slice accepts one recognized system-libc dependency with no
 RPATH/RUNPATH and delegates constructor-before-entry/destructor-before-release
 ordering to the system loader. The bounded P4-A slice accepts AArch64
-initial-exec PT_TLS with `R_AARCH64_TLS_TPREL64`; dynamic TLS, new-thread
-initialization, and live-thread unload remain outside the contract. Failed
+initial-exec PT_TLS with `R_AARCH64_TLS_TPREL64`. Its optional registered-worker
+extension is advertised only in a verified glibc build/runtime. Thread creation,
+join, and release are restricted to the image owner; routine addresses are
+checked against the root `link_map`; opaque thread handles are monotonic and
+never reused. Release closes the spawn gate, joins all workers and their native
+TLS-key teardown, then calls `dlclose`. A linker-produced fixture and packed
+wrapper harness observe initialized data/zero-fill, deterministic worker gates,
+constructor/entry/worker/TLS teardown/destructor ordering, explicit and
+automatic joins, serial reruns, and concurrent independent dispatches. Dynamic
+TLS, unmanaged workers, recursive dispatch, and musl/bionic threaded claims
+remain outside the contract. Failed
 adapter loads clear the output image handle before returning their stable
 status.
 The system loader remains the authority for applying relocation and memory
@@ -91,9 +100,14 @@ Constructor/destructor metadata is the separate bounded
 `runtime.host-context.constructor-destructor` slice. The system loader runs
 nonzero constructor metadata before `urp_entry` and destructor metadata during
 `release_image`; the dependency fixture observes both sides. Zero-valued
-lifecycle mutations remain rejected before loader handoff, while reentrancy,
-live-thread teardown, and broader lifecycle ownership remain outside this
-slice.
+lifecycle mutations remain rejected before loader handoff. The optional
+`URP_HOST_CAP_THREAD_LIFETIME` extension appends managed create/join callbacks;
+the current HostContext table is 72 bytes while preserving the 56-byte legacy
+minimum. Launch args carry the opaque active image handle in the appended
+40-byte view while preserving the 32-byte legacy minimum. Adapter release
+joins registered workers before `dlclose`, so worker TLS teardown completes
+before image destructors. This extension's runtime claim remains evidence-gated
+to native AArch64 glibc.
 
 RPATH/RUNPATH metadata is the separate rejected boundary
 `runtime.host-context.path-search`. HostContext v1 and this adapter define no

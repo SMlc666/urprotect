@@ -190,6 +190,29 @@
       "required": false,
       "expected": "pass-or-unavailable",
       "artifacts": [".artifacts/android-arm64-native-bridge-on-x64/"]
+    },
+    {
+      "id": "native.host-context-threaded-tls",
+      "class": "host-context",
+      "command": "native/urprotect-runtime/test_managed_host_context.sh",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 420,
+      "memoryMb": 2048,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/host-context/managed/host-context-threaded-tls-fixture.so",
+        ".artifacts/host-context/managed/threaded-tls-readelf.txt",
+        ".artifacts/host-context/managed/host-context-dynamic-tls-fixture.so",
+        ".artifacts/host-context/managed/dynamic-tls-negative-readelf.txt",
+        ".artifacts/host-context/managed/threaded-tls-runtime.txt",
+        ".artifacts/host-context/managed/threaded-tls-lifecycle.txt",
+        ".artifacts/host-context/managed/threaded-tls-concurrent.txt",
+        ".artifacts/host-context/managed/thread-adapter-self-test.log",
+        ".artifacts/host-context/managed/host-context-threaded-tls-packed.json",
+        ".artifacts/host-context/managed/sha256.txt"
+      ]
     }
   ]
 }

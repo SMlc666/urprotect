@@ -7,12 +7,18 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#if defined(__GLIBC__)
+#include <gnu/libc-version.h>
+#include <link.h>
+#endif
 
 #define URP_MEMFD_CLOEXEC 1U
 #define URP_MEMFD_ALLOW_SEALING 2U
@@ -35,13 +41,43 @@
 #define F_SEAL_WRITE 0x0008
 #endif
 #define URP_REQUIRED_IMAGE_SEALS (F_SEAL_WRITE | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL)
+typedef struct urp_image_thread_record {
+    pthread_t thread;
+    urp_image_thread_handle handle;
+    int joined; /* 0=registered, -1=join in progress, 1=joined */
+    struct urp_image_thread_record *next;
+} urp_image_thread_record;
+
 typedef struct urp_fd_image {
     void *dl_handle;
+    urp_image_handle handle;
     int fd;
+    pthread_t owner;
+    int release_started;
+    int release_active;
+    urp_image_thread_record *threads;
+    struct urp_fd_image *registry_next;
 } urp_fd_image;
 
+static pthread_mutex_t urp_image_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+static urp_fd_image *urp_image_registry;
+static urp_image_thread_handle urp_next_thread_handle = 1U;
+static urp_image_handle urp_next_image_handle = 1U;
+
+static urp_fd_image *urp_find_image_locked(urp_image_handle handle)
+{
+    for (urp_fd_image *image = urp_image_registry; image != NULL; image = image->registry_next) {
+        if (image->handle == handle) {
+            return image;
+        }
+    }
+    return NULL;
+}
+
 #if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
-static size_t urp_memfd_create_attempt_count;
+static _Atomic size_t urp_memfd_create_attempt_count;
+static _Atomic int urp_fail_next_thread_create;
+static _Atomic int urp_fail_next_thread_join;
 #endif
 
 static int urp_write_all(int fd, const void *bytes, size_t size)
@@ -110,7 +146,7 @@ static urp_status urp_adapter_load_image(
     }
 
 #if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
-    ++urp_memfd_create_attempt_count;
+    (void)atomic_fetch_add_explicit(&urp_memfd_create_attempt_count, 1U, memory_order_relaxed);
 #endif
     long fd_result = syscall(
         SYS_memfd_create,
@@ -160,7 +196,20 @@ static urp_status urp_adapter_load_image(
     }
     image->dl_handle = dl_handle;
     image->fd = fd;
-    *out_handle = (urp_image_handle)(uintptr_t)image;
+    image->owner = pthread_self();
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    if (urp_next_image_handle == 0U || urp_next_image_handle == UINT64_MAX) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        (void)dlclose(dl_handle);
+        (void)close(fd);
+        free(image);
+        return URP_STATUS_LOAD_FAILED;
+    }
+    image->handle = urp_next_image_handle++;
+    image->registry_next = urp_image_registry;
+    urp_image_registry = image;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+    *out_handle = image->handle;
     return URP_STATUS_OK;
 }
 
@@ -176,31 +225,213 @@ static urp_status urp_adapter_lookup_symbol(
         return URP_STATUS_INVALID_ARGUMENT;
     }
 
-    urp_fd_image *image = (urp_fd_image *)(uintptr_t)handle;
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    urp_fd_image *image = urp_find_image_locked(handle);
+    if (image == NULL || image->release_started) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
     (void)dlerror();
     void *symbol = dlsym(image->dl_handle, name);
     const char *error = dlerror();
     if (symbol == NULL || error != NULL) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
         return URP_STATUS_SYMBOL_NOT_FOUND;
     }
     *out_address = (uintptr_t)symbol;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+    return URP_STATUS_OK;
+}
+
+static urp_status urp_adapter_create_image_thread(
+    void *userdata,
+    urp_image_handle handle,
+    void *(*routine)(void *),
+    void *argument,
+    urp_image_thread_handle *out_thread)
+{
+    (void)userdata;
+    if (out_thread == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    *out_thread = 0U;
+    if (handle == 0U || routine == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+#if !defined(__GLIBC__)
+    (void)argument;
+    return URP_STATUS_UNSUPPORTED;
+#else
+    urp_image_thread_record *record = calloc(1U, sizeof(*record));
+    if (record == NULL) {
+        return URP_STATUS_LOAD_FAILED;
+    }
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    urp_fd_image *image = urp_find_image_locked(handle);
+    if (image == NULL || image->release_started || !pthread_equal(image->owner, pthread_self())) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        free(record);
+        return image == NULL ? URP_STATUS_INVALID_ARGUMENT : URP_STATUS_UNSUPPORTED;
+    }
+    /* A routine must resolve to this dlopen root, not libc or another DSO. */
+    struct link_map *root_map = NULL;
+    struct link_map *routine_map = NULL;
+    Dl_info routine_info;
+    if (dlinfo(image->dl_handle, RTLD_DI_LINKMAP, &root_map) != 0
+        || dladdr1((void *)(uintptr_t)routine, &routine_info, (void **)&routine_map, RTLD_DL_LINKMAP) == 0
+        || root_map == NULL || routine_map != root_map) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        free(record);
+        return URP_STATUS_UNSUPPORTED;
+    }
+    if (urp_next_thread_handle == 0U || urp_next_thread_handle == UINT64_MAX) {
+        /* Never recycle opaque handles: exhaustion permanently closes creation. */
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        free(record);
+        return URP_STATUS_LOAD_FAILED;
+    }
+    record->handle = urp_next_thread_handle++;
+    record->next = image->threads;
+    image->threads = record; /* Reserve image ownership before the thread can run. */
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+    int result = atomic_exchange_explicit(&urp_fail_next_thread_create, 0, memory_order_relaxed)
+        ? EAGAIN
+        : pthread_create(&record->thread, NULL, routine, argument);
+#else
+    int result = pthread_create(&record->thread, NULL, routine, argument);
+#endif
+    if (result != 0) {
+        image->threads = record->next;
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        free(record);
+        return URP_STATUS_LOAD_FAILED;
+    }
+    *out_thread = record->handle;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+    return URP_STATUS_OK;
+#endif
+}
+
+static urp_status urp_adapter_join_image_thread(
+    void *userdata,
+    urp_image_handle handle,
+    urp_image_thread_handle thread_handle,
+    void **out_result)
+{
+    (void)userdata;
+    if (handle == 0U || thread_handle == 0U || out_result == NULL) {
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    *out_result = NULL;
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    urp_fd_image *image = urp_find_image_locked(handle);
+    urp_image_thread_record *record = NULL;
+    if (image != NULL) {
+        for (record = image->threads; record != NULL; record = record->next) {
+            if (record->handle == thread_handle) break;
+        }
+    }
+    if (image == NULL || record == NULL || record->joined || image->release_started
+        || !pthread_equal(image->owner, pthread_self())
+        || pthread_equal(record->thread, pthread_self())) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        return URP_STATUS_INVALID_ARGUMENT;
+    }
+    record->joined = -1;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+    void *result = NULL;
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+    int join_status = atomic_exchange_explicit(&urp_fail_next_thread_join, 0, memory_order_relaxed)
+        ? EINVAL
+        : pthread_join(record->thread, &result);
+#else
+    int join_status = pthread_join(record->thread, &result);
+#endif
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    if (join_status != 0) {
+        record->joined = 0;
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        return URP_STATUS_LOAD_FAILED;
+    }
+    record->joined = 1;
+    *out_result = result;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
     return URP_STATUS_OK;
 }
 
 static urp_status urp_adapter_release_image(void *userdata, urp_image_handle handle)
 {
     (void)userdata;
-    if (handle == 0U) {
+    if (handle == 0U) return URP_STATUS_INVALID_ARGUMENT;
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    urp_fd_image *image = urp_find_image_locked(handle);
+    if (image == NULL || !pthread_equal(image->owner, pthread_self())) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
         return URP_STATUS_INVALID_ARGUMENT;
     }
+    if (image->release_active) {
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        return URP_STATUS_LOAD_FAILED;
+    }
+    image->release_active = 1;
+    image->release_started = 1;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
 
-    urp_fd_image *image = (urp_fd_image *)(uintptr_t)handle;
+    for (;;) {
+        (void)pthread_mutex_lock(&urp_image_registry_mutex);
+        urp_image_thread_record *record = image->threads;
+        while (record != NULL && record->joined == 1) record = record->next;
+        if (record == NULL) {
+            (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+            break;
+        }
+        if (record->joined == -1) {
+            image->release_active = 0;
+            (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+            return URP_STATUS_LOAD_FAILED;
+        }
+        record->joined = -1;
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+#if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
+        int join_status = atomic_exchange_explicit(&urp_fail_next_thread_join, 0, memory_order_relaxed)
+            ? EINVAL
+            : pthread_join(record->thread, NULL);
+#else
+        int join_status = pthread_join(record->thread, NULL);
+#endif
+        (void)pthread_mutex_lock(&urp_image_registry_mutex);
+        record->joined = join_status == 0 ? 1 : 0;
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        if (join_status != 0) {
+            (void)pthread_mutex_lock(&urp_image_registry_mutex);
+            image->release_active = 0;
+            (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+            return URP_STATUS_LOAD_FAILED;
+        }
+    }
+
     int dl_result = dlclose(image->dl_handle);
+    if (dl_result != 0) {
+        /* Keep the mapping and fd pinned when loader teardown reports failure. */
+        (void)pthread_mutex_lock(&urp_image_registry_mutex);
+        image->release_active = 0;
+        (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+        return URP_STATUS_LOAD_FAILED;
+    }
     int close_result = close(image->fd);
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    urp_fd_image **cursor = &urp_image_registry;
+    while (*cursor != NULL && *cursor != image) cursor = &(*cursor)->registry_next;
+    if (*cursor == image) *cursor = image->registry_next;
+    urp_image_thread_record *thread = image->threads;
+    while (thread != NULL) {
+        urp_image_thread_record *next = thread->next;
+        free(thread);
+        thread = next;
+    }
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
     free(image);
-    return dl_result == 0 && close_result == 0
-        ? URP_STATUS_OK
-        : URP_STATUS_LOAD_FAILED;
+    return close_result == 0 ? URP_STATUS_OK : URP_STATUS_LOAD_FAILED;
 }
 
 int urp_host_adapter_image_is_sealed(urp_image_handle handle)
@@ -209,15 +440,29 @@ int urp_host_adapter_image_is_sealed(urp_image_handle handle)
         return 0;
     }
 
-    const urp_fd_image *image = (const urp_fd_image *)(uintptr_t)handle;
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    const urp_fd_image *image = urp_find_image_locked(handle);
+    if (image == NULL) { (void)pthread_mutex_unlock(&urp_image_registry_mutex); return 0; }
     int seals = fcntl(image->fd, F_GET_SEALS);
-    return seals >= 0 && (seals & URP_REQUIRED_IMAGE_SEALS) == URP_REQUIRED_IMAGE_SEALS;
+    int sealed = seals >= 0 && (seals & URP_REQUIRED_IMAGE_SEALS) == URP_REQUIRED_IMAGE_SEALS;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+    return sealed;
 }
 
 #if defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS)
 size_t urp_host_adapter_memfd_create_attempts(void)
 {
-    return urp_memfd_create_attempt_count;
+    return atomic_load_explicit(&urp_memfd_create_attempt_count, memory_order_relaxed);
+}
+
+void urp_host_adapter_test_fail_next_thread_create(void)
+{
+    atomic_store_explicit(&urp_fail_next_thread_create, 1, memory_order_relaxed);
+}
+
+void urp_host_adapter_test_fail_next_thread_join(void)
+{
+    atomic_store_explicit(&urp_fail_next_thread_join, 1, memory_order_relaxed);
 }
 #endif
 
@@ -249,4 +494,12 @@ void urp_host_adapter_init(urp_host_adapter_v1 *adapter)
     adapter->context.lookup_symbol = urp_adapter_lookup_symbol;
     adapter->context.release_image = urp_adapter_release_image;
     adapter->context.emit_diagnostic = urp_adapter_emit_diagnostic;
+#if defined(__GLIBC__)
+    /* Build/runtime identity is checked; other libc implementations get no bit. */
+    if (gnu_get_libc_version() != NULL) {
+        adapter->context.capabilities |= URP_HOST_CAP_THREAD_LIFETIME;
+        adapter->context.create_image_thread = urp_adapter_create_image_thread;
+        adapter->context.join_image_thread = urp_adapter_join_image_thread;
+    }
+#endif
 }

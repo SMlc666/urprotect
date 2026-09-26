@@ -164,6 +164,20 @@ executable pathname.
 - `urp_entry` is called at most once per successful frame execution.
 - The runtime releases the image after entry dispatch, including a nonzero
   entry status. Host callbacks must not be invoked after release returns.
+- The optional thread-lifetime capability appends `create_image_thread` and
+  `join_image_thread` at offsets 56 and 64 (72-byte current table); the 56-byte
+  legacy minimum remains valid. The capability requires both appended fields
+  and callbacks. Launch args retain their 32-byte legacy minimum and append
+  the opaque image handle at offset 32 (40-byte current view). Runtime
+  projection copies only caller-declared legacy bytes and supplies the active
+  image handle to entry.
+- A frame requiring thread lifetime is preflighted against the capability,
+  table size, and callbacks before image loading. Registered workers may be
+  created only by the dispatch thread through HostContext. Release closes the
+  spawn gate, joins registered workers and their TLS teardown, then invokes
+  loader destructors and closes image resources. Dynamic TLS, unmanaged
+  workers, and worker-triggered recursive dispatch remain out of scope;
+  same-thread recursive frame dispatch is rejected before nested loading.
 - Unknown ABI versions, truncated tables, missing mandatory capabilities, and
   null mandatory callbacks fail closed before payload dispatch.
 
@@ -307,14 +321,26 @@ executable pathname.
   an executable-stack request returns `URP_STATUS_UNSUPPORTED` before an
   image handle is created. Protection semantics for the accepted
   non-executable case remain delegated to the native system loader.
-- `PT_TLS` has a bounded validated feature row
-  (`runtime.host-context.pt-tls`). The first slice accepts structurally bounded
-  AArch64 initial-exec TLS with `R_AARCH64_TLS_TPREL64`; the system loader owns
-  module allocation and initialization. The retained managed oracle uses a
-  TLS-backed entry and returns status 43 on the native glibc lane. Dynamic TLS
-  models, new-thread initialization, reentrancy, and unload with live TLS users
-  remain outside the claim; malformed TLS and unsupported models still fail
-  closed.
+- `PT_TLS` has a bounded validated feature row (`runtime.host-context.pt-tls`).
+  The first slice accepts structurally bounded AArch64 initial-exec TLS with
+  `R_AARCH64_TLS_TPREL64`; the system loader owns per-thread module allocation
+  and initializes the `p_filesz` template plus zero-fill through `p_memsz`. The
+  retained current-thread oracle returns status 43 on native glibc.
+  Registered-worker initial-exec behavior is a separate
+  `runtime.host-context.threaded-initial-exec-tls` row, limited to native
+  AArch64 glibc. The optional `--thread-lifetime` pack flag sets the required
+  frame capability; it is absent by default and forbidden for `outer-execveat`.
+  The adapter advertises the capability only when compiled against glibc and
+  `gnu_get_libc_version()` verifies the runtime. Creation/join/release are
+  owner-thread-only; routines must resolve to the root `link_map`; thread
+  handles are monotonic and non-reused. Release closes the spawn gate, joins
+  registered workers and TLS teardown, then invokes image destructors and
+  unloads. The retained linker fixture validates constructor/entry/worker/TLS
+  destructor/image destructor ordering for explicit and automatic joins and
+  exercises concurrent independent dispatches. Dynamic/general-dynamic,
+  local-dynamic, TLSDESC, unmanaged workers, recursive worker dispatch, and
+  musl/bionic threaded claims remain outside scope; malformed TLS and
+  unsupported models fail closed.
 - `PT_GNU_PROPERTY` has a bounded validated feature row
   (`runtime.host-context.gnu-property`). The adapter accepts a GNU property
   note containing only AArch64 FEATURE_1 BTI/PAC bits and rejects malformed

@@ -74,6 +74,12 @@ tests plus the relevant malformed-input path:
   tests or Coverlet line/branch coverage.
 - Native `self_test.c` and `test_launcher.sh` cover SHA-256, raw deflate,
   malformed frames, handoff behavior, and signal/status preservation.
+- HostContext worker-lifetime changes require the real-linker initial-exec TLS
+  fixture on native AArch64 glibc, with inherited event/gate pipes, exact
+  readelf TLS/relocation facts, explicit and automatic joins, TLS teardown
+  before image destructor, serial reruns, concurrent independent dispatches,
+  and retained runtime identity/status/hash evidence. Musl/bionic execution is
+  not a substitute for the glibc cell.
 
 Use external `readelf`/`llvm-readelf` checks for produced ELF structure when a
 change affects a launcher, fixture, or release. Compare runtime behavior using

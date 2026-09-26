@@ -10,6 +10,8 @@ extern "C" {
 
 #define URP_HOST_ABI_VERSION UINT32_C(1)
 #define URP_HOST_CONTEXT_MIN_SIZE UINT32_C(56)
+#define URP_HOST_CONTEXT_THREAD_LIFETIME_SIZE UINT32_C(72)
+#define URP_LAUNCH_ARGS_CURRENT_SIZE UINT32_C(40)
 #define URP_LAUNCH_ARGS_MIN_SIZE UINT32_C(32)
 #define URP_HOST_ENTRY_SYMBOL "urp_entry"
 
@@ -17,10 +19,12 @@ extern "C" {
 #define URP_HOST_CAP_LOOKUP_SYMBOL (UINT64_C(1) << 1)
 #define URP_HOST_CAP_EMIT_DIAGNOSTIC (UINT64_C(1) << 2)
 #define URP_HOST_CAP_RELEASE_IMAGE (UINT64_C(1) << 3)
+#define URP_HOST_CAP_THREAD_LIFETIME (UINT64_C(1) << 4)
 #define URP_HOST_CAP_SUPPORTED (URP_HOST_CAP_LOAD_IMAGE \
     | URP_HOST_CAP_LOOKUP_SYMBOL \
     | URP_HOST_CAP_EMIT_DIAGNOSTIC \
-    | URP_HOST_CAP_RELEASE_IMAGE)
+    | URP_HOST_CAP_RELEASE_IMAGE \
+    | URP_HOST_CAP_THREAD_LIFETIME)
 #define URP_HOST_CAP_MANDATORY (URP_HOST_CAP_LOAD_IMAGE \
     | URP_HOST_CAP_LOOKUP_SYMBOL \
     | URP_HOST_CAP_RELEASE_IMAGE)
@@ -38,6 +42,7 @@ extern "C" {
 
 typedef int32_t urp_status;
 typedef uint64_t urp_image_handle;
+typedef uint64_t urp_image_thread_handle;
 
 /* The host consumes bytes before load_image returns; the handle owns the image until release. */
 typedef urp_status (*urp_load_image_fn)(
@@ -63,6 +68,19 @@ typedef urp_status (*urp_emit_diagnostic_fn)(
     uint32_t code,
     const char *message);
 
+typedef urp_status (*urp_create_image_thread_fn)(
+    void *userdata,
+    urp_image_handle image,
+    void *(*routine)(void *),
+    void *argument,
+    urp_image_thread_handle *out_thread);
+
+typedef urp_status (*urp_join_image_thread_fn)(
+    void *userdata,
+    urp_image_handle image,
+    urp_image_thread_handle thread,
+    void **out_result);
+
 typedef struct urp_host_context_v1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -72,6 +90,8 @@ typedef struct urp_host_context_v1 {
     urp_lookup_symbol_fn lookup_symbol;
     urp_release_image_fn release_image;
     urp_emit_diagnostic_fn emit_diagnostic;
+    urp_create_image_thread_fn create_image_thread;
+    urp_join_image_thread_fn join_image_thread;
 } urp_host_context_v1;
 
 typedef struct urp_launch_args_v1 {
@@ -80,6 +100,7 @@ typedef struct urp_launch_args_v1 {
     uint32_t argc;
     const char *const *argv;
     const char *const *envp;
+    urp_image_handle image;
 } urp_launch_args_v1;
 
 typedef int32_t (*urp_entry_fn)(

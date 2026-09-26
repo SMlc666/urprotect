@@ -9,6 +9,8 @@ public sealed class CliApplicationTests
 {
     private static readonly string[] UnknownArgumentArgs = { "validate", "input.elf", "--unknown" };
     private static readonly string[] MissingInputArgs = { "validate", "/tmp/urprotect-does-not-exist.elf" };
+    private static readonly string[] ThreadLifetimeOuterArgs =
+        { "pack", "missing.so", "--output", "out", "--launcher", "launcher", "--thread-lifetime" };
 
     [Fact]
     [Trait("Category", "Cli")]
@@ -168,6 +170,22 @@ public sealed class CliApplicationTests
         Assert.Equal((int)ProductExitCode.Usage, exitCode);
         Assert.Contains("unknown argument", stderr.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Usage:", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "Cli")]
+    public void ThreadLifetimeFlagRequiresTheHostContextProfile()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            ThreadLifetimeOuterArgs,
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Usage, exitCode);
+        Assert.Contains("requires --profile host-context-entry", stderr.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

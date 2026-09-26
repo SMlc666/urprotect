@@ -90,6 +90,18 @@ urprotect pack ./entry-image.so \
   --json ./entry-image.pack.json
 ```
 
+The optional registered-worker lifecycle is explicitly requested with
+`--thread-lifetime`; it is available only for the native AArch64 glibc
+HostContext contract and remains off by default:
+
+```sh
+urprotect pack ./threaded-entry.so \
+  --output ./threaded-entry.host.wrapped \
+  --launcher ./host-context-launcher \
+  --profile host-context-entry \
+  --thread-lifetime
+```
+
 Build the small native launcher on a native AArch64 host with the pinned musl
 toolchain used by CI:
 

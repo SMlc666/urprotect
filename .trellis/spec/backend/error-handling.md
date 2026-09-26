@@ -42,6 +42,15 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 - `PayloadFrameCodec` validates version, flags, architecture, names, bounds,
   encoded digest, exact decompressed size, and source digest before returning
   source bytes.
+- When a frame requires `URP_HOST_CAP_THREAD_LIFETIME`, preflight verifies the
+  full table size and both callbacks before image loading. The native adapter
+  reserves per-image ownership before thread start, returns no handle on failed
+  creation, rejects foreign/repeated/self-join handles, and never reuses opaque
+  thread handles. Release closes creation and joins registered workers; a join
+  failure preserves the image mapping and descriptor so live code is not
+  unloaded. Non-threaded frames receive a legacy-size HostContext projection
+  with the optional callbacks/capability cleared and a 32-byte launch-args view
+  with image handle zero.
 - `ElfPackService` validates source and launcher independently, validates the
   assembled wrapper and recovered payload, and publishes only after a final
   byte comparison.

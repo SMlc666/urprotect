@@ -95,6 +95,7 @@ typedef struct fixture_state {
     int entry_called;
     int released;
     int diagnostics;
+    urp_status release_status;
     const char *expected_entry_name;
 } fixture_state;
 
@@ -108,7 +109,10 @@ static int32_t fixture_entry(
     const urp_launch_args_v1 *args)
 {
     fixture_state *state = (fixture_state *)host->userdata;
-    if (args->argc != 1U || args->argv == NULL || strcmp(args->argv[0], "fixture") != 0) {
+    if (host->struct_size != URP_HOST_CONTEXT_MIN_SIZE
+        || (host->capabilities & URP_HOST_CAP_THREAD_LIFETIME) != 0U
+        || args->struct_size != URP_LAUNCH_ARGS_MIN_SIZE || args->image != 0U
+        || args->argc != 1U || args->argv == NULL || strcmp(args->argv[0], "fixture") != 0) {
         return 19;
     }
     state->entry_called = 1;
@@ -163,7 +167,7 @@ static urp_status fixture_release_image(void *userdata, urp_image_handle image)
         return URP_STATUS_INVALID_ARGUMENT;
     }
     state->released = 1;
-    return URP_STATUS_OK;
+    return state->release_status;
 }
 
 static urp_status fixture_emit_diagnostic(void *userdata, uint32_t code, const char *message)
@@ -174,6 +178,11 @@ static urp_status fixture_emit_diagnostic(void *userdata, uint32_t code, const c
     }
     state->diagnostics++;
     return URP_STATUS_OK;
+}
+
+static void *fixture_adapter_worker(void *argument)
+{
+    return argument;
 }
 
 static int fixture_expect(int condition, const char *message)
@@ -858,6 +867,37 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         free(source);
         return 0;
     }
+    if ((adapter.context.capabilities & URP_HOST_CAP_THREAD_LIFETIME) != 0U) {
+        urp_image_thread_handle worker_handle = 0U;
+        void *worker_result = NULL;
+        urp_status invalid_worker_status = adapter.context.create_image_thread(
+            adapter.context.userdata, sealed_handle, NULL, NULL, &worker_handle);
+        urp_status create_status = adapter.context.create_image_thread(
+            adapter.context.userdata, sealed_handle, fixture_adapter_worker,
+            (void *)(uintptr_t)UINT32_C(0x1234), &worker_handle);
+        urp_status invalid_join_status = adapter.context.join_image_thread(
+            adapter.context.userdata, sealed_handle, UINT64_C(0x1234), &worker_result);
+        if (!fixture_expect(
+                adapter.context.struct_size >= URP_HOST_CONTEXT_THREAD_LIFETIME_SIZE
+                    && adapter.context.create_image_thread != NULL
+                    && adapter.context.join_image_thread != NULL
+                    && invalid_worker_status == URP_STATUS_INVALID_ARGUMENT
+                    && create_status == URP_STATUS_UNSUPPORTED
+                    && worker_handle == 0U
+                    && invalid_join_status == URP_STATUS_INVALID_ARGUMENT,
+                "worker routine outside the root image was not rejected")) {
+            (void)adapter.context.release_image(adapter.context.userdata, sealed_handle);
+            free(source);
+            return 0;
+        }
+    } else if (!fixture_expect(
+            adapter.context.create_image_thread == NULL
+                && adapter.context.join_image_thread == NULL,
+            "non-glibc adapter exposed thread lifetime callbacks")) {
+        (void)adapter.context.release_image(adapter.context.userdata, sealed_handle);
+        free(source);
+        return 0;
+    }
     if (!fixture_expect(
             adapter.context.release_image(adapter.context.userdata, sealed_handle)
                 == URP_STATUS_OK,
@@ -1518,10 +1558,10 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    if (!fixture_expect(sizeof(urp_host_context_v1) == 56U, "context size changed")
-        || !fixture_expect(sizeof(urp_launch_args_v1) == 32U, "launch args size changed")
-        || !fixture_expect(URP_HOST_CONTEXT_MIN_SIZE == 56U, "context minimum size changed")
-        || !fixture_expect(URP_LAUNCH_ARGS_MIN_SIZE == 32U, "launch args minimum size changed")) {
+    if (!fixture_expect(sizeof(urp_host_context_v1) == 72U, "context size changed")
+        || !fixture_expect(sizeof(urp_launch_args_v1) == 40U, "launch args size changed")
+        || !fixture_expect(URP_HOST_CONTEXT_MIN_SIZE == 56U && URP_HOST_CONTEXT_THREAD_LIFETIME_SIZE == 72U, "context minimum size changed")
+        || !fixture_expect(URP_LAUNCH_ARGS_MIN_SIZE == 32U && URP_LAUNCH_ARGS_CURRENT_SIZE == 40U, "launch args minimum size changed")) {
         return 1;
     }
 
@@ -1567,6 +1607,23 @@ int main(int argc, char **argv)
         || !fixture_expect(state.looked_up && state.entry_called, "entry was not dispatched")
         || !fixture_expect(state.released, "image lifetime was not released")
         || !fixture_expect(state.diagnostics == 0, "unexpected diagnostic on entry result")) {
+        return 1;
+    }
+
+    fixture_state release_failure_state = {0};
+    release_failure_state.release_status = URP_STATUS_LOAD_FAILED;
+    urp_host_context_v1 release_failure_host = host;
+    release_failure_host.userdata = &release_failure_state;
+    status = urp_runtime_execute_frame(
+        &release_failure_host,
+        fixture_frame,
+        sizeof(fixture_frame),
+        &args);
+    if (!fixture_expect(status == URP_STATUS_LOAD_FAILED,
+            "entry status masked a failed image release")
+        || !fixture_expect(release_failure_state.entry_called
+                && release_failure_state.released,
+            "release failure case did not reach entry and release")) {
         return 1;
     }
 
@@ -1617,6 +1674,22 @@ int main(int argc, char **argv)
         v2_frame_size,
         &args);
 
+    memcpy(invalid_capabilities, v2_frame, v2_frame_size);
+    fixture_write_u64_le(
+        invalid_capabilities + URP_RUNTIME_FRAME_V2_REQUIRED_CAPABILITIES_OFFSET,
+        URP_HOST_CAP_MANDATORY | URP_HOST_CAP_THREAD_LIFETIME);
+    fixture_state missing_thread_state = {0};
+    missing_thread_state.expected_entry_name = "custom_entry";
+    urp_host_context_v1 missing_thread_host = v2_host;
+    missing_thread_host.userdata = &missing_thread_state;
+    urp_status missing_thread_status = urp_runtime_execute_frame(
+        &missing_thread_host, invalid_capabilities, v2_frame_size, &args);
+
+    urp_host_context_v1 incomplete_thread_host = v2_host;
+    incomplete_thread_host.capabilities |= URP_HOST_CAP_THREAD_LIFETIME;
+    urp_status incomplete_thread_status = urp_runtime_execute_frame(
+        &incomplete_thread_host, v2_frame, v2_frame_size, &args);
+
     uint8_t *invalid_entry_name = (uint8_t *)malloc(v2_frame_size);
     if (!fixture_expect(invalid_entry_name != NULL, "could not allocate invalid v2 entry frame")) {
         free(invalid_capabilities);
@@ -1644,6 +1717,13 @@ int main(int argc, char **argv)
         || !fixture_expect(
             invalid_v2_state.loaded == 0,
             "invalid v2 capability reached the host loader")
+        || !fixture_expect(
+            missing_thread_status == URP_STATUS_HOST_INVALID
+                && missing_thread_state.loaded == 0 && missing_thread_state.entry_called == 0,
+            "missing thread-lifetime capability reached loading or entry")
+        || !fixture_expect(
+            incomplete_thread_status == URP_STATUS_HOST_INVALID,
+            "thread-lifetime capability without extension callbacks was accepted")
         || !fixture_expect(
             invalid_entry_status == URP_STATUS_FRAME_INVALID,
             "invalid v2 UTF-8 entry name was accepted")

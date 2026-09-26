@@ -11,7 +11,8 @@ public sealed record ElfPackOptions(
     PayloadFrameLimits? Limits = null,
     bool AnalyzeInstructions = false,
     PayloadDispatchProfile Profile = PayloadDispatchProfile.OuterExecveat,
-    string EntrySymbol = HostContextContract.EntrySymbol)
+    string EntrySymbol = HostContextContract.EntrySymbol,
+    bool RequireThreadLifetime = false)
 {
     public PayloadFrameLimits EffectiveLimits => Limits ?? new PayloadFrameLimits();
 }
@@ -145,10 +146,19 @@ public sealed class ElfPackService
             return Failure(diagnostics, sourceBytes.Length);
         }
 
+        if (options.RequireThreadLifetime && options.Profile != PayloadDispatchProfile.HostContextEntry)
+        {
+            diagnostics.Error(
+                DiagnosticCode.UnsupportedPackInput,
+                "Thread-lifetime capability is available only for the host-context-entry profile.");
+            return Failure(diagnostics, sourceBytes.Length);
+        }
+
         HostContextFrameMetadata? hostContextMetadata = options.Profile == PayloadDispatchProfile.HostContextEntry
             ? new HostContextFrameMetadata(
                 HostContextContract.AbiVersion,
-                HostContextContract.MandatoryCapabilities,
+                HostContextContract.MandatoryCapabilities
+                    | (options.RequireThreadLifetime ? HostContextCapability.ThreadLifetime : HostContextCapability.None),
                 options.EntrySymbol)
             : null;
         if (!PayloadFrameCodec.TryEncodeCurrent(
