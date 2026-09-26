@@ -19,8 +19,8 @@
       do not claim musl runtime coverage from the accepted path suffix.
 - [x] Update the parser/outer feature rows, compatibility docs, runtime spec,
       and local evidence artifacts.
-- [ ] Confirm pushed GitHub CI retains the native glibc fixture artifacts and
-      passes the post-run evidence gate.
+- [x] Confirm pushed GitHub CI retains the native glibc fixture artifacts and
+      passes the post-run evidence gate (runs `36220305079` and `36220307292`).
 - [x] Audited the touched parser, pack, and launcher boundaries; the class
       policy remains in their existing owners and no large new branch warrants
       a broader refactor in this slice.

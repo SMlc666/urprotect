@@ -68,13 +68,18 @@
   step had run. The case path
   now targets the fixture-smoke directory and the packed feature artifact is
   checked after `Packed fixture smoke`; both gates pass locally.
-- GitHub run `36119338003` passed the managed build, real-sample, and bionic
-  jobs. Its retained packed log exposed that GNU `timeout` reports the
-  self-SIGTERM probe as 143 on the hosted runner, while local GNU `timeout`
-  reports 15. The signal oracle was normalized to accept these two direct
-  signal-result encodings while rejecting timeout status 124; the follow-up
-  CI after this correction remains pending. The run's real-sample artifact
-  supplies the Caddy/Python parser acceptance evidence above.
+- GitHub push run `36220305079` and PR run `36220307292` passed. The PR
+  `build-and-test` job completed all gates including packed-fixture smoke,
+  `--feature elf.outer.dynamic-et-exec`, and evidence upload; real-sample and
+  bionic jobs passed. Retained packed artifacts contain baseline/wrapper
+  process outputs, status files, declared-file observations, and equal
+  signal-result status `143` for the hosted GNU `timeout` implementation.
+- The earlier CI run `36119338003` exposed that local GNU `timeout` reports
+  status 15 for the self-SIGTERM probe while the hosted GNU `timeout` reports
+  143. The oracle now accepts those two direct signal-result encodings and
+  rejects timeout status 124.
+- The final PR remains draft #16 on the feature branch while remaining
+  compatibility-expansion children and parent integration are unfinished.
 
 ## Ownership and rollback
 
