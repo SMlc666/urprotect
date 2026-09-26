@@ -537,7 +537,6 @@ int main(int argc, char **argv)
     if (argc != 2) {
         return 2;
     }
-
     uint8_t *source = NULL;
     size_t source_size = 0U;
     if (!read_file(argv[1], &source, &source_size)) {

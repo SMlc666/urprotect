@@ -6,6 +6,21 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(URP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS)
+#include <stdio.h>
+#include <stdlib.h>
+static void urp_trace_validation_failure(const char *stage, urp_status status)
+{
+    if (getenv("URP_HOST_VALIDATION_TRACE") != NULL) {
+        (void)fprintf(stderr, "HostContext preflight %s returned %d\n", stage, status);
+    }
+}
+#define URP_TRACE_VALIDATION_FAILURE(stage, status) \
+    urp_trace_validation_failure((stage), (status))
+#else
+#define URP_TRACE_VALIDATION_FAILURE(stage, status) ((void)(stage), (void)(status))
+#endif
+
 #define URP_ELF_HEADER_SIZE 64U
 #define URP_ELF_PROGRAM_HEADER_SIZE 56U
 #define URP_ELF_DYNAMIC_ENTRY_SIZE 16U
@@ -857,6 +872,7 @@ static urp_status urp_validate_symbol_version_needs(
     if (!dynamic->has_needed || !dynamic->has_versym
         || !dynamic->has_verneed || !dynamic->has_verneednum
         || dynamic->verneednum == 0U) {
+        URP_TRACE_VALIDATION_FAILURE("incomplete symbol-version tuple", URP_STATUS_UNSUPPORTED);
         return URP_STATUS_UNSUPPORTED;
     }
 
@@ -876,12 +892,15 @@ static urp_status urp_validate_symbol_version_needs(
     static const char glibc_soname[] = "libc.so.6";
     if (needed_name_length != sizeof(glibc_soname) - 1U
         || memcmp(needed_name, glibc_soname, sizeof(glibc_soname) - 1U) != 0) {
+        URP_TRACE_VALIDATION_FAILURE("versioned dependency SONAME", URP_STATUS_UNSUPPORTED);
         return URP_STATUS_UNSUPPORTED;
     }
     if (dynamic->has_symbolic) {
+        URP_TRACE_VALIDATION_FAILURE("DT_SYMBOLIC with version requirements", URP_STATUS_UNSUPPORTED);
         return URP_STATUS_UNSUPPORTED;
     }
     if (dynamic->has_sysv_hash) {
+        URP_TRACE_VALIDATION_FAILURE("DT_HASH with version requirements", URP_STATUS_UNSUPPORTED);
         return URP_STATUS_UNSUPPORTED;
     }
 
@@ -953,6 +972,7 @@ static urp_status urp_validate_symbol_version_needs(
         }
         if (file_name_length != needed_name_length
             || memcmp(file_name, needed_name, needed_name_length) != 0) {
+            URP_TRACE_VALIDATION_FAILURE("DT_VERNEED vn_file mismatch", URP_STATUS_UNSUPPORTED);
             return URP_STATUS_UNSUPPORTED;
         }
 
@@ -1001,6 +1021,7 @@ static urp_status urp_validate_symbol_version_needs(
                 return URP_STATUS_LOAD_FAILED;
             }
             if (version_flags != 0U) {
+                URP_TRACE_VALIDATION_FAILURE("unsupported DT_VERNEED auxiliary flags", URP_STATUS_UNSUPPORTED);
                 return URP_STATUS_UNSUPPORTED;
             }
             if (version_index < 2U
@@ -1421,6 +1442,7 @@ static urp_status urp_validate_dynamic_segment(
         program_header_offset,
         program_header_count);
     if (status != URP_STATUS_OK) {
+        URP_TRACE_VALIDATION_FAILURE("symbol-version needs", status);
         return status;
     }
     status = urp_validate_rela(
@@ -1430,6 +1452,7 @@ static urp_status urp_validate_dynamic_segment(
         program_header_offset,
         program_header_count);
     if (status != URP_STATUS_OK) {
+        URP_TRACE_VALIDATION_FAILURE("RELA", status);
         return status;
     }
     status = urp_validate_plt_rela(
@@ -1439,14 +1462,19 @@ static urp_status urp_validate_dynamic_segment(
         program_header_offset,
         program_header_count);
     if (status != URP_STATUS_OK) {
+        URP_TRACE_VALIDATION_FAILURE("PLT RELA", status);
         return status;
     }
-    return urp_validate_relr(
+    status = urp_validate_relr(
         image,
         image_size,
         &values,
         program_header_offset,
         program_header_count);
+    if (status != URP_STATUS_OK) {
+        URP_TRACE_VALIDATION_FAILURE("RELR", status);
+    }
+    return status;
 }
 
 urp_status urp_host_image_validate(const void *bytes, size_t image_size)
@@ -1530,6 +1558,7 @@ urp_status urp_host_image_validate(const void *bytes, size_t image_size)
                 program_header_offset,
                 program_header_count);
             if (status != URP_STATUS_OK) {
+                URP_TRACE_VALIDATION_FAILURE("PT_DYNAMIC", status);
                 return status;
             }
             break;
@@ -1547,6 +1576,7 @@ urp_status urp_host_image_validate(const void *bytes, size_t image_size)
                     URP_PF_W,
                     0,
                     NULL)) {
+                URP_TRACE_VALIDATION_FAILURE("PT_TLS", URP_STATUS_UNSUPPORTED);
                 return URP_STATUS_UNSUPPORTED;
             }
             break;
@@ -1556,11 +1586,13 @@ urp_status urp_host_image_validate(const void *bytes, size_t image_size)
             if ((flags & (URP_PF_W | URP_PF_X)) != 0U
                 || urp_validate_gnu_property(image, image_size, file_offset, file_size)
                     != URP_STATUS_OK) {
+                URP_TRACE_VALIDATION_FAILURE("PT_GNU_PROPERTY", URP_STATUS_UNSUPPORTED);
                 return URP_STATUS_UNSUPPORTED;
             }
             break;
         case URP_PT_GNU_STACK:
             if ((flags & URP_PF_X) != 0U) {
+                URP_TRACE_VALIDATION_FAILURE("executable PT_GNU_STACK", URP_STATUS_UNSUPPORTED);
                 return URP_STATUS_UNSUPPORTED;
             }
             break;

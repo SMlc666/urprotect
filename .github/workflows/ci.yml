@@ -104,6 +104,11 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p .artifacts/host-context/pr
+          make -C native/urprotect-runtime dependency-fixture
+          cp native/urprotect-runtime/build/host-context-dependency-fixture.so \
+            .artifacts/host-context/pr/
+          readelf -aW native/urprotect-runtime/build/host-context-dependency-fixture.so \
+            > .artifacts/host-context/pr/dependency-fixture-readelf.txt
           make -C native/urprotect-runtime test \
             2>&1 | tee .artifacts/host-context/pr/self-test.log
       - name: Managed HostContext packaging oracle

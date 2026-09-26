@@ -65,7 +65,7 @@ plt-self-test: $(PLT_SELF_TEST) $(PLT_FIXTURE)
 	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
 
 version-self-test: $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE)
-	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
+	URP_HOST_VALIDATION_TRACE=1 "$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
 
 dependency-fixture: $(DEPENDENCY_FIXTURE)
 
@@ -76,7 +76,7 @@ property-fixture: $(PROPERTY_FIXTURE)
 test: check-host $(SELF_TEST) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
 	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
-	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
+	URP_HOST_VALIDATION_TRACE=1 "$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
 
 test-adapter: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)" --adapter-v2
@@ -193,7 +193,7 @@ $(BUILD_DIR)/host_adapter.o: host_adapter.c host_image_validation.h include/urp/
 
 $(BUILD_DIR)/host_image_validation.o: host_image_validation.c host_image_validation.h include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 
 $(BUILD_DIR)/sha256.o: ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h
 	@mkdir -p "$(BUILD_DIR)"
