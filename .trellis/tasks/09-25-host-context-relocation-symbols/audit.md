@@ -105,12 +105,15 @@ The initial feature-branch run on `17ce404` (`36230780225`, PR; and
 `36230777141`, push) failed the HostContext evidence step because the managed
 script stopped in `version-self-test`; the expected downstream TLS artifact was
 therefore absent. Its retained log showed the failing Make target but no
-self-test diagnostic. The GNU-hash chain negative-test setup has since been
-changed to find a mapped terminal word across all file-backed `PT_LOAD` ranges,
-rather than assuming a linker-specific gap after a contiguous load range, and
-now reports setup or mutation failures. Local native runtime and managed
-HostContext tests pass with this correction. CI must rerun before the checklist
-item is complete. Only retained native AArch64 glibc artifacts satisfy the
-runtime evidence contract; local evidence is supplemental. The parent task
-remains active until all remaining child tasks, release integration, and the
-PR workflow are complete.
+self-test diagnostic. A second run (`36231365350`) reproduced the issue. It
+also exposed that the workflow's `tee` pipeline masked the script's nonzero
+exit; the evidence gate caught the missing output later. The pipeline now uses
+`set -o pipefail`, and the self-test has additional setup diagnostics so the
+next CI run pinpoints the failing assertion. The GNU-hash chain negative-test
+setup now finds a mapped terminal word across all file-backed `PT_LOAD` ranges
+rather than assuming a linker-specific gap after a contiguous load range.
+Local native runtime and managed HostContext tests pass with these changes.
+CI must rerun before the checklist item is complete. Only retained native
+AArch64 glibc artifacts satisfy the runtime evidence contract; local evidence
+is supplemental. The parent task remains active until all remaining child
+tasks, release integration, and the PR workflow are complete.

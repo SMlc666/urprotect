@@ -107,6 +107,7 @@ jobs:
             2>&1 | tee .artifacts/host-context/pr/self-test.log
       - name: Managed HostContext packaging oracle
         run: |
+          set -o pipefail
           MANAGED_HOST_CONTEXT_ARTIFACT_ROOT=.artifacts/host-context/managed \
             native/urprotect-runtime/test_managed_host_context.sh \
             2>&1 | tee .artifacts/host-context/pr/managed-pack.log

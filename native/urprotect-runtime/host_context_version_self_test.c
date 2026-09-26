@@ -555,20 +555,36 @@ int main(int argc, char **argv)
     urp_host_adapter_v1 adapter;
     urp_host_adapter_init(&adapter);
     urp_image_handle handle = 0U;
-    if (adapter.context.load_image(
+    urp_status initial_load_status = adapter.context.load_image(
             adapter.context.userdata,
             source,
             source_size,
             URP_LOAD_IMAGE_IMMUTABLE,
-            &handle) != URP_STATUS_OK
-        || handle == 0U
-        || adapter.context.release_image(adapter.context.userdata, handle) != URP_STATUS_OK) {
+            &handle);
+    if (initial_load_status != URP_STATUS_OK || handle == 0U) {
+        (void)fprintf(
+            stderr,
+            "version self-test: positive fixture load returned %d, handle=%llu\n",
+            initial_load_status,
+            (unsigned long long)handle);
+        free(source);
+        return 1;
+    }
+    urp_status initial_release_status = adapter.context.release_image(
+        adapter.context.userdata,
+        handle);
+    if (initial_release_status != URP_STATUS_OK) {
+        (void)fprintf(
+            stderr,
+            "version self-test: positive fixture release returned %d\n",
+            initial_release_status);
         free(source);
         return 1;
     }
 
     uint8_t *mutant = (uint8_t *)malloc(source_size);
     if (mutant == NULL) {
+        (void)fputs("version self-test: failed to allocate mutation buffer\n", stderr);
         free(source);
         return 1;
     }
@@ -580,6 +596,7 @@ int main(int argc, char **argv)
             tags.version_need_address,
             16U,
             &version_need_file_offset)) {
+        (void)fputs("version self-test: DT_VERNEED mapping is invalid\n", stderr);
         free(mutant);
         free(source);
         return 1;
@@ -588,6 +605,7 @@ int main(int argc, char **argv)
         + (uint64_t)read_u32(source + version_need_file_offset + 8U);
     size_t auxiliary_file_offset;
     if (!virtual_to_file(source, source_size, auxiliary_address, 16U, &auxiliary_file_offset)) {
+        (void)fputs("version self-test: Vernaux mapping is invalid\n", stderr);
         free(mutant);
         free(source);
         return 1;
@@ -599,6 +617,7 @@ int main(int argc, char **argv)
             tags.gnu_hash_address,
             16U,
             &gnu_hash_file_offset)) {
+        (void)fputs("version self-test: DT_GNU_HASH mapping is invalid\n", stderr);
         free(mutant);
         free(source);
         return 1;
@@ -635,6 +654,10 @@ int main(int argc, char **argv)
         + (last_chain_address - chain_address) / sizeof(uint32_t);
     if (last_chain_symbol_index > UINT32_MAX
         || last_chain_symbol_index > MAX_HASH_CHAIN_TEST_STEPS) {
+        (void)fprintf(
+            stderr,
+            "version self-test: GNU-hash terminal index %llu exceeds test bound\n",
+            (unsigned long long)last_chain_symbol_index);
         free(mutant);
         free(source);
         return 1;
