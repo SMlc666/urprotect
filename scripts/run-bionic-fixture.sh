@@ -24,6 +24,8 @@ if [[ "${docker_server_platform}" != "linux/arm64" ]]; then
   echo "bionic fixture requires a native Linux/arm64 Docker engine; got ${docker_server_platform}" >&2
   exit 2
 fi
+printf 'bionic native preflight: host_arch=%s docker_server_platform=%s\n' \
+  "$(uname -m)" "${docker_server_platform}"
 if [[ -n "${ANDROID_ROOT:-}" || -n "${ANDROID_DATA:-}" \
   || -e /system/bin/linker64 || -e /dev/binder || -e /dev/vndbinder ]]; then
   echo "bionic fixture refuses an Android, emulator, or Waydroid host context" >&2
@@ -162,8 +164,24 @@ container_common=(
 )
 
 run_shell() {
-  "${container_runtime}" "${container_common[@]}" \
-    "${image}" "${termux_shell}" "$@"
+  if "${container_runtime}" "${container_common[@]}" \
+      "${image}" "${termux_shell}" "$@"; then
+    return 0
+  else
+    local status=$?
+    printf 'bionic container phase failed (exit=%s)\n' "${status}" >&2
+    for log in \
+      "${case_root}/apt-update.log" \
+      "${case_root}/apt-download.log" \
+      "${case_root}/apt-install.log" \
+      "${case_root}/host-context/build-and-test.log"; do
+      if [[ -s "${log}" ]]; then
+        printf '%s\n' "--- ${log} (last 100 lines) ---" >&2
+        tail -n 100 "${log}" >&2
+      fi
+    done
+    return "${status}"
+  fi
 }
 
 run_shell -c '

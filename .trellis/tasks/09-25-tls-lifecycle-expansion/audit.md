@@ -65,14 +65,15 @@ introduced.
 ## CI / PR
 
 The first CI attempt on implementation commit `0bdd835` passed the managed
-build/evidence job and the full real-sample matrix, but its bionic lane exited
-2 in `run-bionic-fixture.sh`'s runner preflight. The runner image now checks
-actual host and Docker-server architecture plus active Android runtime markers
-instead of treating an unused host-side emulator executable as proof that
-execution is emulated; it still requires and exercises the native AArch64
-Termux environment and direct `/system/bin/linker64` identity. This runner
-preflight correction is queued in the next commit and must be revalidated by
-both PR and push CI before archiving the child task. The acceptance gate
-requires the native AArch64 glibc HostContext feature evidence, the full public
+build/evidence job and full real-sample matrix, but its bionic lane exited 2.
+The runner preflight was tightened to assert an AArch64 host and a Linux/arm64
+Docker server rather than equating an installed host-side emulator executable
+with emulated execution. Follow-up PR run `36261267596` still exited 2 in the
+bionic job while build-and-test and real-sample jobs passed, so the runner/tool
+preflight was not confirmed as the root cause. The current follow-up adds
+explicit host/Docker identity output and dumps the retained apt/native-build
+logs when a Termux container phase fails. The bionic job must pass in both PR
+and push workflows before archiving this child. The acceptance gate requires
+the native AArch64 glibc HostContext feature evidence, the full public
 real-sample run, and the bionic adapter lane; bionic results do not promote the
 threaded row.
