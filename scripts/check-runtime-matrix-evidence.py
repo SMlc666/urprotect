@@ -620,15 +620,19 @@ def check_native_fixture(
     runtime = environment.get("glibc" if expected_runtime.startswith("glibc") else "musl_version")
     if runtime != expected_runtime:
         fail(f"{fixture_id} runtime identity is {runtime!r}, expected {expected_runtime!r}")
-    loader = environment.get("loader" if expected_runtime.startswith("glibc") else "runtime_loader_resolved")
-    if not loader or not loader.endswith(interpreter.rsplit("/", 1)[-1]):
-        fail(f"{fixture_id} runtime loader identity is missing or unexpected")
-    if expected_runtime.startswith("Version") and (
-        environment.get("runtime_loader_path") != interpreter
-        or environment.get("runtime_loader_resolved")
-        != str((root / "package-locks/musl-1.2.4/prefix/lib/libc.so").resolve())
-    ):
-        fail(f"{fixture_id} loader path is not the recorded pinned musl runtime")
+    if expected_runtime.startswith("glibc"):
+        loader = environment.get("loader", "")
+        if not loader.endswith(interpreter.rsplit("/", 1)[-1]):
+            fail(f"{fixture_id} glibc loader identity is missing or unexpected")
+    else:
+        expected_musl_runtime = str(
+            (root / "package-locks/musl-1.2.4/prefix/lib/libc.so").resolve()
+        )
+        if (
+            environment.get("runtime_loader_path") != interpreter
+            or environment.get("runtime_loader_resolved") != expected_musl_runtime
+        ):
+            fail(f"{fixture_id} loader path is not the recorded pinned musl runtime")
     if expected_runtime.startswith("glibc") and not environment.get("compiler", "").startswith("gcc "):
         fail(f"{fixture_id} compiler identity is missing")
     elif expected_runtime.startswith("Version") and not environment.get("musl-gcc", "").strip():
