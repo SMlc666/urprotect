@@ -336,6 +336,10 @@
         ".artifacts/runtime-matrix/pr/cells/kernel-page.16k.native-aarch64.result.txt",
         ".artifacts/runtime-matrix/pr/SHA256SUMS",
         ".artifacts/bionic/c-termux-bionic-pie/result.json",
+        ".artifacts/bionic/c-termux-bionic-pie/compiler-package-lock.json",
+        ".artifacts/bionic/c-termux-bionic-pie/package-hash-verification.txt",
+        ".artifacts/bionic/c-termux-bionic-pie/apt-archives/*.deb",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/entry-fixture.sha256",
         ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log"
       ]
     },
@@ -355,10 +359,17 @@
         ".artifacts/runtime-matrix/nightly/cells/glibc.older.ubuntu-22.04-arm64/result.json",
         ".artifacts/runtime-matrix/nightly/cells/musl.1.2.4.ubuntu-native/result.json",
         ".artifacts/runtime-matrix/nightly/cells/musl.1.2.5.alpine-3.22.2/result.json",
+        ".artifacts/runtime-matrix/nightly/package-locks/musl-1.2.4/source/toolchain-source.json",
+        ".artifacts/runtime-matrix/nightly/package-locks/musl-1.2.4/build-facts.txt",
+        ".artifacts/runtime-matrix/nightly/package-locks/musl-1.2.4/loader-link-cleanup.txt",
         ".artifacts/runtime-matrix/nightly/musl-1.2.4-smoke/packed-report.json",
         ".artifacts/runtime-matrix/nightly/cells/kernel-page.16k.native-aarch64.result.txt",
         ".artifacts/runtime-matrix/nightly/SHA256SUMS",
         ".artifacts/bionic/c-termux-bionic-pie/result.json",
+        ".artifacts/bionic/c-termux-bionic-pie/compiler-package-lock.json",
+        ".artifacts/bionic/c-termux-bionic-pie/package-hash-verification.txt",
+        ".artifacts/bionic/c-termux-bionic-pie/apt-archives/*.deb",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/entry-fixture.sha256",
         ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log"
       ]
     },
@@ -378,10 +389,17 @@
         ".artifacts/runtime-matrix/release/cells/glibc.older.ubuntu-22.04-arm64/result.json",
         ".artifacts/runtime-matrix/release/cells/musl.1.2.4.ubuntu-native/result.json",
         ".artifacts/runtime-matrix/release/cells/musl.1.2.5.alpine-3.22.2/result.json",
+        ".artifacts/runtime-matrix/release/package-locks/musl-1.2.4/source/toolchain-source.json",
+        ".artifacts/runtime-matrix/release/package-locks/musl-1.2.4/build-facts.txt",
+        ".artifacts/runtime-matrix/release/package-locks/musl-1.2.4/loader-link-cleanup.txt",
         ".artifacts/runtime-matrix/release/musl-1.2.4-smoke/packed-report.json",
         ".artifacts/runtime-matrix/release/cells/kernel-page.16k.native-aarch64.result.txt",
         ".artifacts/runtime-matrix/release/SHA256SUMS",
         ".artifacts/bionic/c-termux-bionic-pie/result.json",
+        ".artifacts/bionic/c-termux-bionic-pie/compiler-package-lock.json",
+        ".artifacts/bionic/c-termux-bionic-pie/package-hash-verification.txt",
+        ".artifacts/bionic/c-termux-bionic-pie/apt-archives/*.deb",
+        ".artifacts/bionic/c-termux-bionic-pie/host-context/entry-fixture.sha256",
         ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log"
       ]
     }
