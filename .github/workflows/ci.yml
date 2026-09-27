@@ -261,10 +261,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Select runtime matrix tier
+        env:
+          RUN_RELEASE_FIXTURES: ${{ inputs.run_release_fixtures }}
         run: |
           case "${GITHUB_EVENT_NAME}" in
             pull_request) echo 'RUNTIME_MATRIX_TIER=pr' >> "$GITHUB_ENV" ;;
             release) echo 'RUNTIME_MATRIX_TIER=release' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${RUN_RELEASE_FIXTURES}" == true ]]; then
+                echo 'RUNTIME_MATRIX_TIER=release' >> "$GITHUB_ENV"
+              else
+                echo 'RUNTIME_MATRIX_TIER=nightly' >> "$GITHUB_ENV"
+              fi
+              ;;
             *) echo 'RUNTIME_MATRIX_TIER=nightly' >> "$GITHUB_ENV" ;;
           esac
       - name: Record native AArch64 runtime matrix environment
