@@ -18,6 +18,7 @@ VALIDATOR = ROOT / "scripts/validate-runtime-matrix.py"
 GATE = ROOT / "scripts/check-runtime-matrix-evidence.py"
 ALIGN_CHECKER = ROOT / "scripts/check-pt-load-alignment.py"
 FIXTURE_CHECKER = ROOT / "scripts/check-runtime-fixture.py"
+RUN_MATRIX = ROOT / "scripts/run-runtime-matrix.sh"
 DOTNET = shutil.which("dotnet") or "/root/.dotnet/dotnet"
 
 GATE_MODULE_SPEC = importlib.util.spec_from_file_location("runtime_matrix_gate", GATE)
@@ -103,6 +104,19 @@ class RuntimeMatrixTests(unittest.TestCase):
                 root / "fixtures/glibc-4k", "glibc 2.39", root
             ),
             [str(root / "fixtures/glibc-4k")],
+        )
+
+    def test_container_loader_probe_selects_existing_loader_by_runtime(self) -> None:
+        runner = RUN_MATRIX.read_text(encoding="utf-8")
+        self.assertIn(
+            'if [ "$EXPECTED_RUNTIME" = "1.2.5" ]; then\n'
+            '  test -x /lib/ld-musl-aarch64.so.1\n'
+            '  loader=$(readlink -f /lib/ld-musl-aarch64.so.1)\n'
+            'else\n'
+            '  test -x /lib/ld-linux-aarch64.so.1\n'
+            '  loader=$(readlink -f /lib/ld-linux-aarch64.so.1)\n'
+            'fi',
+            runner,
         )
 
     def test_page_probe_is_required_but_runtime_claim_is_optional(self) -> None:

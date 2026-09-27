@@ -163,7 +163,13 @@ case "$actual" in *"$EXPECTED_RUNTIME"*) ;; *) echo unexpected-runtime-version >
 container_page=$(getconf PAGESIZE)
 echo "container_page_size=$container_page"
 test "$container_page" = "$HOST_PAGE_SIZE"
-loader=$(readlink -f /lib/ld-linux-aarch64.so.1 2>/dev/null || readlink -f /lib/ld-musl-aarch64.so.1)
+if [ "$EXPECTED_RUNTIME" = "1.2.5" ]; then
+  test -x /lib/ld-musl-aarch64.so.1
+  loader=$(readlink -f /lib/ld-musl-aarch64.so.1)
+else
+  test -x /lib/ld-linux-aarch64.so.1
+  loader=$(readlink -f /lib/ld-linux-aarch64.so.1)
+fi
 echo "loader=$loader"
 test -n "$loader"
 if [ "$EXPECTED_RUNTIME" = "1.2.5" ]; then
