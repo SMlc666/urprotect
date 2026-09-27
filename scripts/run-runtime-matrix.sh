@@ -129,6 +129,7 @@ cp "$out/cells/glibc.current.native-arm64/toolchain-lock.txt" "$out/cells/glibc.
 run_image() {
  local id="$1" image="$2" digest="$3" expected="$4" fixture_list="$5"
  local cell="$out/cells/$id" ref="$image@$digest"; mkdir -p "$cell/container-results"
+ chmod 0777 "$cell/container-results"
  local docker_server_platform
  docker_server_platform="$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
  [[ "$docker_server_platform" == linux/arm64 ]] || {
