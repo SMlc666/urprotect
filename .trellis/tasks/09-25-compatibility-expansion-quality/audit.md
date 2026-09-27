@@ -41,10 +41,10 @@ nightly, and release evidence and no raw sample inputs in uploaded roots.
   coverage-guided fuzz gates: passed locally where the host provided the
   required toolchain, with native CI covering the complete required release
   tier.
-- PR run `36303770796`, nightly rehearsal `36303781357`, and release rehearsal
-  `36304139025` all passed their required jobs. The latest documentation/task
-  push also passed PR run `36304743007`, including build/test, full real-sample,
-  bionic, and runtime-matrix jobs.
+- The final integration commit passed PR run `36305535021`, nightly rehearsal
+  `36306172678`, and release rehearsal `36306514702`; all required jobs passed,
+  including full real-sample, bionic, runtime-matrix, fixture-nightly, and
+  release-package/release-smoke coverage.
 - The downloaded release package passed checksums and contained both ARM64
   libc archives, launcher provenance/self-test, SBOM, compatibility contract,
   and fixture manifest. GitHub release publication was intentionally skipped

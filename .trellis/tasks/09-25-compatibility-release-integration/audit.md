@@ -47,9 +47,9 @@ retained CI evidence:
 
 | Tier | GitHub Actions run | Commit | Result |
 |---|---:|---|---|
-| PR full gate | `36303770796` | `eb65e8569113cda5a11590434bfdd562d87f9e74` | build/test, 100-identity real-sample, bionic, and runtime-matrix jobs passed |
-| Nightly rehearsal | `36303781357` | `194dae011939386c3ed4b116f0cd1804dc4f5396` | fixture-nightly, full 100-identity matrix, fuzz/stress, musl, bionic, and runtime evidence passed |
-| Release rehearsal | `36304139025` | `194dae011939386c3ed4b116f0cd1804dc4f5396` | release fixture evidence, full 100-identity matrix, runtime matrix, bionic, musl, package, and release smoke passed |
+| PR full gate | `36305535021` | `bfc728e50b90d1cbf8966642b7b3cd953b3e2fb2` | build/test, 100-identity real-sample, bionic, and runtime-matrix jobs passed |
+| Nightly rehearsal | `36306172678` | `bfc728e50b90d1cbf8966642b7b3cd953b3e2fb2` | fixture-nightly, full 100-identity matrix, fuzz/stress, musl, bionic, and runtime evidence passed |
+| Release rehearsal | `36306514702` | `bfc728e50b90d1cbf8966642b7b3cd953b3e2fb2` | release fixture evidence, full 100-identity matrix, runtime matrix, bionic, musl, package, and release smoke passed |
 
 The release artifact was downloaded and independently checked: both ARM64
 archives passed `SHA256SUMS`, contained the published validator, static native
