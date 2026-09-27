@@ -800,8 +800,15 @@ def check_musl_toolchain(root: Path) -> None:
     ):
         if hashlib.sha256(path.read_bytes()).hexdigest() != build_facts.get(key):
             fail(f"musl build artifact hash differs from retained build facts: {key}")
-    if re.fullmatch(r"[0-9a-f]{64}", build_facts.get("gcc_sha256", "")) is None:
-        fail("musl source producer GCC hash is missing")
+    for tool in ("gcc", "ld", "ar", "readelf", "make"):
+        path_key = f"{tool}_path"
+        digest_key = f"{tool}_sha256"
+        executable = build_facts.get(path_key)
+        digest = build_facts.get(digest_key)
+        if not executable or re.fullmatch(r"[0-9a-f]{64}", digest or "") is None:
+            fail(f"musl source build does not record the {tool} path/hash")
+        if hashlib.sha256(Path(executable).read_bytes()).hexdigest() != digest:
+            fail(f"musl source build {tool} hash differs from retained build facts")
     if "Version 1.2.4" not in (base / "logs/loader-version.txt").read_text(encoding="utf-8"):
         fail("musl source-built loader does not identify runtime version 1.2.4")
     if (base / "created-loader-link.txt").read_text(encoding="utf-8").strip() != "/lib/ld-musl-aarch64.so.1":
@@ -835,12 +842,21 @@ def check_musl_toolchain(root: Path) -> None:
     required_hashes = {
         "source/musl-1.2.4.tar.gz",
         "source/toolchain-source.json",
+        "created-loader-link.txt",
+        "loader-link-cleanup.txt",
         "build-facts.txt",
         "prefix/bin/musl-gcc",
         "prefix/lib/libc.so",
     }
     if not required_hashes.issubset(checksums):
         fail("musl source, compiler, and loader artifacts are missing from SHA256SUMS")
+    expected_files = {
+        str(path.resolve().relative_to(base.resolve()))
+        for path in base.rglob("*")
+        if path.is_file() and not path.is_symlink() and path.resolve() != sums_path.resolve()
+    }
+    if set(checksums) != expected_files:
+        fail("musl toolchain SHA256SUMS do not cover the exact retained source/build artifacts")
 
 
 def check_musl_product_smoke(root: Path) -> None:

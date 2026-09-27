@@ -31,7 +31,7 @@ cleanup_installer_loader_link() {
 trap cleanup_installer_loader_link EXIT
 mkdir -p "$archive_dir" "$out/build" "$out/logs"
 [[ "$(uname -m)" == aarch64 ]] || { echo 'musl 1.2.4 toolchain requires native AArch64' >&2; exit 2; }
-for tool in gcc make readelf sha256sum python3 sudo tar; do
+for tool in ar gcc ld make readelf sha256sum python3 sudo tar; do
   if [[ "$tool" == sudo && "$(id -u)" == 0 ]]; then continue; fi
   command -v "$tool" >/dev/null || { echo "required musl build tool missing: $tool" >&2; exit 127; }
 done
@@ -126,15 +126,24 @@ grep -Fq 'Version 1.2.4' "$out/logs/loader-version.txt" || {
   printf 'page_size=%s\n' "$(getconf PAGESIZE)"
   printf 'gcc=%s\n' "$(gcc --version | head -n1)"
   printf 'gcc_path=%s\n' "$(command -v gcc)"
+  printf 'ld=%s\n' "$(ld --version | head -n1)"
+  printf 'ld_path=%s\n' "$(command -v ld)"
+  printf 'ar=%s\n' "$(ar --version | head -n1)"
+  printf 'ar_path=%s\n' "$(command -v ar)"
+  printf 'readelf=%s\n' "$(readelf --version | head -n1)"
+  printf 'readelf_path=%s\n' "$(command -v readelf)"
   printf 'make=%s\n' "$(make --version | head -n1)"
+  printf 'make_path=%s\n' "$(command -v make)"
   printf 'configure_target=aarch64-linux-musl\n'
   printf 'source_lock_sha256=%s\n' "$(sha256sum "$lock" | awk '{print $1}')"
   printf 'source_archive_sha256=%s\n' "$(sha256sum "$archive_dir/musl-1.2.4.tar.gz" | awk '{print $1}')"
   printf 'runtime_loader=%s\n' "$loader"
   printf 'runtime_loader_resolved=%s\n' "$loader_resolved"
   printf 'loader_probe_status=%s\n' "$loader_status"
-  gcc_digest="$(sha256sum "$(command -v gcc)" | awk '{print $1}')"
-  printf 'gcc_sha256=%s\n' "$gcc_digest"
+  for tool in gcc ld ar readelf make; do
+    digest="$(sha256sum "$(command -v "$tool")" | awk '{print $1}')"
+    printf '%s_sha256=%s\n' "$tool" "$digest"
+  done
   printf 'musl_gcc_sha256=%s\n' "$(sha256sum "$prefix/bin/musl-gcc" | awk '{print $1}')"
   printf 'musl_loader_sha256=%s\n' "$(sha256sum "$prefix/lib/libc.so" | awk '{print $1}')"
 } > "$out/build-facts.txt"

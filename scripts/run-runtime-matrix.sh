@@ -21,10 +21,10 @@ cleanup_pinned_musl_loader() {
         rm -f -- "$loader"
       elif command -v sudo >/dev/null; then
         sudo rm -f -- "$loader"
-      else
-        echo "cannot remove owned native musl loader symlink without sudo: $loader" >&2
-        printf 'path=%s\nstatus=cleanup-failed\n' "$loader" > "$cleanup_record"
-        return 1
+    else
+      echo "cannot remove owned native musl loader symlink without sudo: $loader" >&2
+      printf 'path=%s\nstatus=cleanup-failed\n' "$loader" > "$cleanup_record"
+      return 1
       fi
     elif [[ -e "$loader" || -L "$loader" ]]; then
       echo "native musl loader symlink changed owner or target before cleanup: $loader" >&2
@@ -32,6 +32,9 @@ cleanup_pinned_musl_loader() {
       return 1
     fi
     printf 'path=%s\nstatus=removed\n' "$loader" > "$cleanup_record"
+    local toolchain_evidence; toolchain_evidence="$(dirname "$toolchain_root")"
+    find "$toolchain_evidence" -type f ! -path "$toolchain_evidence/SHA256SUMS" \
+      -print0 | sort -z | xargs -0 sha256sum > "$toolchain_evidence/SHA256SUMS"
   fi
 }
 trap cleanup_pinned_musl_loader EXIT
