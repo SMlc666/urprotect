@@ -27,6 +27,7 @@ from real_sample_schema import (  # noqa: E402
     MAX_REAL_SAMPLE_ARCHIVE_MEMBERS,
     MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES,
     RESULTS,
+    STATIC_RESULTS,
 )
 
 
@@ -497,7 +498,12 @@ def validate_policy(validator: Validator, project: dict[str, Any], location: str
         applicable = validator.boolean(layer_policy.get("applicable"), f"{layer_location}.applicable")
         expected = validator.string(layer_policy.get("expectedResult"), f"{layer_location}.expectedResult")
         if expected is not None:
-            validator.require(expected in RESULTS, f"{layer_location}.expectedResult", f"must be one of {sorted(RESULTS)}")
+            allowed_results = STATIC_RESULTS if layer == "static" else RESULTS
+            validator.require(
+                expected in allowed_results,
+                f"{layer_location}.expectedResult",
+                f"must be one of {sorted(allowed_results)} for the {layer} layer",
+            )
         if applicable is False:
             validator.require(
                 expected == "not-applicable",

@@ -101,6 +101,12 @@ internal static class ElfFixture
         return bytes;
     }
 
+    public static byte[] MinimalPieWithInterpreter(string interpreterPath) =>
+        ReplaceInterpreter(MinimalPie(), interpreterPath);
+
+    public static byte[] DynamicExecPayloadWithInterpreter(string interpreterPath) =>
+        ReplaceInterpreter(DynamicExecPayload(), interpreterPath);
+
     public static byte[] StaticExecPayload()
     {
         var bytes = DynamicExecPayload();
@@ -141,6 +147,23 @@ internal static class ElfFixture
         WriteUInt64(span, InterpreterProgramHeaderOffset + ElfProgramHeaderOffsets.MemorySize,
             (ulong)Encoding.ASCII.GetByteCount(interpreter));
         Encoding.ASCII.GetBytes(interpreter).CopyTo(span[0x1E0..]);
+        return bytes;
+    }
+
+    private static byte[] ReplaceInterpreter(byte[] bytes, string interpreterPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(interpreterPath);
+        var interpreterSize = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(
+            bytes.AsSpan(InterpreterProgramHeaderOffset + ElfProgramHeaderOffsets.FileSize)));
+        var encodedInterpreter = Encoding.ASCII.GetBytes(interpreterPath + '\0');
+        if (encodedInterpreter.Length > interpreterSize)
+        {
+            throw new ArgumentException("The fixture interpreter does not fit in the PT_INTERP range.", nameof(interpreterPath));
+        }
+
+        var interpreter = bytes.AsSpan(InterpreterOffset, interpreterSize);
+        interpreter.Clear();
+        encodedInterpreter.CopyTo(interpreter);
         return bytes;
     }
 

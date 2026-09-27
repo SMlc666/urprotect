@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Quality review must verify that static, baseline, outer-wrapper, HostContext, and runtime-specific claims remain at the layer actually evidenced."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Quality review must verify bounded parsing, no heuristic rewriting of unknown records, atomic outputs, malformed coverage, and required native evidence."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/research/current-compatibility-evidence.md","reason":"Review baseline for corrected result semantics, runtime closure completeness, and CI gap closure."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/research/function-protection-gaps.md","reason":"Review baseline for AsmStone usage, symbol boundaries, CFG completeness, machine-state modeling, and resource failure handling."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/prd.md","reason":"Review all acceptance criteria: opt-in selection, atomic failure, three PR runtime E2E, and full 100-project nightly baseline/outer execution."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/design.md","reason":"Review architecture, runtime-closure reproducibility, bionic outer profile, writer invariants, and transformation composition."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/implement.md","reason":"Review implementation sequencing, validation commands, rollback points, and final gates."}

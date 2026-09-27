@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Defines the layered parser, outer-wrapper, HostContext, runtime evidence, and no-path contracts that the compatibility and CI implementation must preserve or explicitly revise."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines bounded ELF handling, unknown-data policy, AsmStone adapter boundaries, atomic publication, malformed tests, and CI evidence requirements."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/research/current-compatibility-evidence.md","reason":"Records current 100-sample, runtime, CI, result-vocabulary, and bionic interpreter gaps that implementation must address."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/research/function-protection-gaps.md","reason":"Records the existing AsmStone/parser/analyzer gaps and the required symbol, IR, CFG, machine-state, resource, and writer foundations."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/prd.md","reason":"Authoritative product requirements: explicit selectors, atomic failure, pass ordering, three PR runtimes, and full nightly baseline/outer coverage."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/design.md","reason":"Technical boundaries, contracts, runtime-closure architecture, function IR, resource planning, rewrite, and evidence design."}
+{"file":".trellis/tasks/09-28-open-world-function-protection/implement.md","reason":"Ordered implementation, validation, rollback, and CI integration checklist."}

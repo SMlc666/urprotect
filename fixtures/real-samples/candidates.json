@@ -1980,7 +1980,7 @@
           "artifactSha256": "6d94663b02164f4d072f7ce7c875a97d8242d6e8162ef901b150736ca580006d",
           "artifactSizeBytes": 67512,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -2064,7 +2064,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -2073,7 +2073,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -2220,7 +2220,7 @@
           "artifactSha256": "8c1047d2cba2bc915c7c6ae3a1f1bc756c20c8c3d00238759f8353bba6ba2c43",
           "artifactSizeBytes": 729392,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -2305,7 +2305,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -2314,7 +2314,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -2385,7 +2385,7 @@
           "artifactSha256": "d4323504915163bfb15b27d84d7dd7c35369d6a2bbba89e239d758044c1135b1",
           "artifactSizeBytes": 198880,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -2470,7 +2470,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -2479,7 +2479,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -2550,7 +2550,7 @@
           "artifactSha256": "b5d4c730f921851b46db74b6a3d84e99c6a0e3797ba126061be24b4d86878f61",
           "artifactSizeBytes": 134536,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -2635,7 +2635,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -2644,7 +2644,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -2715,7 +2715,7 @@
           "artifactSha256": "02953b247cc5538ed853c4a21d50dd789a964b21ae9908c0dfdf46358188f9fe",
           "artifactSizeBytes": 265632,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -2800,7 +2800,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -2809,7 +2809,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -2880,7 +2880,7 @@
           "artifactSha256": "fa2df5eddc2295398bf869b103818b45184cfaa99ec66ae1af7ed3bdf4c94423",
           "artifactSizeBytes": 539896,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -2965,7 +2965,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -2974,7 +2974,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -3045,7 +3045,7 @@
           "artifactSha256": "d3afaebcb97bf6fa214a813d89b108f48955665ea596228340ec80580ee55a0e",
           "artifactSizeBytes": 93752,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -3130,7 +3130,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -3139,7 +3139,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -3210,7 +3210,7 @@
           "artifactSha256": "2dd8d7734f5b43961b1d7243198ffaf1037539b122f2e266fccc9621104ed33b",
           "artifactSizeBytes": 215000,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -3295,7 +3295,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -3304,7 +3304,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -3375,7 +3375,7 @@
           "artifactSha256": "19784efcc52ba72b528ca1c668cfa3fc539385ef93100f118b490937ec1cc0d7",
           "artifactSizeBytes": 477880,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -3460,7 +3460,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -3469,7 +3469,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -3540,7 +3540,7 @@
           "artifactSha256": "39d32aa901e277eea6eb447eeab472c0cc850ef783711ed26ce3ffee4e3f9011",
           "artifactSizeBytes": 992032,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -3625,7 +3625,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -3634,7 +3634,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -3705,7 +3705,7 @@
           "artifactSha256": "9e5f67e9f13b62bbded845a3cfd2b29974273b014f8639e02bf1579cd99e5f3c",
           "artifactSizeBytes": 608200,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -3790,7 +3790,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -3799,7 +3799,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -3870,7 +3870,7 @@
           "artifactSha256": "1687aab628a60ee9a2d9066e033062cbb636657c1adac7591e1b4236f3d9bb34",
           "artifactSizeBytes": 478296,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -3955,7 +3955,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -3964,7 +3964,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -4035,7 +4035,7 @@
           "artifactSha256": "d87e5457eff445c700882d6c37d5fcd151ed722e4f518523310f2680c28a158f",
           "artifactSizeBytes": 330816,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -4120,7 +4120,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -4129,7 +4129,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -4201,7 +4201,7 @@
           "artifactSha256": "da775982e70a7b95a81668745c0625bd24fbe67f307357d35cb8f94520f127d2",
           "artifactSizeBytes": 5644256,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -4287,7 +4287,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -4296,7 +4296,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -4367,7 +4367,7 @@
           "artifactSha256": "da7bcc5d49d04c60337091f3cd4a9279b0455c1dfa1af6763caf42c7678c3512",
           "artifactSizeBytes": 67896,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -4452,7 +4452,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -4461,7 +4461,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -4532,7 +4532,7 @@
           "artifactSha256": "0e69fa123b3d9732645ce1ac8c89819d100f83cdc9e52a80565d9ad8e7d8cf28",
           "artifactSizeBytes": 1640712,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -4617,7 +4617,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -4626,7 +4626,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -4697,7 +4697,7 @@
           "artifactSha256": "19f8ec6c7cb2497d5f34d24ea24786c20857a0f859a9ca022bd77b809729d178",
           "artifactSizeBytes": 67920,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -4782,7 +4782,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -4791,7 +4791,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -4862,7 +4862,7 @@
           "artifactSha256": "8182c64018ae3a0affdf0f6f90c2a2065ca72f0de8a5d76f0f6de489f63be133",
           "artifactSizeBytes": 331128,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -4947,7 +4947,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -4956,7 +4956,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -5027,7 +5027,7 @@
           "artifactSha256": "40cbbed6f2decef80c0620931b095623705422c19cb5c14b8b27f125a3a5be21",
           "artifactSizeBytes": 67728,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -5112,7 +5112,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -5121,7 +5121,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -5192,7 +5192,7 @@
           "artifactSha256": "90a8f29b9976acc7f8958b07dfa0c882b178fbdb825daed722228039a1ba081f",
           "artifactSizeBytes": 133192,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -5277,7 +5277,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -5286,7 +5286,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -5357,7 +5357,7 @@
           "artifactSha256": "b1c570f3697d34828f9006c0215be3390bb0a9a710002c957525447c3d435954",
           "artifactSizeBytes": 333480,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -5442,7 +5442,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -5451,7 +5451,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -5522,7 +5522,7 @@
           "artifactSha256": "5cd0d099170314bbf1bfbfae0392e38ac26175b9f5d1b1c47260c52616c79994",
           "artifactSizeBytes": 2796440,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -5607,7 +5607,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -5616,7 +5616,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -5687,7 +5687,7 @@
           "artifactSha256": "a77e9e102014dbf0f8a6d075a61d6dc5c1cf20d41da4ebc391a4827dd0009714",
           "artifactSizeBytes": 464816,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -5772,7 +5772,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -5781,7 +5781,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "acquisition": {
         "ciOnly": true,
@@ -5840,7 +5840,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -5849,7 +5849,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -5897,7 +5897,7 @@
           "artifactSha256": "1825257bed7391dc428d61f193b52edb69d1c88fd81b716dbdd5e8fd9138162e",
           "artifactSizeBytes": 9644208,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -6008,7 +6008,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -6017,7 +6017,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -6065,7 +6065,7 @@
           "artifactSha256": "f34d6ec69043be0ae2fb5113c4af036b8a0f58e16be3752e64bf86ef98a3f102",
           "artifactSizeBytes": 68224,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -6176,7 +6176,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -6185,7 +6185,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -6233,7 +6233,7 @@
           "artifactSha256": "e3e2ccf3248791b8541a0913b16d2ca7ea49bff634d319133225868182a44887",
           "artifactSizeBytes": 803064,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -6344,7 +6344,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -6353,7 +6353,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -6401,7 +6401,7 @@
           "artifactSha256": "208b455e3d64bb505877a6baed3a3778be51dcbdc6520e03c23a26fe8b9d06f2",
           "artifactSizeBytes": 10264,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -6512,7 +6512,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -6521,7 +6521,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -6569,7 +6569,7 @@
           "artifactSha256": "0a590849d7194fb2cafbf789afe972c13a91355a91c166c2bb8cd93dfddef1e3",
           "artifactSizeBytes": 68128,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -6680,7 +6680,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -6689,7 +6689,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -6737,7 +6737,7 @@
           "artifactSha256": "12718cc036b439245e74acceff6c320d1673f7eb4994d8b016a7b09e73e34258",
           "artifactSizeBytes": 199248,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -6848,7 +6848,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -6857,7 +6857,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -6905,7 +6905,7 @@
           "artifactSha256": "2bda3140c960bdd6de7d9706928796a44b441bd33452d860fad879e91c6c1236",
           "artifactSizeBytes": 594392,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -7016,7 +7016,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -7025,7 +7025,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -7073,7 +7073,7 @@
           "artifactSha256": "e5762e8c23a05bdb78a7e3c1cbf2308c31d30d7801e513905ca1ddfdb93620b3",
           "artifactSizeBytes": 203096,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -7184,7 +7184,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -7193,7 +7193,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -7241,7 +7241,7 @@
           "artifactSha256": "4ad9bd42720d8861798f32a1cdb98b7cafa890dd7f51c3ad45716dc8f6856e76",
           "artifactSizeBytes": 55384,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -7352,7 +7352,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -7361,7 +7361,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -7409,7 +7409,7 @@
           "artifactSha256": "887d9fe3fbe9d44a2481694bd3586e24e78249e55db8119eaa98cd5503d92100",
           "artifactSizeBytes": 496200,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -7520,7 +7520,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -7529,7 +7529,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -7577,7 +7577,7 @@
           "artifactSha256": "ccec5a379f1c1a06df2aa05b03ffe15c76d3c8089eddf9f19c6217f76126cf8e",
           "artifactSizeBytes": 10496760,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -7688,7 +7688,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -7697,7 +7697,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -7745,7 +7745,7 @@
           "artifactSha256": "6a21bba71cee1c3cfab6ab0bc3c94e4d72d9d82d5440e3c1d68f8faf6d7ddd1c",
           "artifactSizeBytes": 10502464,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -7856,7 +7856,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -7865,7 +7865,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -7913,7 +7913,7 @@
           "artifactSha256": "416d59be997e1562a3365552b75318adf4a2dce166b2ee47cb3e60c78a0a1497",
           "artifactSizeBytes": 67688,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -8024,7 +8024,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -8033,7 +8033,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -8081,7 +8081,7 @@
           "artifactSha256": "8689224b9ce9fa94adb4ead441428947c448b141ebc8f6b0492e7034c8f378e5",
           "artifactSizeBytes": 67512,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -8192,7 +8192,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -8201,7 +8201,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -8249,7 +8249,7 @@
           "artifactSha256": "7739b454697341402643c323f5671becf733ba611b726236d327f819da9ab8f2",
           "artifactSizeBytes": 814792,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -8360,7 +8360,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -8369,7 +8369,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -8417,7 +8417,7 @@
           "artifactSha256": "13b2602f60066a35318d2dc451250f650970c30309ccdce2b0113e5f8d147db5",
           "artifactSizeBytes": 1150264,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -8528,7 +8528,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -8537,7 +8537,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -8585,7 +8585,7 @@
           "artifactSha256": "94a66d567efa9ca67f80f9cb3e67ecd5073fa20cadb2242a3d02947425cb91f4",
           "artifactSizeBytes": 198944,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -8696,7 +8696,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -8705,7 +8705,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -8753,7 +8753,7 @@
           "artifactSha256": "5543c8476a1d71da834f24e6b6e72e288b61d6fa3584b5d9374addcddc0b441a",
           "artifactSizeBytes": 133144,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -8864,7 +8864,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -8873,7 +8873,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -8921,7 +8921,7 @@
           "artifactSha256": "d022e2f76b4e9d73de4a7c27cb887c7718144ac53fe35b843a9f946e7daee7b0",
           "artifactSizeBytes": 208320,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -9032,7 +9032,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -9041,7 +9041,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -9089,7 +9089,7 @@
           "artifactSha256": "b10e6c1fdacff09c6f607dffa779e54a7eeee08a2fe3ed7f4e6e0c374db03cc1",
           "artifactSizeBytes": 136360,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -9200,7 +9200,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -9209,7 +9209,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -9257,7 +9257,7 @@
           "artifactSha256": "18798630661035a9327426ab0857c163b84cc13f26ded5d84ed672253f6a8198",
           "artifactSizeBytes": 12307816,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -9368,7 +9368,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -9377,7 +9377,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -9425,7 +9425,7 @@
           "artifactSha256": "32f2e09ff73278993836577732a777c327e47c609f5e70c1fbd8d8c0fb41b015",
           "artifactSizeBytes": 207600,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -9536,7 +9536,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -9545,7 +9545,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -9593,7 +9593,7 @@
           "artifactSha256": "5d42730d8e0aa04b149c9bd2aa3a36a367184190007511a631f93fbde364a66d",
           "artifactSizeBytes": 395992,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -9704,7 +9704,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -9713,7 +9713,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -9761,7 +9761,7 @@
           "artifactSha256": "13b23367d2c4c62dd8912c5a91c0bc121f1a316aa6579ed819d72e879c7d8c5a",
           "artifactSizeBytes": 2889328,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -9872,7 +9872,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -9881,7 +9881,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -9929,7 +9929,7 @@
           "artifactSha256": "4f350bd91187b9ba4392cb48c8bc8f9d33bdba96e357540c2eb9e2032ff90ba4",
           "artifactSizeBytes": 4732656,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -10040,7 +10040,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -10049,7 +10049,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -10097,7 +10097,7 @@
           "artifactSha256": "c33483364705a23a1a2fe7daca8c0a911a507e721ceba3cdc8751d98e8232404",
           "artifactSizeBytes": 331256,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -10208,7 +10208,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -10217,7 +10217,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -10265,7 +10265,7 @@
           "artifactSha256": "ec03db52a3f0042dfa10ae8bdda99198781405924a21caf69ff3257980120cf5",
           "artifactSizeBytes": 120960,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -10376,7 +10376,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -10385,7 +10385,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -10433,7 +10433,7 @@
           "artifactSha256": "82f6a73c4ade40a9c0c58215fb576368cff385458d9c3364ea40cd60b77445e5",
           "artifactSizeBytes": 265824,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -10544,7 +10544,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -10553,7 +10553,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -10601,7 +10601,7 @@
           "artifactSha256": "a10208715d64cb50153c9c07b6a92e53fa03df988bc83a99b8c288eeca5c446c",
           "artifactSizeBytes": 461008,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -10712,7 +10712,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -10721,7 +10721,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -10769,7 +10769,7 @@
           "artifactSha256": "6f5c0fb3bd4355ca91fc7db897d11eaa3cccee6f6a8c29a2b3e734ed9448c19a",
           "artifactSizeBytes": 67816,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -10880,7 +10880,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -10889,7 +10889,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -10937,7 +10937,7 @@
           "artifactSha256": "274fbcdcb0fe1646e3694b9b130e0f26491561b378fd571003988ec63fc8a971",
           "artifactSizeBytes": 1326824,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -11048,7 +11048,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -11057,7 +11057,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -11105,7 +11105,7 @@
           "artifactSha256": "3eb43ddbeff2694ecfde5bb2f4aaeff3c691639097e921574779971d9aa53321",
           "artifactSizeBytes": 722560,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -11216,7 +11216,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -11225,7 +11225,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -11273,7 +11273,7 @@
           "artifactSha256": "6e5e0316d09bb5eacada89adcb4cd03d06804be58f603003c64a1c5e0d10903e",
           "artifactSizeBytes": 72488,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -11384,7 +11384,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -11393,7 +11393,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -11441,7 +11441,7 @@
           "artifactSha256": "b607a8f5f7056dcccb7d81e83cd25115d73e0ef07e337581a4f591ceb01e6f41",
           "artifactSizeBytes": 199624,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -11552,7 +11552,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -11561,7 +11561,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -11609,7 +11609,7 @@
           "artifactSha256": "8a797bb55c2d950f07eaf5955378fff8c219abf898eac53a88e816e84dbf55c2",
           "artifactSizeBytes": 264360,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -11720,7 +11720,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -11729,7 +11729,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -11777,7 +11777,7 @@
           "artifactSha256": "7cabef00a2d2f6c5707ea18e693937b840a2ad9184f6f783e3a63113ed7cde01",
           "artifactSizeBytes": 217248,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -11888,7 +11888,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -11897,7 +11897,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -11945,7 +11945,7 @@
           "artifactSha256": "a0ddf9602c911bcf1a4f5b3e16319bc65f375cb3b31a662ef0c3b624c6a25608",
           "artifactSizeBytes": 270392,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -12056,7 +12056,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -12065,7 +12065,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -12113,7 +12113,7 @@
           "artifactSha256": "df4ef5e518b13915f4e0c81bfd87f92660ab7dbff4c529256ea5af32723636e9",
           "artifactSizeBytes": 1902896,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -12226,7 +12226,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -12235,7 +12235,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -12283,7 +12283,7 @@
           "artifactSha256": "7f871f34913312670be4f67023d6327d2d7c92221e78f402e40becb9e8d7bc6d",
           "artifactSizeBytes": 69264,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -12396,7 +12396,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -12405,7 +12405,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -12453,7 +12453,7 @@
           "artifactSha256": "a2bad022846e46b5cffc300f83a8ff1d2c99c794d878071b8ceacbafd1e1e317",
           "artifactSizeBytes": 133528,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -12566,7 +12566,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -12575,7 +12575,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -12623,7 +12623,7 @@
           "artifactSha256": "304f35b1dc22cbf18987e703971efaaaac9093e6e10082cd296d65457eeb2a8e",
           "artifactSizeBytes": 198704,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -12736,7 +12736,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -12745,7 +12745,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -12793,7 +12793,7 @@
           "artifactSha256": "35aa00d1378e18b22e4cdc91f536dfc2b5e40befca28f05933f8528e1401a31f",
           "artifactSizeBytes": 67400,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -12906,7 +12906,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -12915,7 +12915,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -12963,7 +12963,7 @@
           "artifactSha256": "bb507eed8f4b65e8d01622a8244eadb5fdc9dea700453dadb3fdb39990fa11ba",
           "artifactSizeBytes": 67712,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -13076,7 +13076,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -13085,7 +13085,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -13133,7 +13133,7 @@
           "artifactSha256": "c4de5799a72f61435b2c572dc3fdf75e03b666489a00feddbc5bb3f239ddcda8",
           "artifactSizeBytes": 2631272,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -13246,7 +13246,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -13255,7 +13255,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -13303,7 +13303,7 @@
           "artifactSha256": "05006cc1a338af3f27e45977448707517f2dc2e441143ae45fd16eb8889c2053",
           "artifactSizeBytes": 68360,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -13416,7 +13416,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -13425,7 +13425,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -13473,7 +13473,7 @@
           "artifactSha256": "519f20843929fa96e7d34ef89c459fd8c5c4abba121a6f46b6f884a3c71f0519",
           "artifactSizeBytes": 270512,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -13586,7 +13586,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -13595,7 +13595,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -13643,7 +13643,7 @@
           "artifactSha256": "450b472c9d43a58d1b6308290271a2ba8f1cec24ff517f6440a77c1776e5a0e7",
           "artifactSizeBytes": 657400,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -13756,7 +13756,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -13765,7 +13765,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -13813,7 +13813,7 @@
           "artifactSha256": "32d66fa403ddf7c041466843c2848a2da33f1935f5976701c66dfccca5547a61",
           "artifactSizeBytes": 264136,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -13926,7 +13926,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -13935,7 +13935,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -13983,7 +13983,7 @@
           "artifactSha256": "00cfff17c6de19a5b6cf864e7e9d9eeb1c7bd1b27d068ee133f7bd32cabe6595",
           "artifactSizeBytes": 936408,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -14096,7 +14096,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -14105,7 +14105,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -14153,7 +14153,7 @@
           "artifactSha256": "a7eb3ca52de9ff30552b3a132dac5ea13e13e0434fe3f18f7f38553711b9326a",
           "artifactSizeBytes": 266584,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -14266,7 +14266,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -14275,7 +14275,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -14323,7 +14323,7 @@
           "artifactSha256": "c7709d4e07431e5271f071f48e6792ae80214bae34920674336b3f64b32e9ec0",
           "artifactSizeBytes": 854744,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -14436,7 +14436,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -14445,7 +14445,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -14493,7 +14493,7 @@
           "artifactSha256": "a09fd973327b183f7bd0246dac0b67d5461b333a7a2c6ac0da04070bef4e4887",
           "artifactSizeBytes": 67744,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -14606,7 +14606,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -14615,7 +14615,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -14663,7 +14663,7 @@
           "artifactSha256": "f5fca311267757105cfcb1366bac4223d833b32ede3ad39d980f1cb9302b1365",
           "artifactSizeBytes": 198896,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -14776,7 +14776,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -14785,7 +14785,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -14833,7 +14833,7 @@
           "artifactSha256": "e929f32722e50af0efdb8ab5fb46595aed19d90d43aa4a43d45da798c8d59d84",
           "artifactSizeBytes": 198736,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -14946,7 +14946,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -14955,7 +14955,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -15003,7 +15003,7 @@
           "artifactSha256": "5f4585b5c6f880dd5189d2e81d774bdb80b501f5d80270661071e7452fa628be",
           "artifactSizeBytes": 331256,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -15116,7 +15116,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -15125,7 +15125,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -15173,7 +15173,7 @@
           "artifactSha256": "468af1212895752cafd7249e581ae8cdb09b25ace7e04a1ace3e61d45f018f35",
           "artifactSizeBytes": 201656,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },
@@ -15286,7 +15286,7 @@
         },
         "static": {
           "applicable": true,
-          "expectedResult": "accepted-and-runs",
+          "expectedResult": "validated",
           "reason": "Static ELF fingerprint and managed validation are required for every selected identity.",
           "required": true
         }
@@ -15295,7 +15295,7 @@
         "baseline": "not-applicable",
         "hostContext": "not-applicable",
         "outerWrapper": "not-applicable",
-        "static": "accepted-and-runs"
+        "static": "validated"
       },
       "featureFingerprint": {
         "data": "little-endian",
@@ -15343,7 +15343,7 @@
           "artifactSha256": "a887004f525ec7b76aefef54a7d771dfd8ad65100485b88326dbea2379f4a911",
           "artifactSizeBytes": 198808,
           "elfFactsVerified": true,
-          "managedStaticValidation": "accepted-and-runs",
+          "managedStaticValidation": "validated",
           "rawInputsRetained": false
         }
       },

@@ -339,7 +339,9 @@ bounded `readelf`/UrProtect report, compares ELF64/little-endian/AArch64/ET_DYN
 identity and interpreter against the registry policy, and removes raw inputs
 on exit. It never uploads the downloaded archive, ELF, or runtime rootfs.
 
-The result gate distinguishes `accepted-and-runs`, `expected-rejected`,
+The result gate distinguishes static validation from execution: static success
+is `validated` (the sample process did not run), while execution success is
+`accepted-and-runs`. Other results are `expected-rejected`,
 `unexpected-rejection`, `unexpected-acceptance`, `runtime-failure`,
 `environment-unavailable`, and `not-applicable`. A missing isolation capability
 for an applicable oracle fails the required CI gate. Ordinary packages are

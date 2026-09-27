@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Any
 
 RESULTS = {
+    "validated",
     "accepted-and-runs",
     "expected-rejected",
     "unexpected-rejection",
@@ -19,6 +20,10 @@ RESULTS = {
     "environment-unavailable",
     "not-applicable",
 }
+# Static validation never launches the sample.  Keep the execution-only
+# success result out of this layer so schema consumers cannot accidentally
+# promote a successful `validate` invocation to runtime evidence.
+STATIC_RESULTS = RESULTS - {"accepted-and-runs", "runtime-failure"}
 LAYERS = ("static", "baseline", "outerWrapper", "hostContext")
 FIRST_FAILURE_LAYERS = (
     "acquisition",
@@ -78,7 +83,8 @@ def first_failure_layer(
             continue
         actual = _string(value.get("actual"))
         expected = _string(value.get("expected"))
-        if actual not in RESULTS:
+        allowed = STATIC_RESULTS if layer == "static" else RESULTS
+        if actual not in allowed:
             return layer_failure_name(layer, actual)
         if expected is not None and actual != expected:
             return layer_failure_name(layer, actual)

@@ -20,7 +20,7 @@ from typing import Any
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-from real_sample_schema import FIRST_FAILURE_LAYERS, LAYERS, RESULTS
+from real_sample_schema import FIRST_FAILURE_LAYERS, LAYERS, RESULTS, STATIC_RESULTS
 REQUIRED_FILES = (
     "source.txt",
     "hashes.txt",
@@ -146,7 +146,8 @@ def layer_expectations(project: dict[str, Any]) -> dict[str, str]:
     result: dict[str, str] = {}
     for layer in LAYERS:
         value = policy.get(layer)
-        if not isinstance(value, dict) or value.get("expectedResult") not in RESULTS:
+        allowed_results = STATIC_RESULTS if layer == "static" else RESULTS
+        if not isinstance(value, dict) or value.get("expectedResult") not in allowed_results:
             raise EvidenceError(f"{project.get('projectId', '<unknown>')} has no valid {layer} policy")
         result[layer] = value["expectedResult"]
     return result
@@ -243,7 +244,8 @@ def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
             errors.append(f"{project_id}: result.layers.{layer} is missing")
             continue
         actual = layer_result.get("actual")
-        if actual not in RESULTS:
+        allowed_results = STATIC_RESULTS if layer == "static" else RESULTS
+        if actual not in allowed_results:
             errors.append(f"{project_id}/{layer}: unsupported actual result {actual!r}")
         if layer_result.get("expected") != expected[layer]:
             errors.append(f"{project_id}/{layer}: result expectation does not match registry")

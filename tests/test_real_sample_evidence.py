@@ -112,6 +112,20 @@ class RealSampleEvidenceTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(f"checked {len(json.loads(MANIFEST.read_text(encoding='utf-8'))['corpus']['projects'])} projects", result.stdout)
 
+    def test_static_execution_success_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            self.write_complete_text_evidence(root)
+            result_path = root / "gnu-bash" / "result.json"
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            result["layers"]["static"]["expected"] = "accepted-and-runs"
+            result["layers"]["static"]["actual"] = "accepted-and-runs"
+            result_path.write_text(json.dumps(result) + "\n", encoding="utf-8")
+            result = self.run_gate(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("static", result.stderr)
+
     def test_raw_archive_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "evidence"

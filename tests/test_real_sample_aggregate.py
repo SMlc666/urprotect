@@ -51,8 +51,8 @@ class RealSampleAggregateTests(unittest.TestCase):
         schema = load_schema()
         layers = {
             "static": {
-                "expected": "accepted-and-runs",
-                "actual": "accepted-and-runs",
+                "expected": "validated",
+                "actual": "validated",
             },
             "baseline": {
                 "expected": "accepted-and-runs",

@@ -89,7 +89,7 @@ elif mutation == "invalid-deflate":
     data[encoded_offset:encoded_offset + encoded_size] = b"\x00" * encoded_size
     digest = hashlib.sha256(data[encoded_offset:encoded_offset + encoded_size]).digest()
     data[frame_offset + 80:frame_offset + 112] = digest
-elif mutation in ("invalid-interpreter", "missing-interpreter", "static-exec"):
+elif mutation in ("invalid-interpreter", "missing-interpreter", "bionic-interpreter", "unsupported-bionic-interpreter", "static-exec"):
     import zlib
 
     name_size = int.from_bytes(data[frame_offset + 20:frame_offset + 24], "little")
@@ -118,8 +118,13 @@ elif mutation in ("invalid-interpreter", "missing-interpreter", "static-exec"):
                 break
         if interpreter_offset is None or interpreter_size is None:
             raise SystemExit("source has no PT_INTERP")
-        replacement = (b"/bad/ld-linux-aarch64.so.1\x00"
-                       if mutation == "missing-interpreter" else b"/invalid\x00")
+        if mutation == "bionic-interpreter":
+            replacement = b"/system/bin/linker64\x00"
+        elif mutation == "unsupported-bionic-interpreter":
+            replacement = b"/system/bin/linker\x00"
+        else:
+            replacement = (b"/bad/ld-linux-aarch64.so.1\x00"
+                           if mutation == "missing-interpreter" else b"/invalid\x00")
         if len(replacement) > interpreter_size:
             raise SystemExit("replacement interpreter is too long")
         source[interpreter_offset:interpreter_offset + interpreter_size] = (
@@ -276,6 +281,14 @@ run_expected_failure "${invalid_deflate}" 4 PayloadMalformed invalid-deflate
 invalid_interpreter="${temporary_directory}/invalid-interpreter.wrapped"
 mutate_wrapper "${true_wrapper}" "${invalid_interpreter}" invalid-interpreter
 run_expected_failure "${invalid_interpreter}" 4 UnsupportedPackInput invalid-interpreter
+
+bionic_interpreter="${temporary_directory}/bionic-interpreter.wrapped"
+mutate_wrapper "${true_wrapper}" "${bionic_interpreter}" bionic-interpreter
+run_expected_failure "${bionic_interpreter}" 3 OutputIoFailure bionic-interpreter
+
+unsupported_bionic_interpreter="${temporary_directory}/unsupported-bionic-interpreter.wrapped"
+mutate_wrapper "${true_wrapper}" "${unsupported_bionic_interpreter}" unsupported-bionic-interpreter
+run_expected_failure "${unsupported_bionic_interpreter}" 4 UnsupportedPackInput unsupported-bionic-interpreter
 
 static_exec="${temporary_directory}/static-exec.wrapped"
 mutate_wrapper "${true_wrapper}" "${static_exec}" static-exec

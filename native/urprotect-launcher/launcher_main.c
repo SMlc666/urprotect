@@ -474,6 +474,7 @@ static int urp_validate_interpreter(const uint8_t *bytes, size_t size)
 {
     const char *linux_suffix = "ld-linux-aarch64.so.1";
     const char *musl_suffix = "ld-musl-aarch64.so.1";
+    const char *bionic_path = "/system/bin/linker64";
     size_t path_size = 0;
     while (path_size < size && bytes[path_size] != 0U) {
         ++path_size;
@@ -483,11 +484,14 @@ static int urp_validate_interpreter(const uint8_t *bytes, size_t size)
     }
     size_t linux_length = strlen(linux_suffix);
     size_t musl_length = strlen(musl_suffix);
+    size_t bionic_length = strlen(bionic_path);
     int linux_match = path_size >= linux_length
         && memcmp(bytes + path_size - linux_length, linux_suffix, linux_length) == 0;
     int musl_match = path_size >= musl_length
         && memcmp(bytes + path_size - musl_length, musl_suffix, musl_length) == 0;
-    return linux_match || musl_match;
+    int bionic_match = path_size == bionic_length
+        && memcmp(bytes, bionic_path, bionic_length) == 0;
+    return linux_match || musl_match || bionic_match;
 }
 
 static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)

@@ -54,7 +54,9 @@ reuse the exact registry and runner and may add repeatability or release
 evidence, never a subset. A sample that is not applicable to a layer receives
 an explicit `not-applicable` result; it is not silently omitted.
 
-The runner records these layers:
+The runner records these layers. Static success is `validated`: it proves
+bounded fingerprinting and UrProtect validation only, and never claims that the
+sample process ran.
 
 1. static ELF fingerprint and UrProtect JSON validation;
 2. baseline execution when the registry policy supplies a complete runtime
@@ -66,6 +68,7 @@ The runner records these layers:
 Result vocabulary is fixed:
 
 ```text
+validated
 accepted-and-runs
 expected-rejected
 unexpected-rejection

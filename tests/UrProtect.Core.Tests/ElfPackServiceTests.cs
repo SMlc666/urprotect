@@ -181,6 +181,68 @@ public sealed class ElfPackServiceTests
         Assert.Equal(PayloadDispatchProfile.OuterExecveat, decoded.Frame!.Profile);
     }
 
+    [Theory]
+    [InlineData("/lib/ld-linux-aarch64.so.1")]
+    [InlineData("/lib/ld-musl-aarch64.so.1")]
+    [InlineData("/system/bin/linker64")]
+    [Trait("Category", "PackWrapper")]
+    public void PacksDynamicEtExecWithRecognizedRuntimeInterpreter(string interpreter)
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input-exec.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped-exec.elf");
+        var source = ElfFixture.DynamicExecPayloadWithInterpreter(interpreter);
+        File.WriteAllBytes(inputPath, source);
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var decoded = PayloadFrameCodec.ReadWrapper(File.ReadAllBytes(outputPath), new PayloadFrameLimits());
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        Assert.Equal(source, decoded.SourceBytes);
+        Assert.Equal(PayloadDispatchProfile.OuterExecveat, decoded.Frame!.Profile);
+    }
+
+    [Fact]
+    [Trait("Category", "PackWrapper")]
+    public void PacksBionicPieWithLinker64Interpreter()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input-bionic.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped-bionic.elf");
+        var source = ElfFixture.MinimalPieWithInterpreter("/system/bin/linker64");
+        File.WriteAllBytes(inputPath, source);
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var decoded = PayloadFrameCodec.ReadWrapper(File.ReadAllBytes(outputPath), new PayloadFrameLimits());
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        Assert.Equal(source, decoded.SourceBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "PackMalformed")]
+    public void RejectsBionicLikeButUnrecognizedInterpreterWithoutPublishingOutput()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("unsupported-bionic-interpreter.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.DynamicExecPayloadWithInterpreter("/system/bin/linker"));
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+
+        var result = new ElfPackService().Pack(inputPath, outputPath, launcherPath);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnsupportedInterpreter);
+        Assert.False(File.Exists(outputPath));
+    }
+
     [Fact]
     [Trait("Category", "PackMalformed")]
     public void RejectsStaticEtExecInputWithoutPublishingOutput()
