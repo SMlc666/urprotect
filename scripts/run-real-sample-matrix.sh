@@ -86,7 +86,7 @@ values=[
  p['projectId'], prov['archiveUrl'], prov['version'], prov['archivePath'], prov['archiveSha256'],
  prov['archiveFormat'], prov['artifactPath'], p['featureFingerprint']['producer'],
  policy['static']['expectedResult'], str(policy['baseline']['applicable']).lower(),
- policy['baseline']['expectedResult'], policy['baseline'].get('mode',''), base64.urlsafe_b64encode(json.dumps(policy['baseline'].get('command', [])).encode()).decode(), target['runtime'], target['loader'],
+ policy['baseline']['expectedResult'], policy['baseline'].get('mode','-'), base64.urlsafe_b64encode(json.dumps(policy['baseline'].get('command', [])).encode()).decode(), target['runtime'], target['loader'],
  base64.urlsafe_b64encode(json.dumps(apk_metadata).encode()).decode(),
 ]
 print('\t'.join(values))
