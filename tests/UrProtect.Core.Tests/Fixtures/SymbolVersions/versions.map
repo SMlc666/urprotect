@@ -1,0 +1,8 @@
+URP_1.0 {
+    global: urp_api_v1;
+    local: *;
+};
+
+URP_2.0 {
+    global: urp_api_v2;
+} URP_1.0;

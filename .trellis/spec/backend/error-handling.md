@@ -8,6 +8,10 @@ address conversion, and dynamic-table traversal must be checked before a read,
 allocation, or conversion. The parser reports structured diagnostics instead
 of repairing bytes or guessing code/data boundaries.
 
+Native HostContext image validation follows the same fail-closed rule in
+`native/urprotect-runtime/host_image_validation.c`; `host_adapter.c` performs
+no memfd or loader handoff until that preflight succeeds.
+
 ## Error Types
 
 Use `DiagnosticCode` for stable machine-readable categories and `Diagnostic` for
@@ -17,8 +21,8 @@ ordered aggregation while result records carry diagnostics to the caller.
 Important parser categories include `InputTooSmall`, `InvalidHeader`,
 `TableOutOfBounds`, `InvalidProgramHeader`, `InvalidSegment`,
 `DynamicTableMalformed`, `DynamicPointerUnmapped`, `AddressOverflow`,
-`AddressUnmapped`, `SymbolVersionTableMalformed`, and
-`VersionNeedTableMalformed`.
+`AddressUnmapped`, `SymbolVersionTableMalformed`,
+`VersionDefinitionTableMalformed`, and `VersionNeedTableMalformed`.
 
 Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 `LauncherUnavailable`, `PayloadMalformed`, `PayloadUnsupported`,
@@ -38,6 +42,15 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 - `PayloadFrameCodec` validates version, flags, architecture, names, bounds,
   encoded digest, exact decompressed size, and source digest before returning
   source bytes.
+- When a frame requires `URP_HOST_CAP_THREAD_LIFETIME`, preflight verifies the
+  full table size and both callbacks before image loading. The native adapter
+  reserves per-image ownership before thread start, returns no handle on failed
+  creation, rejects foreign/repeated/self-join handles, and never reuses opaque
+  thread handles. Release closes creation and joins registered workers; a join
+  failure preserves the image mapping and descriptor so live code is not
+  unloaded. Non-threaded frames receive a legacy-size HostContext projection
+  with the optional callbacks/capability cleared and a 32-byte launch-args view
+  with image handle zero.
 - `ElfPackService` validates source and launcher independently, validates the
   assembled wrapper and recovered payload, and publishes only after a final
   byte comparison.

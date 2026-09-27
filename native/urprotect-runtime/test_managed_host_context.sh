@@ -10,8 +10,14 @@ if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "managed HostContext handoff requires an aarch64 host" >&2
   exit 2
 fi
+libc_identity="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
+if [[ "${libc_identity}" != glibc\ * ]]; then
+  echo "threaded HostContext lifecycle evidence requires native glibc" >&2
+  exit 2
+fi
 command -v "${dotnet_command}" >/dev/null 2>&1
 command -v make >/dev/null 2>&1
+command -v readelf >/dev/null 2>&1
 
 mkdir -p "${artifact_root}"
 make -C "${script_dir}" host-context-launcher build/host-context-entry-fixture.so \
@@ -92,7 +98,53 @@ printf 'symbol_profile=host-context-entry\nsymbol_relocation=GLOB_DAT\nsymbol_st
 sha256sum "${symbol_output}" "${script_dir}/build/host-context-symbol-fixture.so" \
   >>"${artifact_root}/sha256.txt"
 
+make -C "${script_dir}" plt-fixture >>"${artifact_root}/build.log" 2>&1
+make -C "${script_dir}" plt-self-test >"${artifact_root}/plt-self-test.log" 2>&1
+cat "${artifact_root}/plt-self-test.log" >>"${artifact_root}/build.log"
+plt_output="${artifact_root}/host-context-plt-packed"
+plt_report="${artifact_root}/host-context-plt-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${script_dir}/build/host-context-plt-fixture.so" \
+  --output "${plt_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry \
+  --json "${plt_report}" \
+  >"${artifact_root}/plt-pack.log" 2>&1
+set +e
+"${plt_output}" >"${artifact_root}/plt.stdout" 2>"${artifact_root}/plt.stderr"
+plt_status=$?
+set -e
+if [[ "${plt_status}" -ne 53 ]]; then
+  echo "weak undefined JUMP_SLOT fixture returned ${plt_status}, expected 53" >&2
+  exit 1
+fi
+printf 'plt_profile=host-context-entry\nplt_relocation=weak-undefined-JUMP_SLOT\nplt_status=%s\n' "${plt_status}" \
+  >"${artifact_root}/plt-result.txt"
+sha256sum "${plt_output}" "${script_dir}/build/host-context-plt-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
+
 make -C "${script_dir}" dependency-fixture >>"${artifact_root}/build.log" 2>&1
+cp "${script_dir}/build/host-context-dependency-fixture.so" \
+  "${artifact_root}/host-context-dependency-fixture.so"
+readelf -aW "${artifact_root}/host-context-dependency-fixture.so" \
+  >"${artifact_root}/dependency-fixture-readelf.txt"
+make -C "${script_dir}" version-self-test >"${artifact_root}/version-self-test.log" 2>&1
+cat "${artifact_root}/version-self-test.log" >>"${artifact_root}/build.log"
+readelf -dW --version-info "${script_dir}/build/host-context-dependency-fixture.so" \
+  >"${artifact_root}/dependency-version-metadata.txt"
+grep -Eq '\(NEEDED\).*Shared library: \[libc\.so\.6\]' \
+  "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(VERSYM)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(VERNEED)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(VERNEEDNUM)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq '(GNU_HASH)' "${artifact_root}/dependency-version-metadata.txt"
+grep -Fq 'File: libc.so.6' "${artifact_root}/dependency-version-metadata.txt"
+grep -Eq 'GLIBC_[0-9]+\.[0-9]+' "${artifact_root}/dependency-version-metadata.txt"
+if grep -Eq '\((VERDEF|HASH)\)' "${artifact_root}/dependency-version-metadata.txt"; then
+  echo "dependency fixture used an unsupported version definition or SysV hash" >&2
+  exit 1
+fi
 dependency_output="${artifact_root}/host-context-dependency-packed"
 dependency_report="${artifact_root}/host-context-dependency-packed.json"
 "${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
@@ -116,9 +168,126 @@ if [[ "$(cat "${artifact_root}/lifecycle-marker.txt" 2>/dev/null || true)" != "r
   echo "dependency destructor did not run before HostContext release completed" >&2
   exit 1
 fi
-printf 'dependency=libc.so.6\ndependency_status=%s\n' "${dependency_status}" \
+printf 'dependency=libc.so.6\ndependency_versions=VERNEED\ndependency_status=%s\n' "${dependency_status}" \
   >"${artifact_root}/dependency-result.txt"
 sha256sum "${dependency_output}" "${script_dir}/build/host-context-dependency-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
+
+make -C "${script_dir}" graph-fixture \
+  build/host-context-fake-loader-probe >>"${artifact_root}/build.log" 2>&1
+cp "${script_dir}/build/host-context-graph-fixture.so" \
+  "${artifact_root}/host-context-graph-fixture.so"
+cp "${script_dir}/build/host-context-graph-reversed-fixture.so" \
+  "${artifact_root}/host-context-graph-reversed-fixture.so"
+cp "${script_dir}/build/host-context-graph-loader-failure-fixture.so" \
+  "${artifact_root}/host-context-graph-loader-failure-fixture.so"
+mkdir -p "${artifact_root}/fake-loader-root"
+cp "${script_dir}/build/fake-loader-root/ld-linux-aarch64.so.1" \
+  "${artifact_root}/fake-loader-root/ld-linux-aarch64.so.1"
+readelf -dW --version-info "${artifact_root}/host-context-graph-fixture.so" \
+  >"${artifact_root}/dependency-graph-readelf.txt"
+readelf -dW "${artifact_root}/host-context-graph-reversed-fixture.so" \
+  >"${artifact_root}/dependency-graph-reversed-readelf.txt"
+readelf -dW -rW --dyn-syms "${artifact_root}/host-context-graph-loader-failure-fixture.so" \
+  >"${artifact_root}/dependency-graph-loader-failure-readelf.txt"
+if [[ "$(grep -Ec '\(NEEDED\)' "${artifact_root}/dependency-graph-reversed-readelf.txt")" -ne 2 ]] \
+  || [[ "$(grep -Ec '\(NEEDED\).*libc\.so\.6' "${artifact_root}/dependency-graph-reversed-readelf.txt")" -ne 1 ]] \
+  || [[ "$(grep -Ec '\(NEEDED\).*ld-linux-aarch64\.so\.1' "${artifact_root}/dependency-graph-reversed-readelf.txt")" -ne 1 ]]; then
+  echo "reversed dependency graph fixture does not contain the exact glibc pair" >&2
+  exit 1
+fi
+readelf -dW "${artifact_root}/fake-loader-root/ld-linux-aarch64.so.1" \
+  >"${artifact_root}/fake-loader-readelf.txt"
+"${script_dir}/build/host-context-fake-loader-probe" \
+  "${script_dir}/build/fake-loader-root/ld-linux-aarch64.so.1" \
+  >"${artifact_root}/fake-loader-probe.log" 2>&1
+if [[ "$(grep -Ec '\(NEEDED\)' "${artifact_root}/dependency-graph-readelf.txt")" -ne 2 ]] \
+  || [[ "$(grep -Ec '\(NEEDED\).*libc\.so\.6' "${artifact_root}/dependency-graph-readelf.txt")" -ne 1 ]] \
+  || [[ "$(grep -Ec '\(NEEDED\).*ld-linux-aarch64\.so\.1' "${artifact_root}/dependency-graph-readelf.txt")" -ne 1 ]]; then
+  echo "dependency graph fixture does not contain the exact glibc pair" >&2
+  exit 1
+fi
+if [[ "$(grep -Ec '\(NEEDED\)' "${artifact_root}/dependency-graph-loader-failure-readelf.txt")" -ne 2 ]] \
+  || [[ "$(grep -Ec '\(NEEDED\).*libc\.so\.6' "${artifact_root}/dependency-graph-loader-failure-readelf.txt")" -ne 1 ]] \
+  || [[ "$(grep -Ec '\(NEEDED\).*ld-linux-aarch64\.so\.1' "${artifact_root}/dependency-graph-loader-failure-readelf.txt")" -ne 1 ]] \
+  || ! grep -Eq 'R_AARCH64_GLOB_DAT.*urp_missing_graph_loader_symbol' \
+    "${artifact_root}/dependency-graph-loader-failure-readelf.txt" \
+  || ! grep -Eq 'GLOBAL[[:space:]]+DEFAULT[[:space:]]+UND urp_missing_graph_loader_symbol' \
+    "${artifact_root}/dependency-graph-loader-failure-readelf.txt"; then
+  echo "loader failure fixture must have the exact dependency pair and unresolved strong GLOB_DAT import" >&2
+  exit 1
+fi
+if grep -Eq '\((RPATH|RUNPATH|AUXILIARY|FILTER)\)' "${artifact_root}/dependency-graph-readelf.txt"; then
+  echo "dependency graph fixture unexpectedly contains path/filter metadata" >&2
+  exit 1
+fi
+{
+  printf 'architecture=%s\n' "$(uname -m)"
+  printf 'libc=%s\n' "$(getconf GNU_LIBC_VERSION 2>/dev/null || printf unknown)"
+  for variable in LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT; do
+    value="${!variable-}"
+    printf '%s=%s\n' "$variable" "${value:+nonempty}"
+  done
+} >"${artifact_root}/graph-environment.txt"
+make -C "${script_dir}" graph-self-test \
+  >"${artifact_root}/graph-self-test.log" 2>&1
+graph_output="${artifact_root}/host-context-graph-packed"
+graph_report="${artifact_root}/host-context-graph-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${script_dir}/build/host-context-graph-fixture.so" \
+  --output "${graph_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry \
+  --json "${graph_report}" \
+  >"${artifact_root}/graph-pack.log" 2>&1
+set +e
+rm -f "${artifact_root}/graph-lifecycle-marker.txt"
+rm -f /tmp/urp-host-context-graph-release.marker /tmp/urp-host-context-fake-loader.marker
+env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT \
+  "${graph_output}" >"${artifact_root}/graph.stdout" 2>"${artifact_root}/graph.stderr"
+graph_status=$?
+set -e
+if [[ "${graph_status}" -ne 37 ]]; then
+  echo "glibc dependency-pair fixture returned ${graph_status}, expected 37" >&2
+  exit 1
+fi
+if [[ "$(cat /tmp/urp-host-context-graph-release.marker 2>/dev/null || true)" != "released" ]]; then
+  echo "dependency graph destructor did not run before root-image release" >&2
+  exit 1
+fi
+cp /tmp/urp-host-context-graph-release.marker "${artifact_root}/graph-lifecycle-marker.txt"
+
+rm -f /tmp/urp-host-context-fake-loader.marker /tmp/urp-host-context-graph-release.marker
+set +e
+env -u LD_PRELOAD -u LD_AUDIT \
+  LD_LIBRARY_PATH="${artifact_root}/fake-loader-root" \
+  "${graph_output}" >"${artifact_root}/graph-env.stdout" \
+  2>"${artifact_root}/graph-env.stderr"
+graph_env_status=$?
+set -e
+if [[ "${graph_env_status}" -ne 4 ]]; then
+  echo "loader-path-influenced dependency pair returned ${graph_env_status}, expected 4" >&2
+  exit 1
+fi
+if [[ -e /tmp/urp-host-context-fake-loader.marker \
+  || -e /tmp/urp-host-context-graph-release.marker ]]; then
+  echo "loader-path influence reached a fake dependency or payload entry" >&2
+  exit 1
+fi
+printf 'dependencies=libc.so.6,ld-linux-aarch64.so.1\ngraph_status=%s\nrelease=destructor-observed\nstdout_bytes=%s\nstderr_bytes=%s\n' "${graph_status}" "$(wc -c <"${artifact_root}/graph.stdout")" "$(wc -c <"${artifact_root}/graph.stderr")" \
+  >"${artifact_root}/graph-result.txt"
+if [[ -e /tmp/urp-host-context-fake-loader.marker ]]; then
+  printf 'fake_loader_marker=present\n' >"${artifact_root}/graph-env-result.txt"
+else
+  printf 'LD_LIBRARY_PATH=fake-loader-root\nlauncher_status=%s\nfake_loader_marker=absent\nentry_called=false\n' \
+    "${graph_env_status}" >"${artifact_root}/graph-env-result.txt"
+fi
+if [[ -e /tmp/urp-host-context-graph-release.marker ]]; then
+  echo "fixture destructor ran after environment-gate rejection" >&2
+  exit 1
+fi
+sha256sum "${graph_output}" "${script_dir}/build/host-context-graph-fixture.so" \
   >>"${artifact_root}/sha256.txt"
 
 make -C "${script_dir}" tls-fixture >>"${artifact_root}/build.log" 2>&1
@@ -168,4 +337,51 @@ printf 'gnu_property=BTI\nproperty_status=%s\n' "${property_status}" \
   >"${artifact_root}/property-result.txt"
 sha256sum "${property_output}" "${script_dir}/build/host-context-property-fixture.so" \
   >>"${artifact_root}/sha256.txt"
+make -C "${script_dir}" threaded-tls-fixture threaded-tls-harness threaded-tls-runtime-test thread-adapter-test >>"${artifact_root}/build.log" 2>&1
+threaded_fixture="${script_dir}/build/host-context-threaded-tls-fixture.so"
+cp "${threaded_fixture}" "${artifact_root}/host-context-threaded-tls-fixture.so"
+readelf -lW -dW -rW "${threaded_fixture}" >"${artifact_root}/threaded-tls-readelf.txt"
+grep -q 'TLS ' "${artifact_root}/threaded-tls-readelf.txt"
+grep -q 'R_AARCH64_TLS_TPREL64' "${artifact_root}/threaded-tls-readelf.txt"
+threaded_output="${artifact_root}/host-context-threaded-tls-packed"
+threaded_report="${artifact_root}/host-context-threaded-tls-packed.json"
+"${dotnet_command}" run --project "${repo_root}/src/UrProtect.Cli" \
+  --configuration Release --no-build --no-restore -- \
+  pack "${threaded_fixture}" --output "${threaded_output}" \
+  --launcher "${script_dir}/build/host-context-launcher" \
+  --profile host-context-entry --thread-lifetime --json "${threaded_report}" \
+  >"${artifact_root}/threaded-tls-pack.log" 2>&1
+python3 - "${threaded_output}" <<'PYFRAME'
+import pathlib, struct, sys
+wrapper = pathlib.Path(sys.argv[1]).read_bytes()
+trailer = wrapper[-24:]
+if trailer[:8] != b"URTRAIL1": raise SystemExit("threaded wrapper trailer is invalid")
+offset, length = struct.unpack_from("<QQ", trailer, 8)
+frame = wrapper[offset:offset + length]
+if frame[:8] != b"URPCK01\0" or struct.unpack_from("<H", frame, 8)[0] != 3:
+    raise SystemExit("threaded wrapper did not retain current v3 frame")
+if struct.unpack_from("<I", frame, 136)[0] != 2:
+    raise SystemExit("threaded wrapper selected a non-HostContext profile")
+if struct.unpack_from("<Q", frame, 120)[0] != 27:
+    raise SystemExit("thread-lifetime capability is not explicitly required")
+PYFRAME
+"${script_dir}/build/host-context-threaded-tls-harness" "${threaded_output}" \
+  >"${artifact_root}/threaded-tls-lifecycle.txt" 2>&1
+"${script_dir}/build/host-context-threaded-tls-runtime-test" "${threaded_output}" \
+  >"${artifact_root}/threaded-tls-concurrent.txt" 2>&1
+cp "${script_dir}/build/host-context-dynamic-tls-fixture.so" \
+  "${artifact_root}/host-context-dynamic-tls-fixture.so"
+readelf -lW -dW -rW "${artifact_root}/host-context-dynamic-tls-fixture.so" \
+  >"${artifact_root}/dynamic-tls-negative-readelf.txt"
+grep -Eq 'TLS_DTPMOD|TLS_DTPREL|TLSDESC' "${artifact_root}/dynamic-tls-negative-readelf.txt"
+"${script_dir}/build/host-context-thread-adapter-test" "${threaded_fixture}" \
+  "${script_dir}/build/host-context-dynamic-tls-fixture.so" \
+  >"${artifact_root}/thread-adapter-self-test.log" 2>&1
+printf 'native_arch=%s\nlibc=%s\nthreaded_frame=host-context-entry+thread-lifetime\n' \
+  "$(uname -m)" "$(getconf GNU_LIBC_VERSION 2>/dev/null || printf unknown)" \
+  >"${artifact_root}/threaded-tls-runtime.txt"
+sha256sum "${threaded_output}" "${threaded_fixture}" \
+  "${artifact_root}/host-context-dynamic-tls-fixture.so" \
+  >>"${artifact_root}/sha256.txt"
+
 echo "managed HostContext handoff: PASS"

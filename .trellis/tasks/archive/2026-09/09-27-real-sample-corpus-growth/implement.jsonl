@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/runtime-compatibility.md", "reason": "Defines distinct identity semantics, CI-only real-sample acquisition, evidence layer vocabulary, feature threshold disposition, and compatibility claim boundaries."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines bounded fixture acquisition, raw-input safety, regression ownership, CI evidence, and AArch64 native runner requirements."}

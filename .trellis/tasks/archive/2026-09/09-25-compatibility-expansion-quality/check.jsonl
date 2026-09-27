@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review code structure, checked arithmetic, tests, fuzz regressions, benchmarks, CI tiers, and release evidence against project quality rules."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Review that every claimed compatibility layer has the correct oracle, evidence, runtime boundary, and explicit unsupported semantics."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check diagnostic stability, fail-closed behavior, atomic publication, and no silent fallback across managed and native paths."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Check that new code stays in the correct Core, CLI, native, fixture, script, and third-party ownership boundary."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Audit for duplicated constants, offsets, address arithmetic, parsers, feature logic, and evidence validators after each refactor."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit complete data-flow and contract synchronization across managed code, C headers, launchers, tests, CI, reports, and docs."}

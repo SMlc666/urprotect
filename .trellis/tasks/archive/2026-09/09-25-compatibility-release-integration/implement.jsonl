@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Reconcile final layered compatibility contracts and long-term support boundaries."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run final repository quality, CI evidence, fuzz/stress, and release gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Ensure release diagnostics, failure classifications, and publication semantics remain consistent."}
+{"file":"fixtures/real-samples/README.md","reason":"Reconcile final CI-first real-sample process and support-impact requirements."}
+{"file":"COMPATIBILITY.md","reason":"Synchronize the final user-facing conditional compatibility claim and proof boundaries."}

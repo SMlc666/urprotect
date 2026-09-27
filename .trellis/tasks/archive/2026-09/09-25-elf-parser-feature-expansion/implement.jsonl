@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply bounded reads, LoadMap ownership, typed addresses, negative tests, fuzz regressions, and coverage standards."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Keep model, parser table readers, feature logic, diagnostics, and orchestration in clear Core ownership boundaries."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve stable diagnostics and reject malformed/unknown semantic cases without guessing."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Keep observed/modelled/parser/validator/runtime claims distinct and synchronize feature evidence."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse the existing bounded reader, address mapper, and dynamic metadata owners rather than duplicating parsing logic."}

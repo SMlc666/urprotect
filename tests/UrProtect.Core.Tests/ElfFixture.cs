@@ -94,6 +94,56 @@ internal static class ElfFixture
         return bytes;
     }
 
+    public static byte[] DynamicExecPayload()
+    {
+        var bytes = MinimalPie();
+        WriteUInt16(bytes.AsSpan(), 16, ElfConstants.TypeExec);
+        return bytes;
+    }
+
+    public static byte[] StaticExecPayload()
+    {
+        var bytes = DynamicExecPayload();
+        bytes.AsSpan(InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        bytes.AsSpan(DynamicProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        return bytes;
+    }
+
+    public static byte[] DynamicExecWithSearchPath(ulong searchPathTag)
+    {
+        if (searchPathTag is not (ElfConstants.DtRpath or ElfConstants.DtRunPath))
+        {
+            throw new ArgumentOutOfRangeException(nameof(searchPathTag));
+        }
+
+        var bytes = DynamicExecPayload();
+        var span = bytes.AsSpan();
+        const ulong dynamicSize = 5 * ElfConstants.DynamicEntrySize64;
+        WriteUInt64(span, DynamicTableOffset, ElfConstants.DtFlags1);
+        WriteUInt64(span, DynamicTableOffset + 8, ElfConstants.Df1Pie);
+        WriteUInt64(span, DynamicTableOffset + 16, ElfConstants.DtStrTab);
+        WriteUInt64(span, DynamicTableOffset + 24, 0x1D0);
+        WriteUInt64(span, DynamicTableOffset + 32, ElfConstants.DtStrSz);
+        WriteUInt64(span, DynamicTableOffset + 40, 6);
+        WriteUInt64(span, DynamicTableOffset + 48, searchPathTag);
+        WriteUInt64(span, DynamicTableOffset + 56, 1);
+        WriteUInt64(span, DynamicTableOffset + 64, ElfConstants.DtNull);
+        WriteUInt64(span, DynamicTableOffset + 72, 0);
+        WriteUInt64(span, DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.FileSize, dynamicSize);
+        WriteUInt64(span, DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.MemorySize, dynamicSize);
+        new byte[] { 0, (byte)'/', (byte)'t', (byte)'m', (byte)'p', 0 }.CopyTo(span[0x1D0..]);
+
+        const string interpreter = "/lib/ld-linux-aarch64.so.1\0";
+        WriteUInt64(span, InterpreterProgramHeaderOffset + ElfProgramHeaderOffsets.FileOffset, 0x1E0);
+        WriteUInt64(span, InterpreterProgramHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress, 0x1E0);
+        WriteUInt64(span, InterpreterProgramHeaderOffset + ElfProgramHeaderOffsets.FileSize,
+            (ulong)Encoding.ASCII.GetByteCount(interpreter));
+        WriteUInt64(span, InterpreterProgramHeaderOffset + ElfProgramHeaderOffsets.MemorySize,
+            (ulong)Encoding.ASCII.GetByteCount(interpreter));
+        Encoding.ASCII.GetBytes(interpreter).CopyTo(span[0x1E0..]);
+        return bytes;
+    }
+
     private static void WriteProgramHeader(
         Span<byte> destination,
         int offset,

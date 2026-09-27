@@ -295,7 +295,7 @@ public sealed class CliApplication
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  urprotect validate <input> [--copy <output>] [--json <path|->] [--no-analysis]");
-        writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>]");
+        writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime]");
     }
 
     private static int RunValidation(CliOptions options, TextWriter stdout, TextWriter stderr)
@@ -421,7 +421,8 @@ public sealed class CliApplication
             options.LauncherPath,
             new ElfPackOptions(
                 Profile: options.Profile,
-                EntrySymbol: options.EntrySymbol));
+                EntrySymbol: options.EntrySymbol,
+                RequireThreadLifetime: options.RequireThreadLifetime));
         return WritePackResult(options, result, stdout, stderr);
     }
 
@@ -514,6 +515,7 @@ public sealed class CliApplication
         string? launcherPath = null;
         var profile = PayloadDispatchProfile.OuterExecveat;
         var entrySymbol = HostContextContract.EntrySymbol;
+        var requireThreadLifetime = false;
         for (var index = 2; index < args.Length; index++)
         {
             switch (args[index])
@@ -554,6 +556,14 @@ public sealed class CliApplication
                     }
 
                     break;
+                case "--thread-lifetime":
+                    if (requireThreadLifetime)
+                    {
+                        error = "Usage: --thread-lifetime may be specified only once.";
+                        return false;
+                    }
+                    requireThreadLifetime = true;
+                    break;
                 case "--entry-symbol" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (entrySymbol != HostContextContract.EntrySymbol)
                     {
@@ -579,6 +589,12 @@ public sealed class CliApplication
             return false;
         }
 
+        if (profile == PayloadDispatchProfile.OuterExecveat && requireThreadLifetime)
+        {
+            error = "Usage: --thread-lifetime requires --profile host-context-entry.";
+            return false;
+        }
+
         if (profile == PayloadDispatchProfile.OuterExecveat
             && entrySymbol != HostContextContract.EntrySymbol)
         {
@@ -586,7 +602,7 @@ public sealed class CliApplication
             return false;
         }
 
-        options = new PackOptions(args[1], outputPath, jsonPath, launcherPath, profile, entrySymbol);
+        options = new PackOptions(args[1], outputPath, jsonPath, launcherPath, profile, entrySymbol, requireThreadLifetime);
         return true;
     }
 
@@ -738,7 +754,7 @@ public sealed class CliApplication
             if (result.IsSuccess)
             {
                 stdout.WriteLine(
-                    $"Packed AArch64 ET_DYN PIE: {result.SourceSize} source bytes, "
+                    $"Packed AArch64 payload for {result.Profile.ToCliValue()}: {result.SourceSize} source bytes, "
                     + $"{result.EncodedSize} compressed bytes.");
                 stdout.WriteLine($"Wrapper written to {result.OutputPath}.");
             }
@@ -792,7 +808,7 @@ public sealed class CliApplication
         if (result.File is not null)
         {
             stdout.WriteLine(
-                $"Validated ET_DYN AArch64 {result.File.Kind}: "
+                $"Validated AArch64 {result.File.Header.TypeName} {result.File.Kind}: "
                 + $"{result.File.ProgramHeaders.Count} program headers, "
                 + $"{result.File.DynamicEntries.Count} dynamic entries, "
                 + $"{result.File.RelaRelocations.Count} RELA relocations.");
@@ -867,5 +883,6 @@ public sealed class CliApplication
         string? JsonPath,
         string? LauncherPath,
         PayloadDispatchProfile Profile,
-        string EntrySymbol);
+        string EntrySymbol,
+        bool RequireThreadLifetime);
 }

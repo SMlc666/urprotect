@@ -87,6 +87,7 @@ run_binary_case() {
   local launcher="${3:-}"
   local library_path="${4:-}"
   local variant="${5:-}"
+  local artifact="${6:-}"
   local case_root="${artifact_root}/${id}"
   local copy="${case_root}/no-op-copy"
   local baseline_stdout="${case_root}/baseline.stdout"
@@ -102,12 +103,13 @@ run_binary_case() {
     echo "FAIL ${id}: readelf structural oracle could not inspect the ELF" >&2
     return 1
   fi
-  if ! python3 - "${case_root}/readelf.txt" "${id}" <<'PY'
+  if ! python3 - "${case_root}/readelf.txt" "${id}" "${artifact}" <<'PY'
 import pathlib
 import sys
 
 report = pathlib.Path(sys.argv[1]).read_text(errors="replace")
 case_id = sys.argv[2]
+artifact = sys.argv[3]
 required = (
     ("Class", "ELF64"),
     ("Data", "2's complement, little endian"),
@@ -119,8 +121,9 @@ for line in report.splitlines():
         name, value = line.split(":", 1)
         fields[name.strip()] = value.strip()
 missing = [f"{name}={value}" for name, value in required if fields.get(name) != value]
-if not fields.get("Type", "").startswith("DYN"):
-    missing.append("Type=DYN")
+expected_type = "EXEC" if artifact == "et-exec" else "DYN"
+if not fields.get("Type", "").startswith(expected_type):
+    missing.append(f"Type={expected_type}")
 if "There is no dynamic section in this file." in report:
     missing.append("dynamic section")
 if missing:
@@ -219,6 +222,12 @@ build_case() {
         "${release_linker_flags[@]}" "${source}" -o "${output_dir}/fixture"
       binary="${output_dir}/fixture"
       ;;
+    gcc-c-exec)
+      has_tool gcc || { skip_or_fail "${case_json}" "gcc is unavailable"; return; }
+      gcc -std=c11 -O2 -g0 -Wl,--build-id=none -no-pie \
+        -Wl,-dynamic-linker,/lib/ld-linux-aarch64.so.1 "${source}" -o "${output_dir}/fixture"
+      binary="${output_dir}/fixture"
+      ;;
     gcc-cxx)
       has_tool g++ || { skip_or_fail "${case_json}" "g++ is unavailable"; return; }
       g++ -std=c++17 -O2 -g0 -fPIE -pie -Wl,--build-id=none \
@@ -308,7 +317,7 @@ build_case() {
     echo "FAIL ${id}: builder did not produce executable ${binary}" >&2
     return 1
   fi
-  run_binary_case "${id}" "${binary}" "${launcher:-}" "${library_path:-}" "${variant}"
+  run_binary_case "${id}" "${binary}" "${launcher:-}" "${library_path:-}" "${variant}" "$(case_value "${case_json}" artifact)"
 }
 
 echo "Running fixture tier ${requested_tier} on $(uname -m)"

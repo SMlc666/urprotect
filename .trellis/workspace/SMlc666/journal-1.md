@@ -112,3 +112,39 @@ Established and merged a 20-project public AArch64 real-sample corpus with CI-on
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: Bound HostContext glibc dependency graph
+<!-- trellis-session: v=2 fp=5077fe4d806371e6 -->
+
+**Date**: 2026-09-26
+**Task**: Bound HostContext glibc dependency graph
+**Branch**: `feat/aarch64-compatibility-expansion-quality`
+
+### Summary
+
+Completed the HostContext bounded dependency-pair child task with native and managed evidence, documentation, feature gates, and rollback coverage; PR and push CI passed on commit 429f62e. Parent compatibility expansion continues with TLS/lifecycle, runtime matrix, and release integration.
+
+### Main Changes
+
+- Accepted only the exact libc.so.6 plus ld-linux-aarch64.so.1 dependency pair on native AArch64 glibc while preserving the singleton behavior.
+- Added pair-order, environment rejection, fake-loader isolation, and post-memfd dlopen rollback oracles.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `429f62e` | feat(runtime): validate bounded glibc dependency graph |
+
+### Testing
+
+- [OK] 136 .NET tests, native runtime/contract tests, managed handoff, fixture/regression matrices, evidence gate (27 paths), and PR stress suite passed.
+- [OK] GitHub PR run 36247881357 and push run 36247879166 passed; test-evidence artifact retained.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Proceed to tls-lifecycle-expansion; maintain CI-gated commits and complete PR #16 after the remaining children.

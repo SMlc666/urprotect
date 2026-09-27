@@ -19,12 +19,18 @@ if ! command -v "${container_runtime}" >/dev/null 2>&1; then
   echo "${container_runtime} is required for the native bionic fixture; no fallback is permitted" >&2
   exit 127
 fi
-for forbidden in qemu-aarch64 qemu-aarch64-static qemu-system-aarch64 waydroid emulator; do
-  if command -v "${forbidden}" >/dev/null 2>&1; then
-    echo "bionic fixture refuses a host with ${forbidden}; use a native ARM64 container runner" >&2
-    exit 2
-  fi
-done
+docker_server_platform="$("${container_runtime}" version --format '{{.Server.Os}}/{{.Server.Arch}}')"
+if [[ "${docker_server_platform}" != "linux/arm64" ]]; then
+  echo "bionic fixture requires a native Linux/arm64 Docker engine; got ${docker_server_platform}" >&2
+  exit 2
+fi
+printf 'bionic native preflight: host_arch=%s docker_server_platform=%s\n' \
+  "$(uname -m)" "${docker_server_platform}"
+if [[ -n "${ANDROID_ROOT:-}" || -n "${ANDROID_DATA:-}" \
+  || -e /system/bin/linker64 || -e /dev/binder || -e /dev/vndbinder ]]; then
+  echo "bionic fixture refuses an Android, emulator, or Waydroid host context" >&2
+  exit 2
+fi
 for required_command in cmp file getconf readelf python3 sed sha256sum; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "${required_command} is required for bionic fixture evidence" >&2
@@ -158,8 +164,24 @@ container_common=(
 )
 
 run_shell() {
-  "${container_runtime}" "${container_common[@]}" \
-    "${image}" "${termux_shell}" "$@"
+  if "${container_runtime}" "${container_common[@]}" \
+      "${image}" "${termux_shell}" "$@"; then
+    return 0
+  else
+    local status=$?
+    printf 'bionic container phase failed (exit=%s)\n' "${status}" >&2
+    for log in \
+      "${case_root}/apt-update.log" \
+      "${case_root}/apt-download.log" \
+      "${case_root}/apt-install.log" \
+      "${case_root}/host-context/build-and-test.log"; do
+      if [[ -s "${log}" ]]; then
+        printf '%s\n' "--- ${log} (last 100 lines) ---" >&2
+        tail -n 100 "${log}" >&2
+      fi
+    done
+    return "${status}"
+  fi
 }
 
 run_shell -c '
@@ -219,7 +241,6 @@ run_shell -c '
       printf "%s\n" "${installed_version}" > /artifacts/clang-package-version.txt
     fi
   done
-  rm -rf /artifacts/apt-archives
   dpkg-query -W -f="\${binary:Package}\t\${Version}\t\${Architecture}\t\${Status}\n" \
     | sort > /artifacts/packages.txt
   apt-cache policy clang > /artifacts/package-policy.txt
@@ -236,6 +257,11 @@ run_shell -c '
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
 ' -- "${compiler_package_specs[@]}"
+
+# The container's apt sandbox may leave its partial-download directory with
+# restrictive ownership; make the retained hash-locked archives readable by
+# the host evidence scanner/upload action.
+sudo chmod -R a+rX "${case_root}/apt-archives"
 
 python3 - "${case_root}/packages-before.txt" "${case_root}/packages.txt" \
   "${package_lock_json}" <<'PY'
@@ -355,6 +381,7 @@ printf '%s\n' \
   "host_arch=$(uname -m)" \
   "host_kernel=${host_kernel}" \
   "host_page_size=${host_page_size}" \
+  "docker_server_platform=${docker_server_platform}" \
   "container_arch=aarch64" \
   "container_kernel=${container_kernel}" \
   "container_page_size=${container_page_size}" \
@@ -377,7 +404,7 @@ if [[ ! -s "${host_context_fixture}" ]]; then
   exit 1
 fi
 file "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-file.txt"
-readelf -hW -lW -dW "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-readelf.txt"
+readelf -hW -lW -dW -sW "${host_context_fixture}" > "${case_root}/host-context/entry-fixture-readelf.txt"
 sha256sum "${host_context_fixture}" > "${case_root}/host-context/entry-fixture.sha256"
 printf '%s\n' \
   "status=validated" \

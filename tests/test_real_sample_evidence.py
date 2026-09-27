@@ -35,10 +35,11 @@ class RealSampleEvidenceTests(unittest.TestCase):
                 for layer in ("static", "baseline", "outerWrapper", "hostContext")
             }
             result = {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "tier": "pr",
                 "projectId": project["projectId"],
                 "artifactSha256": "",
+                "firstFailureLayer": None,
                 "layers": {
                     layer: {
                         "expected": status,
@@ -53,24 +54,45 @@ class RealSampleEvidenceTests(unittest.TestCase):
             (project_root / "hashes.txt").write_text("hash metadata\n", encoding="utf-8")
             (project_root / "environment.txt").write_text("network=none\n", encoding="utf-8")
             (project_root / "elf-fingerprint.json").write_text(
-                json.dumps({"schemaVersion": 1, "projectId": project["projectId"]}) + "\n",
+                json.dumps({
+                    "schemaVersion": 2,
+                    "projectId": project["projectId"],
+                    "error": "metadata-only contract fixture",
+                    "unknownFields": ["all"],
+                }) + "\n",
                 encoding="utf-8",
             )
             (project_root / "fingerprint-comparison.json").write_text(
-                json.dumps({"schemaVersion": 1, "projectId": project["projectId"], "status": "passed"}) + "\n",
+                json.dumps({
+                    "schemaVersion": 2,
+                    "projectId": project["projectId"],
+                    "status": "not-applicable",
+                }) + "\n",
                 encoding="utf-8",
             )
             (project_root / "readelf.txt").write_text("readelf evidence\n", encoding="utf-8")
             (project_root / "urprotect-report.json").write_text("{}\n", encoding="utf-8")
             (project_root / "result.json").write_text(json.dumps(result) + "\n", encoding="utf-8")
+            (project_root / "raw-inputs-removed.txt").write_text(
+                "raw-inputs-removed=true\n", encoding="utf-8"
+            )
             (project_root / "logs" / "run.log").write_text("run evidence\n", encoding="utf-8")
         ids = [project["projectId"] for project in manifest["corpus"]["projects"]]
+        count = len(ids)
         aggregate = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "tier": "pr",
-            "requiredProjectCount": 20,
-            "observedProjectCount": 20,
+            "requiredProjectCount": count,
+            "observedProjectCount": count,
+            "identityCount": count,
             "projectIds": ids,
+            "coverage": {
+                "approvedTargetProjectCount": manifest["corpus"]["targetProjectCount"],
+                "currentIdentityCount": count,
+                "shortfall": manifest["corpus"]["targetProjectCount"] - count,
+            },
+            "featureHistogram": [],
+            "firstFailureLayers": {},
         }
         (root / "aggregate.json").write_text(json.dumps(aggregate) + "\n", encoding="utf-8")
         (root / "aggregate.md").write_text("# aggregate\n", encoding="utf-8")
@@ -88,7 +110,7 @@ class RealSampleEvidenceTests(unittest.TestCase):
             self.write_complete_text_evidence(root)
             result = self.run_gate(root)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("checked 20 projects", result.stdout)
+            self.assertIn(f"checked {len(json.loads(MANIFEST.read_text(encoding='utf-8'))['corpus']['projects'])} projects", result.stdout)
 
     def test_raw_archive_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines stable handling for corrupt or missing sample artifacts and fail-closed binary validation."}
+{"file": "fixtures/real-samples/README.md", "reason": "Documents current corpus ownership, runner isolation, raw-input cleanup, result layers, and evidence rules."}

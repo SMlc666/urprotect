@@ -17,22 +17,26 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from real_sample_schema import (  # noqa: E402
+    LAYERS,
+    MAX_REAL_SAMPLE_ARCHIVE_BYTES,
+    MAX_REAL_SAMPLE_ARCHIVE_MEMBERS,
+    MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES,
+    RESULTS,
+)
+
 
 TIERS = ("pr", "nightly", "release")
 RUNTIMES = {"glibc", "musl", "bionic"}
-LAYERS = ("static", "baseline", "outerWrapper", "hostContext")
-RESULTS = {
-    "accepted-and-runs",
-    "expected-rejected",
-    "unexpected-rejection",
-    "unexpected-acceptance",
-    "runtime-failure",
-    "environment-unavailable",
-    "not-applicable",
-}
 ARCHIVE_FORMATS = {"deb", "tar.gz", "tar", "zip", "apk"}
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,79}$")
+APPROVED_TARGET_COUNT = 100
+MINIMUM_ALPINE_APK_IDENTITIES = APPROVED_TARGET_COUNT // 5
 
 
 class ValidationError(Exception):
@@ -156,6 +160,68 @@ def validate_provenance(
     artifact_sha = provenance.get("artifactSha256")
     if artifact_sha is not None:
         validate_hash(validator, artifact_sha, f"{location}.provenance.artifactSha256")
+    source_index_sha = provenance.get("sourceIndexSha256")
+    if source_index_sha is not None:
+        validate_hash(validator, source_index_sha, f"{location}.provenance.sourceIndexSha256")
+    archive_size = provenance.get("archiveSizeBytes")
+    if archive_size is not None:
+        validator.require(
+            isinstance(archive_size, int) and not isinstance(archive_size, bool) and archive_size > 0,
+            f"{location}.provenance.archiveSizeBytes",
+            "must be a positive integer when present",
+        )
+        if isinstance(archive_size, int) and not isinstance(archive_size, bool):
+            validator.require(
+                archive_size <= MAX_REAL_SAMPLE_ARCHIVE_BYTES,
+                f"{location}.provenance.archiveSizeBytes",
+                f"must not exceed {MAX_REAL_SAMPLE_ARCHIVE_BYTES} bytes",
+            )
+    bounded = provenance.get("boundedExtraction")
+    if bounded is not None:
+        bounded_map = validator.mapping(bounded, f"{location}.provenance.boundedExtraction")
+        if bounded_map is not None:
+            for key in ("memberLimit", "expandedBytesLimit", "archiveBytesLimit", "localArchiveBytes"):
+                value = bounded_map.get(key)
+                validator.require(
+                    isinstance(value, int) and not isinstance(value, bool) and value > 0,
+                    f"{location}.provenance.boundedExtraction.{key}",
+                    "must be a positive integer",
+                )
+            for key in ("declaredArtifactVerified", "artifactResolvesWithinArchive"):
+                validator.require(
+                    bounded_map.get(key) is True,
+                    f"{location}.provenance.boundedExtraction.{key}",
+                    "must be true for a promoted artifact",
+                )
+            validator.require(
+                bounded_map.get("memberLimit") == MAX_REAL_SAMPLE_ARCHIVE_MEMBERS,
+                f"{location}.provenance.boundedExtraction.memberLimit",
+                f"must match the extractor bound {MAX_REAL_SAMPLE_ARCHIVE_MEMBERS}",
+            )
+            validator.require(
+                bounded_map.get("expandedBytesLimit") == MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES,
+                f"{location}.provenance.boundedExtraction.expandedBytesLimit",
+                f"must match the extractor bound {MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES}",
+            )
+            validator.require(
+                bounded_map.get("archiveBytesLimit") == MAX_REAL_SAMPLE_ARCHIVE_BYTES,
+                f"{location}.provenance.boundedExtraction.archiveBytesLimit",
+                f"must match the acquisition bound {MAX_REAL_SAMPLE_ARCHIVE_BYTES}",
+            )
+            local_size = bounded_map.get("localArchiveBytes")
+            if isinstance(archive_size, int) and not isinstance(archive_size, bool):
+                validator.require(
+                    local_size == archive_size,
+                    f"{location}.provenance.boundedExtraction.localArchiveBytes",
+                    "must match the locked archive size",
+                )
+                archive_limit = bounded_map.get("archiveBytesLimit")
+                if isinstance(archive_limit, int) and not isinstance(archive_limit, bool):
+                    validator.require(
+                        archive_size <= archive_limit,
+                        f"{location}.provenance.archiveSizeBytes",
+                        "must fit inside boundedExtraction.archiveBytesLimit",
+                    )
     archive_format = validator.string(
         provenance.get("archiveFormat"), f"{location}.provenance.archiveFormat"
     )
@@ -164,6 +230,24 @@ def validate_provenance(
             archive_format in ARCHIVE_FORMATS,
             f"{location}.provenance.archiveFormat",
             f"must be one of {sorted(ARCHIVE_FORMATS)}",
+        )
+    if archive_format == "apk":
+        # APKINDEX facts are the review source for the musl increment.  The
+        # archive hash remains the immutable package lock; these bounded
+        # fields prevent a package/origin/license drift from being hidden
+        # behind a renamed project id.
+        for key in ("packageName", "origin", "packageChecksum", "sourceIndexSha256", "repository"):
+            validator.string(provenance.get(key), f"{location}.provenance.{key}")
+        archive_size = provenance.get("archiveSizeBytes")
+        validator.require(
+            isinstance(archive_size, int) and not isinstance(archive_size, bool) and archive_size > 0,
+            f"{location}.provenance.archiveSizeBytes",
+            "must be a positive integer for an APK lock",
+        )
+        validator.require(
+            provenance.get("sourceKind") == "alpine-v3.22-main-aarch64-apk",
+            f"{location}.provenance.sourceKind",
+            "must identify the pinned Alpine v3.22 AArch64 APK repository",
         )
     validator.string(provenance.get("license"), f"{location}.provenance.license")
     validator.string(
@@ -202,7 +286,18 @@ def validate_target(validator: Validator, project: dict[str, Any], location: str
     runtime = validator.string(target.get("runtime"), f"{location}.target.runtime")
     if runtime is not None:
         validator.require(runtime in RUNTIMES, f"{location}.target.runtime", f"must be one of {sorted(RUNTIMES)}")
-    validator.string(target.get("loader"), f"{location}.target.loader")
+    loader = validator.string(target.get("loader"), f"{location}.target.loader")
+    expected_loader = {
+        "glibc": "/lib/ld-linux-aarch64.so.1",
+        "musl": "/lib/ld-musl-aarch64.so.1",
+        "bionic": "/system/bin/linker64",
+    }.get(runtime or "")
+    if expected_loader is not None:
+        validator.require(
+            loader == expected_loader,
+            f"{location}.target.loader",
+            f"must be {expected_loader} for the declared runtime",
+        )
     validator.string(target.get("artifactKind"), f"{location}.target.artifactKind")
     page_size = target.get("pageSize")
     if page_size is not None:
@@ -212,6 +307,34 @@ def validate_target(validator: Validator, project: dict[str, Any], location: str
             "must be a positive integer when present",
         )
     return runtime if isinstance(runtime, str) else None
+
+
+def _validate_string_array(
+    validator: Validator,
+    value: Any,
+    location: str,
+    *,
+    maximum: int = 256,
+) -> None:
+    values = validator.sequence(value, location)
+    if values is None:
+        return
+    validator.require(len(values) <= maximum, location, f"must contain at most {maximum} values")
+    for index, item in enumerate(values):
+        validator.string(item, f"{location}[{index}]")
+
+
+def _validate_bounded_mapping(
+    validator: Validator,
+    value: Any,
+    location: str,
+    *,
+    maximum: int = 256,
+) -> None:
+    mapping = validator.mapping(value, location)
+    if mapping is None:
+        return
+    validator.require(len(mapping) <= maximum, location, f"must contain at most {maximum} fields")
 
 
 def validate_fingerprint(validator: Validator, project: dict[str, Any], location: str) -> None:
@@ -242,12 +365,30 @@ def validate_fingerprint(validator: Validator, project: dict[str, Any], location
     for key in required:
         if key not in fingerprint:
             validator.error(f"{location}.featureFingerprint.{key}", "is required")
-    for key in ("tls", "gnuProperty", "relro", "stripped"):
-        if key in fingerprint:
-            value = fingerprint[key]
-            if isinstance(value, dict) and value.get("source") == "ci-generated":
-                continue
-            validator.boolean(value, f"{location}.featureFingerprint.{key}")
+
+    validator.string(fingerprint.get("producer"), f"{location}.featureFingerprint.producer")
+    for key in ("elfClass", "data", "machine", "type"):
+        validator.string(fingerprint.get(key), f"{location}.featureFingerprint.{key}")
+    interpreter = fingerprint.get("interpreter")
+    validator.require(
+        interpreter is None or isinstance(interpreter, str),
+        f"{location}.featureFingerprint.interpreter",
+        "must be a string or null",
+    )
+    for key in ("tls", "gnuProperty", "relro", "gnuStack", "stripped"):
+        if key not in fingerprint:
+            continue
+        value = fingerprint[key]
+        # Registry rows use a source marker while CI rows contain the concrete
+        # normalized object.  Both are metadata; neither is a support claim.
+        if isinstance(value, dict):
+            validator.require(
+                len(value) <= 256,
+                f"{location}.featureFingerprint.{key}",
+                "must contain at most 256 fields",
+            )
+            continue
+        validator.boolean(value, f"{location}.featureFingerprint.{key}")
     if "fileSizeBytes" in fingerprint:
         value = fingerprint["fileSizeBytes"]
         validator.require(
@@ -256,19 +397,61 @@ def validate_fingerprint(validator: Validator, project: dict[str, Any], location
             f"{location}.featureFingerprint.fileSizeBytes",
             "must be a positive integer or ci-generated",
         )
-    for key in ("dynamicNeeded", "featureTags"):
-        values = validator.sequence(fingerprint.get(key), f"{location}.featureFingerprint.{key}")
-        if values is not None:
-            for index, value in enumerate(values):
-                validator.string(value, f"{location}.featureFingerprint.{key}[{index}]")
-    validator.mapping(fingerprint.get("ptLoadLayout"), f"{location}.featureFingerprint.ptLoadLayout")
-    validator.mapping(fingerprint.get("relocations"), f"{location}.featureFingerprint.relocations")
-    expected_tags = fingerprint.get("expectedFeatureTags")
-    if expected_tags is not None:
-        values = validator.sequence(expected_tags, f"{location}.featureFingerprint.expectedFeatureTags")
-        if values is not None:
-            for index, value in enumerate(values):
-                validator.string(value, f"{location}.featureFingerprint.expectedFeatureTags[{index}]")
+    for key in ("dynamicNeeded", "featureTags", "expectedFeatureTags", "unknownFields"):
+        if key in fingerprint:
+            _validate_string_array(
+                validator,
+                fingerprint[key],
+                f"{location}.featureFingerprint.{key}",
+                maximum=1024 if key == "dynamicNeeded" else 256,
+            )
+    pt_load = fingerprint.get("ptLoadLayout")
+    validator.require(
+        isinstance(pt_load, (dict, list)),
+        f"{location}.featureFingerprint.ptLoadLayout",
+        "must be an object or bounded array",
+    )
+    if isinstance(pt_load, list):
+        validator.require(
+            len(pt_load) <= 128,
+            f"{location}.featureFingerprint.ptLoadLayout",
+            "must contain at most 128 load segments",
+        )
+    for key in (
+        "relocations",
+        "dependencies",
+        "dynamic",
+        "symbolVersions",
+        "tls",
+        "gnuProperty",
+        "relro",
+        "gnuStack",
+        "hardening",
+        "sections",
+        "inspection",
+    ):
+        if key in fingerprint:
+            _validate_bounded_mapping(
+                validator,
+                fingerprint[key],
+                f"{location}.featureFingerprint.{key}",
+            )
+    for key in ("pageSize", "programHeaderCount", "dynamicSymbolCount"):
+        if key not in fingerprint:
+            continue
+        value = fingerprint[key]
+        validator.require(
+            value is None or (isinstance(value, int) and not isinstance(value, bool) and value > 0),
+            f"{location}.featureFingerprint.{key}",
+            "must be a positive integer or null",
+        )
+    schema_version = fingerprint.get("schemaVersion")
+    if schema_version is not None:
+        validator.require(
+            schema_version in {1, 2},
+            f"{location}.featureFingerprint.schemaVersion",
+            "must be 1 or 2",
+        )
 
 
 def validate_selection(validator: Validator, project: dict[str, Any], location: str) -> None:
@@ -369,6 +552,33 @@ def validate_policy(validator: Validator, project: dict[str, Any], location: str
                 )
 
 
+def validate_acquisition(validator: Validator, project: dict[str, Any], location: str) -> None:
+    acquisition = validator.mapping(project.get("acquisition"), f"{location}.acquisition")
+    if acquisition is None:
+        return
+    validator.require(acquisition.get("ciOnly") is True, f"{location}.acquisition.ciOnly", "must remain CI-only")
+    validator.require(
+        acquisition.get("networkPhase") == "download-hash-extract",
+        f"{location}.acquisition.networkPhase",
+        "must separate acquisition from later offline inspection",
+    )
+    validator.require(
+        acquisition.get("rawArtifactsUploaded") is False,
+        f"{location}.acquisition.rawArtifactsUploaded",
+        "must remain false",
+    )
+    validator.require(
+        acquisition.get("maxArchiveBytes") == MAX_REAL_SAMPLE_ARCHIVE_BYTES,
+        f"{location}.acquisition.maxArchiveBytes",
+        f"must match the extractor bound {MAX_REAL_SAMPLE_ARCHIVE_BYTES}",
+    )
+    validator.require(
+        acquisition.get("maxExtractedBytes") == MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES,
+        f"{location}.acquisition.maxExtractedBytes",
+        f"must match the extractor bound {MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES}",
+    )
+
+
 def validate_variants(validator: Validator, project: dict[str, Any], location: str) -> None:
     variants = project.get("variants", [])
     values = validator.sequence(variants, f"{location}.variants")
@@ -409,6 +619,26 @@ def validate_project(validator: Validator, project: Any, index: int, *, selected
     validate_fingerprint(validator, value, location)
     validate_selection(validator, value, location)
     if selected:
+        validate_acquisition(validator, value, location)
+        provenance = value.get("provenance")
+        if isinstance(provenance, dict):
+            validator.require(
+                isinstance(provenance.get("archiveSizeBytes"), int)
+                and not isinstance(provenance.get("archiveSizeBytes"), bool),
+                f"{location}.provenance.archiveSizeBytes",
+                "must be recorded for every selected archive",
+            )
+            validator.require(
+                isinstance(provenance.get("boundedExtraction"), dict),
+                f"{location}.provenance.boundedExtraction",
+                "must record bounds and local artifact verification for every selected archive",
+            )
+            if provenance.get("archiveFormat") == "apk":
+                validator.require(
+                    runtime == "musl",
+                    f"{location}.target.runtime",
+                    "Alpine APK records must declare musl",
+                )
         validate_policy(validator, value, location)
         validate_fingerprint_policy(validator, value, location)
     return project_id, identity
@@ -419,9 +649,14 @@ def validate_candidates(validator: Validator, data: dict[str, Any]) -> dict[str,
     validator.string(data.get("discoveryPolicy"), "candidates.discoveryPolicy")
     candidates = validator.sequence(data.get("candidates"), "candidates.candidates")
     result: dict[str, dict[str, Any]] = {}
+    seen_identities: set[str] = set()
     if candidates is None:
         return result
-    validator.require(len(candidates) >= 20, "candidates.candidates", "must retain at least the locked corpus size")
+    validator.require(
+        len(candidates) >= APPROVED_TARGET_COUNT,
+        "candidates.candidates",
+        f"must retain at least the approved target ledger size ({APPROVED_TARGET_COUNT})",
+    )
     for index, candidate in enumerate(candidates):
         location = f"candidates.candidates[{index}]"
         value = validator.mapping(candidate, location)
@@ -439,6 +674,13 @@ def validate_candidates(validator: Validator, data: dict[str, Any]) -> dict[str,
             validator.require(bool(value.get("dispositionReason")), f"{location}.dispositionReason", "is required for rejected/deferred candidates")
         if identity is not None:
             validator.require(identity.strip() != "", f"{location}.identityKey", "must identify one upstream project")
+            normalized_identity = identity.casefold()
+            validator.require(
+                normalized_identity not in seen_identities,
+                f"{location}.identityKey",
+                "must identify a distinct upstream project; variants belong in variants",
+            )
+            seen_identities.add(normalized_identity)
     return result
 
 
@@ -452,15 +694,88 @@ def validate_registry(
     if corpus is None:
         return validator, []
     count = corpus.get("requiredProjectCount")
-    validator.require(count == 20, "manifest.corpus.requiredProjectCount", "must be exactly 20")
+    validator.require(
+        isinstance(count, int) and not isinstance(count, bool) and count > 0,
+        "manifest.corpus.requiredProjectCount",
+        "must be a positive integer",
+    )
+    target_count = corpus.get("targetProjectCount", APPROVED_TARGET_COUNT)
+    validator.require(
+        isinstance(target_count, int) and not isinstance(target_count, bool) and target_count == APPROVED_TARGET_COUNT,
+        "manifest.corpus.targetProjectCount",
+        f"must equal the approved target {APPROVED_TARGET_COUNT}",
+    )
+    if isinstance(count, int) and isinstance(target_count, int):
+        validator.require(
+            count == target_count == APPROVED_TARGET_COUNT,
+            "manifest.corpus.requiredProjectCount",
+            f"must equal the approved target {APPROVED_TARGET_COUNT}",
+        )
     validator.string(corpus.get("selectionPolicy"), "manifest.corpus.selectionPolicy")
+    expansion = corpus.get("expansion")
+    increment: dict[str, Any] | None = None
+    expansion_details: dict[str, Any] | None = None
+    if expansion is not None:
+        expansion_map = validator.mapping(expansion, "manifest.corpus.expansion")
+        if expansion_map is not None:
+            expansion_details = expansion_map
+            validator.require(
+                expansion_map.get("approvedTarget") == APPROVED_TARGET_COUNT,
+                "manifest.corpus.expansion.approvedTarget",
+                f"must remain {APPROVED_TARGET_COUNT} distinct identities",
+            )
+            validator.require(
+                expansion_map.get("currentApproved") == count,
+                "manifest.corpus.expansion.currentApproved",
+                "must match requiredProjectCount",
+            )
+            validator.string(expansion_map.get("status"), "manifest.corpus.expansion.status")
+            validator.string(expansion_map.get("shortfallEvidence"), "manifest.corpus.expansion.shortfallEvidence")
+            increment_value = expansion_map.get("increment")
+            increment = validator.mapping(increment_value, "manifest.corpus.expansion.increment")
+            if increment is not None:
+                expected_increment = {
+                    "addedIdentities": 80,
+                    "deferredPromoted": 23,
+                    "debianBookwormArm64Added": 37,
+                    "alpineV322Arm64ApkAdded": 20,
+                }
+                for key, expected_value in expected_increment.items():
+                    validator.require(
+                        increment.get(key) == expected_value,
+                        f"manifest.corpus.expansion.increment.{key}",
+                        f"must equal the reviewed increment value {expected_value}",
+                    )
+                increment_counts = [
+                    increment.get(key)
+                    for key in (
+                        "deferredPromoted",
+                        "debianBookwormArm64Added",
+                        "alpineV322Arm64ApkAdded",
+                    )
+                ]
+                added_count = increment.get("addedIdentities")
+                if all(type(item) is int for item in increment_counts) and type(added_count) is int:
+                    validator.require(
+                        sum(increment_counts) == added_count,
+                        "manifest.corpus.expansion.increment",
+                        "source counts must sum to addedIdentities",
+                    )
+            backlog = expansion_map.get("candidateBacklog")
+            if backlog is not None:
+                _validate_string_array(validator, backlog, "manifest.corpus.expansion.candidateBacklog", maximum=256)
     tiers = validator.sequence(corpus.get("tiers"), "manifest.corpus.tiers")
     if tiers is not None:
         validator.require({value for value in tiers if isinstance(value, str)} == set(TIERS), "manifest.corpus.tiers", "must include exactly pr, nightly, and release")
     projects = validator.sequence(corpus.get("projects"), "manifest.corpus.projects")
     if projects is None:
         return validator, []
-    validator.require(len(projects) == 20, "manifest.corpus.projects", "must contain exactly 20 project records")
+    if isinstance(count, int):
+        validator.require(
+            len(projects) == count,
+            "manifest.corpus.projects",
+            f"must contain exactly {count} project records",
+        )
     seen_ids: set[str] = set()
     seen_identities: set[str] = set()
     runtimes: set[str] = set()
@@ -478,7 +793,13 @@ def validate_registry(
                     selected_prov = project.get("provenance")
                     candidate_prov = candidate.get("provenance")
                     if isinstance(selected_prov, dict) and isinstance(candidate_prov, dict):
-                        validator.require(selected_prov.get("archiveSha256") == candidate_prov.get("archiveSha256"), f"manifest.corpus.projects[{index}].provenance.archiveSha256", "must match candidate ledger")
+                        for provenance_key in sorted(set(selected_prov) | set(candidate_prov)):
+                            validator.require(
+                                selected_prov.get(provenance_key)
+                                == candidate_prov.get(provenance_key),
+                                f"manifest.corpus.projects[{index}].provenance.{provenance_key}",
+                                "must match candidate ledger",
+                            )
             if identity is not None:
                 normalized_identity = identity.casefold()
                 validator.require(normalized_identity not in seen_identities, f"manifest.corpus.projects[{index}].identityKey", "must identify a distinct upstream project")
@@ -488,6 +809,90 @@ def validate_registry(
             runtimes.add(target["runtime"])
         validate_variants(validator, project if isinstance(project, dict) else {}, f"manifest.corpus.projects[{index}]")
     validator.require(RUNTIMES.issubset(runtimes), "manifest.corpus.projects", "must cover glibc, musl, and bionic runtimes")
+    if candidates is not None:
+        selected_ids = {
+            project_id
+            for project_id, candidate in candidates.items()
+            if candidate.get("disposition") == "selected"
+        }
+        validator.require(
+            selected_ids == seen_ids,
+            "manifest.corpus.projects",
+            "selected candidate IDs must equal the complete manifest registry",
+        )
+    apk_count = sum(
+        isinstance(project, dict)
+        and isinstance(project.get("provenance"), dict)
+        and project["provenance"].get("archiveFormat") == "apk"
+        for project in projects
+    )
+    validator.require(
+        apk_count >= MINIMUM_ALPINE_APK_IDENTITIES,
+        "manifest.corpus.projects",
+        f"must include at least {MINIMUM_ALPINE_APK_IDENTITIES} pinned Alpine APK identities for musl coverage",
+    )
+    if increment is not None:
+        validator.require(
+            apk_count == increment.get("alpineV322Arm64ApkAdded"),
+            "manifest.corpus.projects",
+            "APK archive count must equal the reviewed Alpine APK increment",
+        )
+        package_source_counts = {
+            "debian-bookworm-arm64-package": sum(
+                isinstance(project, dict)
+                and isinstance(project.get("provenance"), dict)
+                and project["provenance"].get("sourceKind") == "debian-bookworm-arm64-package"
+                and project["provenance"].get("sourceIndexSha256") is not None
+                for project in projects
+            ),
+            "alpine-v3.22-main-aarch64-apk": apk_count,
+            "existing-public-baseline": 0,
+        }
+        package_source_counts["existing-public-baseline"] = len(projects) - sum(
+            package_source_counts.values()
+        )
+        declared_source_mix = expansion_details.get("sourceMix") if expansion_details is not None else None
+        if isinstance(declared_source_mix, dict):
+            validator.require(
+                package_source_counts == declared_source_mix,
+                "manifest.corpus.expansion.sourceMix",
+                "must match the provenance-verified increment and original baseline counts",
+            )
+        actual_runtime_mix = {
+            runtime: sum(
+                isinstance(project, dict)
+                and isinstance(project.get("target"), dict)
+                and project["target"].get("runtime") == runtime
+                for project in projects
+            )
+            for runtime in sorted(RUNTIMES)
+        }
+        declared_runtime_mix = expansion_details.get("runtimeMix") if expansion_details is not None else None
+        if isinstance(declared_runtime_mix, dict):
+            validator.require(
+                actual_runtime_mix == declared_runtime_mix,
+                "manifest.corpus.expansion.runtimeMix",
+                "must match the selected project target runtime fields",
+            )
+        for index, project in enumerate(projects):
+            if not isinstance(project, dict):
+                continue
+            provenance = project.get("provenance")
+            if not isinstance(provenance, dict):
+                continue
+            source_index = provenance.get("sourceIndexSha256")
+            if provenance.get("archiveFormat") == "apk":
+                validator.require(
+                    source_index == increment.get("alpineIndexSha256"),
+                    f"manifest.corpus.projects[{index}].provenance.sourceIndexSha256",
+                    "must match the pinned Alpine package index digest",
+                )
+            elif source_index is not None and provenance.get("sourceKind") == "debian-bookworm-arm64-package":
+                validator.require(
+                    source_index == increment.get("debianIndexSha256"),
+                    f"manifest.corpus.projects[{index}].provenance.sourceIndexSha256",
+                    "must match the pinned Debian package index digest",
+                )
     return validator, [project for project in projects if isinstance(project, dict)]
 
 
@@ -498,7 +903,7 @@ def parse_args() -> argparse.Namespace:
         nargs="?",
         type=Path,
         default=Path("fixtures/real-samples/manifest.json"),
-        help="selected 20-project registry",
+        help="selected public AArch64 registry",
     )
     parser.add_argument(
         "--candidates",
@@ -508,7 +913,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tier",
         choices=TIERS,
-        help="validate that a tier is declared; all tiers remain locked to the same 20 projects",
+        help="validate that a tier is declared; all tiers use the same locked registry",
     )
     parser.add_argument(
         "--emit",

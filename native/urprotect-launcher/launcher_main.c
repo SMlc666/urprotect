@@ -18,6 +18,7 @@
 #define URP_ELF_CLASS_64 2U
 #define URP_ELF_DATA_LSB 1U
 #define URP_ELF_VERSION_CURRENT 1U
+#define URP_ELF_TYPE_EXEC 2U
 #define URP_PT_LOAD 1U
 #define URP_PT_INTERP 3U
 #define URP_PF_X 1U
@@ -491,6 +492,7 @@ static int urp_validate_interpreter(const uint8_t *bytes, size_t size)
 
 static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
 {
+    uint16_t elf_type = source_size >= 18U ? urp_read_u16_le(source + 16U) : 0U;
     if (source_size < 64U
         || source[0] != 0x7FU
         || source[1] != 'E'
@@ -499,7 +501,7 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
         || source[4] != 2U
         || source[5] != 1U
         || source[6] != URP_ELF_VERSION_CURRENT
-        || urp_read_u16_le(source + 16U) != URP_FRAME_TYPE_DYN
+        || (elf_type != URP_FRAME_TYPE_DYN && elf_type != URP_ELF_TYPE_EXEC)
         || urp_read_u16_le(source + 18U) != URP_FRAME_MACHINE_AARCH64
         || urp_read_u32_le(source + 20U) != URP_ELF_VERSION_CURRENT
         || urp_read_u16_le(source + 52U) != 64U
@@ -574,6 +576,10 @@ static int urp_validate_recovered_elf(const uint8_t *source, size_t source_size)
             has_dynamic = 1;
         }
     }
+    if (elf_type == URP_ELF_TYPE_EXEC && (!has_dynamic || !has_interpreter)) {
+        return 0;
+    }
+
     return has_load && has_executable_entry && (!has_dynamic || has_interpreter);
 }
 
@@ -677,7 +683,7 @@ int main(int argc, char **argv, char **envp)
     if (!urp_validate_recovered_elf(source, source_size)) {
         free(source);
         free(wrapper);
-        return urp_report(URP_EXIT_VALIDATION, "UnsupportedPackInput", "the recovered payload is not a supported AArch64 ET_DYN executable");
+        return urp_report(URP_EXIT_VALIDATION, "UnsupportedPackInput", "the recovered payload is not a supported AArch64 executable");
     }
 
     int result = urp_write_payload_and_exec(&frame, source, source_size, argc, argv, envp);

@@ -8,6 +8,7 @@ public static class ElfConstants
     public const byte LittleEndian = 1;
     public const byte IdentificationVersionCurrent = 1;
     public const uint HeaderVersionCurrent = 1;
+    public const ushort TypeExec = 2;
     public const ushort TypeDyn = 3;
     public const ushort MachineAarch64 = 183;
     public const ushort HeaderSize64 = 64;
@@ -68,6 +69,8 @@ public static class ElfConstants
     public const ulong Df1Pie = 0x08000000;
     public const ulong DtGnuHash = 0x6FFFFEF5;
     public const ulong DtVersym = 0x6FFFFFF0;
+    public const ulong DtVerdef = 0x6FFFFFFC;
+    public const ulong DtVerdefNum = 0x6FFFFFFD;
     public const ulong DtVerneed = 0x6FFFFFFE;
     public const ulong DtVerneedNum = 0x6FFFFFFF;
     public const ulong DtRelr = 36;
@@ -145,6 +148,8 @@ public enum ElfFileKind
     Unknown,
     PieExecutable,
     StaticPieExecutable,
+    DynamicExecutable,
+    StaticExecutable,
     SharedObject,
 }
 
@@ -166,6 +171,13 @@ public readonly record struct ElfHeader(
     public bool IsAarch64 => Machine == ElfConstants.MachineAarch64;
 
     public bool IsDynamic => Type == ElfConstants.TypeDyn;
+
+    public string TypeName => Type switch
+    {
+        ElfConstants.TypeDyn => "ET_DYN",
+        ElfConstants.TypeExec => "ET_EXEC",
+        _ => $"0x{Type:X}",
+    };
 }
 
 public enum ProgramHeaderKind
@@ -274,6 +286,24 @@ public sealed record VersionNeed(
     IReadOnlyList<VersionNeedAuxiliary> Auxiliaries,
     ReadOnlyMemory<byte> RawBytes);
 
+public readonly record struct VersionDefinitionAuxiliary(
+    uint NameOffset,
+    uint NextOffset,
+    string Name,
+    ReadOnlyMemory<byte> RawBytes);
+
+public sealed record VersionDefinition(
+    ushort Version,
+    ushort Flags,
+    ushort Index,
+    ushort AuxiliaryCount,
+    uint Hash,
+    uint AuxiliaryOffset,
+    uint NextOffset,
+    string Name,
+    IReadOnlyList<VersionDefinitionAuxiliary> Auxiliaries,
+    ReadOnlyMemory<byte> RawBytes);
+
 public sealed record ElfSymbolVersionMetadata(
     ulong VersionTableAddress,
     ReadOnlyMemory<byte> VersionTableBytes,
@@ -282,6 +312,12 @@ public sealed record ElfSymbolVersionMetadata(
     ReadOnlyMemory<byte> VersionNeedBytes,
     IReadOnlyList<VersionNeed> NeededVersions)
 {
+    public VirtualAddress VersionDefinitionAddress { get; init; }
+
+    public ReadOnlyMemory<byte> VersionDefinitionBytes { get; init; }
+
+    public IReadOnlyList<VersionDefinition> DefinedVersions { get; init; } = Array.Empty<VersionDefinition>();
+
     public static ElfSymbolVersionMetadata Empty { get; } = new(
         0,
         ReadOnlyMemory<byte>.Empty,
@@ -461,15 +497,19 @@ public sealed class ElfFile
     public IReadOnlyList<DynamicSymbol> DynamicSymbols { get; }
 
     public ElfFileKind Kind =>
-        ProgramHeaders.Any(header => header.Type == ElfConstants.PtInterp)
-            ? ElfFileKind.PieExecutable
-            : Header.Entry != 0
-                && ProgramHeaders.Any(header =>
-                    header.IsExecutable
-                    && Header.Entry >= header.VirtualAddress
-                    && Header.Entry - header.VirtualAddress < header.FileSize)
-                ? ElfFileKind.StaticPieExecutable
-            : ElfFileKind.SharedObject;
+        Header.Type == ElfConstants.TypeExec
+            ? (ProgramHeaders.Any(header => header.Type == ElfConstants.PtInterp)
+                ? ElfFileKind.DynamicExecutable
+                : ElfFileKind.StaticExecutable)
+            : ProgramHeaders.Any(header => header.Type == ElfConstants.PtInterp)
+                ? ElfFileKind.PieExecutable
+                : Header.Entry != 0
+                    && ProgramHeaders.Any(header =>
+                        header.IsExecutable
+                        && Header.Entry >= header.VirtualAddress
+                        && Header.Entry - header.VirtualAddress < header.FileSize)
+                    ? ElfFileKind.StaticPieExecutable
+                : ElfFileKind.SharedObject;
 }
 
 public sealed record ElfParseResult(

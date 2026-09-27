@@ -23,6 +23,22 @@ public sealed class HostContextContractTests
                 HostContextContract.MandatoryCapabilities));
     }
 
+    [Fact]
+    public void AcceptsOptionalThreadLifetimeRequirement()
+    {
+        var metadata = new HostContextFrameMetadata(
+            HostContextContract.AbiVersion,
+            HostContextContract.MandatoryCapabilities | HostContextCapability.ThreadLifetime,
+            HostContextContract.EntrySymbol);
+
+        Assert.True(metadata.IsValid(out var error), error);
+        Assert.True(HostContextContract.HasOnlySupportedCapabilities(metadata.RequiredCapabilities));
+        Assert.Equal(56U, HostContextContract.MinimumContextSize);
+        Assert.Equal(72U, HostContextContract.CurrentContextSize);
+        Assert.Equal(32U, HostContextContract.MinimumLaunchArgsSize);
+        Assert.Equal(40U, HostContextContract.CurrentLaunchArgsSize);
+    }
+
     [Theory]
     [InlineData(0U)]
     [InlineData(2U)]

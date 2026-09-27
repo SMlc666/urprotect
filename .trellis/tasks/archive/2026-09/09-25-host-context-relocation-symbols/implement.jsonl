@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Define the exact HostContext relocation/symbol claim and keep loader acceptance distinct from contract support."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply managed/native ABI drift, malformed fixture, fuzz, evidence, and AArch64 runtime gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve pre-handoff rejection, stable status/diagnostics, zero handles, and no partial dispatch."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Respect shared ELF model ownership and native adapter/ABI boundaries."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace feature data from ELF model through managed frame, native adapter, fixtures, CI, manifest, and docs."}

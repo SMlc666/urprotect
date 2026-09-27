@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_nightly_rehearsal:
+        description: Run the full nightly real-sample and fixture evidence tiers without waiting for the schedule.
+        required: false
+        default: false
+        type: boolean
       run_release_fixtures:
         description: Run the release-tier compatibility fixture and evidence gates without publishing a release.
         required: false
@@ -70,6 +75,10 @@ jobs:
         run: python3 tests/test_fixture_matrix.py
       - name: Check regression matrix contract
         run: python3 tests/test_regression_matrix.py
+      - name: Check runtime covering matrix
+        run: |
+          python3 tests/test_runtime_matrix.py
+          python3 scripts/validate-runtime-matrix.py fixtures/runtime-matrix.json
       - name: Render PR regression matrix plan
         run: |
           mkdir -p .artifacts/regression-matrix/pr
@@ -99,13 +108,21 @@ jobs:
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.wrapper-v1-baseline
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.outer.dynamic-et-exec
       - name: HostContext runtime contract smoke
         run: |
+          set -o pipefail
           mkdir -p .artifacts/host-context/pr
+          make -C native/urprotect-runtime dependency-fixture
+          cp native/urprotect-runtime/build/host-context-dependency-fixture.so \
+            .artifacts/host-context/pr/
+          readelf -aW native/urprotect-runtime/build/host-context-dependency-fixture.so \
+            > .artifacts/host-context/pr/dependency-fixture-readelf.txt
           make -C native/urprotect-runtime test \
             2>&1 | tee .artifacts/host-context/pr/self-test.log
       - name: Managed HostContext packaging oracle
         run: |
+          set -o pipefail
           MANAGED_HOST_CONTEXT_ARTIFACT_ROOT=.artifacts/host-context/managed \
             native/urprotect-runtime/test_managed_host_context.sh \
             2>&1 | tee .artifacts/host-context/pr/managed-pack.log
@@ -114,8 +131,13 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v1
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v2
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.pt-tls
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.threaded-initial-exec-tls
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-property
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.dependency-resolution
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.weak-undefined-jump-slot
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.dependency-symbol-version-requirements
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.bounded-glibc-loader-dependency
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.symbol-version
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.constructor-destructor
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.path-search
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.text-relocation
@@ -125,8 +147,7 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-stack
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.production-pack
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.dependency-resolution
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.constructor-destructor
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.symbol-version.requirements
       - name: Render compatibility matrix
         run: |
           python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
@@ -163,7 +184,7 @@ jobs:
             /tmp/urprotect-*.err
           if-no-files-found: warn
 
-  # The public real-sample corpus is a required full-20 gate on every PR.
+  # The current approved public real-sample slice is a required full-corpus gate on every PR.
   # Scheduled and release runs reuse the exact registry/orchestrator and only
   # change the tier's retention/repeat policy; they never select a subset.
   real-sample-matrix:
@@ -182,6 +203,15 @@ jobs:
             pull_request) echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV" ;;
             release) echo 'REAL_SAMPLE_TIER=release' >> "$GITHUB_ENV" ;;
             schedule) echo 'REAL_SAMPLE_TIER=nightly' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${{ inputs.run_release_rehearsal }}" == true ]]; then
+                echo 'REAL_SAMPLE_TIER=release' >> "$GITHUB_ENV"
+              elif [[ "${{ inputs.run_nightly_rehearsal }}" == true ]]; then
+                echo 'REAL_SAMPLE_TIER=nightly' >> "$GITHUB_ENV"
+              else
+                echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV"
+              fi
+              ;;
             *) echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV" ;;
           esac
       - name: Record isolated ARM64 runner environment
@@ -218,9 +248,17 @@ jobs:
             fixtures/real-samples/manifest.json \
             --candidates fixtures/real-samples/candidates.json \
             --tier "${REAL_SAMPLE_TIER}"
-      - name: Run required full 20-project real-sample suite
+      - name: Run required full approved real-sample suite
         run: |
           ./scripts/run-real-sample-matrix.sh --tier "${REAL_SAMPLE_TIER}"
+      - name: Recheck retained real-sample evidence
+        if: always()
+        run: |
+          python3 scripts/check-real-sample-evidence.py \
+            fixtures/real-samples/manifest.json \
+            --candidates fixtures/real-samples/candidates.json \
+            --tier "${REAL_SAMPLE_TIER}" \
+            --artifact-root ".artifacts/real-samples/${REAL_SAMPLE_TIER}"
       - name: Upload real-sample evidence (never raw inputs)
         if: always()
         uses: actions/upload-artifact@v4
@@ -228,6 +266,81 @@ jobs:
           name: real-samples-${{ env.REAL_SAMPLE_TIER }}-${{ github.run_id }}
           path: .artifacts/real-samples/
           if-no-files-found: error
+
+  runtime-matrix-native-arm64:
+    needs: bionic-native-arm64
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select runtime matrix tier
+        env:
+          RUN_RELEASE_FIXTURES: ${{ inputs.run_release_fixtures }}
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request) echo 'RUNTIME_MATRIX_TIER=pr' >> "$GITHUB_ENV" ;;
+            release) echo 'RUNTIME_MATRIX_TIER=release' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${RUN_RELEASE_FIXTURES}" == true ]]; then
+                echo 'RUNTIME_MATRIX_TIER=release' >> "$GITHUB_ENV"
+              else
+                echo 'RUNTIME_MATRIX_TIER=nightly' >> "$GITHUB_ENV"
+              fi
+              ;;
+            *) echo 'RUNTIME_MATRIX_TIER=nightly' >> "$GITHUB_ENV" ;;
+          esac
+      - name: Record native AArch64 runtime matrix environment
+        run: |
+          mkdir -p ".artifacts/runtime-matrix/${RUNTIME_MATRIX_TIER}"
+          ./.github/scripts/record-environment.sh \
+            ".artifacts/runtime-matrix/${RUNTIME_MATRIX_TIER}/runner.txt" aarch64 runtime-covering-matrix
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            **/packages.lock.json
+      - name: Restore and build UrProtect for every runtime tier
+        run: |
+          dotnet restore UrProtect.sln --locked-mode
+          dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Install the pinned native musl toolchain for extended tiers
+        if: env.RUNTIME_MATRIX_TIER != 'pr'
+        env:
+          RUNTIME_TOOLCHAIN_ARTIFACT_ROOT: .artifacts/runtime-matrix/${{ env.RUNTIME_MATRIX_TIER }}/package-locks/musl-1.2.4
+        run: |
+          chmod +x scripts/install-runtime-musl-toolchain.sh
+          ./scripts/install-runtime-musl-toolchain.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: bionic-native-arm64-${{ github.run_id }}
+          path: .artifacts/bionic
+      - name: Validate registry and run native/container covering set
+        env:
+          RUNTIME_MATRIX_ARTIFACT_ROOT: .artifacts/runtime-matrix/${{ env.RUNTIME_MATRIX_TIER }}
+          BIONIC_MATRIX_ARTIFACT_ROOT: .artifacts/bionic/c-termux-bionic-pie
+        run: ./scripts/run-runtime-matrix.sh "${RUNTIME_MATRIX_TIER}"
+      - name: Hash final runtime and consumed bionic evidence
+        if: always()
+        run: |
+          find ".artifacts/runtime-matrix/${RUNTIME_MATRIX_TIER}" .artifacts/bionic/c-termux-bionic-pie \
+            -type f ! -path ".artifacts/runtime-matrix/${RUNTIME_MATRIX_TIER}/SHA256SUMS" -print0 | sort -z | xargs -0 sha256sum \
+            > ".artifacts/runtime-matrix/${RUNTIME_MATRIX_TIER}/SHA256SUMS"
+      - name: Recheck retained runtime matrix evidence
+        if: always()
+        run: python3 scripts/check-runtime-matrix-evidence.py "${RUNTIME_MATRIX_TIER}" ".artifacts/runtime-matrix/${RUNTIME_MATRIX_TIER}" .artifacts/bionic/c-termux-bionic-pie
+      - name: Upload runtime matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-matrix-${{ env.RUNTIME_MATRIX_TIER }}-${{ github.run_id }}
+          path: |
+            .artifacts/runtime-matrix/
+            .artifacts/bionic/
+          if-no-files-found: error
+          include-hidden-files: true
 
   bionic-native-arm64:
     if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'

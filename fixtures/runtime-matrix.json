@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "selection": "named covering set; main effects: native AArch64, current/older glibc, musl 1.2.4/1.2.5, bionic baseline, loader identity, host page size; high-risk interaction: 16KiB PT_LOAD alignment across glibc and musl loaders. Containers share the native runner kernel. High-risk pairwise interactions explicitly covered: older glibc x 16KiB PT_LOAD alignment and musl 1.2.5 x 16KiB PT_LOAD alignment. The 16KiB runtime probe is mandatory evidence collection but its runtime claim is optional/unknown unless a native 16KiB kernel is observed. Producer/shape rationale: system GCC/GNU ld produce the GNU PIE witnesses, the hash-locked musl 1.2.4 source build produces both musl alignment witnesses (then Alpine 1.2.5 exercises cross-version runtime), and the existing hash-locked Termux Clang/LLD closure owns bionic HostContext. Fixtures keep the dynamic PIE/loader/program-header oracle bounded; named interactions isolate userland-version x producer-alignment behavior instead of multiplying every producer across every loader.",
+  "tiers": {
+    "pr": [
+      "glibc.current.native-arm64",
+      "kernel-page.16k.native-aarch64",
+      "bionic.termux.locked"
+    ],
+    "nightly": [
+      "glibc.current.native-arm64",
+      "glibc.older.ubuntu-22.04-arm64",
+      "musl.1.2.4.ubuntu-native",
+      "musl.1.2.5.alpine-3.22.2",
+      "kernel-page.16k.native-aarch64",
+      "bionic.termux.locked"
+    ],
+    "release": [
+      "glibc.current.native-arm64",
+      "glibc.older.ubuntu-22.04-arm64",
+      "musl.1.2.4.ubuntu-native",
+      "musl.1.2.5.alpine-3.22.2",
+      "kernel-page.16k.native-aarch64",
+      "bionic.termux.locked"
+    ]
+  },
+  "cells": [
+    {
+      "id": "glibc.current.native-arm64",
+      "runtime": "glibc",
+      "version": "2.39",
+      "platform": "native-aarch64",
+      "image": null,
+      "imageDigest": null,
+      "kernel": "native host",
+      "pageSize": "observed",
+      "tier": [
+        "pr",
+        "nightly",
+        "release"
+      ],
+      "required": true,
+      "rationale": "Current native glibc main effect; GNU-linked 4KiB and 16KiB PT_LOAD fixtures.",
+      "producerClass": "runner GCC + GNU ld",
+      "fixtureFeatures": "ET_DYN PIE; PT_INTERP; PT_DYNAMIC; PT_LOAD alignments 4KiB and 16KiB; no-op write oracle"
+    },
+    {
+      "id": "glibc.older.ubuntu-22.04-arm64",
+      "runtime": "glibc",
+      "version": "2.35",
+      "platform": "arm64-container",
+      "image": "ubuntu:22.04",
+      "imageDigest": "sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02",
+      "kernel": "inherited native host",
+      "pageSize": "inherited observed host",
+      "tier": [
+        "nightly",
+        "release"
+      ],
+      "required": true,
+      "rationale": "Older glibc loader/userland, same GNU fixture alignment interaction.",
+      "interactions": [
+        "glibc-older x PT_LOAD.p_align=16384"
+      ],
+      "producerClass": "runner GCC/GNU ld producer, pinned Ubuntu 22.04 glibc loader",
+      "fixtureFeatures": "ET_DYN PIE; PT_INTERP; PT_DYNAMIC; GNU 16KiB PT_LOAD alignment; cross-userland runtime"
+    },
+    {
+      "id": "musl.1.2.4.ubuntu-native",
+      "runtime": "musl",
+      "version": "1.2.4-source-build",
+      "platform": "native-aarch64",
+      "image": null,
+      "imageDigest": null,
+      "kernel": "native host",
+      "pageSize": "observed",
+      "tier": [
+        "nightly",
+        "release"
+      ],
+      "required": true,
+      "rationale": "Ubuntu ARM64 native GCC builds hash-locked musl 1.2.4 source and its loader/runtime.",
+      "producerClass": "SHA-256-pinned musl 1.2.4 source build with recorded native GCC",
+      "fixtureFeatures": "ET_DYN PIE; PT_INTERP; PT_DYNAMIC; musl producer 4KiB and 16KiB PT_LOAD alignment",
+      "toolchainEvidence": [
+        "package-locks/musl-1.2.4/source/toolchain-source.json",
+        "package-locks/musl-1.2.4/source/musl-1.2.4.tar.gz",
+        "package-locks/musl-1.2.4/created-loader-link.txt",
+        "package-locks/musl-1.2.4/loader-link-cleanup.txt",
+        "package-locks/musl-1.2.4/build-facts.txt",
+        "package-locks/musl-1.2.4/logs/configure.log",
+        "package-locks/musl-1.2.4/logs/build.log",
+        "package-locks/musl-1.2.4/logs/install.log",
+        "package-locks/musl-1.2.4/logs/loader-version.txt",
+        "package-locks/musl-1.2.4/prefix/bin/musl-gcc",
+        "package-locks/musl-1.2.4/prefix/lib/libc.so",
+        "package-locks/musl-1.2.4/SHA256SUMS"
+      ]
+    },
+    {
+      "id": "musl.1.2.5.alpine-3.22.2",
+      "runtime": "musl",
+      "version": "1.2.5",
+      "platform": "arm64-container",
+      "image": "alpine:3.22.2",
+      "imageDigest": "sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412",
+      "kernel": "inherited native host",
+      "pageSize": "inherited observed host",
+      "tier": [
+        "nightly",
+        "release"
+      ],
+      "required": true,
+      "rationale": "Independent newer musl runtime executes native musl 1.2.4-produced fixture.",
+      "interactions": [
+        "musl-1.2.5 x PT_LOAD.p_align=16384"
+      ],
+      "producerClass": "SHA-256-pinned musl 1.2.4 source-built compiler, digest-pinned Alpine musl 1.2.5 loader",
+      "fixtureFeatures": "ET_DYN PIE; cross-version PT_INTERP/runtime; 4KiB and 16KiB PT_LOAD alignment; parser-copy equivalence"
+    },
+    {
+      "id": "bionic.termux.locked",
+      "runtime": "bionic",
+      "version": "locked Termux baseline",
+      "platform": "native-arm64-container",
+      "image": "existing bionic fixture registry",
+      "imageDigest": "fixtures/manifest.json",
+      "kernel": "inherited native host",
+      "pageSize": "observed by existing lane",
+      "tier": [
+        "pr",
+        "nightly",
+        "release"
+      ],
+      "required": true,
+      "rationale": "Existing locked Termux lane remains a distinct bionic witness.",
+      "evidenceProducer": "bionic-native-arm64",
+      "resultEvidence": "result.json",
+      "packageLockEvidence": "compiler-package-lock.json",
+      "packageVerificationEvidence": "package-hash-verification.txt",
+      "hostContextEvidence": "host-context/build-and-test.log",
+      "requiredArtifacts": [
+        "result.json",
+        "apt-archives/clang_21.1.8-3_aarch64.deb",
+        "apt-archives/libcompiler-rt_21.1.8-3_aarch64.deb",
+        "apt-archives/libllvm_21.1.8-3_aarch64.deb",
+        "apt-archives/libxml2_2.15.4-1_aarch64.deb",
+        "apt-archives/lld_21.1.8-3_aarch64.deb",
+        "apt-archives/llvm_21.1.8-3_aarch64.deb",
+        "apt-archives/ndk-sysroot_30_aarch64.deb",
+        "apt-archives/make_4.4.1-1_aarch64.deb",
+        "compiler-package-lock.json",
+        "package-hash-verification.txt",
+        "package-sha256sums.txt",
+        "provenance.txt",
+        "baseline.status",
+        "baseline.stdout",
+        "linker.status",
+        "linker.stdout",
+        "host-context/build-and-test.log",
+        "host-context/result.txt",
+        "host-context/entry-fixture-readelf.txt",
+        "host-context/entry-fixture.sha256",
+        "host-context/build/host-context-entry-fixture.so"
+      ],
+      "producerClass": "locked Termux Clang/LLD package closure",
+      "fixtureFeatures": "Bionic ET_DYN PIE; direct linker64 identity; sealed HostContext adapter and urp_entry dispatch"
+    },
+    {
+      "id": "kernel-page.16k.native-aarch64",
+      "runtime": "kernel-page-probe",
+      "version": "16384 bytes required for runtime claim",
+      "platform": "native-aarch64",
+      "image": null,
+      "imageDigest": null,
+      "kernel": "native host",
+      "pageSize": "probe; unavailable when host is not 16KiB",
+      "tier": [
+        "pr",
+        "nightly",
+        "release"
+      ],
+      "required": false,
+      "rationale": "Always record actual native page size; a 4KiB host produces environment-unavailable and leaves 16KiB kernel support unknown. ELF alignment is not kernel evidence.",
+      "probeRequired": true,
+      "claimRequired": false,
+      "producerClass": "native runner probe",
+      "fixtureFeatures": "host kernel page-size observation; no ELF fixture substitutes for this runtime fact"
+    }
+  ]
+}

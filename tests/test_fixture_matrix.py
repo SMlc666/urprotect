@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -143,7 +144,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["witness"],
             "native/urprotect-runtime/host_context_tls_fixture.c",
         )
-        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn(
             "native/urprotect-runtime/host_context_tls_fixture.c",
             feature["evidence"],
@@ -183,7 +184,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["witness"],
             "native/urprotect-runtime/host_context_property_fixture.c",
         )
-        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn(
             ".artifacts/host-context/managed/property-result.txt",
             feature["evidence"],
@@ -312,7 +313,7 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertEqual(
             feature["oracle"],
-            "native/urprotect-runtime/host_adapter.c",
+            "native/urprotect-runtime/host_image_validation.c",
         )
         self.assertIn("DT_TEXTREL", feature["obligation"])
         self.assertIn("writable-text relocation", feature["reason"])
@@ -323,7 +324,7 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertEqual(
             feature["negativeOracle"],
-            "native/urprotect-runtime/host_adapter.c",
+            "native/urprotect-runtime/host_image_validation.c",
         )
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertIn(
@@ -386,25 +387,24 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["witness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["oracle"], "native/urprotect-runtime/host_image_validation.c")
         for relocation_tag in (
             "DT_REL",
             "DT_RELSZ",
             "DT_RELENT",
-            "DT_JMPREL",
-            "DT_PLTRELSZ",
-            "DT_PLTREL",
         ):
             self.assertIn(relocation_tag, feature["obligation"])
+        self.assertNotIn("DT_JMPREL", feature["obligation"])
+        self.assertIn("partial", feature["obligation"])
         for dependency_tag in ("DT_NEEDED", "DT_AUXILIARY", "DT_FILTER"):
             self.assertNotIn(dependency_tag, feature["obligation"])
         self.assertIn("RELATIVE/RELR", feature["reason"])
-        self.assertIn("system-loader", feature["reason"])
+        self.assertIn("weak-undefined JUMP_SLOT subset", feature["reason"])
         self.assertEqual(
             feature["negativeWitness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertIn(
             ".trellis/spec/backend/runtime-compatibility.md",
@@ -420,6 +420,28 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertTrue(any("RELATIVE/RELR" in item for item in feature["constraints"]))
         self.assertTrue(any("positive" in item for item in feature["constraints"]))
+        self.assertTrue(
+            any("JUMP_SLOT in ordinary DT_RELA" in item for item in feature["constraints"])
+        )
+
+        plt = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.host-context.weak-undefined-jump-slot"
+        )
+        self.assertEqual(plt["status"], "validated")
+        self.assertIn("DT_JMPREL", plt["obligation"])
+        self.assertIn("DT_PLTRELSZ", plt["obligation"])
+        self.assertIn("DT_PLTREL=DT_RELA", plt["obligation"])
+        self.assertEqual(
+            plt["negativeWitness"],
+            "native/urprotect-runtime/host_context_plt_self_test.c",
+        )
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertIn(
+            "--feature runtime.host-context.weak-undefined-jump-slot",
+            workflow,
+        )
 
         feature_ids = [item["id"] for item in self.data["features"]]
         self.assertEqual(
@@ -464,7 +486,7 @@ class FixtureMatrixTests(unittest.TestCase):
             feature["negativeWitness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
         self.assertTrue(
@@ -474,6 +496,50 @@ class FixtureMatrixTests(unittest.TestCase):
             )
         )
         self.assertTrue(any("positive" in item for item in feature["constraints"]))
+
+    def test_symbol_version_fixture_path_and_hash_are_pinned(self) -> None:
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "elf.symbol-version.definitions"
+        )
+        fixture_path = Path("tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so")
+        fixture = REPO_ROOT / fixture_path
+        self.assertIn(fixture_path.as_posix(), feature["evidence"])
+        self.assertTrue(fixture.is_file())
+        digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
+        constraints = " ".join(feature["constraints"])
+        self.assertIn(digest, constraints)
+        self.assertIn(digest, (REPO_ROOT / "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/README.md").read_text())
+
+    def test_symbol_version_parser_observation_does_not_promote_runtime_support(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        features = {feature["id"]: feature for feature in self.data["features"]}
+        parser = features["elf.symbol-version.definitions"]
+        requirements = features["elf.symbol-version.requirements"]
+        host_context = features["runtime.host-context.symbol-version"]
+        libc_requirements = features[
+            "runtime.host-context.dependency-symbol-version-requirements"
+        ]
+
+        self.assertEqual(parser["status"], "proven")
+        self.assertEqual(
+            parser["witness"],
+            "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+        )
+        self.assertIn(
+            "liburp-versioned.so",
+            " ".join(parser["evidence"]),
+        )
+        self.assertTrue(any("not confirmed ELF prevalence" in item for item in parser["constraints"]))
+        self.assertTrue(any("actual CI fingerprint histogram" in item for item in parser["constraints"]))
+        self.assertEqual(requirements["status"], "proven")
+        self.assertIn("DT_VERNEED", requirements["obligation"])
+        self.assertEqual(host_context["status"], "rejected")
+        self.assertIn("DT_VERDEF", host_context["obligation"])
+        self.assertEqual(libc_requirements["status"], "validated")
+        self.assertIn("libc.so.6", libc_requirements["obligation"])
 
     def test_symbol_versions_are_an_explicit_rejected_host_context_boundary(self) -> None:
         result = self.run_validator(self.data)
@@ -492,21 +558,21 @@ class FixtureMatrixTests(unittest.TestCase):
             "DT_VERNEEDNUM",
         ):
             self.assertIn(symbol_version_tag, feature["obligation"])
-        self.assertIn("unversioned entry-symbol lookup", feature["reason"])
+        self.assertIn("versioned entry lookup", feature["reason"])
         self.assertEqual(
             feature["negativeWitness"],
             "native/urprotect-runtime/host_context_self_test.c",
         )
-        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_adapter.c")
+        self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
         self.assertTrue(
             any(
-                "nonzero sentinel" in item and "zero handle" in item
+                "nonzero handle sentinel" in item and "zero handle" in item
                 for item in feature["constraints"]
             )
         )
-        self.assertTrue(any("unversioned urp_entry" in item for item in feature["constraints"]))
+        self.assertTrue(any("declared entry name remains unversioned" in item for item in feature["constraints"]))
 
     def test_feature_covering_strategy_is_required(self) -> None:
         data = copy.deepcopy(self.data)
@@ -646,6 +712,7 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.unsupported-relocation-table | rejected", rendered)
             self.assertIn("runtime.host-context.android-packed-relocation | rejected", rendered)
             self.assertIn("runtime.host-context.symbol-version | rejected", rendered)
+            self.assertIn("elf.symbol-version.definitions | proven", rendered)
             self.assertIn("runtime.wrapper-v1-baseline | validated", rendered)
 
 

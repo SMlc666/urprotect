@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Use the repository's managed/native/fixture/script ownership boundaries while decomposing legacy hotspots and adding compatibility work."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply bounded binary parsing, typed address domains, no-op identity, test, CI, release, and code-quality requirements to every child slice."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Preserve layered AArch64 claims, explicit profiles, HostContext semantics, runtime evidence, and fail-closed boundaries."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Keep stable diagnostics, failure propagation, exit codes, publication rules, and rejection-before-handoff behavior during refactoring and feature expansion."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Keep Core/native/report output ownership and evidence logging boundaries stable while reorganizing CLI and CI code."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Prevent duplicate parser, codec, contract, feature, and evidence implementations during modernization."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace managed/native/fixture/CI/report data flow and synchronize all cross-language and evidence contracts."}

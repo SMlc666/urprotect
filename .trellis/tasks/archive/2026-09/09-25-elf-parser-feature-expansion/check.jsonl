@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review parser safety, tests, fuzz regressions, performance, and no best-effort ELF recovery."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify each feature is reported at the exact model/validation/runtime layer proved by its evidence."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify stable diagnostic codes/offsets and failure behavior for malformed and unsupported variants."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check single ownership for address arithmetic, dynamic-table interpretation, and shared constants."}

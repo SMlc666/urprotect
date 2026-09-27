@@ -10,6 +10,7 @@ public enum HostContextCapability : ulong
     LookupSymbol = 1UL << 1,
     EmitDiagnostic = 1UL << 2,
     ReleaseImage = 1UL << 3,
+    ThreadLifetime = 1UL << 4,
 }
 
 public static class HostContextContract
@@ -20,14 +21,18 @@ public static class HostContextContract
 
     public const uint AbiVersion = 1;
     public const uint MinimumContextSize = 56;
+    public const uint CurrentContextSize = 72;
     public const uint MinimumLaunchArgsSize = 32;
+    public const uint CurrentLaunchArgsSize = 40;
+    public const uint ThreadLifetimeContextSize = 72;
     public const string EntrySymbol = "urp_entry";
     public const int MaximumEntryNameBytes = 4096;
     public const uint LoadImageImmutable = 1;
     public const HostContextCapability SupportedCapabilities = HostContextCapability.LoadImage
         | HostContextCapability.LookupSymbol
         | HostContextCapability.EmitDiagnostic
-        | HostContextCapability.ReleaseImage;
+        | HostContextCapability.ReleaseImage
+        | HostContextCapability.ThreadLifetime;
     public const HostContextCapability MandatoryCapabilities = HostContextCapability.LoadImage
         | HostContextCapability.LookupSymbol
         | HostContextCapability.ReleaseImage;

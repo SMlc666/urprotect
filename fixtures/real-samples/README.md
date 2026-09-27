@@ -5,6 +5,25 @@ not contain executable samples. The registry and candidate ledger contain only
 provenance, hashes, expected ELF facts, selection rationale, and execution
 policy.
 
+## Locked registry
+
+The selected registry contains exactly **100 distinct upstream project
+identities**. The approved target is 100 and the shortfall is zero. A libc,
+distribution, package, build, or version variant is a nested attribute of one
+project and never adds to the count. `selection.md` lists every selected
+identity and the reviewed source/runtime mix.
+
+The reviewed increment is 23 promoted Debian deferred candidates, 37 new
+Debian Bookworm AArch64 projects, and 20 new Alpine v3.22 AArch64 APK
+projects. The resulting runtime mix is 78 glibc, 21 musl, and 1 bionic
+identity. The Alpine APK increment alone contributes 20 distinct musl
+projects.
+
+The Debian package-index SHA-256 is
+`2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00`; the
+Alpine APKINDEX SHA-256 is
+`1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20`.
+
 ## Local boundary
 
 Local commands are metadata-only:
@@ -23,45 +42,23 @@ point requires both the GitHub Actions environment and a native AArch64 runner:
 ./scripts/run-real-sample-matrix.sh --tier pr
 ```
 
-The command is intentionally a CI-only command. It downloads each locked
-artifact into `RUNNER_TEMP`, verifies its SHA-256, extracts it into a private
-temporary directory, records static evidence, and removes the temporary tree
-on exit. Raw archives and binaries are never copied into the repository or
-uploaded as artifacts.
-
-## Corpus rule
-
-The selected registry contains exactly 20 distinct upstream project
-identities. A libc, distribution, or build variant is a nested attribute of
-one project and does not add to the count. The current selection is listed in
-`selection.md`; `candidates.json` retains additional public candidates and
-the reason they were selected, rejected, or deferred.
-
-The selection is deliberately cross-ecosystem:
-
-- common GNU/Linux programs: Bash, coreutils, curl, Git, OpenSSL, Perl,
-  SQLite, Vim, Nano, and Caddy;
-- compact and alternate producers: BusyBox, jq, ripgrep, and CMake;
-- larger dependency/loader shapes: FFmpeg, Nginx, Node.js, PostgreSQL, and
-  Redis;
-- one Termux/bionic artifact and one musl rootfs artifact as runtime facts;
-  CPython and Caddy provide real ET_EXEC rejection boundaries.
-
-The final support claim still belongs to the ELF/HostContext contract. A real
-sample observation does not promote a feature automatically.
+The command is intentionally CI-only. It downloads each locked artifact into
+`RUNNER_TEMP`, verifies its SHA-256, extracts it into a private temporary
+directory, records static evidence, and removes the temporary tree on exit.
+Raw archives and binaries are never copied into the repository or uploaded.
 
 ## CI execution and evidence
 
-Every pull request runs all 20 projects. Scheduled and release runs reuse the
-same registry and runner and may add repeatability or release evidence. A
-sample that is not applicable to a layer receives an explicit
-`not-applicable` result; it is not silently omitted.
+Every pull request runs all 100 approved projects. Scheduled and release runs
+reuse the exact registry and runner and may add repeatability or release
+evidence, never a subset. A sample that is not applicable to a layer receives
+an explicit `not-applicable` result; it is not silently omitted.
 
 The runner records these layers:
 
 1. static ELF fingerprint and UrProtect JSON validation;
 2. baseline execution when the registry policy supplies a complete runtime
-   closure and an isolation mode;
+   closure and isolation mode;
 3. outer-wrapper behavior when a reviewed profile policy enables it;
 4. HostContext behavior only for an image with the declared `urp_entry`
    contract.
@@ -79,32 +76,45 @@ not-applicable
 ```
 
 The evidence root is `.artifacts/real-samples/<tier>/`. It contains normalized
-fingerprints, readelf output, reports, hashes, environment facts, result JSON,
-logs, and an aggregate report. It does not contain source archives, ELF
-executables, shared objects, or runtime rootfs contents.
+fingerprints, bounded readelf output, reports, hashes, environment facts,
+result JSON, logs, and an aggregate report. It does not contain source
+archives, ELF executables, shared objects, or runtime rootfs contents.
+Aggregate schema 2 reports include distinct-identity feature histograms,
+producer/runtime/loader and page-size coverage, diagnostics, result
+classifications, and the fixed first-failure taxonomy
+(`acquisition`, `fingerprint`, `parse-model`, `static-validation`, `outer`,
+`host-context`, `environment`).
 
-The post-run gate checks all 20 project directories, all four layers, registry
-expectations, aggregate project IDs, non-empty evidence, and the absence of
-raw binary-like files. A missing runtime or isolation capability is recorded
-as `environment-unavailable` and fails the required CI job; it is not relabeled
-as a compatibility pass.
+A metadata-only baseline is retained at
+`fixtures/real-samples/baseline-aggregate.json` and
+`fixtures/real-samples/baseline-aggregate.md`. It is generated without network
+or ELF acquisition:
+
+```sh
+python3 scripts/render-real-sample-report.py \
+  fixtures/real-samples/manifest.json --tier pr --registry-only \
+  --artifact-root fixtures/real-samples \
+  --output-json fixtures/real-samples/baseline-aggregate.json \
+  --output-markdown fixtures/real-samples/baseline-aggregate.md
+```
+
+Baseline fields are labelled registry metadata; only the CI aggregate produced
+from acquired, hash-verified samples is an observation report. Features at or
+above the 5% distinct-identity threshold carry an explicit roadmap disposition
+in `feature-dispositions.json`; this record does not promote product support.
+
+The post-run gate checks all 100 project directories, all four layers, registry
+expectations, aggregate project IDs, non-empty evidence, cleanup markers, and
+the absence of raw binary-like files. A missing runtime or isolation capability
+is recorded as `environment-unavailable` and fails the required CI job; it is
+not relabeled as a compatibility pass.
 
 ## CI-first compatibility workflow
 
 When a later compatibility task changes the parser, validator, packer,
 launcher, native runtime, fixture contract, or compatibility docs, its PRD
-must include a real-sample impact table:
-
-| Field | Required value |
-| --- | --- |
-| Project IDs | every affected sample, not a guessed subset |
-| Feature | the ELF fingerprint or contract feature under review |
-| Layer | parser, outer wrapper, HostContext, or runtime fact |
-| Oracle | static, baseline, outer, or HostContext observation |
-| Expected result | exact registry result and failure boundary |
-| Evidence | per-sample and aggregate artifact paths |
-
-An unexpected rejection or acceptance keeps that compatibility task open until
-it is classified. A new support claim requires a real observation, a
-controlled positive fixture, a nearest-negative fixture, stable diagnostics,
-an appropriate oracle, and updated contract/documentation evidence.
+must include a real-sample impact table for every affected sample and layer.
+A real observation never widens a product compatibility claim by itself. A new
+support claim still requires controlled positive and nearest-negative fixtures,
+stable diagnostics, an appropriate oracle, and synchronized contract and
+documentation evidence.

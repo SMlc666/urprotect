@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Define current package and layer ownership before extracting parser, codec, CLI, and native responsibilities."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Preserve bounded binary handling, stable public contracts, test expectations, benchmarks, and release quality while refactoring."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Characterize and preserve diagnostics, propagation, exit codes, and fail-closed/publication semantics."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Keep refactoring behavior-neutral with respect to current AArch64 profiles and compatibility evidence."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Identify duplicated parsers, constants, codecs, and evidence logic before establishing single owners."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Map ABI/frame/fixture/CI data flow so each extraction preserves all consumers and contract checks."}

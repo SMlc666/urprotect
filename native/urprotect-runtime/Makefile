@@ -2,7 +2,7 @@ SHELL := /bin/sh
 
 CC ?= cc
 BUILD_DIR ?= build
-CFLAGS ?= -std=c11 -O2 -g0 -Wall -Wextra -Werror -Wshadow -Wconversion
+CFLAGS ?= -std=c11 -O2 -g0 -Wall -Wextra -Werror -Wshadow -Wconversion -pthread
 CPPFLAGS := -Iinclude -I../urprotect-launcher -I../../third_party/miniz
 MINIZ_CPPFLAGS := -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_DEFLATE_APIS \
                   -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ZLIB_APIS \
@@ -18,18 +18,42 @@ SYMBOL_FIXTURE := $(BUILD_DIR)/host-context-symbol-fixture.so
 SYMBOL_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-symbol-fixture.o
 SYMBOL_SELF_TEST := $(BUILD_DIR)/host-context-symbol-self-test
 SYMBOL_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_symbol_self_test.o
+PLT_FIXTURE := $(BUILD_DIR)/host-context-plt-fixture.so
+PLT_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-plt-fixture.o
+PLT_SELF_TEST := $(BUILD_DIR)/host-context-plt-self-test
+PLT_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_plt_self_test.o
+VERSION_SELF_TEST := $(BUILD_DIR)/host-context-version-self-test
+VERSION_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_version_self_test.o
 DEPENDENCY_FIXTURE := $(BUILD_DIR)/host-context-dependency-fixture.so
 DEPENDENCY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-dependency-fixture.o
+GRAPH_FIXTURE := $(BUILD_DIR)/host-context-graph-fixture.so
+GRAPH_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-graph-fixture.o
+GRAPH_REVERSED_FIXTURE := $(BUILD_DIR)/host-context-graph-reversed-fixture.so
+GRAPH_LOADER_FAILURE_FIXTURE := $(BUILD_DIR)/host-context-graph-loader-failure-fixture.so
+GRAPH_LOADER_FAILURE_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-graph-loader-failure-fixture.o
+FAKE_LOADER_FIXTURE := $(BUILD_DIR)/fake-loader-root/ld-linux-aarch64.so.1
+FAKE_LOADER_FIXTURE_OBJECT := $(BUILD_DIR)/host_context_fake_loader.o
+FAKE_LOADER_PROBE := $(BUILD_DIR)/host-context-fake-loader-probe
+GRAPH_SELF_TEST := $(BUILD_DIR)/host-context-graph-self-test
+GRAPH_SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_graph_self_test.o
 TLS_FIXTURE := $(BUILD_DIR)/host-context-tls-fixture.so
 TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-tls-fixture.o
+THREADED_TLS_FIXTURE := $(BUILD_DIR)/host-context-threaded-tls-fixture.so
+THREADED_TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-threaded-tls-fixture.o
+THREADED_TLS_HARNESS := $(BUILD_DIR)/host-context-threaded-tls-harness
+THREADED_TLS_RUNTIME_TEST := $(BUILD_DIR)/host-context-threaded-tls-runtime-test
+THREAD_ADAPTER_TEST := $(BUILD_DIR)/host-context-thread-adapter-test
+DYNAMIC_TLS_FIXTURE := $(BUILD_DIR)/host-context-dynamic-tls-fixture.so
+DYNAMIC_TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-dynamic-tls-fixture.o
 PROPERTY_FIXTURE := $(BUILD_DIR)/host-context-property-fixture.so
 PROPERTY_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-property-fixture.o
 RUNTIME_OBJECTS := $(BUILD_DIR)/runtime.o $(BUILD_DIR)/sha256.o $(BUILD_DIR)/miniz_tinfl.o
 RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
+RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
-LDLIBS ?= -ldl
+LDLIBS ?= -ldl -pthread
 
-.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test dependency-fixture tls-fixture property-fixture contract-probe contract-check clean check-host
+.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-runtime-test thread-adapter-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -52,14 +76,42 @@ symbol-fixture: $(SYMBOL_FIXTURE)
 symbol-self-test: $(SYMBOL_SELF_TEST) $(SYMBOL_FIXTURE)
 	"$(SYMBOL_SELF_TEST)" "$(SYMBOL_FIXTURE)"
 
+plt-fixture: $(PLT_FIXTURE)
+
+plt-self-test: $(PLT_SELF_TEST) $(PLT_FIXTURE)
+	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
+
+version-self-test: $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE)
+	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
+
 dependency-fixture: $(DEPENDENCY_FIXTURE)
 
 tls-fixture: $(TLS_FIXTURE)
 
+threaded-tls-fixture: $(THREADED_TLS_FIXTURE)
+
+threaded-tls-harness: $(THREADED_TLS_HARNESS)
+
+threaded-tls-runtime-test: $(THREADED_TLS_RUNTIME_TEST)
+
+thread-adapter-test: $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(DYNAMIC_TLS_FIXTURE)
+	"$(THREAD_ADAPTER_TEST)" "$(THREADED_TLS_FIXTURE)" "$(DYNAMIC_TLS_FIXTURE)"
+
 property-fixture: $(PROPERTY_FIXTURE)
 
-test: check-host $(SELF_TEST)
+graph-fixture: $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE)
+
+graph-self-test: $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(DEPENDENCY_FIXTURE)
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_REVERSED_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
+
+test: check-host $(SELF_TEST) $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(DYNAMIC_TLS_FIXTURE) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE) $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
+	"$(THREAD_ADAPTER_TEST)" "$(THREADED_TLS_FIXTURE)" "$(DYNAMIC_TLS_FIXTURE)"
+	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
+	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_REVERSED_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
 
 test-adapter: check-host $(SELF_TEST)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)" --adapter-v2
@@ -78,9 +130,9 @@ $(HOST_CONTEXT_LAUNCHER): $(BUILD_DIR)/host_context_launcher.o $(RUNTIME_OBJECTS
 	$(CC) $(CFLAGS) $(BUILD_DIR)/host_context_launcher.o $(RUNTIME_OBJECTS) $(LDLIBS) -o "$@"
 	chmod 0755 "$@"
 
-$(SYMBOL_SELF_TEST): $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o
+$(SYMBOL_SELF_TEST): $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CFLAGS) $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o -ldl -o "$@"
+	$(CC) $(CFLAGS) $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -o "$@"
 
 $(ENTRY_FIXTURE): $(ENTRY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
@@ -90,17 +142,95 @@ $(SYMBOL_FIXTURE): $(SYMBOL_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
 	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
 
+$(PLT_SELF_TEST): $(PLT_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) $(PLT_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -o "$@"
+
+$(VERSION_SELF_TEST): $(VERSION_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) $(VERSION_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -o "$@"
+
+$(PLT_FIXTURE): $(PLT_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --build-id=none --eh-frame-hdr -z now "$<" -o "$@"
+
+# Keep this dependency oracle focused on GLOB_DAT/version requirements; the
+# separately tested PLT slice owns JUMP_SLOT semantics.
 $(DEPENDENCY_FIXTURE): $(DEPENDENCY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) -shared -Wl,--build-id=none,-z,now "$<" -o "$@"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now "$<" -lc -o "$@"
 
+
+$(GRAPH_FIXTURE): $(GRAPH_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed "$<" -lc -l:ld-linux-aarch64.so.1 -o "$@"
+
+$(GRAPH_REVERSED_FIXTURE): $(GRAPH_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed "$<" -l:ld-linux-aarch64.so.1 -lc -o "$@"
+
+$(GRAPH_LOADER_FAILURE_FIXTURE): $(GRAPH_LOADER_FAILURE_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed --unresolved-symbols=ignore-all "$<" -lc -l:ld-linux-aarch64.so.1 -o "$@"
+
+$(FAKE_LOADER_FIXTURE): $(FAKE_LOADER_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)/fake-loader-root"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now -soname ld-linux-aarch64.so.1 "$<" -o "$@"
+
+$(FAKE_LOADER_PROBE): host_context_fake_loader_probe.c host_context_graph_fixture_contract.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) "$<" -ldl -o "$@"
+
+$(GRAPH_SELF_TEST): $(GRAPH_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) $(GRAPH_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -o "$@"
+
+$(GRAPH_FIXTURE_OBJECT): host_context_graph_fixture.c host_context_graph_fixture_contract.h include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -c "$<" -o "$@"
+
+$(GRAPH_LOADER_FAILURE_FIXTURE_OBJECT): host_context_graph_loader_failure_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -c "$<" -o "$@"
+
+$(FAKE_LOADER_FIXTURE_OBJECT): host_context_fake_loader.c
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -c "$<" -o "$@"
+
+$(GRAPH_SELF_TEST_OBJECT): host_context_graph_self_test.c host_context_graph_fixture_contract.h host_image_validation.h include/urp/host_context.h include/urp/host_adapter.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
+
+# Direct linking avoids driver-injected weak PLT imports unrelated to these
+# TLS/property fixtures, keeping each positive oracle isolated to its feature.
 $(TLS_FIXTURE): $(TLS_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) -shared -Wl,--build-id=none,-z,now "$<" -o "$@"
+	$(LD) -shared --build-id=none -z now "$<" -o "$@"
+
+$(THREADED_TLS_FIXTURE): $(THREADED_TLS_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --build-id=none -z now "$<" -o "$@"
+
+$(DYNAMIC_TLS_FIXTURE): $(DYNAMIC_TLS_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --build-id=none -z now "$<" -o "$@"
+
+$(THREADED_TLS_HARNESS): host_context_threaded_tls_harness.c
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) "$<" -o "$@"
+
+
+$(THREAD_ADAPTER_TEST): host_context_thread_adapter_test.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 "$<" $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -pthread -o "$@"
+
+$(THREADED_TLS_RUNTIME_TEST): host_context_threaded_tls_runtime_test.c $(RUNTIME_OBJECTS)
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) "$<" $(RUNTIME_OBJECTS) $(LDLIBS) -o "$@"
 
 $(PROPERTY_FIXTURE): $(PROPERTY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) -shared -Wl,--build-id=none,-z,now "$<" -o "$@"
+	$(LD) -shared --build-id=none -z now "$<" -o "$@"
 
 $(ENTRY_FIXTURE_OBJECT): host_context_entry_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
@@ -110,19 +240,31 @@ $(SYMBOL_FIXTURE_OBJECT): host_context_symbol_fixture.c include/urp/host_context
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
 
-$(DEPENDENCY_FIXTURE_OBJECT): host_context_dependency_fixture.c include/urp/host_context.h
+$(PLT_FIXTURE_OBJECT): host_context_plt_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c "$<" -o "$@"
+
+$(DEPENDENCY_FIXTURE_OBJECT): host_context_dependency_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -c "$<" -o "$@"
 
 $(TLS_FIXTURE_OBJECT): host_context_tls_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -ftls-model=initial-exec -c "$<" -o "$@"
 
+$(THREADED_TLS_FIXTURE_OBJECT): host_context_threaded_tls_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -fno-plt -ftls-model=initial-exec -pthread -c "$<" -o "$@"
+
+$(DYNAMIC_TLS_FIXTURE_OBJECT): host_context_dynamic_tls_fixture.c
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -ftls-model=global-dynamic -c "$<" -o "$@"
+
 $(PROPERTY_FIXTURE_OBJECT): host_context_property_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -mbranch-protection=bti -c "$<" -o "$@"
 
-$(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c include/urp/host_context.h include/urp/runtime.h
+$(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c host_image_validation.h include/urp/host_context.h include/urp/runtime.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
@@ -134,6 +276,14 @@ $(SYMBOL_SELF_TEST_OBJECT): host_context_symbol_self_test.c include/urp/host_con
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
+$(PLT_SELF_TEST_OBJECT): host_context_plt_self_test.c include/urp/host_adapter.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+
+$(VERSION_SELF_TEST_OBJECT): host_context_version_self_test.c include/urp/host_adapter.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+
 $(BUILD_DIR)/contract-probe: contract_probe.c include/urp/host_context.h include/urp/payload_frame.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) "$<" -o "$@"
@@ -142,9 +292,13 @@ $(BUILD_DIR)/runtime.o: runtime.c include/urp/host_context.h include/urp/runtime
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
-$(BUILD_DIR)/host_adapter.o: host_adapter.c include/urp/host_context.h include/urp/host_adapter.h
+$(BUILD_DIR)/host_adapter.o: host_adapter.c host_image_validation.h include/urp/host_context.h include/urp/host_adapter.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
+
+$(BUILD_DIR)/host_image_validation.o: host_image_validation.c host_image_validation.h include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 
 $(BUILD_DIR)/sha256.o: ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h
 	@mkdir -p "$(BUILD_DIR)"

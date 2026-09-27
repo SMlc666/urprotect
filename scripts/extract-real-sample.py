@@ -18,8 +18,12 @@ import sys
 import tarfile
 import zipfile
 
-MAX_MEMBERS = 100_000
-MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+from real_sample_schema import (
+    MAX_REAL_SAMPLE_ARCHIVE_BYTES,
+    MAX_REAL_SAMPLE_ARCHIVE_MEMBERS,
+    MAX_REAL_SAMPLE_PACKAGE_METADATA_BYTES,
+    MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES,
+)
 
 
 class ExtractionError(Exception):
@@ -94,11 +98,13 @@ def prepare_target(destination: Path, relative: Path) -> Path:
 
 
 def check_limits(members: list[tuple[str, int]]) -> None:
-    if len(members) > MAX_MEMBERS:
+    if len(members) > MAX_REAL_SAMPLE_ARCHIVE_MEMBERS:
         raise ExtractionError(f"archive has too many members: {len(members)}")
     total = sum(size for _, size in members)
-    if total > MAX_UNCOMPRESSED_BYTES:
-        raise ExtractionError(f"archive expands beyond {MAX_UNCOMPRESSED_BYTES} bytes")
+    if total > MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES:
+        raise ExtractionError(
+            f"archive expands beyond {MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES} bytes"
+        )
 
 
 def extract_tar(archive: Path, destination: Path) -> None:
@@ -231,6 +237,59 @@ def extract_deb(archive: Path, destination: Path) -> None:
         raise ExtractionError(f"could not extract deb archive: {error}") from error
 
 
+def validate_apk_metadata(
+    destination: Path,
+    *,
+    expected_package: str | None,
+    expected_version: str | None,
+    expected_architecture: str | None,
+    expected_origin: str | None,
+    expected_license: str | None,
+) -> None:
+    """Check Alpine's signed tar metadata against the registry lock.
+
+    Alpine v3.22 APKs are gzip-compressed tar archives containing `.SIGN.*`,
+    `.PKGINFO`, and the package files directly at archive root. They do not
+    wrap those files in a nested `data.tar.gz` member.
+    """
+    package_info = destination / ".PKGINFO"
+    try:
+        metadata_stat = package_info.lstat()
+    except OSError as error:
+        raise ExtractionError(f"APK metadata .PKGINFO is missing: {error}") from error
+    if not stat.S_ISREG(metadata_stat.st_mode) or package_info.is_symlink():
+        raise ExtractionError("APK metadata .PKGINFO must be a regular non-symlink file")
+    if metadata_stat.st_size <= 0 or metadata_stat.st_size > MAX_REAL_SAMPLE_PACKAGE_METADATA_BYTES:
+        raise ExtractionError("APK metadata .PKGINFO is empty or exceeds its size limit")
+    try:
+        lines = package_info.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise ExtractionError(f"APK metadata .PKGINFO is unreadable: {error}") from error
+
+    fields: dict[str, list[str]] = {}
+    for line in lines:
+        if not line or line.startswith("#") or " = " not in line:
+            continue
+        key, value = line.split(" = ", 1)
+        fields.setdefault(key, []).append(value)
+
+    expected = {
+        "pkgname": expected_package,
+        "pkgver": expected_version,
+        "arch": expected_architecture,
+        "origin": expected_origin,
+        "license": expected_license,
+    }
+    for key, value in expected.items():
+        observed = fields.get(key, [])
+        if len(observed) != 1 or not observed[0]:
+            raise ExtractionError(f"APK metadata .PKGINFO must contain exactly one non-empty {key}")
+        if value is not None and observed[0] != value:
+            raise ExtractionError(
+                f"APK metadata {key} mismatch: expected {value!r}, observed {observed[0]!r}"
+            )
+
+
 def validate_extracted_tree(destination: Path) -> None:
     count = 0
     total = 0
@@ -241,11 +300,11 @@ def validate_extracted_tree(destination: Path) -> None:
                 relative = path.relative_to(destination)
                 safe_link_target(str(relative), os.readlink(path))
                 count += 1
-                if count > MAX_MEMBERS:
+                if count > MAX_REAL_SAMPLE_ARCHIVE_MEMBERS:
                     raise ExtractionError("extracted tree has too many entries")
                 continue
             count += 1
-            if count > MAX_MEMBERS:
+            if count > MAX_REAL_SAMPLE_ARCHIVE_MEMBERS:
                 raise ExtractionError("extracted tree has too many entries")
             try:
                 stat_result = path.stat()
@@ -253,7 +312,7 @@ def validate_extracted_tree(destination: Path) -> None:
                 raise ExtractionError(f"cannot inspect extracted entry {path}: {error}") from error
             if stat.S_ISREG(stat_result.st_mode):
                 total += stat_result.st_size
-                if total > MAX_UNCOMPRESSED_BYTES:
+                if total > MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES:
                     raise ExtractionError("extracted tree exceeds size limit")
             elif not stat.S_ISDIR(stat_result.st_mode):
                 raise ExtractionError(f"extracted tree contains a device or special file: {path}")
@@ -262,9 +321,26 @@ def validate_extracted_tree(destination: Path) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", required=True, type=Path)
-    parser.add_argument("--format", required=True, choices=("deb", "tar.gz", "tar", "zip"))
+    parser.add_argument("--format", required=True, choices=("deb", "tar.gz", "tar", "zip", "apk"))
     parser.add_argument("--destination", required=True, type=Path)
-    return parser.parse_args()
+    parser.add_argument("--expected-apk-package")
+    parser.add_argument("--expected-apk-version")
+    parser.add_argument("--expected-apk-architecture", default="aarch64")
+    parser.add_argument("--expected-apk-origin")
+    parser.add_argument("--expected-apk-license")
+    arguments = parser.parse_args()
+    if arguments.format == "apk":
+        required_apk_values = {
+            "--expected-apk-package": arguments.expected_apk_package,
+            "--expected-apk-version": arguments.expected_apk_version,
+            "--expected-apk-architecture": arguments.expected_apk_architecture,
+            "--expected-apk-origin": arguments.expected_apk_origin,
+            "--expected-apk-license": arguments.expected_apk_license,
+        }
+        missing = [name for name, value in required_apk_values.items() if not value]
+        if missing:
+            parser.error(f"APK extraction requires registry metadata: {', '.join(missing)}")
+    return arguments
 
 
 def main() -> int:
@@ -273,11 +349,24 @@ def main() -> int:
         archive = arguments.archive.resolve(strict=True)
         if not archive.is_file() or archive.is_symlink():
             raise ExtractionError("archive must be a regular non-symlink file")
+        if archive.stat().st_size > MAX_REAL_SAMPLE_ARCHIVE_BYTES:
+            raise ExtractionError(
+                f"archive exceeds {MAX_REAL_SAMPLE_ARCHIVE_BYTES} byte input limit"
+            )
         destination = ensure_destination(arguments.destination)
         if arguments.format == "deb":
             extract_deb(archive, destination)
-        elif arguments.format in {"tar", "tar.gz"}:
+        elif arguments.format in {"tar", "tar.gz", "apk"}:
             extract_tar(archive, destination)
+            if arguments.format == "apk":
+                validate_apk_metadata(
+                    destination,
+                    expected_package=arguments.expected_apk_package,
+                    expected_version=arguments.expected_apk_version,
+                    expected_architecture=arguments.expected_apk_architecture,
+                    expected_origin=arguments.expected_apk_origin,
+                    expected_license=arguments.expected_apk_license,
+                )
         else:
             extract_zip(archive, destination)
         validate_extracted_tree(destination)

@@ -205,7 +205,11 @@ static urp_status urp_validate_host(const urp_host_context_v1 *host)
         || (host->capabilities & URP_HOST_CAP_MANDATORY) != URP_HOST_CAP_MANDATORY
         || host->load_image == NULL
         || host->lookup_symbol == NULL
-        || host->release_image == NULL) {
+        || host->release_image == NULL
+        || ((host->capabilities & URP_HOST_CAP_THREAD_LIFETIME) != 0U
+            && (host->struct_size < URP_HOST_CONTEXT_THREAD_LIFETIME_SIZE
+                || host->create_image_thread == NULL
+                || host->join_image_thread == NULL))) {
         return URP_STATUS_HOST_INVALID;
     }
     return URP_STATUS_OK;
@@ -492,7 +496,7 @@ static urp_status urp_decode_frame(
     return URP_STATUS_OK;
 }
 
-urp_status urp_runtime_execute_frame(
+static urp_status urp_runtime_execute_frame_inner(
     const urp_host_context_v1 *host,
     const uint8_t *frame,
     size_t frame_size,
@@ -522,7 +526,11 @@ urp_status urp_runtime_execute_frame(
 
     if (frame_view.host_abi_version != host->abi_version
         || (host->capabilities & frame_view.required_capabilities)
-            != frame_view.required_capabilities) {
+            != frame_view.required_capabilities
+        || ((frame_view.required_capabilities & URP_HOST_CAP_THREAD_LIFETIME) != 0U
+            && (host->struct_size < URP_HOST_CONTEXT_THREAD_LIFETIME_SIZE
+                || host->create_image_thread == NULL
+                || host->join_image_thread == NULL))) {
         urp_emit(host, URP_STATUS_HOST_INVALID, "HostContext capabilities do not satisfy the payload frame");
         return URP_STATUS_HOST_INVALID;
     }
@@ -574,18 +582,65 @@ urp_status urp_runtime_execute_frame(
             entry_status = URP_STATUS_UNSUPPORTED;
         } else {
             memcpy(&entry, &entry_address, sizeof(entry));
-            entry_status = entry(host, args);
+            urp_launch_args_v1 current_args;
+            memset(&current_args, 0, sizeof(current_args));
+            size_t args_copy_size = args->struct_size < URP_LAUNCH_ARGS_MIN_SIZE
+                ? 0U
+                : (args->struct_size < sizeof(current_args)
+                    ? (size_t)args->struct_size
+                    : sizeof(current_args));
+            if (args_copy_size != 0U) memcpy(&current_args, args, args_copy_size);
+            current_args.abi_version = URP_HOST_ABI_VERSION;
+            const int requires_thread_lifetime =
+                (frame_view.required_capabilities & URP_HOST_CAP_THREAD_LIFETIME) != 0U;
+            current_args.struct_size = requires_thread_lifetime
+                ? URP_LAUNCH_ARGS_CURRENT_SIZE
+                : URP_LAUNCH_ARGS_MIN_SIZE;
+            current_args.image = requires_thread_lifetime ? image : 0U;
+            if (requires_thread_lifetime) {
+                entry_status = entry(host, &current_args);
+            } else {
+                /* Keep the optional callbacks and image identity invisible to legacy frames. */
+                urp_host_context_v1 legacy_host;
+                memset(&legacy_host, 0, sizeof(legacy_host));
+                size_t host_copy_size = host->struct_size < URP_HOST_CONTEXT_MIN_SIZE
+                    ? (size_t)host->struct_size
+                    : (size_t)URP_HOST_CONTEXT_MIN_SIZE;
+                memcpy(&legacy_host, host, host_copy_size);
+                legacy_host.struct_size = URP_HOST_CONTEXT_MIN_SIZE;
+                legacy_host.capabilities &= ~URP_HOST_CAP_THREAD_LIFETIME;
+                legacy_host.create_image_thread = NULL;
+                legacy_host.join_image_thread = NULL;
+                entry_status = entry(&legacy_host, &current_args);
+            }
         }
     }
 
     urp_status release_status = host->release_image(host->userdata, image);
-    if (entry_status == URP_STATUS_OK && release_status != URP_STATUS_OK) {
+    /* Teardown failure takes precedence for every entry result: a nonzero
+     * payload status must not hide a still-pinned live image. */
+    if (release_status != URP_STATUS_OK) {
         entry_status = release_status;
     }
     if (entry_status < URP_STATUS_OK) {
         urp_emit(host, entry_status, "HostContext entry dispatch failed");
     }
     return entry_status;
+}
+
+static _Thread_local int urp_dispatch_active;
+
+urp_status urp_runtime_execute_frame(
+    const urp_host_context_v1 *host,
+    const uint8_t *frame,
+    size_t frame_size,
+    const urp_launch_args_v1 *args)
+{
+    if (urp_dispatch_active) return URP_STATUS_UNSUPPORTED;
+    urp_dispatch_active = 1;
+    urp_status status = urp_runtime_execute_frame_inner(host, frame, frame_size, args);
+    urp_dispatch_active = 0;
+    return status;
 }
 
 urp_status urp_runtime_execute_wrapper(

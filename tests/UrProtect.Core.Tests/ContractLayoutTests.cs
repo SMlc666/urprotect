@@ -33,10 +33,10 @@ public sealed class ContractLayoutTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.Equal(
-            HostContextContract.MinimumContextSize,
+            HostContextContract.CurrentContextSize,
             root.GetProperty("hostContextSize").GetUInt32());
         Assert.Equal(
-            HostContextContract.MinimumLaunchArgsSize,
+            HostContextContract.CurrentLaunchArgsSize,
             root.GetProperty("launchArgsSize").GetUInt32());
         Assert.Equal(
             HostContextContract.AbiVersion,
@@ -71,6 +71,10 @@ public sealed class ContractLayoutTests
         Assert.Equal(
             PayloadFrameCodec.CurrentReservedOffset,
             root.GetProperty("v3ReservedOffset").GetUInt16());
+
+        Assert.Equal(56U, root.GetProperty("threadCreateOffset").GetUInt32());
+        Assert.Equal(64U, root.GetProperty("threadJoinOffset").GetUInt32());
+        Assert.Equal(32U, root.GetProperty("launchImageOffset").GetUInt32());
 
         Assert.True(
             string.IsNullOrWhiteSpace(error),
