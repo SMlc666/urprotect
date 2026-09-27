@@ -64,11 +64,11 @@ sample-layer/result taxonomy and isolation guarantees.
       path verified locally and by CI.
 - [x] Metadata validators, fingerprint/aggregate/security tests, and registry
       consistency tests pass at the 100-identity count.
-- [ ] Native AArch64 PR CI acquires and validates all 100 artifacts, produces
+- [x] Native AArch64 PR CI acquires and validates all 100 artifacts, produces
       all-layer results plus fingerprints/readelf/provenance, deletes raw
       inputs, and retains complete evidence; nightly/release use the same
       registry and complete-set semantics.
-- [ ] CI aggregate identity count is 100, first-failure classification is
+- [x] CI aggregate identity count is 100, first-failure classification is
       complete, and every feature above the 5% distinct-identity threshold has
       a disposition.
 - [x] Existing parser, outer, HostContext, bionic, TLS, and runtime-matrix

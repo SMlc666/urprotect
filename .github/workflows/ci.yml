@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_nightly_rehearsal:
+        description: Run the full nightly real-sample and fixture evidence tiers without waiting for the schedule.
+        required: false
+        default: false
+        type: boolean
       run_release_fixtures:
         description: Run the release-tier compatibility fixture and evidence gates without publishing a release.
         required: false
@@ -198,6 +203,15 @@ jobs:
             pull_request) echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV" ;;
             release) echo 'REAL_SAMPLE_TIER=release' >> "$GITHUB_ENV" ;;
             schedule) echo 'REAL_SAMPLE_TIER=nightly' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${{ inputs.run_release_rehearsal }}" == true ]]; then
+                echo 'REAL_SAMPLE_TIER=release' >> "$GITHUB_ENV"
+              elif [[ "${{ inputs.run_nightly_rehearsal }}" == true ]]; then
+                echo 'REAL_SAMPLE_TIER=nightly' >> "$GITHUB_ENV"
+              else
+                echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV"
+              fi
+              ;;
             *) echo 'REAL_SAMPLE_TIER=pr' >> "$GITHUB_ENV" ;;
           esac
       - name: Record isolated ARM64 runner environment

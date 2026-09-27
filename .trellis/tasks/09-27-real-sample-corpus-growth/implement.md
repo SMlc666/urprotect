@@ -41,10 +41,10 @@
       budgets, and evidence expectations that currently assume 20 projects;
       preserve fixed result vocabulary, four-layer results, hash checks, raw
       input cleanup, and complete-100-set CI selection.
-- [ ] Run native AArch64 PR CI. Fix acquisition, archive, license, path,
+- [x] Run native AArch64 PR CI. Fix acquisition, archive, license, path,
       extraction, parser, or evidence failures from their retained logs; do not
       waive rows or convert failures to unavailable/success.
-- [ ] Verify all 100 sample evidence directories, aggregate counts, feature
+- [x] Verify all 100 sample evidence directories, aggregate counts, feature
       histograms, source/artifact hashes, cleanup markers, and sanitized
       artifacts; follow with nightly/release CI for the current registry.
 

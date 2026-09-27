@@ -80,14 +80,21 @@ Independent local checks performed in this working session:
 - Fixture manifest, runtime-matrix registry, shell syntax, Python compilation,
   and `git diff --check` passed.
 
-## CI status / remaining gate
+## CI status
 
-The latest successful PR/push runs before this change, `36293074081` and
-`36293071468`, used commit `370080c6f2dbbb97b0bd5db3a080c64d2a76791f` and
-therefore tested the old 20-project registry. They do not count as proof for
-this 100-project revision. A fresh native AArch64 PR run must acquire all 100
-archives, validate the real APK format and exact hashes, retain every project
-and all layers, sanitize/remove all raw inputs, and pass the complete evidence
-gate. Nightly and release must then pass the same full registry and verify
-release claims/aggregate counts. Keep this task and its acceptance criteria
-open until these updated-run artifacts are inspected and checked.
+The updated native AArch64 PR run `36303381447` passed on commit
+`eb65e8569113cda5a11590434bfdd562d87f9e74`. Its `real-sample-matrix`,
+`build-and-test`, `bionic-native-arm64`, and `runtime-matrix-native-arm64` jobs
+passed. The independently downloaded `real-samples-pr-36303381447` artifact
+passed the post-run evidence gate with 100 project directories, 100 cleanup
+markers, zero raw archive/ELF-like files, complete four-layer result schemas,
+aggregate `identityCount=100`, shortfall 0, and an empty first-failure map.
+
+The first PR attempt on commit `2c7c881` exposed an APK metadata argument
+position bug in the shell tabular transport: an empty baseline-mode field
+shifted the locked APK metadata column, causing all 20 APK rows to become
+environment-unavailable. The follow-up commits `5431a04` and `eb65e85` use a
+non-empty `-` sentinel and restore executable mode; the final PR run passed
+the complete 100-project acquisition/evidence gate. Nightly and release runs
+remain required before archiving this child and before final release
+integration.
