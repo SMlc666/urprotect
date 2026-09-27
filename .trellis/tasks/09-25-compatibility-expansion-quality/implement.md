@@ -60,8 +60,10 @@ characterization tests and audit notes.
 
 ## Stage 1 — Real-sample expansion and failure taxonomy
 
-Owner: `09-25-real-sample-expansion`; depends on the baseline evidence owners
-from Stage 0.
+Owner: `09-25-real-sample-expansion` and its follow-up
+`09-27-real-sample-corpus-growth`; depends on the baseline evidence owners from
+Stage 0. The first child established the schema/20-identity baseline; the
+follow-up owns the remaining 80 identities and 100-project PR evidence gate.
 
 - [ ] Extend the normalized fingerprint for relocation/PLT/GOT, dependency
       graph, symbol versions, TLS, GNU properties, hardening, stripping,
@@ -76,6 +78,9 @@ from Stage 0.
       named layer with a stable result and evidence path.
 - [ ] Apply the approved 5% distinct-identity trigger for roadmap disposition;
       frequency prioritizes work but never bypasses semantic proof.
+- [ ] The follow-up corpus increment reaches the approved 100-identity target,
+      retains at least 20 distinct Alpine/musl APK identities, and passes the
+      full-set PR, nightly, and release evidence gates before final integration.
 
 Validation:
 
@@ -281,8 +286,9 @@ last release matrix and all prior validated evidence.
 
 - [ ] Every child has reviewed planning artifacts and explicit dependency text.
 - [ ] Architecture foundation is complete before broad feature acceptance.
-- [ ] The corpus is hash-locked, CI-only, and approaching the approved 100
-      identity target through quality-gated increments.
+- [ ] The corpus is hash-locked, CI-only, reaches the approved 100-identity
+      target through quality-gated increments, and records any future shortfall
+      only after an explicit parent-target review.
 - [ ] The 5% feature-frequency trigger is computed over distinct identities and
       every triggered cluster has a recorded disposition.
 - [ ] Outer and HostContext claims remain independent.

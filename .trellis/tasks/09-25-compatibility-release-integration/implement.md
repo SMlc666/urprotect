@@ -3,7 +3,7 @@
 ## Dependencies
 
 - Wait for the selected architecture, sample, parser, profile, HostContext,
-  TLS/lifecycle, and runtime-matrix children.
+  TLS/lifecycle, runtime-matrix, and 100-identity corpus-growth children.
 - Resolve all child evidence paths and statuses before changing the published
   claim.
 

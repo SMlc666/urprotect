@@ -1,6 +1,6 @@
 # Public real-sample aggregate (pr)
 
-Distinct project identities: **20/100** (shortfall: **80**).
+Distinct project identities: **100/100** (shortfall: **0**).
 Evidence mode: `registry-baseline`; report schema: `2`.
 
 ## First-failure layers
@@ -19,14 +19,14 @@ Evidence mode: `registry-baseline`; report schema: `2`.
 
 | Feature | Identities | Percent | Disposition |
 | --- | ---: | ---: | --- |
-| `elf.class.ELF64` | 20 | 100.00% | `deferred` |
-| `elf.data.little-endian` | 20 | 100.00% | `deferred` |
-| `elf.machine.AArch64` | 20 | 100.00% | `deferred` |
-| `elf.type.ET_DYN` | 18 | 90.00% | `deferred` |
-| `elf.type.ET_EXEC` | 2 | 10.00% | `deferred` |
-| `loader./lib/ld-linux-aarch64.so.1` | 18 | 90.00% | `deferred` |
-| `loader./lib/ld-musl-aarch64.so.1` | 1 | 5.00% | `deferred` |
-| `loader./system/bin/linker64` | 1 | 5.00% | `deferred` |
+| `elf.class.ELF64` | 100 | 100.00% | `deferred` |
+| `elf.data.little-endian` | 100 | 100.00% | `deferred` |
+| `elf.machine.AArch64` | 100 | 100.00% | `deferred` |
+| `elf.type.ET_DYN` | 96 | 96.00% | `deferred` |
+| `elf.type.ET_EXEC` | 4 | 4.00% | `deferred` |
+| `loader./lib/ld-linux-aarch64.so.1` | 78 | 78.00% | `deferred` |
+| `loader./lib/ld-musl-aarch64.so.1` | 21 | 21.00% | `deferred` |
+| `loader./system/bin/linker64` | 1 | 1.00% | `deferred` |
 
 ## Runtime, loader, producer, and page-size coverage
 
@@ -35,27 +35,30 @@ Evidence mode: `registry-baseline`; report schema: `2`.
 | Value | Identities |
 | --- | ---: |
 | `bionic` | 1 |
-| `glibc` | 18 |
-| `musl` | 1 |
+| `glibc` | 78 |
+| `musl` | 21 |
 
 ### Loader
 
 | Value | Identities |
 | --- | ---: |
-| `/lib/ld-linux-aarch64.so.1` | 18 |
-| `/lib/ld-musl-aarch64.so.1` | 1 |
+| `/lib/ld-linux-aarch64.so.1` | 78 |
+| `/lib/ld-musl-aarch64.so.1` | 21 |
 | `/system/bin/linker64` | 1 |
 
 ### Producer
 
 | Value | Identities |
 | --- | ---: |
-| `alpine-musl-gcc` | 1 |
-| `autotools-gcc` | 11 |
+| `alpine-musl-g++` | 4 |
+| `alpine-musl-gcc` | 17 |
+| `autotools-gcc` | 24 |
 | `cmake-gcc` | 1 |
-| `configure-gcc` | 2 |
-| `go` | 1 |
-| `make-gcc` | 2 |
+| `configure-gcc` | 10 |
+| `debian-bookworm-g++` | 3 |
+| `debian-bookworm-gcc` | 32 |
+| `go` | 3 |
+| `make-gcc` | 4 |
 | `rustc` | 1 |
 | `termux-clang` | 1 |
 
@@ -63,7 +66,7 @@ Evidence mode: `registry-baseline`; report schema: `2`.
 
 | Value | Identities |
 | --- | ---: |
-| `4096` | 20 |
+| `4096` | 100 |
 
 ## Unexpected outcomes
 

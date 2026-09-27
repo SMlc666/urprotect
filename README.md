@@ -301,14 +301,15 @@ benchmark, and Android evidence is uploaded even when the job fails.
 
 The repository also tracks a locked ecology corpus in
 [`fixtures/real-samples/manifest.json`](fixtures/real-samples/manifest.json). It
-contains the current approved slice of exactly 20 distinct public AArch64
-project identities and an approved target of 100, including Debian/glibc
-applications, an Alpine/musl BusyBox rootfs, a public Termux/bionic Node.js
-artifact, and real ET_EXEC boundaries. `candidates.json` retains exact
-hash-locked, license-labelled rejected/deferred public candidates and
-`selection.md` explains the feature/runtime covering rationale and the
-current evidence-backed shortfall of 80 identities. No raw archive or ELF
-binary is committed.
+contains exactly 100 distinct public AArch64 project identities, including 78
+glibc, 21 musl, and one bionic observation. The reviewed corpus includes the
+original Debian/glibc and Termux/bionic samples, Alpine/musl BusyBox, real
+ET_EXEC boundaries, 60 additional Debian Bookworm ARM64 packages, and 20
+distinct Alpine v3.22 AArch64 APK packages. Package/runtime variants do not
+increase the identity count. `candidates.json` retains the three rejected
+public candidates with rationale; `selection.md` records the source/runtime
+mix and immutable package/index hashes. The shortfall to the approved target
+of 100 is zero. No raw archive or ELF binary is committed.
 
 Local validation remains metadata-only and sample-free:
 
@@ -328,7 +329,7 @@ CI renders schema-2 aggregate evidence with distinct-identity feature
 frequencies, producer/runtime/loader/page-size coverage, diagnostics, and
 first-failure layers. Baseline metadata does not promote product support.
 
-Every pull request runs the full currently approved 20-project suite on the native
+Every pull request runs the full 100-project suite on the native
 `ubuntu-24.04-arm` runner; no affected-path or sample filter can reduce it.
 Scheduled runs use the same registry and runner as `nightly`, and published
 releases use it as `release`, adding retention/repeat strength without

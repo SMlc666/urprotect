@@ -131,12 +131,12 @@ ASLR addresses and timing.
 ## Public real-sample CI corpus
 
 `fixtures/real-samples/manifest.json` is a separate ecology evidence layer from
-`fixtures/manifest.json`. It locks the current approved slice of exactly 20
-distinct public AArch64 upstream project identities, records an approved target
-of 100, and retains archive/version/file hashes, extracted paths, runtime facts,
-and layer policies. A libc/build variant is an attribute of one identity and
-never another corpus count. The candidate ledger and selection report retain
-why selected, rejected, and deferred public candidates differ.
+`fixtures/manifest.json`. It locks exactly 100 distinct public AArch64 upstream
+project identities, records the approved target of 100, and retains
+archive/version/file hashes, extracted paths, runtime facts, and layer
+policies. A libc/build variant is an attribute of one identity and never
+another corpus count. The candidate ledger and selection report retain why
+selected, rejected, and deferred public candidates differ.
 
 Local developer commands for this layer are metadata-only:
 
@@ -155,7 +155,15 @@ approved projects; no diff-path, label, or affected-sample filter is allowed.
 Nightly and release reuse the exact registry and oracle implementation and may
 only add repetition/retention/environment strength.
 
-Static evidence is mandatory for all 20. An applicable dynamic oracle must run
+The bounded extractor and its schema share archive/member/expanded-size limits
+through `scripts/real_sample_schema.py`. Alpine v3.22 APKs are gzip-compressed
+tar archives with `.SIGN.*`, `.PKGINFO`, and payload paths directly in the
+archive; the runner checks locked package name, version, `aarch64` architecture,
+origin, and license from `.PKGINFO` before static inspection. Do not treat an
+APK as a tar containing a nested `data.tar.gz`; any new APK packaging format
+requires a separately named, bounded extraction contract and fixture.
+
+Static evidence is mandatory for all 100. An applicable dynamic oracle must run
 in a networkless bounded isolation root with read-only inputs, temporary output,
 dropped privileges/no-new-privileges behavior, bounded wall time, memory,
 process count, output, and cleanup. A missing isolation capability is
@@ -230,7 +238,7 @@ python3 scripts/check-real-sample-evidence.py MANIFEST --tier TIER \
 
 - Good: native CI writes schema-2 evidence, sanitizes runner paths, renders a
   distinct-identity histogram, and the post-run gate verifies every record.
-- Base: the metadata-only baseline reports the current 20/100 coverage and is
+- Base: the metadata-only baseline reports the current 100/100 coverage and is
   clearly labeled `registry-baseline`.
 - Bad: a report infers support from a feature tag, counts a libc variant as a
   new identity, or uploads a raw archive/temp-root path.

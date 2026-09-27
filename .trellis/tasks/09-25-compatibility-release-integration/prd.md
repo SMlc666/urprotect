@@ -9,7 +9,9 @@ set, specification, and release evidence package.
 ## Dependencies and constraints
 
 - This child is the final integration deliverable and waits for every selected
-  feature/runtime/refactor child to pass its own quality gates.
+  feature/runtime/refactor child to pass its own quality gates, including
+  `09-27-real-sample-corpus-growth` reaching the approved 100 identities with
+  complete native CI evidence.
 - It must not invent support claims or upgrade `unknown`/`rejected` rows without
   their source child’s evidence.
 - Outer, HostContext, parser/model, and runtime-specific rows remain distinct.

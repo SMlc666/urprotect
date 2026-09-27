@@ -38,23 +38,46 @@ class RealSampleManifestTests(unittest.TestCase):
                 text=True,
             )
 
-    def test_locked_registry_has_exactly_twenty_distinct_projects(self) -> None:
+    def test_locked_registry_has_exactly_one_hundred_distinct_projects(self) -> None:
         result = self.validate()
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         projects = self.manifest["corpus"]["projects"]
-        self.assertEqual(len(projects), 20)
-        self.assertEqual(self.manifest["corpus"]["targetProjectCount"], 100)
-        self.assertEqual(self.manifest["corpus"]["expansion"]["currentApproved"], 20)
-        self.assertEqual(self.manifest["corpus"]["expansion"]["approvedTarget"], 100)
-        self.assertEqual(len({project["projectId"] for project in projects}), 20)
-        self.assertEqual(len({project["identityKey"] for project in projects}), 20)
+        target = self.manifest["corpus"]["targetProjectCount"]
+        self.assertEqual(len(projects), target)
+        self.assertEqual(self.manifest["corpus"]["requiredProjectCount"], target)
+        self.assertEqual(self.manifest["corpus"]["expansion"]["currentApproved"], target)
+        self.assertEqual(self.manifest["corpus"]["expansion"]["approvedTarget"], target)
+        self.assertEqual(len({project["projectId"] for project in projects}), target)
+        self.assertEqual(len({project["identityKey"] for project in projects}), target)
+        apk_increment = self.manifest["corpus"]["expansion"]["increment"]["alpineV322Arm64ApkAdded"]
+        self.assertEqual(sum(project["provenance"]["archiveFormat"] == "apk" for project in projects), apk_increment)
+        increment_projects = [
+            project for project in projects
+            if project["provenance"].get("sourceIndexSha256") is not None
+        ]
+        self.assertEqual(len(increment_projects), 80)
+        self.assertTrue(
+            all(
+                "boundedExtraction" in project["provenance"]
+                and project["provenance"]["archiveSizeBytes"]
+                == project["provenance"]["boundedExtraction"]["localArchiveBytes"]
+                for project in projects
+            )
+        )
+        self.assertTrue(
+            all(
+                project["acquisition"]["maxArchiveBytes"] == 64 * 1024 * 1024
+                and project["acquisition"]["maxExtractedBytes"] == 2 * 1024 * 1024 * 1024
+                for project in projects
+            )
+        )
         self.assertEqual(
             {project["target"]["runtime"] for project in projects},
             {"glibc", "musl", "bionic"},
         )
 
     def test_candidate_ledger_is_broader_than_locked_selection(self) -> None:
-        self.assertGreaterEqual(len(self.candidates["candidates"]), 40)
+        self.assertGreaterEqual(len(self.candidates["candidates"]), self.manifest["corpus"]["targetProjectCount"])
         self.assertTrue(all(len(candidate["provenance"]["archiveSha256"]) == 64 for candidate in self.candidates["candidates"]))
         selected = {
             candidate["projectId"]
@@ -110,7 +133,7 @@ class RealSampleManifestTests(unittest.TestCase):
         ]
         result = self.validate(data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
-        self.assertEqual(len(data["corpus"]["projects"]), 20)
+        self.assertEqual(len(data["corpus"]["projects"]), data["corpus"]["targetProjectCount"])
 
     def test_missing_provenance_is_rejected(self) -> None:
         data = copy.deepcopy(self.manifest)
@@ -147,7 +170,50 @@ class RealSampleManifestTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must match candidate ledger", result.stderr or result.stdout)
 
-    def test_tier_selection_emits_all_twenty_without_network(self) -> None:
+    def test_every_selected_provenance_field_is_cross_checked(self) -> None:
+        candidates = copy.deepcopy(self.candidates)
+        candidate = next(
+            item for item in candidates["candidates"]
+            if item["projectId"] == "ruby"
+        )
+        candidate["provenance"]["sourceKind"] = "other-public-source"
+        result = self.validate(candidates=candidates)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must match candidate ledger", result.stderr or result.stdout)
+
+    def test_pinned_alpine_index_digest_is_cross_checked(self) -> None:
+        data = copy.deepcopy(self.manifest)
+        data["corpus"]["expansion"]["increment"]["alpineIndexSha256"] = "0" * 64
+        result = self.validate(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pinned Alpine package index digest", result.stderr or result.stdout)
+
+    def test_documented_runtime_mix_matches_selected_targets(self) -> None:
+        data = copy.deepcopy(self.manifest)
+        data["corpus"]["expansion"]["runtimeMix"]["glibc"] += 1
+        result = self.validate(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("selected project target runtime fields", result.stderr or result.stdout)
+
+    def test_selected_acquisition_limits_match_shared_extractor_bounds(self) -> None:
+        data = copy.deepcopy(self.manifest)
+        data["corpus"]["projects"][0]["acquisition"]["maxArchiveBytes"] -= 1
+        result = self.validate(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("match the extractor bound", result.stderr or result.stdout)
+
+    def test_selected_bounded_extraction_facts_match_shared_limits(self) -> None:
+        data = copy.deepcopy(self.manifest)
+        apk = next(
+            project for project in data["corpus"]["projects"]
+            if project["provenance"]["archiveFormat"] == "apk"
+        )
+        apk["provenance"]["boundedExtraction"]["memberLimit"] += 1
+        result = self.validate(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must match the extractor bound", result.stderr or result.stdout)
+
+    def test_tier_selection_emits_complete_registry_without_network(self) -> None:
         result = self.validate()
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         # The production command's validation output explicitly records that it

@@ -30,10 +30,12 @@ class RealSampleAggregateTests(unittest.TestCase):
         aggregate = json.loads(BASELINE.read_text(encoding="utf-8"))
         self.assertEqual(aggregate["schemaVersion"], 2)
         self.assertEqual(aggregate["evidenceMode"], "registry-baseline")
-        self.assertEqual(aggregate["identityCount"], 20)
-        self.assertEqual(aggregate["coverage"]["approvedTargetProjectCount"], 100)
-        self.assertEqual(aggregate["coverage"]["shortfall"], 80)
-        self.assertEqual(len(aggregate["projectIds"]), 20)
+        target = aggregate["coverage"]["approvedTargetProjectCount"]
+        self.assertEqual(aggregate["identityCount"], target)
+        self.assertEqual(aggregate["requiredProjectCount"], target)
+        self.assertEqual(aggregate["observedProjectCount"], target)
+        self.assertEqual(aggregate["coverage"]["shortfall"], 0)
+        self.assertEqual(len(aggregate["projectIds"]), target)
         self.assertTrue(aggregate["featureHistogram"])
         self.assertTrue(
             all(

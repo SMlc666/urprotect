@@ -22,13 +22,17 @@ unsupported combinations explicit and fail-closed.
   with explicit `outer-execveat` and `host-context-entry` profiles, bounded
   RELATIVE/RELR and GLOB_DAT slices, a bounded dependency/lifecycle slice,
   initial-exec TLS, GNU property evidence, and native glibc/musl/bionic facts.
-- `fixtures/manifest.json` currently has 30 feature rows: 20 `validated`, 6
-  `rejected`, and 4 `proven`. The rejected rows include unsupported
+- At the initial compatibility-expansion baseline, `fixtures/manifest.json`
+  had 30 feature rows: 20 `validated`, 6 `rejected`, and 4 `proven`. The
+  current manifest has 38 rows: 25 `validated`, 7 `proven`, and 6 `rejected`.
+  Rejected rows include unsupported
   interpreters, dynamic path search, text relocations, unsupported relocation
   tables, Android packed relocations, and symbol versions.
-- `fixtures/real-samples/` currently contains a locked public corpus of 20
-  upstream project identities. It is acquired only in CI and does not place
-  raw binaries in the repository.
+- The initial public real-sample registry contained 20 identities; the current
+  reviewed registry contains exactly 100 distinct public project identities
+  across glibc, musl, and bionic. Native CI evidence for this latest corpus
+  increment is still a completion gate. Samples remain CI-acquired and raw
+  binaries are not placed in the repository.
 - The repository already requires bounded binary reads, typed address domains,
   stable diagnostics, byte-preserving output, profile-matched launchers,
   retained evidence, and no silent architecture/runtime fallback.
@@ -269,16 +273,25 @@ verifiable children should be created during planning:
    baseline/wrapper equivalence oracles.
 5. **HostContext relocation/symbol/dependency expansion** — add capability
    semantics and runtime-backed entry-image support in dependency order.
-6. **TLS/lifecycle and runtime matrix expansion** — define ownership/thread
-   semantics and extend glibc/musl/bionic/page-size evidence.
-7. **Final integration and release claim reconciliation** — synchronize matrix,
-   reports, docs, specs, release smoke, and regression baselines.
+6. **Dependency and path semantics** — define the bounded graph and loader
+   search/environment contract.
+7. **TLS/lifecycle expansion** — define thread, TLS, and image release
+   ownership.
+8. **Runtime matrix expansion** — cover native glibc/musl/bionic cells and
+   page-size evidence.
+9. **Public sample corpus growth follow-up** — complete the approved increase
+   from 20 to 100 identities, including a distinct Alpine/musl increment and
+   full CI fingerprint/evidence coverage.
+10. **Final integration and release claim reconciliation** — synchronize
+    matrix, reports, docs, specs, release smoke, and regression baselines after
+    all selected feature and corpus child gates.
 
 Child ordering is expressed in each child's planning artifacts rather than by
 assuming task-tree order: the architecture foundation precedes feature work;
 sample/fingerprint work precedes frequency-driven support; outer profile work
 can proceed before HostContext expansion; dependency semantics precede broader
-TLS/lifecycle claims; final integration waits for all selected child gates.
+TLS/lifecycle claims; final integration waits for all selected child gates,
+including the 100-identity public-corpus growth task.
 
 ## Confirmed planning decisions
 

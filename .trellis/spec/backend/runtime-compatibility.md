@@ -513,11 +513,24 @@ what public AArch64 software actually produces and which observations are
 applicable. The latter is metadata-only in the developer tree and is acquired
 only by the native ARM64 GitHub Actions job.
 
-The locked corpus contains exactly 20 distinct upstream identities. Every pull
-request runs the full set, including provenance/hash verification, static
+The locked corpus contains exactly 100 distinct upstream identities. Every
+pull request runs the full set, including provenance/hash verification, static
 fingerprint, and UrProtect JSON validation. Nightly and release reuse the same
 set and runner; they may repeat or retain more evidence but never replace PR
 coverage with a subset. Runtime/build/libc variants do not add identities.
+
+The reviewed increment contains 23 promoted Debian Bookworm AArch64 records,
+37 additional Debian Bookworm AArch64 records, and 20 Alpine v3.22 AArch64
+APK records. The resulting runtime mix is 78 glibc, 21 musl, and 1 bionic
+identity. The Alpine APK records are distinct upstream projects, not package
+or distribution variants of an existing identity; their archive and index
+SHA-256 locks remain in the real-sample manifest and candidate ledger.
+For the selected Alpine v3.22 format, APK archives are gzip-compressed tar
+files with `.SIGN.*`, `.PKGINFO`, and payload members directly at archive root.
+The CI extractor checks the locked package name, version, `aarch64` architecture,
+origin, and license in `.PKGINFO` before resolving the declared executable.
+The bounded source-of-truth limits live in `scripts/real_sample_schema.py` and
+are consumed by both the validator and archive extractor.
 
 The CI fingerprint is authoritative for observed facts. The registry locks and
 compares only ELF64, little-endian, AArch64, `ET_DYN`, and the declared

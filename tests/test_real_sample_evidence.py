@@ -78,17 +78,18 @@ class RealSampleEvidenceTests(unittest.TestCase):
             )
             (project_root / "logs" / "run.log").write_text("run evidence\n", encoding="utf-8")
         ids = [project["projectId"] for project in manifest["corpus"]["projects"]]
+        count = len(ids)
         aggregate = {
             "schemaVersion": 2,
             "tier": "pr",
-            "requiredProjectCount": 20,
-            "observedProjectCount": 20,
-            "identityCount": 20,
+            "requiredProjectCount": count,
+            "observedProjectCount": count,
+            "identityCount": count,
             "projectIds": ids,
             "coverage": {
-                "approvedTargetProjectCount": 100,
-                "currentIdentityCount": 20,
-                "shortfall": 80,
+                "approvedTargetProjectCount": manifest["corpus"]["targetProjectCount"],
+                "currentIdentityCount": count,
+                "shortfall": manifest["corpus"]["targetProjectCount"] - count,
             },
             "featureHistogram": [],
             "firstFailureLayers": {},
@@ -109,7 +110,7 @@ class RealSampleEvidenceTests(unittest.TestCase):
             self.write_complete_text_evidence(root)
             result = self.run_gate(root)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("checked 20 projects", result.stdout)
+            self.assertIn(f"checked {len(json.loads(MANIFEST.read_text(encoding='utf-8'))['corpus']['projects'])} projects", result.stdout)
 
     def test_raw_archive_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
