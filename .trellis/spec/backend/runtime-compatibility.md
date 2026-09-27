@@ -555,3 +555,28 @@ containers inherit the runner kernel. A non-16KiB native probe remains
 not a 16KiB kernel. Musl 1.2.4 uses SHA-256-pinned source and records its native
 compiler/runtime hashes and build logs; its temporary loader link is removed
 after the oracle.
+
+The executable entry point is `scripts/run-runtime-matrix.sh pr|nightly|release`;
+the post-run gate is `scripts/check-runtime-matrix-evidence.py TIER
+ARTIFACT_ROOT BIONIC_ARTIFACT_ROOT`. Native glibc and musl cells retain direct
+status/streams, managed validate/no-op-copy status and streams, source/copy
+hashes, the exact ELF report, toolchain identities, and the observed runner
+kernel/page size. Container cells retain OCI inspection, direct loader output,
+individual bounded command results, and the inherited kernel/page facts.
+
+After native musl oracle execution, the test-owned `/lib/ld-musl-aarch64.so.1`
+link is removed before evidence packaging. The post-run checker therefore
+re-executes the exact musl binaries through the retained
+`package-locks/musl-1.2.4/prefix/lib/libc.so`, not by relying on a host loader
+link. Container loader selection must first check that the runtime-specific
+interpreter is executable, then resolve it; `readlink -f` alone may print a
+nonexistent final pathname and is not a presence check. The musl 1.2.5 cell
+selects `/lib/ld-musl-aarch64.so.1`; glibc selects
+`/lib/ld-linux-aarch64.so.1`.
+
+The producing job hashes the complete runtime and consumed bionic trees before
+the evidence gate runs. The upload step must set
+`include-hidden-files: true` when the checksum manifest covers hidden source
+build files, or post-download evidence will be incomplete even when the
+pre-upload gate passed. A retained artifact audit verifies every SHA256SUMS
+entry after download; the archive's file set must match the checksum manifest.

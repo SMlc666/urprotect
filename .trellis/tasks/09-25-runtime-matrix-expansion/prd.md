@@ -43,14 +43,14 @@ producers, and ELF feature combinations.
 
 ## Acceptance Criteria
 
-- [ ] Covering-array selection covers all required main effects and named
+- [x] Covering-array selection covers all required main effects and named
       high-risk interactions with no unexplained unsupported cell.
-- [ ] Every required row runs on the declared native AArch64 environment and
+- [x] Every required row runs on the declared native AArch64 environment and
       retains non-empty environment and oracle evidence.
-- [ ] 4K and 16K behavior is measured for applicable parser/runtime contracts.
-- [ ] Environment-unavailable cannot be mistaken for success or a product
+- [x] 4K and 16K behavior is measured for applicable parser/runtime contracts.
+- [x] Environment-unavailable cannot be mistaken for success or a product
       rejection.
-- [ ] Release claims name exactly the runtime cells validated by the release
+- [x] Release claims name exactly the runtime cells validated by the release
       artifacts.
 
 ## Initial covering-set proposal

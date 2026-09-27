@@ -20,7 +20,7 @@
       available, retain `environment-unavailable` evidence and keep the kernel
       support cell unknown (no emulation fallback).
 - [x] Update PR/nightly/release budgets and artifact ownership.
-- [ ] Execute cells on native AArch64 CI and classify unavailable capabilities; this remains pending until retained CI output proves each selected cell.
+- [x] Execute cells on native AArch64 CI and classify unavailable capabilities; retained PR, nightly, and release CI artifacts prove each selected cell and preserve the 16KiB kernel probe as `environment-unavailable` on the measured 4KiB host.
 - [x] Render a reviewable registry with release tier mapping; CI artifacts hold runtime report and claims.
 
 ## Validation
@@ -72,13 +72,39 @@ Local implementation and regression checks now enforce these task criteria:
 - [x] Regression-matrix artifact declarations name concrete generated outputs,
       tier budgets account for pinned image pulls and runtime probes; validators
       and focused tests pass locally.
-- [ ] Native container and bionic facts still require required AArch64 CI
-      execution and retained post-run evidence. Local checks are not runtime
-      claims.
+- [x] Native container and bionic facts are backed by required AArch64 CI
+      execution and retained post-run evidence; local checks remain separate
+      from runtime claims.
 
-Acceptance criteria remain open until that CI evidence is retained: especially
-that every selected runtime row has non-empty environment/oracle artifacts and
-that release claims exactly match validated cells.
+## Final CI acceptance audit (2026-09-27)
+
+- Pull-request run `36290915990` passed build-and-test, the full locked
+  20-identity real-sample matrix, native bionic evidence, and the PR runtime
+  cell on commit `9856887648ad6aef8c36d0a1c1d8a9c9e6cefff6`.
+- Nightly run `36291070139` passed the extended fixture, runtime, bionic,
+  real-sample, musl-container, and evidence jobs on the same commit. The
+  runtime artifact contains all six selected cells and retains a complete
+  SHA256SUMS manifest; an independent post-download check verified all 4,484
+  listed runtime and bionic files, including hidden source-build files.
+- Release rehearsal run `36292019899` passed the release fixture tier, release
+  runtime matrix, bionic lane, package-and-smoke job, and all other workflows
+  after retrying one transient `packages.termux.dev` timeout in the public
+  real-sample acquisition. Its release run manifest lists exactly the five
+  validated claims and keeps the 16KiB kernel claim unknown because the
+  observed native page size is 4096 bytes. A second independent checksum pass
+  verified all 4,484 listed release runtime and bionic files.
+- Release smoke produced and checked the glibc and musl bundles; publishing
+  assets remained skipped for this non-publishing workflow-dispatch rehearsal.
+- Earlier runtime CI failures found and fixed in this task were: missing host
+  OS facts in the native musl row, loader identity validation tied to a SONAME
+  rather than the pinned source-built musl image, evidence re-execution after
+  intentional interpreter-link cleanup, and Alpine loader selection resolving
+  a nonexistent glibc path. The corresponding fixes are covered by the final
+  passing PR and extended CI runs.
+
+The PRD acceptance criteria are satisfied by the retained PR/nightly/release
+CI evidence above. The only unavailable claim is the distinct 16KiB kernel
+runtime, explicitly reported as `unknown` on the measured 4KiB host.
 
 ## Implemented artifacts
 

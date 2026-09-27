@@ -83,6 +83,15 @@ host musl loader is preserved and causes an explicit failure rather than being
 overwritten. The bionic producer retains the downloaded locked package
 archives alongside its lock and verification output.
 
+The native post-run evidence gate repeats musl fixture execution by invoking
+the exact retained source-built loader directly after the test-owned `/lib`
+interpreter symlink has been removed. Container loader probes select the
+runtime-specific interpreter only after an executable path existence check;
+an unresolved or absent glibc path is never mistaken for a musl loader. The
+uploaded runtime artifact includes hidden files because they are covered by
+the exact post-run SHA256SUMS manifest; the producing job and an independent
+post-download check both verify complete runtime and bionic evidence sets.
+
 ## Tier strategy
 
 - PR: fast required covering set plus all static metadata checks;
