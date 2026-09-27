@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,11 @@ GATE = ROOT / "scripts/check-runtime-matrix-evidence.py"
 ALIGN_CHECKER = ROOT / "scripts/check-pt-load-alignment.py"
 FIXTURE_CHECKER = ROOT / "scripts/check-runtime-fixture.py"
 DOTNET = shutil.which("dotnet") or "/root/.dotnet/dotnet"
+
+GATE_MODULE_SPEC = importlib.util.spec_from_file_location("runtime_matrix_gate", GATE)
+assert GATE_MODULE_SPEC is not None and GATE_MODULE_SPEC.loader is not None
+GATE_MODULE = importlib.util.module_from_spec(GATE_MODULE_SPEC)
+GATE_MODULE_SPEC.loader.exec_module(GATE_MODULE)
 
 
 class RuntimeMatrixTests(unittest.TestCase):
@@ -494,6 +500,44 @@ Dynamic section at offset 0xf00 contains 1 entry:
             result = self.gate(root, bionic, self._fixture_manifest_path)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("does not match the lock", result.stderr)
+
+    def test_musl_product_smoke_checks_noop_and_packed_streams(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            smoke = root / "musl-1.2.4-smoke"
+            for relative in (
+                "build/fixture",
+                "no-op-copy",
+                "packed-fixture",
+                "native-launcher/urprotect-launcher",
+                "musl-launcher-toolchain.txt",
+                "packed-report.json",
+                "readelf.txt",
+                "packed-file.txt",
+                "packed-readelf.txt",
+            ):
+                path = smoke / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"artifact\n")
+            for status in ("baseline", "output", "packed"):
+                (smoke / f"{status}.status").write_text("0\n", encoding="utf-8")
+            for output in ("baseline", "output", "packed"):
+                (smoke / f"{output}.stdout").write_bytes(b"fixture-output\n")
+                (smoke / f"{output}.stderr").touch()
+            (smoke / "validator.stdout").write_text("validated\n", encoding="utf-8")
+            (smoke / "validator.stderr").touch()
+            (smoke / "musl-launcher-toolchain.txt").write_text(
+                "musl_source_build=1.2.4\n"
+                "musl_toolchain_root=/toolchain\n"
+                "musl_base_specs=/toolchain/lib/musl-gcc.specs\n"
+                "musl_static_pie_specs=/artifacts/musl-static-pie.specs\n",
+                encoding="utf-8",
+            )
+            GATE_MODULE.check_musl_product_smoke(root)
+
+            (smoke / "packed.stdout").write_bytes(b"tampered\n")
+            with self.assertRaises(SystemExit):
+                GATE_MODULE.check_musl_product_smoke(root)
 
 
 if __name__ == "__main__":

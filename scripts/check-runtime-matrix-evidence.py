@@ -848,7 +848,7 @@ def check_musl_product_smoke(root: Path) -> None:
     required = (
         "build/fixture",
         "no-op-copy",
-        "packed",
+        "packed-fixture",
         "native-launcher/urprotect-launcher",
         "baseline.status",
         "output.status",
