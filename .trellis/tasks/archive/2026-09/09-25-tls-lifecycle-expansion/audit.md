@@ -64,23 +64,20 @@ introduced.
 
 ## CI / PR
 
-The first CI attempt on implementation commit `0bdd835` passed the managed
-build/evidence job and full real-sample matrix, but its bionic lane exited 2.
-The runner preflight was tightened to assert an AArch64 host and a Linux/arm64
-Docker server rather than equating an installed host-side emulator executable
-with emulated execution. Follow-up PR run `36261267596` still exited 2 in the
-bionic job while build-and-test and real-sample jobs passed, so the runner/tool
-preflight was not confirmed as the root cause. PR run `36261694499` retained
-the next diagnostic: host and Docker architecture preflight passed, then
-Bionic Clang `-Werror` rejected glibc-only callback functions and the thread
-handle sequence variable as unused. Those definitions are now guarded by
-`__GLIBC__`; Bionic continues compiling the base adapter but advertises no
-thread-lifetime capability or callbacks. The runner also prints host/Docker
-identity and dumps apt/native-build logs when a Termux container phase fails.
-PR #16 attempt `36261694499` still failed in the bionic job and its retained
-logs confirmed the unused glibc-only identifiers. This guard fix has passed
-locally on the native glibc host; its current PR and push runs are pending.
-Both CI triggers must pass before archiving this child. The
-acceptance gate requires the native AArch64 glibc HostContext feature evidence,
-the full public real-sample run, and the bionic adapter lane; bionic results do
-not promote the threaded row.
+Early Bionic CI attempts on implementation commits recorded runner/toolchain
+issues: the first jobs exited during preflight, then Bionic Clang `-Werror`
+identified glibc-only worker callbacks and a thread-handle sequence variable
+as unused. Glibc-only adapter definitions are guarded by `__GLIBC__`; Bionic
+still compiles the base adapter but advertises no thread-lifetime capability or
+callbacks. These fixes are covered by subsequent green native Bionic CI.
+
+The final PR run `36292804646` passed on commit
+`b5e45a5464acbea389166fc6d5638a2bddf8ae0b`, including build-and-test,
+`Check PR HostContext evidence`, full real-sample acquisition, bionic, and the
+runtime-matrix PR lane. Extended nightly run `36291070139` and release
+rehearsal `36292019899` on the preceding source-identical implementation
+commit also passed the threaded feature evidence gate along with the complete
+runtime, bionic, and release-package jobs. The release rehearsal initially
+encountered one transient public Termux archive timeout; the failed
+real-sample job was rerun and the full run completed successfully. Threaded
+TLS remains native AArch64 glibc-only; bionic success does not promote it.
