@@ -9,16 +9,16 @@
 
 ## Checklist
 
-- [ ] Compare child feature IDs/statuses with `fixtures/manifest.json` and
+- [x] Compare child feature IDs/statuses with `fixtures/manifest.json` and
       real-sample registry.
-- [ ] Render compatibility and aggregate sample reports.
-- [ ] Search for stale frame/profile/version wording and duplicate contract
+- [x] Render compatibility and aggregate sample reports.
+- [x] Search for stale frame/profile/version wording and duplicate contract
       owners.
-- [ ] Reconcile README, `COMPATIBILITY.md`, native README, specs, contract
+- [x] Reconcile README, `COMPATIBILITY.md`, native README, specs, contract
       inventory, release package, and release smoke.
-- [ ] Run complete managed/native/fixture/fuzz/stress/evidence/release gates.
-- [ ] Review architecture/code-quality changes and remaining legacy hotspots.
-- [ ] Record explicit rejected/unknown/unavailable boundaries.
+- [x] Run complete managed/native/fixture/fuzz/stress/evidence/release gates.
+- [x] Review architecture/code-quality changes and remaining legacy hotspots.
+- [x] Record explicit rejected/unknown/unavailable boundaries.
 
 ## Validation
 

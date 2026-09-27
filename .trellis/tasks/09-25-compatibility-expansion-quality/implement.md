@@ -21,22 +21,22 @@
 
 Owner: `09-25-architecture-quality-foundation`
 
-- [ ] Map data flow from real-sample acquisition through fingerprinting,
+- [x] Map data flow from real-sample acquisition through fingerprinting,
       managed model/parser, profile pack, native runtime, evidence, and release
       report.
-- [ ] Inventory public contracts: diagnostic codes/order, report JSON,
+- [x] Inventory public contracts: diagnostic codes/order, report JSON,
       frame layouts/digests, HostContext ABI, launcher markers, CLI exit codes,
       result vocabulary, fixture IDs, and evidence paths.
-- [ ] Add or strengthen characterization tests for the contracts that each
+- [x] Add or strengthen characterization tests for the contracts that each
       refactor must preserve.
-- [ ] Audit `ElfParser`, `PayloadFrame`, `CliApplication`, `host_adapter`,
+- [x] Audit `ElfParser`, `PayloadFrame`, `CliApplication`, `host_adapter`,
       native self-test mutation helpers, and repeated evidence-script logic for
       responsibility mixing, duplication, coupling, and testability risks.
-- [ ] Choose the first extraction boundaries and document owner, migration
+- [x] Choose the first extraction boundaries and document owner, migration
       order, behavior preserved, performance baseline, and rollback.
-- [ ] Establish one owner for contract literals, typed address arithmetic,
+- [x] Establish one owner for contract literals, typed address arithmetic,
       feature/result vocabulary, and evidence path validation.
-- [ ] Refactor the first hotspots without changing compatibility claims.
+- [x] Refactor the first hotspots without changing compatibility claims.
 
 Required gate before broad feature work:
 
@@ -65,20 +65,20 @@ Owner: `09-25-real-sample-expansion` and its follow-up
 Stage 0. The first child established the schema/20-identity baseline; the
 follow-up owns the remaining 80 identities and 100-project PR evidence gate.
 
-- [ ] Extend the normalized fingerprint for relocation/PLT/GOT, dependency
+- [x] Extend the normalized fingerprint for relocation/PLT/GOT, dependency
       graph, symbol versions, TLS, GNU properties, hardening, stripping,
       interpreter, page size, producer, and loader.
-- [ ] Add bounded aggregate feature-frequency and first-failure reporting.
-- [ ] Grow the public corpus in reviewed increments from 20 toward 100 unique
+- [x] Add bounded aggregate feature-frequency and first-failure reporting.
+- [x] Grow the public corpus in reviewed increments from 20 toward 100 unique
       project identities without duplicating variants as identities.
-- [ ] Keep acquisition, archive/extracted hashes, isolation, cleanup, and raw
+- [x] Keep acquisition, archive/extracted hashes, isolation, cleanup, and raw
       input non-publication guarantees unchanged.
-- [ ] Ensure PR/nightly/release use the same registry and result semantics.
-- [ ] Classify every observed feature cluster and every unexpected result at a
+- [x] Ensure PR/nightly/release use the same registry and result semantics.
+- [x] Classify every observed feature cluster and every unexpected result at a
       named layer with a stable result and evidence path.
-- [ ] Apply the approved 5% distinct-identity trigger for roadmap disposition;
+- [x] Apply the approved 5% distinct-identity trigger for roadmap disposition;
       frequency prioritizes work but never bypasses semantic proof.
-- [ ] The follow-up corpus increment reaches the approved 100-identity target,
+- [x] The follow-up corpus increment reaches the approved 100-identity target,
       retains at least 20 distinct Alpine/musl APK identities, and passes the
       full-set PR, nightly, and release evidence gates before final integration.
 
@@ -102,17 +102,17 @@ preserve the last hash-locked corpus and its evidence schema.
 Owner: `09-25-elf-parser-feature-expansion`; depends on Stage 0 and the first
 Stage 1 fingerprint report.
 
-- [ ] Extract cohesive parser/model owners from the monolithic parser where the
+- [x] Extract cohesive parser/model owners from the monolithic parser where the
       audit identifies real responsibility boundaries.
-- [ ] Select the first feature families from frequency, product value,
+- [x] Select the first feature families from frequency, product value,
       semantic risk, and dependency order.
-- [ ] Add typed records and checked address/range handling for each selected
+- [x] Add typed records and checked address/range handling for each selected
       feature; reuse `BoundedReader` and `LoadMap`.
-- [ ] Add positive real-toolchain fixtures and paired malformed/nearest-negative
+- [x] Add positive real-toolchain fixtures and paired malformed/nearest-negative
       fixtures.
-- [ ] Preserve unknown data and stable diagnostics; never repair bytes or infer
+- [x] Preserve unknown data and stable diagnostics; never repair bytes or infer
       unsupported loader behavior.
-- [ ] Update feature identifiers, matrix rows, contract inventory, reports,
+- [x] Update feature identifiers, matrix rows, contract inventory, reports,
       and parser/model tests as one cross-layer change.
 
 Validation:
@@ -133,15 +133,15 @@ Owner: `09-25-outer-profile-expansion`; depends on Stage 0, the current frame
 contract, and the relevant Stage 1 fingerprints. It may proceed in parallel
 with HostContext feature work only after the current profile contract is stable.
 
-- [ ] Define one executable class at a time: dynamic PIE, static PIE, ET_EXEC,
+- [x] Define one executable class at a time: dynamic PIE, static PIE, ET_EXEC,
       shared object, interpreter variation, stripped/sectionless variants.
-- [ ] Verify that the launcher and source process semantics are defined before
+- [x] Verify that the launcher and source process semantics are defined before
       widening pack acceptance.
-- [ ] Add baseline/wrapped behavior probes for status, streams, argv/argv[0],
+- [x] Add baseline/wrapped behavior probes for status, streams, argv/argv[0],
       environment, cwd, descriptors, signals, declared files, and loader
       failures.
-- [ ] Keep outer and HostContext matrix rows separate.
-- [ ] Add runtime-specific evidence only for the recorded native environments.
+- [x] Keep outer and HostContext matrix rows separate.
+- [x] Add runtime-specific evidence only for the recorded native environments.
 
 Validation:
 
@@ -162,14 +162,14 @@ Owner: `09-25-host-context-relocation-symbols`; depends on Stage 0, Stage 1
 feature observations, and the Stage 2 typed ELF model. It must not broaden
 HostContext merely because a system loader accepts an image.
 
-- [ ] Define symbol scope, binding timing, weak/visibility/conflict behavior,
+- [x] Define symbol scope, binding timing, weak/visibility/conflict behavior,
       target permissions, and status mapping before each relocation family.
-- [ ] Implement the smallest prioritized AArch64 family, with shared model
+- [x] Implement the smallest prioritized AArch64 family, with shared model
       records and native adapter preflight.
-- [ ] Add real-linker positive fixtures and mutation-based negative tests.
-- [ ] Add managed frame/metadata behavior only when the HostContext capability
+- [x] Add real-linker positive fixtures and mutation-based negative tests.
+- [x] Add managed frame/metadata behavior only when the HostContext capability
       contract requires it.
-- [ ] Run separate glibc, musl, and bionic oracles where the feature claim
+- [x] Run separate glibc, musl, and bionic oracles where the feature claim
       names those environments.
 
 Validation:
@@ -191,15 +191,15 @@ family before loader handoff, and remove incomplete capability bits/evidence.
 Owner: `09-25-host-context-dependencies-paths`; depends on Stage 4 symbol
 scope and the Stage 0 owner boundaries.
 
-- [ ] Define allowed dependency roots, graph ownership, search precedence,
+- [x] Define allowed dependency roots, graph ownership, search precedence,
       environment influence, `$ORIGIN`, RPATH/RUNPATH, filters/auxiliary
       dependencies, sharing, cycles, missing dependencies, rollback, and
       release ordering.
-- [ ] Implement one deterministic dependency subset; reject the rest before
+- [x] Implement one deterministic dependency subset; reject the rest before
       loader handoff.
-- [ ] Add multi-dependency positive fixtures, path-search nearest negatives,
+- [x] Add multi-dependency positive fixtures, path-search nearest negatives,
       and teardown/failure oracles.
-- [ ] Keep payload-controlled search from becoming an accidental contract.
+- [x] Keep payload-controlled search from becoming an accidental contract.
 
 Validation:
 
@@ -220,16 +220,16 @@ Owners: `09-25-tls-lifecycle-expansion` and `09-25-runtime-matrix-expansion`;
 the child artifacts must define their dependency ordering. Broader TLS and
 live-thread claims wait for explicit image ownership semantics.
 
-- [ ] Define current-thread and new-thread TLS initialization, constructor /
+- [x] Define current-thread and new-thread TLS initialization, constructor /
       entry / destructor ordering, reentrancy, live-thread release, and image
       ownership before accepting new models.
-- [ ] Add deterministic threaded fixtures and teardown assertions.
-- [ ] Select a covering array from sample fingerprints across older/current
+- [x] Add deterministic threaded fixtures and teardown assertions.
+- [x] Select a covering array from sample fingerprints across older/current
       glibc, musl, bionic, loader identity, 4K/16K page size, toolchain, and
       artifact shape.
-- [ ] Record complete runner, kernel, page-size, loader, image/package,
+- [x] Record complete runner, kernel, page-size, loader, image/package,
       toolchain, and isolation facts.
-- [ ] Keep PR/nightly/release semantics identical while widening cells and
+- [x] Keep PR/nightly/release semantics identical while widening cells and
       repetition only by tier.
 
 Validation:
@@ -250,16 +250,16 @@ new cells or semantics unavailable/rejected with retained evidence.
 Owner: `09-25-compatibility-release-integration`; waits for all selected child
 deliverables.
 
-- [ ] Reconcile `fixtures/manifest.json`, real-sample registry, compatibility
+- [x] Reconcile `fixtures/manifest.json`, real-sample registry, compatibility
       report, README, `COMPATIBILITY.md`, runtime and quality specs, contract
       inventory, and release scripts.
-- [ ] Verify no duplicate active parser/codec/feature/evidence implementation
+- [x] Verify no duplicate active parser/codec/feature/evidence implementation
       or stale profile/version wording remains.
-- [ ] Render the final matrix and aggregate real-sample report.
-- [ ] Run full managed/native/fixture/fuzz/stress/evidence/release gates.
-- [ ] Record unresolved environments as explicit limitations rather than
+- [x] Render the final matrix and aggregate real-sample report.
+- [x] Run full managed/native/fixture/fuzz/stress/evidence/release gates.
+- [x] Record unresolved environments as explicit limitations rather than
       converting them into support claims.
-- [ ] Complete final architecture/code-quality review and update durable specs.
+- [x] Complete final architecture/code-quality review and update durable specs.
 
 Validation:
 
@@ -284,15 +284,15 @@ last release matrix and all prior validated evidence.
 
 ## Parent review gates
 
-- [ ] Every child has reviewed planning artifacts and explicit dependency text.
-- [ ] Architecture foundation is complete before broad feature acceptance.
-- [ ] The corpus is hash-locked, CI-only, reaches the approved 100-identity
+- [x] Every child has reviewed planning artifacts and explicit dependency text.
+- [x] Architecture foundation is complete before broad feature acceptance.
+- [x] The corpus is hash-locked, CI-only, reaches the approved 100-identity
       target through quality-gated increments, and records any future shortfall
       only after an explicit parent-target review.
-- [ ] The 5% feature-frequency trigger is computed over distinct identities and
+- [x] The 5% feature-frequency trigger is computed over distinct identities and
       every triggered cluster has a recorded disposition.
-- [ ] Outer and HostContext claims remain independent.
-- [ ] All support rows have owners, positive/negative witnesses, oracle output,
+- [x] Outer and HostContext claims remain independent.
+- [x] All support rows have owners, positive/negative witnesses, oracle output,
       and non-empty retained evidence.
-- [ ] Full-scope check passes, specs are updated, and the parent is only
+- [x] Full-scope check passes, specs are updated, and the parent is only
       archived after implementation commits exist.

@@ -227,32 +227,32 @@ revision, but changing either baseline requires an explicit parent-task review.
 
 ## Acceptance Criteria
 
-- [ ] A baseline architecture/data-flow audit identifies legacy hotspots,
+- [x] A baseline architecture/data-flow audit identifies legacy hotspots,
       duplicated contract owners, coupling, missing characterization tests,
       and the refactor order; no broad feature child starts before its required
       boundary is owned.
-- [ ] Current managed, native, fixture, fuzz/stress, and evidence gates pass
+- [x] Current managed, native, fixture, fuzz/stress, and evidence gates pass
       or have a documented environment-specific result before each expansion
       wave is judged.
-- [ ] The real-sample corpus grows in approved increments, remains public,
+- [x] The real-sample corpus grows in approved increments, remains public,
       hash-locked, CI-only, and produces an aggregate feature/failure report.
-- [ ] Each accepted ELF feature has a model owner, stable diagnostics, focused
+- [x] Each accepted ELF feature has a model owner, stable diagnostics, focused
       positive and nearest-negative tests, a runtime oracle where applicable,
       and retained matrix evidence.
-- [ ] Outer and HostContext claims are reported separately and never promoted
+- [x] Outer and HostContext claims are reported separately and never promoted
       by loader acceptance alone; profile/launcher mismatch and stale frame
       versions fail clearly.
-- [ ] Runtime claims are tied to recorded native AArch64 environments,
+- [x] Runtime claims are tied to recorded native AArch64 environments,
       covering-array selection, and non-empty evidence; unavailable runtime
       capabilities never become passes.
-- [ ] Legacy code touched by this program is either refactored behind a clear
+- [x] Legacy code touched by this program is either refactored behind a clear
       owner boundary or explicitly documented with a follow-up task and
       containment rule. New feature logic does not accumulate in a known
       monolith without an extraction plan.
-- [ ] No duplicate active parser/codec/feature/evidence implementation remains
+- [x] No duplicate active parser/codec/feature/evidence implementation remains
       after each child is integrated; contract literals and address arithmetic
       have one owner.
-- [ ] Full cross-layer validation, spec updates, and final compatibility report
+- [x] Full cross-layer validation, spec updates, and final compatibility report
       pass for every completed child; unresolved regressions keep the relevant
       child and parent open.
 
