@@ -72,6 +72,14 @@ def parse_sha256(path: Path, label: str, expected_name: str) -> str:
     return match.group(1)
 
 
+def runtime_execution_argv(binary: Path, expected_runtime: str, root: Path) -> list[str]:
+    """Run musl artifacts through the exact pinned loader after symlink cleanup."""
+    if expected_runtime.startswith("Version"):
+        loader = root / "package-locks/musl-1.2.4/prefix/lib/libc.so"
+        return [str(loader), str(binary)]
+    return [str(binary)]
+
+
 def safe_artifact(root: Path, relative: str, label: str) -> Path:
     candidate = (root / relative).resolve()
     try:
@@ -703,7 +711,7 @@ def check_native_fixture(
         ),
     ):
         execution = subprocess.run(
-            ["timeout", "20", str(binary)],
+            ["timeout", "20", *runtime_execution_argv(binary, expected_runtime, root)],
             check=False,
             capture_output=True,
         )

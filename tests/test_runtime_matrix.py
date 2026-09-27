@@ -82,12 +82,28 @@ class RuntimeMatrixTests(unittest.TestCase):
             "imageDigest"
         ] = "latest"
         self.assertNotEqual(self.validate(data).returncode, 0)
-
         data = copy.deepcopy(self.data)
         next(cell for cell in data["cells"] if cell["id"] == "musl.1.2.5.alpine-3.22.2")[
             "interactions"
         ] = []
         self.assertNotEqual(self.validate(data).returncode, 0)
+
+    def test_musl_recheck_uses_pinned_runtime_after_test_symlink_cleanup(self) -> None:
+        root = Path("/tmp/runtime-matrix-artifacts/nightly")
+        binary = root / "fixtures/musl-1.2.4-4k"
+        self.assertEqual(
+            GATE_MODULE.runtime_execution_argv(binary, "Version 1.2.4", root),
+            [
+                str(root / "package-locks/musl-1.2.4/prefix/lib/libc.so"),
+                str(binary),
+            ],
+        )
+        self.assertEqual(
+            GATE_MODULE.runtime_execution_argv(
+                root / "fixtures/glibc-4k", "glibc 2.39", root
+            ),
+            [str(root / "fixtures/glibc-4k")],
+        )
 
     def test_page_probe_is_required_but_runtime_claim_is_optional(self) -> None:
         data = copy.deepcopy(self.data)
