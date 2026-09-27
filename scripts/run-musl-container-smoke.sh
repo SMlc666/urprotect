@@ -93,10 +93,41 @@ launcher_directory="${artifact_root}/native-launcher"
 launcher="${launcher_directory}/urprotect-launcher"
 packed="${artifact_root}/packed-fixture"
 mkdir -p "${launcher_directory}"
+launcher_make_args=(
+  "BUILD_DIR=${launcher_directory}"
+  "CC=${NATIVE_LAUNCHER_CC:-musl-gcc}"
+  "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}"
+)
+if [[ -n "${MUSL_TOOLCHAIN_ROOT:-}" ]]; then
+  pinned_musl_specs="${artifact_root}/musl-static-pie.specs"
+  [[ -s "${MUSL_TOOLCHAIN_ROOT}/lib/musl-gcc.specs" \
+    && -s "${MUSL_TOOLCHAIN_ROOT}/lib/rcrt1.o" \
+    && -s "${MUSL_TOOLCHAIN_ROOT}/lib/crti.o" ]] || {
+    echo "pinned musl 1.2.4 static-PIE inputs are incomplete: ${MUSL_TOOLCHAIN_ROOT}" >&2
+    exit 1
+  }
+  sed "s|/usr/lib/aarch64-linux-musl|${MUSL_TOOLCHAIN_ROOT}/lib|g" \
+    "${repo_root}/native/urprotect-launcher/musl-static-pie.specs" \
+    > "${pinned_musl_specs}"
+  launcher_make_args+=(
+    "MUSL_REAL_CC=$(command -v gcc)"
+    "MUSL_BASE_SPECS=${MUSL_TOOLCHAIN_ROOT}/lib/musl-gcc.specs"
+    "MUSL_STATIC_PIE_SPECS=${pinned_musl_specs}"
+  )
+  {
+    printf 'musl_toolchain_root=%s\n' "${MUSL_TOOLCHAIN_ROOT}"
+    printf 'musl_source_build=1.2.4\n'
+    printf 'musl_launcher_linker=%s\n' "$(command -v gcc)"
+    printf 'musl_base_specs=%s\n' "${MUSL_TOOLCHAIN_ROOT}/lib/musl-gcc.specs"
+    printf 'musl_static_pie_specs=%s\n' "${pinned_musl_specs}"
+    sha256sum "${MUSL_TOOLCHAIN_ROOT}/bin/musl-gcc" \
+      "${MUSL_TOOLCHAIN_ROOT}/lib/libc.so" \
+      "${MUSL_TOOLCHAIN_ROOT}/lib/musl-gcc.specs" \
+      "${pinned_musl_specs}"
+  } > "${artifact_root}/musl-launcher-toolchain.txt"
+fi
 make -C "${repo_root}/native/urprotect-launcher" \
-  BUILD_DIR="${launcher_directory}" \
-  CC="${NATIVE_LAUNCHER_CC:-musl-gcc}" \
-  SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}" all self-test
+  "${launcher_make_args[@]}" all self-test
 if [[ ! -x "${launcher}" ]]; then
   echo "musl launcher build did not produce ${launcher}" >&2
   exit 1

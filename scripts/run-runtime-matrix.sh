@@ -202,6 +202,7 @@ if [[ "$tier" != pr ]]; then
    exit 1
  }
  rm -rf -- "$out/musl-1.2.4-smoke"
+ MUSL_TOOLCHAIN_ROOT="$MUSL_TOOLCHAIN_ROOT" \
  MUSL_CONTAINER_ARTIFACT_ROOT="$out/musl-1.2.4-smoke" \
    "$root/scripts/run-musl-container-smoke.sh"
  run_image glibc.older.ubuntu-22.04-arm64 ubuntu:22.04 sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02 '2.35' 'glibc-4k glibc-4k.urp-copy glibc-16k-align glibc-16k-align.urp-copy'

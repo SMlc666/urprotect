@@ -861,6 +861,7 @@ def check_musl_product_smoke(root: Path) -> None:
         "packed.stderr",
         "validator.stdout",
         "validator.stderr",
+        "musl-launcher-toolchain.txt",
         "packed-report.json",
         "readelf.txt",
         "packed-file.txt",
@@ -879,6 +880,12 @@ def check_musl_product_smoke(root: Path) -> None:
         for stream in ("stdout", "stderr"):
             if (base / f"baseline.{stream}").read_bytes() != (base / f"{output}.{stream}").read_bytes():
                 fail(f"musl {output} {stream} differs from baseline")
+    launcher_facts = parse_key_values(base / "musl-launcher-toolchain.txt", "musl launcher toolchain facts")
+    if launcher_facts.get("musl_source_build") != "1.2.4":
+        fail("musl launcher smoke did not use the pinned 1.2.4 source toolchain")
+    for key in ("musl_toolchain_root", "musl_base_specs", "musl_static_pie_specs"):
+        if not launcher_facts.get(key):
+            fail(f"musl launcher toolchain facts omit {key}")
 
 
 def check_sha256_manifest(runtime_root: Path, bionic_root: Path) -> None:
