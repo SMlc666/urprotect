@@ -166,7 +166,11 @@ test "$container_page" = "$HOST_PAGE_SIZE"
 loader=$(readlink -f /lib/ld-linux-aarch64.so.1 2>/dev/null || readlink -f /lib/ld-musl-aarch64.so.1)
 echo "loader=$loader"
 test -n "$loader"
-set +e; timeout 10 "$loader" --help > /results/loader-identity.txt 2>&1; loader_status=$?; set -e
+if [ "$EXPECTED_RUNTIME" = "1.2.5" ]; then
+  set +e; timeout 10 "$loader" --help > /results/loader-identity.txt 2>&1; loader_status=$?; set -e
+else
+  set +e; timeout 10 "$loader" --version > /results/loader-identity.txt 2>&1; loader_status=$?; set -e
+fi
 echo "$loader_status" > /results/loader-identity.status
 echo "direct_loader_status=$loader_status"
 for f in $FIXTURES; do set +e; timeout 20 "/fixtures/$f" > "/results/$f.stdout" 2> "/results/$f.stderr"; status=$?; set -e; echo "$status" > "/results/$f.status"; echo "status_$f=$status"; test "$status" -eq 0; done

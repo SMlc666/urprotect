@@ -364,7 +364,8 @@ def check_container_cell(cell: dict[str, Any], root: Path) -> None:
     loader_output = base / "container-results/loader-identity.txt"
     require_file(loader_output, f"{cell_id} direct loader identity output")
     loader_status = (base / "container-results/loader-identity.status").read_text(encoding="utf-8").strip()
-    if loader_status not in {"0", "1"}:
+    allowed_loader_statuses = {"0", "1"} if cell_id.startswith("musl.") else {"0"}
+    if loader_status not in allowed_loader_statuses:
         fail(f"{cell_id} direct loader identity probe has an invalid exit status")
     version_pattern = rf"{re.escape(expected_version)}(?:[\s.,]|$)"
     if not re.search(version_pattern, loader_output.read_text(encoding="utf-8", errors="replace")):
