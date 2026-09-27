@@ -1,100 +1,64 @@
-# Audit: 100-identity public AArch64 sample corpus
+# Public real-sample corpus growth audit
 
-## Registry and identity counts
+## Result
 
-- Selected registry: **100** distinct project IDs and **100** distinct
-  `identityKey` values; required and target counts are both 100.
-- Candidate ledger: **103** records, comprising 100 selected and 3 rejected.
-- Increment: **80** identities, exactly 23 promoted deferred Debian records,
-  37 additional Debian Bookworm ARM64 records, and 20 Alpine v3.22 AArch64 APK
-  records.
-- Runtime mix: **78 glibc / 21 musl / 1 bionic**. Archive mix: 79 `.deb`, 20
-  `.apk`, and one existing Alpine BusyBox `tar.gz` rootfs.
-- The distinct-identity aggregate baseline now reports 100/100 with shortfall
-  zero. Feature dispositions contain 55 reviewed feature clusters; the local
-  evidence gate verifies every feature at/above its 5% identity threshold has
-  a disposition.
+The approved public AArch64 registry now contains exactly 100 distinct
+upstream identities: 78 glibc package identities, 21 musl identities (20
+Alpine APKs plus the retained BusyBox rootfs), and one bionic/Termux identity.
+The registry target is 100 with a zero shortfall. The selected set keeps
+package, distribution, version, libc, and build variants as attributes rather
+than additional identities.
 
-## Locked package evidence and local preflight
+Every selected record has a locked archive URL/path, SHA-256, archive size,
+bounded extraction limits and verification facts, executable artifact path,
+target architecture/runtime/loader, license, license source, and explicit
+four-layer execution policy. The 80-identity increment consists of the 23
+reviewed deferred records, 37 Debian Bookworm AArch64 package records, and 20
+Alpine 3.22 AArch64 APK records.
 
-Research indexes and package/ELF bytes live only under `/tmp` and are not
-tracked. The Debian Bookworm ARM64 `Packages.xz` index hash is
-`2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00`; the
-Alpine v3.22 main/aarch64 APK index hash is
-`1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20`.
+## CI evidence
 
-Independent local checks performed in this working session:
+| Tier | GitHub Actions run | Commit | Result |
+|---|---:|---|---|
+| PR | `36303770796` | `eb65e8569113cda5a11590434bfdd562d87f9e74` | full 100-identity real-sample matrix and all PR checks passed |
+| Nightly rehearsal | `36303781357` | `194dae011939386c3ed4b116f0cd1804dc4f5396` | full 100-identity matrix, fixture-nightly, runtime matrix, bionic, musl, fuzz/stress, and evidence checks passed |
+| Release rehearsal | `36304139025` | `194dae011939386c3ed4b116f0cd1804dc4f5396` | full 100-identity matrix, release fixture evidence, runtime matrix, bionic, musl, and release package smoke passed |
 
-- Verified all **100/100** downloaded local archive SHA-256 values against
-  the selected registry; `archiveSizeBytes` and
-  `boundedExtraction.localArchiveBytes` match on every record, and every
-  archive is within the 64 MiB limit.
-- Checked all **60/60** new/pinned Debian package-control records for package
-  name, version, and `arm64` architecture with `dpkg-deb`.
-- Checked all **20/20** APK `.PKGINFO` files for package name/version,
-  `aarch64`, origin, and license. All have `.SIGN.*`, `.PKGINFO`, and direct
-  payload members; none contains a nested `data.tar.gz`.
-- Ran the current bounded extractor against all **20/20** actual APKs; package
-  metadata matched the candidate lock, declared artifacts resolved inside the
-  extracted roots, and executable mode was present.
-- Ran a complete local static preflight over **100/100** inputs: locked
-  archive hash, bounded extraction, artifact/symlink resolution, `readelf`
-  inspection, fingerprint invariant comparison, and managed CLI
-  `validate --no-analysis` all passed.
-- All 100 manifest/candidate records now carry exact archive size and matching
-  bounded-extraction witnesses under the shared 100,000-member/2 GiB/64 MiB
-  limits. The local sanitized 100-project evidence root at
-  `/tmp/real-sample-corpus/full-evidence` has all four layer results and cleanup
-  markers; `check-real-sample-evidence.py` passed for 100 project directories.
-  This is local verification, not GitHub Actions release evidence.
+The retained real-sample artifact bundles were downloaded from all three
+runs and independently checked with:
 
-## Implemented contract changes
+```text
+python3 scripts/check-real-sample-evidence.py fixtures/real-samples/manifest.json --tier pr --artifact-root .../pr
+python3 scripts/check-real-sample-evidence.py fixtures/real-samples/manifest.json --tier nightly --artifact-root .../nightly
+python3 scripts/check-real-sample-evidence.py fixtures/real-samples/manifest.json --tier release --artifact-root .../release
+```
 
-- `scripts/real_sample_schema.py` owns shared archive-byte, member-count,
-  expanded-size, and APK metadata bounds consumed by the extractor/validator.
-- `scripts/extract-real-sample.py` safely extracts Alpine APK direct tar
-  members, validates `.PKGINFO` against locked package/version/architecture/
-  origin/license metadata, and retains path/link/special-file/size limits.
-- `scripts/run-real-sample-matrix.sh` passes those selected metadata locks to
-  the extractor and gets the byte cap from the shared schema owner.
-- `scripts/validate-real-samples.py` validates all selected CI-only acquisition
-  limits, required detailed extraction witnesses, all manifest/candidate
-  provenance fields, source-index digests, source/runtime mix, and the reviewed
-  23+37+20 increment.
-- The baseline aggregate, feature dispositions, selection report, README, and
-  runtime/quality specs describe 100 identities without upgrading any ELF,
-  outer, HostContext, or runtime support claim.
+Each tier contains 100 project directories, each with a result, normalized
+fingerprint, bounded readelf record, source/provenance record, archive and
+artifact hashes, and `raw-inputs-removed=true`. Each aggregate reports
+`identityCount=100`, `approvedTargetProjectCount=100`, and `shortfall=0`.
+The release artifact independently matched every manifest artifact path and
+archive hash, verified every AArch64 ELF identity, matched result and
+fingerprint artifact hashes, and recorded `accepted-and-runs` for all 100
+static layers.
 
-## Local tests
+## Local checks
 
-- Real-sample unit/integration suite: **35 passed**.
-- Managed solution suite: **140 passed**.
-- Fixture matrix: **24 passed**; regression matrix: **5 passed**.
-- Registry validator passed for `pr`, `nightly`, and `release` with network
-  unused.
-- Deterministic registry-baseline JSON/Markdown regeneration matched the
-  checked-in files exactly.
-- Local full-set evidence check: `checked 100 projects and all layers`.
-- APK metadata/extraction/artifact checks: 20/20; all 100 archive digests and
-  static validation preflights passed.
-- Fixture manifest, runtime-matrix registry, shell syntax, Python compilation,
-  and `git diff --check` passed.
+- `python3 scripts/validate-real-samples.py ... --tier pr` — 100 unique
+  projects; glibc, musl, and bionic runtime classes validated.
+- The same registry validator passed for `nightly` and `release`.
+- `scripts/check-real-sample-evidence.py` passed for all three downloaded
+  CI tiers and checked all 100 projects plus all four layers in each tier.
+- The focused real-sample manifest, fingerprint, aggregate, evidence, and
+  security suites passed in the producing CI jobs.
+- The complete selected set retained no raw archive, ELF, package root, or
+  extracted runtime input under the uploaded artifact roots.
 
-## CI status
+## Claim limits
 
-The updated native AArch64 PR run `36303381447` passed on commit
-`eb65e8569113cda5a11590434bfdd562d87f9e74`. Its `real-sample-matrix`,
-`build-and-test`, `bionic-native-arm64`, and `runtime-matrix-native-arm64` jobs
-passed. The independently downloaded `real-samples-pr-36303381447` artifact
-passed the post-run evidence gate with 100 project directories, 100 cleanup
-markers, zero raw archive/ELF-like files, complete four-layer result schemas,
-aggregate `identityCount=100`, shortfall 0, and an empty first-failure map.
-
-The first PR attempt on commit `2c7c881` exposed an APK metadata argument
-position bug in the shell tabular transport: an empty baseline-mode field
-shifted the locked APK metadata column, causing all 20 APK rows to become
-environment-unavailable. The follow-up commits `5431a04` and `eb65e85` use a
-non-empty `-` sentinel and restore executable mode; the final PR run passed
-the complete 100-project acquisition/evidence gate. Nightly and release runs
-remain required before archiving this child and before final release
-integration.
+The corpus is ecology and parser/static-validation evidence. Ordinary public
+samples without `urp_entry` remain HostContext `not-applicable`, and package
+observations do not promote outer, HostContext, TLS, or runtime claims. The
+release package job performed bundle smoke and retained evidence; GitHub
+release asset publication remains intentionally skipped by the rehearsal
+workflow because this run is not a publishing tag.

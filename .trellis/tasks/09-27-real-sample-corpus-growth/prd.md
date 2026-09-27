@@ -59,7 +59,7 @@ sample-layer/result taxonomy and isolation guarantees.
       locked provenance; no variant inflates identity count.
 - [x] The 80 new identities include at least 20 reviewed Alpine/musl
       artifacts and maintain a documented producer/runtime/ecosystem mix.
-- [ ] All 100 package artifacts have locked SHA-256, license/source metadata,
+- [x] All 100 package artifacts have locked SHA-256, license/source metadata,
       bounded extraction facts, and an existing executable AArch64 artifact
       path verified locally and by CI.
 - [x] Metadata validators, fingerprint/aggregate/security tests, and registry
