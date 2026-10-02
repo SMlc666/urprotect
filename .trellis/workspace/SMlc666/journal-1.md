@@ -148,3 +148,66 @@ Completed the HostContext bounded dependency-pair child task with native and man
 ### Next Steps
 
 - Proceed to tls-lifecycle-expansion; maintain CI-gated commits and complete PR #16 after the remaining children.
+
+## Session 6: Open-world function protection and CI-gated PR delivery
+<!-- trellis-session: v=2 fp=open-world-function-protection-20261002 -->
+
+**Date**: 2026-10-02
+**Task**: Open-world AArch64 compatibility and opt-in function protection
+**Branches / PRs**: `feat/open-world-function-protection` / PR #17; contract follow-up PR #18
+
+### Summary
+
+Implemented the first opt-in function-protection pipeline and delivered it
+through two merged, CI-green pull requests. Function discovery now merges
+`.symtab` and `.dynsym` `STT_FUNC` identities; exact selectors reject
+ambiguity; AsmStone-backed CFG analysis, register-resource planning,
+control-flow flattening, register permutation, atomic ELF rewriting, and
+post-write validation are wired into the `protect` CLI and JSON report.
+
+### Main Changes
+
+- Added project-owned protection and function-analysis modules with explicit
+  selector identity, pass order, resource plan, diagnostics, and no-partial-
+  publication behavior.
+- Added deterministic symbolized glibc/musl protection E2E and locked bionic
+  fixture coverage, including standalone and combined pass behavior checks.
+- Required glibc, musl, and bionic protection smoke in CI and added evidence
+  validation that removes raw protected executables before artifact checks.
+- Added the backend code-spec scenario covering signatures, error matrix,
+  evidence, and wrong/correct implementation patterns.
+
+### Git Commits / Merges
+
+| Hash | Message |
+|------|---------|
+| `65f729b` | `feat: add opt-in function protection pipeline` |
+| `66a5ad0` | `docs: codify function protection contract` |
+| `5df2883` | squash merge of PR #17 |
+| `65c493f` | squash merge of PR #18 |
+
+### Testing / CI Evidence
+
+- [OK] 154 managed tests; all real-sample, fixture, security, aggregate, and
+  runtime-matrix Python contract suites passed locally.
+- [OK] Native launcher self-test and integration test passed with the explicit
+  AArch64 compiler override `CC=aarch64-linux-gnu-gcc`.
+- [OK] Local protection E2E/evidence gate passed for glibc with standalone
+  register permutation, standalone flattening (including a branch fixture),
+  and combined ordered passes.
+- [OK] PR #17 CI run `36958348397` passed build, real-sample, bionic, musl,
+  and runtime-matrix jobs; merged main run `36958759075` passed.
+- [OK] PR #18 CI run `36959175796` passed all applicable gates; merged main
+  run `36959524918` passed build-and-test.
+
+### Status
+
+[OK] **Protection increment and PR flow completed**
+
+### Remaining Parent Scope
+
+The parent plan still contains the broader full-100 real-sample dependency
+closure and outer-wrapper execution expansion. The current merged increment
+keeps those existing registry claims explicit instead of relabeling static
+validation as execution; continue that compatibility expansion as a separate
+CI-gated increment.
