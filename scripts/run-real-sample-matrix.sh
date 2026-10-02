@@ -225,6 +225,16 @@ PYISO
   fi
   run_isolated_command "${extract_root}" "${sample_root}" baseline "${command_b64}"
 }
+prepare_runtime_root() {
+  local root="$1" temporary_directory="${1%/}/tmp"
+  if [[ -L "${temporary_directory}" || ( -e "${temporary_directory}" && ! -d "${temporary_directory}" ) ]]; then
+    echo "runtime closure has a non-directory /tmp: ${temporary_directory}" >&2
+    return 1
+  fi
+  mkdir -p "${temporary_directory}"
+  chmod 1777 "${temporary_directory}"
+}
+
 
 resolve_artifact() {
   local root="$1" relative="$2" candidate link target
@@ -366,6 +376,10 @@ PYAPK
       && ! resolve_artifact "${runtime_root}" "${artifact_path}" > "${sample_tmp}/runtime-artifact"; then
     closure_failed=true
     closure_reason='runtime closure does not contain the declared artifact'
+  elif [[ "${closure_failed}" == false && "${runtime}" != bionic ]] \
+      && ! prepare_runtime_root "${runtime_root}"; then
+    closure_failed=true
+    closure_reason='runtime closure cannot provide an isolated writable /tmp'
   fi
   local command_json
   if [[ "${baseline_mode}" == "bubblewrap-rootfs" && -n "${baseline_command_b64}" ]]; then
