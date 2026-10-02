@@ -247,7 +247,8 @@ run_shell -c '
   grep -Fq "${TERMUX_PACKAGE_REPOSITORY}" /artifacts/package-policy.txt
   clang --version > /artifacts/clang-version.txt
   clang -fPIE -pie -Wl,--build-id=none -Wl,--dynamic-linker=/system/bin/linker64 \
-    /workspace/fixtures/samples/bionic/main.c -o /artifacts/fixture
+    /workspace/fixtures/samples/bionic/main.c \
+    /workspace/fixtures/samples/protection/target.S -o /artifacts/fixture
   sha256sum /system/bin/linker64 /artifacts/fixture > /artifacts/container-sha256sums.txt
   mkdir -p /artifacts/host-context
   make -C /workspace/native/urprotect-runtime \
@@ -341,6 +342,73 @@ printf '%s\n' "${linker_status}" > "${case_root}/linker.status"
 if [[ "${baseline_status}" -ne 0 || "${linker_status}" -ne 0 ]]; then
   echo "bionic fixture failed: shell status=${baseline_status}, direct linker status=${linker_status}" >&2
   exit 1
+fi
+
+if [[ "${BIONIC_PROTECTION_E2E:-false}" == "true" ]]; then
+  if ! command -v dotnet >/dev/null 2>&1; then
+    echo "BIONIC_PROTECTION_E2E requires dotnet on the native ARM64 host" >&2
+    exit 127
+  fi
+  protection_input="${case_root}/protection-input"
+  protection_output="${case_root}/protected-fixture"
+  cp --preserve=mode "${case_root}/fixture" "${protection_input}"
+  python3 - "${protection_input}" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+path = Path(sys.argv[1])
+data = bytearray(path.read_bytes())
+phoff = struct.unpack_from('<Q', data, 32)[0]
+entry_size = struct.unpack_from('<H', data, 54)[0]
+count = struct.unpack_from('<H', data, 56)[0]
+for index in range(count):
+    offset = phoff + index * entry_size
+    if struct.unpack_from('<I', data, offset)[0] == 0x6474E552:
+        struct.pack_into('<I', data, offset, 0)
+        path.write_bytes(data)
+        break
+else:
+    raise SystemExit('bionic protection fixture has no PT_GNU_RELRO slot')
+PY
+  dotnet run --project "${repo_root}/src/UrProtect.Cli" \
+    --configuration Release --no-restore -- \
+    protect "${protection_input}" \
+    --output "${protection_output}" \
+    --function urp_transform_target \
+    --pass register-permutation \
+    --json "${case_root}/protection.json" \
+    > "${case_root}/protection-pack.stdout" \
+    2> "${case_root}/protection-pack.stderr"
+  chmod --reference="${protection_input}" "${protection_output}"
+  readelf -hW -lW -sW "${protection_output}" > "${case_root}/protection-readelf.txt"
+  set +e
+  run_shell -c 'exec /artifacts/protected-fixture' \
+    > "${case_root}/protection.stdout" \
+    2> "${case_root}/protection.stderr"
+  protection_status=$?
+  set -e
+  printf '%s\n' "${protection_status}" > "${case_root}/protection.status"
+  cmp -- "${case_root}/baseline.stdout" "${case_root}/protection.stdout"
+  cmp -- "${case_root}/baseline.stderr" "${case_root}/protection.stderr"
+  if [[ "${protection_status}" -ne "${baseline_status}" ]]; then
+    echo "bionic protected fixture status ${protection_status} differs from baseline ${baseline_status}" >&2
+    exit 1
+  fi
+  python3 - "${case_root}/protection.json" <<'PY'
+import json
+import sys
+
+report = json.loads(open(sys.argv[1]).read())
+if report.get('success') is not True:
+    raise SystemExit('bionic protection report did not succeed')
+selected = [item for item in report.get('functions', [])
+            if item.get('name') == 'urp_transform_target']
+if len(selected) != 1 or selected[0].get('transformed') is not True:
+    raise SystemExit('bionic selected function was not transformed')
+PY
+  sha256sum "${protection_input}" "${protection_output}" > "${case_root}/protection.sha256"
+  rm -f -- "${protection_input}" "${protection_output}"
 fi
 if ! grep -Fq 'This is /system/bin/linker64, the helper program for dynamic executables.' \
   "${case_root}/linker.stdout"; then

@@ -5,7 +5,9 @@ runtime shell, a C#/.NET command-line product for conservative ELF64 AArch64
 validation and outer ELF packaging.
 It validates supported `ET_DYN` PIE executables and dynamically linked shared
 objects, emits a stable JSON report, can produce a byte-identical no-op copy,
-and can wrap a supported executable in a new self-extracting AArch64 ELF.
+can wrap a supported executable in a new self-extracting AArch64 ELF, and can
+perform explicitly selected function-level protection on the initial supported
+symbol-bounded subset.
 
 The wrapper stores the complete source ELF as a deterministic compressed
 payload, verifies its SHA-256 digest, writes it to an anonymous Linux memfd,
@@ -53,14 +55,42 @@ Stream exactly one JSON document to stdout:
 urprotect validate ./program --json - --no-analysis > report.json
 ```
 
+## Explicit function protection
+
+Protection is opt-in: no function is transformed unless it is selected and at
+least one pass is named. Exact symbol names use `STT_FUNC` entries from both
+`.symtab` and `.dynsym`; an ambiguous name must be disambiguated with a table
+identity or address selector. The initial writer requires a symbol-bounded,
+instruction-aligned function, a complete supported AArch64 CFG, and a spare
+program-header slot. A failed selected function aborts the complete operation
+and publishes no protected output.
+
+```sh
+urprotect protect ./program \
+  --output ./program.protected \
+  --function target_function \
+  --pass control-flow-flattening \
+  --pass register-permutation \
+  --json ./program.protection.json
+```
+
+When both passes are requested, the report and emitted pipeline order are
+always `control-flow-flattening` followed by `register-permutation`. Use
+`--function-id symtab:<index>` / `dynsym:<index>` or
+`--function-address 0x...` to resolve duplicate names. The protection report
+contains the resolved identity, range, register-resource plan, pass outcome,
+output hash, and atomic publication result.
+
 Exit codes are stable: `0` success, `2` usage, `3` filesystem failure, `4`
 invalid/unsupported ELF, `5` output identity/publication failure, and `10`
 unexpected internal failure. The `--copy` path never serializes the parsed
 model; it publishes only after byte-for-byte identity is proven.
 
-This release does not rewrite code, encrypt code, inject runtime logic,
-virtualize control flow, implement a custom in-process loader, or claim
-physical Android-device compatibility.
+The protection writer does not implement a custom in-process loader or claim
+physical Android-device compatibility. Unsupported instructions, unresolved
+control flow, insufficient register resources, and layouts without a legal
+placement are reported as explicit protection failures rather than rewritten
+heuristically.
 
 The conditional compatibility claim and its proof boundary are documented in
 [`COMPATIBILITY.md`](COMPATIBILITY.md). The machine-readable obligations and

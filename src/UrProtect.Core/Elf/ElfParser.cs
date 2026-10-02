@@ -128,6 +128,12 @@ public static class ElfParser
             dynamicEntries,
             diagnostics);
         var dynamicSymbols = ParseDynamicSymbols(reader, loadMap, dynamicEntries, diagnostics);
+        var functionSymbols = ParseFunctionSymbols(
+            reader,
+            sectionHeaders,
+            dynamicMetadata,
+            dynamicSymbols,
+            diagnostics);
         var symbolVersions = ElfSymbolVersionParser.Parse(
             reader,
             loadMap,
@@ -149,7 +155,8 @@ public static class ElfParser
             relaRelocations,
             relrWords,
             androidPackedRelocations,
-            dynamicSymbols);
+            dynamicSymbols,
+            functionSymbols);
 
         var validation = ElfValidator.Validate(file);
         foreach (var diagnostic in validation.Diagnostics)
@@ -869,6 +876,128 @@ public static class ElfParser
             }
 
             result.Add(new DynamicSymbol(name, info, other, sectionIndex, value, symbolSize));
+        }
+
+        return result;
+    }
+
+    private static List<ElfFunctionSymbol> ParseFunctionSymbols(
+        BoundedReader reader,
+        IReadOnlyList<SectionHeader> sectionHeaders,
+        ElfDynamicMetadata dynamicMetadata,
+        IReadOnlyList<DynamicSymbol> dynamicSymbols,
+        DiagnosticBag diagnostics)
+    {
+        var result = new List<ElfFunctionSymbol>();
+        for (var index = 0; index < dynamicSymbols.Count; index++)
+        {
+            var symbol = dynamicSymbols[index];
+            if ((symbol.Info & 0x0F) != ElfConstants.SttFunc || symbol.Size == 0)
+            {
+                continue;
+            }
+
+            if (!TryReadString(dynamicMetadata.StringTable, symbol.Name, out var name))
+            {
+                diagnostics.Warning(
+                    DiagnosticCode.SymbolTableMalformed,
+                    "A dynamic function symbol name is outside the dynamic string table.",
+                    symbol.Name);
+                continue;
+            }
+
+            result.Add(new ElfFunctionSymbol(
+                name,
+                ElfSymbolTableKind.Dynamic,
+                checked((uint)index),
+                (byte)(symbol.Info >> 4),
+                symbol.Other,
+                symbol.SectionIndex,
+                symbol.Value,
+                symbol.Size));
+        }
+
+        for (var sectionIndex = 0; sectionIndex < sectionHeaders.Count; sectionIndex++)
+        {
+            var symbolTable = sectionHeaders[sectionIndex];
+            if (symbolTable.Type != ElfConstants.ShtSymTab)
+            {
+                continue;
+            }
+
+            if (symbolTable.EntrySize == 0
+                || symbolTable.EntrySize != ElfConstants.SymbolEntrySize64
+                || symbolTable.Size % symbolTable.EntrySize != 0
+                || symbolTable.Link >= (uint)sectionHeaders.Count)
+            {
+                diagnostics.Warning(
+                    DiagnosticCode.SymbolTableMalformed,
+                    "A static symbol table has an unsupported layout and was ignored.",
+                    symbolTable.Offset);
+                continue;
+            }
+
+            var stringTable = sectionHeaders[(int)symbolTable.Link];
+            if (stringTable.Type != ElfConstants.ShtStrTab
+                || !reader.Contains(stringTable.Offset, stringTable.Size)
+                || !reader.TrySlice(stringTable.Offset, stringTable.Size, out var strings))
+            {
+                diagnostics.Warning(
+                    DiagnosticCode.SymbolTableMalformed,
+                    "A static symbol table string table is not file-backed.",
+                    stringTable.Offset);
+                continue;
+            }
+
+            var count = symbolTable.Size / symbolTable.EntrySize;
+            if (count > int.MaxValue
+                || !reader.Contains(symbolTable.Offset, symbolTable.Size))
+            {
+                diagnostics.Warning(
+                    DiagnosticCode.SymbolTableMalformed,
+                    "A static symbol table is outside the input.",
+                    symbolTable.Offset);
+                continue;
+            }
+
+            for (ulong symbolIndex = 0; symbolIndex < count; symbolIndex++)
+            {
+                if (!TryElementOffset(
+                        symbolTable.Offset,
+                        symbolTable.EntrySize,
+                        symbolIndex,
+                        out var offset)
+                    || !reader.TryReadUInt32(offset, out var nameOffset)
+                    || !reader.TryReadByte(offset + 4, out var info)
+                    || !reader.TryReadByte(offset + 5, out var other)
+                    || !reader.TryReadUInt16(offset + 6, out var section)
+                    || !reader.TryReadUInt64(offset + 8, out var value)
+                    || !reader.TryReadUInt64(offset + 16, out var size))
+                {
+                    diagnostics.Warning(
+                        DiagnosticCode.SymbolTableMalformed,
+                        "A static symbol table contains a truncated entry.",
+                        offset);
+                    break;
+                }
+
+                if ((info & 0x0F) != ElfConstants.SttFunc
+                    || size == 0
+                    || !TryReadString(strings, nameOffset, out var name))
+                {
+                    continue;
+                }
+
+                result.Add(new ElfFunctionSymbol(
+                    name,
+                    ElfSymbolTableKind.Static,
+                    checked((uint)symbolIndex),
+                    (byte)(info >> 4),
+                    other,
+                    section,
+                    value,
+                    size));
+            }
         }
 
         return result;

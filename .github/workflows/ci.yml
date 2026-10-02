@@ -67,6 +67,24 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Run required glibc protection smoke
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          PROTECTION_ARTIFACT_ROOT=".artifacts/protection/${tier}/glibc" \
+            ./scripts/run-protection-e2e.sh --tier "${tier}" --runtime glibc
+      - name: Check glibc protection evidence
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-protection-evidence.py \
+            ".artifacts/protection/${tier}/glibc" --tier "${tier}" --runtime glibc
       - name: Test
         run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
       - name: Check coverage floor
@@ -180,6 +198,7 @@ jobs:
             .artifacts/regression-matrix/
             .artifacts/environment/
             .artifacts/compatibility-matrix.md
+            .artifacts/protection/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
           if-no-files-found: warn
@@ -348,6 +367,19 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+      - name: Build protection CLI
+        run: |
+          dotnet restore UrProtect.sln --locked-mode
+          dotnet build UrProtect.sln --configuration Release --no-restore
       - name: Record native bionic runner environment
         run: |
           mkdir -p .artifacts/bionic
@@ -357,6 +389,8 @@ jobs:
       - name: Verify Docker runtime
         run: docker version
       - name: Run native ARM64 bionic fixture
+        env:
+          BIONIC_PROTECTION_E2E: 'true'
         run: ./scripts/run-bionic-fixture.sh
       - name: Check native ARM64 bionic evidence
         run: |
@@ -366,6 +400,8 @@ jobs:
             --feature runtime.bionic.linker
           python3 scripts/check-evidence.py fixtures/manifest.json \
             --feature runtime.host-context.bionic-handoff
+          python3 scripts/check-protection-evidence.py \
+            .artifacts/bionic/c-termux-bionic-pie --runtime bionic
       - name: Upload bionic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -569,7 +605,7 @@ jobs:
           if-no-files-found: warn
 
   musl-container-smoke:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     container:
@@ -603,6 +639,24 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Run required musl protection smoke
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          PROTECTION_ARTIFACT_ROOT=.artifacts/musl-container/protection \
+            ./scripts/run-protection-e2e.sh --tier "${tier}" --runtime musl
+      - name: Check musl protection evidence
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-protection-evidence.py \
+            .artifacts/musl-container/protection --tier "${tier}" --runtime musl
       - name: Run musl container smoke
         run: ./scripts/run-musl-container-smoke.sh
       - name: Upload musl container evidence
