@@ -226,12 +226,14 @@ PYISO
   run_isolated_command "${extract_root}" "${sample_root}" baseline "${command_b64}"
 }
 prepare_runtime_root() {
-  local root="$1" temporary_directory="${1%/}/tmp"
-  if [[ -L "${temporary_directory}" || ( -e "${temporary_directory}" && ! -d "${temporary_directory}" ) ]]; then
-    echo "runtime closure has a non-directory /tmp: ${temporary_directory}" >&2
-    return 1
-  fi
-  mkdir -p "${temporary_directory}"
+  local root="$1" temporary_directory="${1%/}/tmp" proc_directory="${1%/}/proc" dev_directory="${1%/}/dev"
+  for directory in "${temporary_directory}" "${proc_directory}" "${dev_directory}"; do
+    if [[ -L "${directory}" || ( -e "${directory}" && ! -d "${directory}" ) ]]; then
+      echo "runtime closure has a non-directory mount target: ${directory}" >&2
+      return 1
+    fi
+    mkdir -p "${directory}"
+  done
   chmod 1777 "${temporary_directory}"
 }
 
