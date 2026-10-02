@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "policyName": "explicit-function-protection",
+  "default": {
+    "status": "not-applicable",
+    "reason": "No per-project selector is declared; function protection is never automatic."
+  },
+  "projects": {},
+  "smokeFixtures": {
+    "protection-symbolized-fixture": {
+      "runtime": ["glibc", "musl", "bionic"],
+      "selectors": ["urp_transform_target", "urp_flatten_target"],
+      "passes": ["register-permutation", "control-flow-flattening"],
+      "combinedOrder": ["control-flow-flattening", "register-permutation"]
+    }
+  }
+}
