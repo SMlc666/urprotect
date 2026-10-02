@@ -70,9 +70,11 @@ cat > "${isolation_dropper_dir}/urp-dropper.c" <<'DROPper'
 #include <unistd.h>
 int main(int argc, char **argv) {
     if (argc < 2) { dprintf(2, "dropper: missing target\\n"); return 125; }
-    if (setgroups(0, NULL) != 0 && errno != EPERM) { dprintf(2, "dropper: setgroups: %s\\n", strerror(errno)); return 125; }
-    if (setgid(65534) != 0) { dprintf(2, "dropper: setgid: %s\\n", strerror(errno)); return 125; }
-    if (setuid(65534) != 0) { dprintf(2, "dropper: setuid: %s\\n", strerror(errno)); return 125; }
+    if (geteuid() == 0) {
+        if (setgroups(0, NULL) != 0 && errno != EPERM) { dprintf(2, "dropper: setgroups: %s\\n", strerror(errno)); return 125; }
+        if (setgid(65534) != 0) { dprintf(2, "dropper: setgid: %s\\n", strerror(errno)); return 125; }
+        if (setuid(65534) != 0) { dprintf(2, "dropper: setuid: %s\\n", strerror(errno)); return 125; }
+    }
     char **child = calloc((size_t)argc, sizeof(*child));
     if (child == NULL) { dprintf(2, "dropper: calloc: %s\\n", strerror(errno)); return 125; }
     const char *argv0 = getenv("URP_ARGV0");
