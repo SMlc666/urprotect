@@ -128,6 +128,8 @@ def main() -> int:
         "--unshare-uts",
         "--clearenv",
         "--cap-drop", "ALL",
+        "--cap-add", "CAP_SETGID",
+        "--cap-add", "CAP_SETUID",
         "--ro-bind", str(rootfs), "/",
         "--tmpfs", "/tmp",
         *dropper_bind,
