@@ -23,7 +23,7 @@ artifact_root="${REAL_SAMPLE_ARTIFACT_ROOT:-${repo_root}/.artifacts/real-samples
 mkdir -p "${artifact_root}"
 artifact_root="$(cd "${artifact_root}" && pwd)"
 
-for command in curl sha256sum python3 readelf timeout dotnet; do
+for command in curl sha256sum python3 readelf timeout dotnet flock; do
   command -v "${command}" >/dev/null 2>&1 || { echo "${command} is required" >&2; exit 127; }
 done
 
@@ -55,6 +55,8 @@ temp_root="$(mktemp -d "${runner_temp%/}/urprotect-real-samples-${requested_tier
 # Bubblewrap runs directly as the unprivileged CI runner; retain private
 # names while allowing read-only bind traversal through the temporary root.
 chmod 711 "${temp_root}"
+isolation_lock="${temp_root}/isolation.lock"
+: > "${isolation_lock}"
 parallelism="${REAL_SAMPLE_PARALLELISM:-4}"
 if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 8 ]]; then
   echo 'REAL_SAMPLE_PARALLELISM must be an integer from 1 through 8' >&2
@@ -213,10 +215,13 @@ PYISO
     echo "isolated command is empty or malformed" >&2
     return 125
   fi
-  python3 "${repo_root}/scripts/run-isolated-real-sample.py" \
-    --rootfs "${extract_root}" --stdout "${sample_root}/logs/${label}.stdout" \
-    --stderr "${sample_root}/logs/${label}.stderr" --timeout 30 --memory-bytes 536870912 \
-    --process-limit 32 --output-limit 1048576 "${argv0_args[@]}" -- "${command_parts[@]}"
+  (
+    flock 9
+    python3 "${repo_root}/scripts/run-isolated-real-sample.py" \
+      --rootfs "${extract_root}" --stdout "${sample_root}/logs/${label}.stdout" \
+      --stderr "${sample_root}/logs/${label}.stderr" --timeout 30 --memory-bytes 536870912 \
+      --process-limit 32 --output-limit 1048576 "${argv0_args[@]}" -- "${command_parts[@]}"
+  ) 9>"${isolation_lock}"
 }
 
 run_isolated_baseline() {
