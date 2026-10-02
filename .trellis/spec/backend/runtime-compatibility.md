@@ -596,3 +596,121 @@ the evidence gate runs. The upload step must set
 build files, or post-download evidence will be incomplete even when the
 pre-upload gate passed. A retained artifact audit verifies every SHA256SUMS
 entry after download; the archive's file set must match the checksum manifest.
+
+## Scenario: explicit function-protection request and runtime evidence
+
+### 1. Scope / Trigger
+
+This contract applies to the managed `protect` command, the merged ELF
+function-symbol inventory, the AsmStone-backed AArch64 analysis/rewrite path,
+the protection JSON report, and the three-runtime protection smoke. It does
+not change the no-op validator or outer packer defaults: protection is never
+implicit and never means “all functions”.
+
+### 2. Signatures
+
+```text
+urprotect protect INPUT --output OUTPUT
+  (--function NAME | --function-id symtab:INDEX|dynsym:INDEX
+                    | --function-address 0xADDRESS)+
+  (--pass control-flow-flattening | --pass register-permutation)+
+  [--json PATH|-]
+```
+
+The core request is `FunctionProtectionOptions(Selectors, Passes)`. Selectors
+resolve `STT_FUNC` records from both `.symtab` and `.dynsym`; a resolved record
+retains its table kind, table index, address, size, and exact name. A valid
+request with both passes is normalized to
+`control-flow-flattening`, then `register-permutation`.
+
+### 3. Contracts
+
+- A name selector is exact and fails with `FunctionSelectorAmbiguous` when
+  more than one valid symbol identity matches. Table/index or address criteria
+  must be supplied explicitly to disambiguate; the resolver never picks a
+  first match.
+- The selected range must be non-empty, instruction-aligned, file-backed, and
+  wholly contained in exactly one executable `PT_LOAD`. Unsupported decode,
+  unresolved indirect control flow, unsupported PC-relative semantics, and
+  reserved-register conflicts are explicit per-function outcomes.
+- `AsmStoneAdapter` is the only third-party boundary. Every register-
+  permutation instruction is AsmStone decoded, re-encoded, and decoded again
+  before emission. Project-owned IR retains semantic operands, implicit
+  effects, register views, memory addressing, flags, and control-flow targets.
+- The resource plan reserves AArch64 x18 and pass scratch/state registers,
+  records used/available registers and pressure, and fails before emission
+  when the plan is insufficient. It never selects an arbitrary last-minute
+  scratch register.
+- The operation is transactional. Any selected-function failure, layout
+  failure, structural reparse failure, post-write decode failure, or output IO
+  failure publishes no protected output. The writer changes only selected
+  function ranges and its reserved program-header slot; all other source bytes
+  remain byte-identical.
+- The report contains the original input hash, exact selector strings, pass
+  order, each selected function identity/range, resource plan, diagnostics,
+  transformed status, output hash, and publication status.
+- The PR smoke executes standalone register permutation, standalone control-
+  flow flattening (including an NZCV branch fixture), and the combined order
+  in glibc, musl, and locked Termux/bionic cells. Baseline and protected
+  status/stdout/stderr must match; raw fixture executables are removed before
+  evidence validation.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Missing selector or pass | usage/`InvalidArgument`; no output |
+| Missing or ambiguous exact symbol | `FunctionNotFound`/`FunctionSelectorAmbiguous`; no output |
+| Zero-sized, misaligned, overlapping, or out-of-range selected range | `FunctionResourceUnavailable`; no output |
+| AsmStone decode/encode/round-trip failure | explicit analysis/protection diagnostic; no output |
+| Reserved register or insufficient resource plan | `FunctionResourceUnavailable` with resource reason; no output |
+| No legal executable placement | `ProtectionLayoutUnavailable`; no output |
+| Output parse/decode or byte-invariant failure | `WrapperMalformed`; no output |
+| Protected process status/streams differ from baseline | runtime E2E failure; evidence gate fails |
+| Required glibc, musl, or bionic capability/evidence missing | environment/CI failure; never `not-applicable` |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a unique symbol-bounded function is selected, each requested pass
+  completes, the output reparses and re-decodes, and all three runtime smoke
+  comparisons are equivalent.
+- Base: a normal ELF with no explicit selector performs no transformation;
+  a selected function whose layout has no legal placement returns an explicit
+  failure and leaves no output file.
+- Bad: treating `.symtab`/`.dynsym` name aliases as one implicit selection,
+  rewriting an unselected range, or labeling a static parser result as
+  `accepted-and-runs`.
+
+### 6. Tests Required
+
+- ELF parser tests assert `.symtab` and `.dynsym` `STT_FUNC` identities,
+  non-empty ranges, and stable table/index metadata.
+- Protection tests assert ambiguity, explicit identity resolution, pass
+  ordering, resource diagnostics, atomic failure, selected/unselected byte
+  invariants, output reparse, and post-write decode.
+- Adapter tests assert semantic operand projection, SP/ZR roles, register
+  permutation round-trip, and NZCV/control-flow classification.
+- CLI tests assert selector/pass parsing, JSON selectors/resource plans,
+  executable-mode preservation, and no output on failure.
+- `run-protection-e2e.sh` plus `check-protection-evidence.py` assert baseline
+  equivalence and normalized evidence in glibc, musl, and bionic CI cells.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+for every function in the ELF:
+    rewrite(function)
+publish(output)
+```
+
+#### Correct
+
+```text
+resolve exact user selectors from .symtab/.dynsym
+-> plan CFG, AsmStone semantics, and register resources
+-> flatten (if requested), then permute (if requested)
+-> write a temporary ELF and reparse/redecode it
+-> publish only after all selected functions and runtime checks pass
+```
