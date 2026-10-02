@@ -52,7 +52,10 @@ package_archive_cache="${package_cache_root}/archives"
 package_index_cache="${package_cache_root}/indexes"
 mkdir -p "${package_archive_cache}" "${package_index_cache}"
 temp_root="$(mktemp -d "${runner_temp%/}/urprotect-real-samples-${requested_tier}.XXXXXX")"
-chmod 700 "${temp_root}"
+# The isolated process runs as uid 65534 in a user namespace; retain private
+# names while allowing that uid to traverse the temporary root for read-only
+# bubblewrap binds.
+chmod 711 "${temp_root}"
 parallelism="${REAL_SAMPLE_PARALLELISM:-4}"
 if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 8 ]]; then
   echo 'REAL_SAMPLE_PARALLELISM must be an integer from 1 through 8' >&2
