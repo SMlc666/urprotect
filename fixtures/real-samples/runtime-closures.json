@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "registryName": "public-real-aarch64-100",
+  "policy": "Every registry identity receives baseline and outer-wrapper execution in its declared runtime; function protection remains separately opt-in.",
+  "runtimes": {
+    "glibc": {
+      "family": "debian-bookworm-arm64",
+      "packageIndexUrl": "https://deb.debian.org/debian/dists/bookworm/main/binary-arm64/Packages.xz",
+      "packageIndexSha256": "2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00",
+      "repositoryRoot": "https://deb.debian.org/debian/",
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "archiveFormat": "deb",
+      "resolver": "deb-depends-v1"
+    },
+    "musl": {
+      "family": "alpine-v3.22-main-aarch64",
+      "packageIndexUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz",
+      "packageIndexSha256": "4d5e75508936b08bed7423bb9e9039a669eadc05323189a9c31c90573766ab99",
+      "registryObservationIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+      "repositoryRoot": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/",
+      "loader": "/lib/ld-musl-aarch64.so.1",
+      "archiveFormat": "apk",
+      "resolver": "apk-depends-v1"
+    },
+    "bionic": {
+      "family": "termux-bionic-locked",
+      "loader": "/system/bin/linker64",
+      "archiveFormat": "deb",
+      "resolver": "termux-container-v1",
+      "execution": "locked-native-arm64-termux-container"
+    }
+  },
+  "projects": {
+    "*": {
+      "baseline": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "runtime-closure",
+        "invocation": "declared-artifact-version"
+      },
+      "outerWrapper": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "outer-execveat",
+        "compare": ["status", "stdout", "stderr"]
+      },
+      "hostContext": {
+        "expectedResult": "not-applicable",
+        "reason": "Ordinary public executable does not declare urp_entry."
+      }
+    }
+  }
+}

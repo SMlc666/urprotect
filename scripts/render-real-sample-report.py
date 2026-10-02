@@ -57,6 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("manifest", type=Path, nargs="?", default=Path("fixtures/real-samples/manifest.json"))
     parser.add_argument("--tier", required=True, choices=("pr", "nightly", "release"))
     parser.add_argument("--artifact-root", type=Path)
+    parser.add_argument("--runtime-closures", type=Path)
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-markdown", type=Path)
     parser.add_argument(
@@ -129,7 +130,7 @@ def project_identity(project: dict[str, Any]) -> tuple[str, str]:
     return project_id, identity
 
 
-def expected_layers(project: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def expected_layers(project: dict[str, Any], closures: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     policy = as_mapping(project.get("executionPolicy"))
     values: dict[str, dict[str, Any]] = {}
     for layer in LAYERS:
@@ -145,6 +146,19 @@ def expected_layers(project: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "status": "metadata-only",
             "reason": "Registry policy baseline; CI oracle has not been acquired.",
         }
+    if closures is not None:
+        runtime = as_mapping(project.get("target")).get("runtime")
+        default = as_mapping(closures.get("projects")).get("*")
+        if runtime in {"glibc", "musl", "bionic"} and isinstance(default, dict):
+            for layer in ("baseline", "outerWrapper"):
+                declaration = as_mapping(default.get(layer))
+                if isinstance(declaration.get("expectedResult"), str):
+                    values[layer]["expected"] = declaration["expectedResult"]
+                    values[layer]["actual"] = declaration["expectedResult"]
+            host = as_mapping(default.get("hostContext"))
+            if isinstance(host.get("expectedResult"), str):
+                values["hostContext"]["expected"] = host["expectedResult"]
+                values["hostContext"]["actual"] = host["expectedResult"]
     return values
 
 
@@ -154,10 +168,11 @@ def load_project_evidence(
     *,
     registry_only: bool,
     require_evidence: bool,
+    closures: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
     project_id, _ = project_identity(project)
     if registry_only:
-        return expected_layers(project), declared_fingerprint(project), "registry-baseline"
+        return expected_layers(project, closures), declared_fingerprint(project), "registry-baseline"
     sample_root = artifact_root / project_id
     result_path = sample_root / "result.json"
     fingerprint_path = sample_root / "elf-fingerprint.json"
@@ -182,7 +197,7 @@ def load_project_evidence(
     else:
         if require_evidence:
             raise ReportError(f"{project_id}: result.json has no layers")
-        layers = expected_layers(project)
+        layers = expected_layers(project, closures)
     if not isinstance(fingerprint, dict) or not fingerprint:
         if require_evidence:
             raise ReportError(f"{project_id}: fingerprint evidence is missing")
@@ -217,6 +232,7 @@ def build_report(
     *,
     registry_only: bool,
     require_evidence: bool,
+    closures: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if len(projects) > MAX_PROJECTS:
         raise ReportError(f"registry contains more than {MAX_PROJECTS} projects")
@@ -274,6 +290,7 @@ def build_report(
             project,
             registry_only=registry_only,
             require_evidence=require_evidence,
+            closures=closures,
         )
         observation_sources[source] += 1
         runtime_value = str(fingerprint.get("runtime", runtime))
@@ -495,6 +512,9 @@ def main() -> int:
             dispositions = as_mapping(dispositions_data.get("dispositions", dispositions_data))
         else:
             dispositions = {}
+        closures = None
+        if arguments.runtime_closures is not None:
+            closures = load_required(arguments.runtime_closures, "runtime closures")
         aggregate = build_report(
             manifest,
             projects,
@@ -503,6 +523,7 @@ def main() -> int:
             dispositions,
             registry_only=arguments.registry_only,
             require_evidence=arguments.require_evidence,
+            closures=closures,
         )
         output_json.parent.mkdir(parents=True, exist_ok=True)
         output_markdown.parent.mkdir(parents=True, exist_ok=True)

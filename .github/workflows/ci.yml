@@ -99,6 +99,10 @@ jobs:
         run: |
           python3 tests/test_runtime_matrix.py
           python3 scripts/validate-runtime-matrix.py fixtures/runtime-matrix.json
+          python3 tests/test_runtime_closures.py
+          python3 scripts/validate-runtime-closures.py \
+            fixtures/real-samples/runtime-closures.json \
+            fixtures/real-samples/manifest.json
       - name: Render PR regression matrix plan
         run: |
           mkdir -p .artifacts/regression-matrix/pr
@@ -244,11 +248,12 @@ jobs:
       - name: Install bounded isolation and inspection tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap binutils curl dpkg-dev
+          sudo apt-get install -y --no-install-recommends bubblewrap binutils curl dpkg-dev make musl-tools
           {
             echo "bubblewrap=$(bwrap --version)"
             echo "readelf=$(readelf --version | head -n 1)"
             echo "runner_arch=$(uname -m)"
+            echo "docker=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
           } | tee -a .artifacts/real-samples/runner/environment.txt
       - uses: actions/setup-dotnet@v4
         with:
@@ -263,13 +268,23 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build product
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Build static AArch64 outer launcher
+        run: |
+          make -C native/urprotect-launcher \
+            CC=musl-gcc MUSL_REAL_CC=aarch64-linux-gnu-gcc \
+            launcher check-elf
       - name: Recheck metadata without acquisition
         run: |
           python3 scripts/validate-real-samples.py \
             fixtures/real-samples/manifest.json \
             --candidates fixtures/real-samples/candidates.json \
             --tier "${REAL_SAMPLE_TIER}"
+          python3 scripts/validate-runtime-closures.py \
+            fixtures/real-samples/runtime-closures.json \
+            fixtures/real-samples/manifest.json
       - name: Run required full approved real-sample suite
+        env:
+          REAL_SAMPLE_LAUNCHER: native/urprotect-launcher/build/urprotect-launcher
         run: |
           ./scripts/run-real-sample-matrix.sh --tier "${REAL_SAMPLE_TIER}"
       - name: Recheck retained real-sample evidence
@@ -278,6 +293,7 @@ jobs:
           python3 scripts/check-real-sample-evidence.py \
             fixtures/real-samples/manifest.json \
             --candidates fixtures/real-samples/candidates.json \
+            --runtime-closures fixtures/real-samples/runtime-closures.json \
             --tier "${REAL_SAMPLE_TIER}" \
             --artifact-root ".artifacts/real-samples/${REAL_SAMPLE_TIER}"
       - name: Upload real-sample evidence (never raw inputs)

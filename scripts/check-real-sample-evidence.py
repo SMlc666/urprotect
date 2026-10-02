@@ -61,6 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tier", required=True, choices=("pr", "nightly", "release"))
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--candidates", type=Path)
+    parser.add_argument("--runtime-closures", type=Path)
     parser.add_argument(
         "--dispositions",
         type=Path,
@@ -139,7 +140,7 @@ def manifest_projects(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return projects
 
 
-def layer_expectations(project: dict[str, Any]) -> dict[str, str]:
+def layer_expectations(project: dict[str, Any], closures: dict[str, Any] | None = None) -> dict[str, str]:
     policy = project.get("executionPolicy")
     if not isinstance(policy, dict):
         raise EvidenceError(f"{project.get('projectId', '<unknown>')} has no executionPolicy")
@@ -150,6 +151,17 @@ def layer_expectations(project: dict[str, Any]) -> dict[str, str]:
         if not isinstance(value, dict) or value.get("expectedResult") not in allowed_results:
             raise EvidenceError(f"{project.get('projectId', '<unknown>')} has no valid {layer} policy")
         result[layer] = value["expectedResult"]
+    if closures is not None:
+        runtime = project.get("target", {}).get("runtime")
+        default = closures.get("projects", {}).get("*")
+        if runtime in {"glibc", "musl", "bionic"} and isinstance(default, dict):
+            for layer in ("baseline", "outerWrapper"):
+                policy = default.get(layer)
+                if isinstance(policy, dict) and isinstance(policy.get("expectedResult"), str):
+                    result[layer] = policy["expectedResult"]
+            host = default.get("hostContext")
+            if isinstance(host, dict) and isinstance(host.get("expectedResult"), str):
+                result["hostContext"] = host["expectedResult"]
     return result
 
 
@@ -192,7 +204,7 @@ def check_fingerprint_shape(fingerprint: dict[str, Any], project_id: str) -> lis
     return errors
 
 
-def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
+def check_sample(project: dict[str, Any], tier: str, root: Path, closures: dict[str, Any] | None = None) -> list[str]:
     project_id = project.get("projectId")
     if not isinstance(project_id, str) or not project_id:
         raise EvidenceError("manifest project has no projectId")
@@ -233,7 +245,7 @@ def check_sample(project: dict[str, Any], tier: str, root: Path) -> list[str]:
         errors.append(f"{project_id}: result tier does not match {tier}")
     if result.get("projectId") != project_id:
         errors.append(f"{project_id}: result projectId does not match directory")
-    expected = layer_expectations(project)
+    expected = layer_expectations(project, closures)
     layers = result.get("layers")
     if not isinstance(layers, dict):
         errors.append(f"{project_id}: result.layers must be an object")
@@ -326,6 +338,13 @@ def main() -> int:
         sibling = manifest.with_name("feature-dispositions.json")
         dispositions_path = sibling if sibling.is_file() else None
     root = (arguments.artifact_root or Path(".artifacts/real-samples") / arguments.tier).resolve()
+    closures = None
+    if arguments.runtime_closures is not None:
+        try:
+            closures = read_json(arguments.runtime_closures, "runtime closures")
+        except EvidenceError as error:
+            print(f"FAIL real-sample evidence gate: {error}", file=sys.stderr)
+            return 1
     try:
         run_validator(manifest, candidates)
         manifest_data = read_json(manifest, "manifest")
@@ -337,7 +356,7 @@ def main() -> int:
         errors: list[str] = []
         project_ids = {project.get("projectId") for project in projects}
         for project in projects:
-            errors.extend(check_sample(project, arguments.tier, root))
+            errors.extend(check_sample(project, arguments.tier, root, closures))
         aggregate_json = root / "aggregate.json"
         aggregate_md = root / "aggregate.md"
         require_non_empty(aggregate_json, "aggregate.json")

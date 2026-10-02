@@ -15,6 +15,11 @@ Artifacts are public, versioned, and SHA-256 locked in `manifest.json` and `cand
 
 The Debian index lock is `2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00`; the Alpine AArch64 APKINDEX lock is `1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20`. The 20 new APKs are independently sourced upstream identities and are not Alpine variants of an existing project.
 
+The execution closure refresh is recorded separately in
+`runtime-closures.json`. Its current Alpine resolver index is hash-locked to
+`4d5e75508936b08bed7423bb9e9039a669eadc05323189a9c31c90573766ab99`; the
+registry observation hash above remains the historical selection evidence.
+
 ## Runtime, source, and producer mix
 
 | Dimension | Value | Identities |

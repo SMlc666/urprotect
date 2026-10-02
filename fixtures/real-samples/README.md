@@ -24,6 +24,14 @@ The Debian package-index SHA-256 is
 Alpine APKINDEX SHA-256 is
 `1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20`.
 
+`runtime-closures.json` is the execution policy for the complete registry. It
+locks the Debian `Packages.xz` and Alpine `APKINDEX` inputs, resolver family,
+loader identity, and the required `accepted-and-runs` baseline/outer layers.
+The runner resolves only the locked transitive Debian `Depends` and Alpine
+providers into a temporary rootfs; it never uses ambient host libraries. The
+bionic identity is executed through the locked native ARM64 Termux container
+and `/system/bin/linker64`.
+
 ## Local boundary
 
 Local commands are metadata-only:
@@ -59,9 +67,10 @@ bounded fingerprinting and UrProtect validation only, and never claims that the
 sample process ran.
 
 1. static ELF fingerprint and UrProtect JSON validation;
-2. baseline execution when the registry policy supplies a complete runtime
-   closure and isolation mode;
-3. outer-wrapper behavior when a reviewed profile policy enables it;
+2. baseline execution in the runtime closure declared by
+   `runtime-closures.json`;
+3. outer-wrapper behavior in the same closure through the profile-matched
+   native launcher;
 4. HostContext behavior only for an image with the declared `urp_entry`
    contract.
 
@@ -106,11 +115,11 @@ from acquired, hash-verified samples is an observation report. Features at or
 above the 5% distinct-identity threshold carry an explicit roadmap disposition
 in `feature-dispositions.json`; this record does not promote product support.
 
-The post-run gate checks all 100 project directories, all four layers, registry
-expectations, aggregate project IDs, non-empty evidence, cleanup markers, and
-the absence of raw binary-like files. A missing runtime or isolation capability
-is recorded as `environment-unavailable` and fails the required CI job; it is
-not relabeled as a compatibility pass.
+The post-run gate checks all 100 project directories, all four layers, the
+runtime-closure expectations, aggregate project IDs, non-empty evidence,
+cleanup markers, and the absence of raw binary-like files. A missing runtime
+or isolation capability is recorded as `environment-unavailable` and fails the
+required CI job; it is not relabeled as a compatibility pass.
 
 ## CI-first compatibility workflow
 
