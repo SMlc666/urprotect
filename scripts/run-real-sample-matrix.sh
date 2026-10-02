@@ -239,6 +239,7 @@ PYISO
 }
 prepare_runtime_root() {
   local root="$1" temporary_directory="${1%/}/tmp" proc_directory="${1%/}/proc" dev_directory="${1%/}/dev"
+  chmod 755 "${root}"
   for directory in "${temporary_directory}" "${proc_directory}" "${dev_directory}"; do
     if [[ -L "${directory}" || ( -e "${directory}" && ! -d "${directory}" ) ]]; then
       echo "runtime closure has a non-directory mount target: ${directory}" >&2
@@ -291,6 +292,7 @@ process_project() {
   archive="${sample_tmp}/source.archive"
   extract_root="${sample_tmp}/extract"
   rm -rf -- "${sample_root}" "${sample_tmp}"; mkdir -p "${sample_root}/logs" "${sample_tmp}"
+  chmod 711 "${sample_tmp}"
   {
     printf 'projectId=%s\nversion=%s\narchiveUrl=%s\narchivePath=%s\narchiveSha256=%s\nartifactPath=%s\narchiveFormat=%s\n' \
       "${id}" "${version}" "${archive_url}" "${archive_path}" "${archive_sha}" "${artifact_path}" "${archive_format}"
