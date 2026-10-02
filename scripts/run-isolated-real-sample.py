@@ -32,7 +32,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--process-limit", required=True, type=int)
     parser.add_argument("--output-limit", required=True, type=int)
     parser.add_argument("--argv0", default=None)
-    
     parser.add_argument("--lock", default=None)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser.parse_args()
