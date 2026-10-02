@@ -78,6 +78,7 @@ run_shell "set -eu
 host_wrapper="${artifact_root}/node-wrapper"
 dotnet run --project "$repo_root/src/UrProtect.Cli" --configuration Release --no-restore -- \
   pack "$input" --output "$host_wrapper" --launcher "$launcher" --profile outer-execveat \
+  --path-preserving \
   --json "${artifact_root}/node-pack.json" > "${artifact_root}/node-pack.stdout" \
   2> "${artifact_root}/node-pack.stderr"
 readelf -hW -lW "$host_wrapper" > "${artifact_root}/node-wrapper-readelf.txt"

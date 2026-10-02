@@ -23,7 +23,7 @@ import urllib.request
 
 
 MAX_INDEX_BYTES = 64 * 1024 * 1024
-MAX_PACKAGE_BYTES = 128 * 1024 * 1024
+MAX_PACKAGE_BYTES = 1024 * 1024 * 1024
 
 
 def fail(message: str) -> None:
@@ -91,9 +91,17 @@ def safe_extract_tar(archive: Path, root: Path, apk: bool) -> None:
             if target != root_resolved and root_resolved not in target.parents:
                 fail(f"archive traversal: {member.name}")
             if member.issym() or member.islnk():
-                if member.linkname.startswith("/"):
-                    fail(f"absolute archive link: {member.name}")
-        tar.extractall(root, filter="data")
+                link_target = (
+                    root / member.linkname.lstrip("/")
+                    if member.linkname.startswith("/")
+                    else root / Path(member.name).parent / member.linkname
+                ).resolve()
+                if link_target != root_resolved and root_resolved not in link_target.parents:
+                    fail(f"archive link escapes root: {member.name} -> {member.linkname}")
+        # The member/link paths were checked against the destination root above.
+        # Alpine intentionally ships absolute links such as /bin/sh and
+        # /etc/ssl1.1/cert.pem; tar's data filter rejects those safe in-root links.
+        tar.extractall(root, filter=lambda member, _path: member)
 
 
 def parse_debian_index(index: Path) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
@@ -129,6 +137,12 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
         fail(f"source package is absent from the locked Debian index: {source_path}")
     pending = deque([seed["Package"]])
     selected: dict[str, dict] = {}
+    project_policy = args.closure.get("projects", {}).get(project.get("projectId"), {})
+    excluded = {
+        item.get("package")
+        for item in project_policy.get("excludeDependencies", [])
+        if isinstance(item, dict) and isinstance(item.get("package"), str)
+    }
     while pending:
         name = pending.popleft()
         if name in selected:
@@ -138,6 +152,8 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
             fail(f"Debian dependency is absent from the locked index: {name}")
         selected[name] = record
         for dependency in dependency_names(record.get("Pre-Depends")) + dependency_names(record.get("Depends")):
+            if dependency in excluded:
+                continue
             if dependency not in selected:
                 pending.append(dependency)
 
@@ -193,6 +209,12 @@ def build_apk(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
         fail(f"source APK package is absent from the locked index: {source_package}")
     pending = deque([source_package])
     selected: dict[str, dict] = {}
+    project_policy = args.closure.get("projects", {}).get(project.get("projectId"), {})
+    excluded = {
+        item.get("package")
+        for item in project_policy.get("excludeDependencies", [])
+        if isinstance(item, dict) and isinstance(item.get("package"), str)
+    }
     while pending:
         name = pending.popleft()
         record = providers.get(name)
@@ -205,6 +227,10 @@ def build_apk(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
         for dependency in record.get("D", "").split():
             dependency = dependency.split("=", 1)[0]
             dependency = dependency.split(">", 1)[0].split("<", 1)[0]
+            if dependency.startswith("!"):
+                continue
+            if dependency in excluded:
+                continue
             if dependency:
                 pending.append(dependency)
 
@@ -245,6 +271,7 @@ def main() -> None:
     args = parser.parse_args()
     closure = json.loads(args.runtime_closures.read_text())
     project = json.loads(args.project.read_text())
+    args.closure = closure
     runtime = closure["runtimes"][args.runtime]
     args.work_root.mkdir(parents=True, exist_ok=True)
     args.index_dir.mkdir(parents=True, exist_ok=True)

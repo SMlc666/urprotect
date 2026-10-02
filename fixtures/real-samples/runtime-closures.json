@@ -31,6 +31,28 @@
     }
   },
   "projects": {
+    "zero-ad": {
+      "baseline": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "runtime-closure",
+        "invocation": "declared-artifact-version"
+      },
+      "outerWrapper": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "outer-execveat",
+        "compare": ["status", "stdout", "stderr"]
+      },
+      "hostContext": {
+        "expectedResult": "not-applicable",
+        "reason": "Ordinary public executable does not declare urp_entry."
+      },
+      "excludeDependencies": [
+        {
+          "package": "0ad-data",
+          "reason": "The bounded --version invocation does not access the optional 0ad data tree."
+        }
+      ]
+    },
     "*": {
       "baseline": {
         "expectedResult": "accepted-and-runs",
