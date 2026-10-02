@@ -118,9 +118,11 @@ fi
 dotnet_cli=(dotnet "${cli_dll}")
 
 project_fields() {
-  python3 - "$1" <<'PY'
+  python3 - "$1" "${runtime_closures}" <<'PY'
 import base64, json, sys
-p=json.loads(sys.argv[1]); prov=p['provenance']; target=p['target']; policy=p['executionPolicy']
+p=json.loads(sys.argv[1]); closures=json.load(open(sys.argv[2])); prov=p['provenance']; target=p['target']; policy=p['executionPolicy']
+closure_policy=closures.get('projects', {}).get(p['projectId'], closures['projects']['*'])
+baseline_policy={**policy['baseline'], **closure_policy.get('baseline', {})}
 apk_metadata={
  'package': prov.get('packageName',''),
  'version': prov.get('version',''),
@@ -131,8 +133,8 @@ apk_metadata={
 values=[
  p['projectId'], prov['archiveUrl'], prov['version'], prov['archivePath'], prov['archiveSha256'],
  prov['archiveFormat'], prov['artifactPath'], p['featureFingerprint']['producer'],
- policy['static']['expectedResult'], str(policy['baseline']['applicable']).lower(),
- policy['baseline']['expectedResult'], policy['baseline'].get('mode','-'), base64.urlsafe_b64encode(json.dumps(policy['baseline'].get('command', [])).encode()).decode(), target['runtime'], target['loader'],
+ policy['static']['expectedResult'], str(baseline_policy.get('applicable', True)).lower(),
+ baseline_policy.get('expectedResult', 'accepted-and-runs'), baseline_policy.get('mode','-'), base64.urlsafe_b64encode(json.dumps(baseline_policy.get('command', [])).encode()).decode(), target['runtime'], target['loader'],
  base64.urlsafe_b64encode(json.dumps(apk_metadata).encode()).decode(),
  prov.get('sourceKind',''),
 ]
@@ -183,6 +185,11 @@ write_failure_evidence() {
 
 run_isolated_command() {
   local extract_root="$1" sample_root="$2" label="$3" command_b64="$4"
+  local argv0="${5:-}"
+  local -a argv0_args=()
+  if [[ -n "${argv0}" ]]; then
+    argv0_args=(--argv0 "${argv0}")
+  fi
   local -a command_parts
   mapfile -t command_parts < <(python3 - "${command_b64}" <<'PYISO'
 import base64, json, sys
@@ -205,7 +212,7 @@ PYISO
   python3 "${repo_root}/scripts/run-isolated-real-sample.py" \
     --rootfs "${extract_root}" --stdout "${sample_root}/logs/${label}.stdout" \
     --stderr "${sample_root}/logs/${label}.stderr" --timeout 30 --memory-bytes 536870912 \
-    --process-limit 32 --output-limit 1048576 -- "${command_parts[@]}"
+    --process-limit 32 --output-limit 1048576 "${argv0_args[@]}" -- "${command_parts[@]}"
 }
 
 run_isolated_baseline() {
@@ -500,7 +507,7 @@ values[0]='/usr/local/bin/urprotect-packed'
 print(base64.urlsafe_b64encode(json.dumps(values).encode()).decode())
 PYOUTER
       )"
-      if run_isolated_command "${runtime_root}" "${sample_root}" outer "${outer_command}"; then :; else wrapper_status=$?; fi
+      if run_isolated_command "${runtime_root}" "${sample_root}" outer "${outer_command}" "/${artifact_path#/}"; then :; else wrapper_status=$?; fi
       if [[ "${wrapper_status}" -eq 0 ]]; then
         actual_outer=accepted-and-runs
         reason_outer="outer status=${wrapper_status}"

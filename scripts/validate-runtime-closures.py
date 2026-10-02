@@ -61,6 +61,21 @@ def validate(closure_path: Path, manifest_path: Path) -> None:
             fail(f"default {layer} policy must require accepted-and-runs")
     if default["outerWrapper"].get("mode") != "outer-execveat":
         fail("default outer-wrapper mode must be outer-execveat")
+    for project in projects:
+        project_id = project.get("projectId")
+        policy = policies.get(project_id, default)
+        if not isinstance(policy, dict):
+            fail(f"{project_id}: runtime closure policy must be an object")
+        baseline = policy.get("baseline", {})
+        if not isinstance(baseline, dict):
+            fail(f"{project_id}: baseline policy must be an object")
+        command = baseline.get("command")
+        if command is not None:
+            if not isinstance(command, list) or not command or any(not isinstance(item, str) for item in command):
+                fail(f"{project_id}: baseline command must be a non-empty string list")
+            artifact = "/" + project.get("provenance", {}).get("artifactPath", "").lstrip("/")
+            if command[0] != artifact:
+                fail(f"{project_id}: baseline command must launch declared artifact {artifact}")
     print(f"PASS runtime closures: 100 identities, {len(runtimes)} runtime families")
 
 

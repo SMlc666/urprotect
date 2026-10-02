@@ -35,7 +35,8 @@
       "baseline": {
         "expectedResult": "accepted-and-runs",
         "mode": "runtime-closure",
-        "invocation": "declared-artifact-version"
+        "invocation": "declared-artifact-version",
+        "command": ["/usr/games/pyrogenesis", "--version"]
       },
       "outerWrapper": {
         "expectedResult": "accepted-and-runs",
@@ -53,6 +54,34 @@
         }
       ]
     },
+    "alpine-7zip": {"baseline": {"command": ["/usr/bin/7z", "-h"]}},
+    "alpine-dosfstools": {"baseline": {"command": ["/sbin/fsck.fat", "-h"]}},
+    "alpine-dropbear": {"baseline": {"command": ["/usr/sbin/dropbear", "-h"]}},
+    "alpine-mandoc": {"baseline": {"command": ["/usr/bin/mandoc", "-V"]}},
+    "alpine-mc": {"baseline": {"command": ["/usr/bin/mc", "--version"]}},
+    "alpine-openssh": {"baseline": {"command": ["/usr/bin/ssh", "-V"]}},
+    "alpine-bluez": {"baseline": {"command": ["/usr/bin/hciconfig", "version"]}},
+    "apache2": {"baseline": {"command": ["/usr/sbin/apache2", "-v"]}},
+    "bind9": {"baseline": {"command": ["/usr/bin/dig", "-v"]}},
+    "caddy": {"baseline": {"command": ["/usr/bin/caddy", "version"]}},
+    "ffmpeg": {"baseline": {"command": ["/usr/bin/ffmpeg", "-version"]}},
+    "graphviz": {"baseline": {"command": ["/usr/bin/dot_builtins", "-V"]}},
+    "iproute2": {"baseline": {"command": ["/sbin/ip", "-V"]}},
+    "lsof": {"baseline": {"command": ["/usr/bin/lsof", "-v"]}},
+    "lua": {"baseline": {"command": ["/usr/bin/lua5.4", "-v"]}},
+    "micro": {"baseline": {"command": ["/usr/bin/micro", "-version"]}},
+    "minicom": {"baseline": {"command": ["/usr/bin/minicom", "-v"]}},
+    "mpv": {"baseline": {"command": ["/usr/bin/mpv", "--version"]}},
+    "nmap": {"baseline": {"command": ["/usr/bin/nmap", "--version"]}},
+    "nginx": {"baseline": {"command": ["/usr/sbin/nginx", "-v"]}},
+    "openssl": {"baseline": {"command": ["/usr/bin/openssl", "version"]}},
+    "socat": {"baseline": {"command": ["/usr/bin/socat", "-V"]}},
+    "squashfs-tools": {"baseline": {"command": ["/usr/bin/mksquashfs", "-version"]}},
+    "sysstat": {"baseline": {"command": ["/usr/bin/iostat", "-V"]}},
+    "tmux": {"baseline": {"command": ["/usr/bin/tmux", "-V"]}},
+    "unzip": {"baseline": {"command": ["/usr/bin/unzip", "-v"]}},
+    "sed": {"baseline": {"command": ["/bin/sed", "--version"]}},
+    "alpine-fping": {"baseline": {"command": ["/usr/sbin/fping", "--version"]}},
     "*": {
       "baseline": {
         "expectedResult": "accepted-and-runs",

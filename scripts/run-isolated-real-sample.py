@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory-bytes", required=True, type=int)
     parser.add_argument("--process-limit", required=True, type=int)
     parser.add_argument("--output-limit", required=True, type=int)
+    parser.add_argument("--argv0", default=None)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -90,6 +91,7 @@ def main() -> int:
 
     # Mount the archive-derived root as '/', not the checkout or the host's
     # writable filesystem.  /tmp is the only writable target mount.
+    argv0 = ["--argv0", arguments.argv0] if arguments.argv0 is not None else []
     sudo = shutil.which("sudo") if os.geteuid() != 0 else None
     wrapped = ([sudo, "-n"] if sudo else []) + [
         bwrap,
@@ -108,7 +110,11 @@ def main() -> int:
         "--chdir", "/tmp",
         "--setenv", "PATH", "/bin:/usr/bin:/sbin:/usr/sbin",
         "--setenv", "HOME", "/tmp",
-        "--setenv", "LANG", "C",
+        "--setenv", "TERM", "xterm",
+        "--setenv", "LANG", "C.UTF-8",
+        "--setenv", "LC_ALL", "C.UTF-8",
+        "--setenv", "LD_LIBRARY_PATH", "/lib:/usr/lib:/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/blas:/usr/lib/aarch64-linux-gnu/lapack:/lib/arm-linux-gnueabihf:/usr/lib/arm-linux-gnueabihf",
+        *argv0,
         "--",
         *command,
     ]
