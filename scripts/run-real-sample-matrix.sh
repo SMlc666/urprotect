@@ -23,7 +23,7 @@ artifact_root="${REAL_SAMPLE_ARTIFACT_ROOT:-${repo_root}/.artifacts/real-samples
 mkdir -p "${artifact_root}"
 artifact_root="$(cd "${artifact_root}" && pwd)"
 
-for command in curl sha256sum python3 readelf timeout dotnet flock musl-gcc; do
+for command in curl sha256sum python3 readelf timeout dotnet musl-gcc; do
   command -v "${command}" >/dev/null 2>&1 || { echo "${command} is required" >&2; exit 127; }
 done
 
@@ -241,14 +241,12 @@ PYISO
     echo "isolated command is empty or malformed" >&2
     return 125
   fi
-  (
-    flock 9
-    python3 "${repo_root}/scripts/run-isolated-real-sample.py" \
-      --rootfs "${extract_root}" --stdout "${sample_root}/logs/${label}.stdout" \
-      --stderr "${sample_root}/logs/${label}.stderr" --timeout 30 --memory-bytes 536870912 \
-      --process-limit 32 --output-limit 1048576 --dropper "${isolation_dropper}" \
-      "${argv0_args[@]}" -- "${command_parts[@]}"
-  ) 9>"${isolation_lock}" 2>"${sample_root}/logs/${label}.isolation.log"
+  python3 "${repo_root}/scripts/run-isolated-real-sample.py" \
+    --rootfs "${extract_root}" --stdout "${sample_root}/logs/${label}.stdout" \
+    --stderr "${sample_root}/logs/${label}.stderr" --timeout 30 --memory-bytes 536870912 \
+    --process-limit 32 --output-limit 1048576 --dropper "${isolation_dropper}" \
+    --lock "${isolation_lock}" "${argv0_args[@]}" -- "${command_parts[@]}" \
+    2>"${sample_root}/logs/${label}.isolation.log"
 }
 
 run_isolated_baseline() {

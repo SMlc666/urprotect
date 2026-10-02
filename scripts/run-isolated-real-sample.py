@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import fcntl
 import errno
 import os
 from pathlib import Path
@@ -32,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-limit", required=True, type=int)
     parser.add_argument("--argv0", default=None)
     parser.add_argument("--dropper", default=None)
+    parser.add_argument("--lock", default=None)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -90,6 +92,16 @@ def main() -> int:
     for path in (arguments.stdout, arguments.stderr):
         path.parent.mkdir(parents=True, exist_ok=True)
 
+    lock_file = None
+    if arguments.lock is not None:
+        try:
+            lock_file = open(arguments.lock, "a+")
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        except OSError as error:
+            if lock_file is not None:
+                lock_file.close()
+            print(f"environment-unavailable: could not lock isolation: {error}", file=sys.stderr)
+            return 125
     # Mount the archive-derived root as '/', not the checkout or the host's
     # writable filesystem.  /tmp is the only writable target mount.
     argv0 = ["--argv0", arguments.argv0] if arguments.argv0 is not None else []
@@ -191,6 +203,9 @@ def main() -> int:
         return_code = 124
     arguments.stdout.write_bytes(bytes(buffers["stdout"]))
     arguments.stderr.write_bytes(bytes(buffers["stderr"]))
+    if lock_file is not None:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
     return return_code
 
 
