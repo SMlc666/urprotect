@@ -248,7 +248,7 @@ PYISO
       --stderr "${sample_root}/logs/${label}.stderr" --timeout 30 --memory-bytes 536870912 \
       --process-limit 32 --output-limit 1048576 --dropper "${isolation_dropper}" \
       "${argv0_args[@]}" -- "${command_parts[@]}"
-  ) 9>"${isolation_lock}"
+  ) 9>"${isolation_lock}" 2>"${sample_root}/logs/${label}.isolation.log"
 }
 
 run_isolated_baseline() {
