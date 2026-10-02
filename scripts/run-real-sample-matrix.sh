@@ -57,31 +57,6 @@ temp_root="$(mktemp -d "${runner_temp%/}/urprotect-real-samples-${requested_tier
 chmod 711 "${temp_root}"
 isolation_lock="${temp_root}/isolation.lock"
 : > "${isolation_lock}"
-isolation_dropper="${temp_root}/urp-dropper"
-cat > "${temp_root}/urp-dropper.c" <<'DROPper'
-#include <errno.h>
-#include <grp.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-int main(int argc, char **argv) {
-    if (argc < 2) return 125;
-    if (setgroups(0, NULL) != 0 && errno != EPERM) return 125;
-    if (setgid(65534) != 0 || setuid(65534) != 0) return 125;
-    char **child = calloc((size_t)argc, sizeof(*child));
-    if (child == NULL) return 125;
-    const char *argv0 = getenv("URP_ARGV0");
-    child[0] = (argv0 != NULL && *argv0 != '\0') ? (char *)argv0 : argv[1];
-    for (int index = 2; index < argc; ++index) child[index - 1] = argv[index];
-    child[argc - 1] = NULL;
-    execv(argv[1], child);
-    perror("execv");
-    return 127;
-}
-DROPper
-musl-gcc -static -O2 -s "${temp_root}/urp-dropper.c" -o "${isolation_dropper}"
-chmod 755 "${isolation_dropper}"
-rm -f "${temp_root}/urp-dropper.c"
 parallelism="${REAL_SAMPLE_PARALLELISM:-4}"
 if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 8 ]]; then
   echo 'REAL_SAMPLE_PARALLELISM must be an integer from 1 through 8' >&2
@@ -246,7 +221,7 @@ PYISO
     python3 "${repo_root}/scripts/run-isolated-real-sample.py" \
       --rootfs "${extract_root}" --stdout "${sample_root}/logs/${label}.stdout" \
       --stderr "${sample_root}/logs/${label}.stderr" --timeout 30 --memory-bytes 536870912 \
-      --process-limit 32 --output-limit 1048576 --dropper "${isolation_dropper}" \
+      --process-limit 32 --output-limit 1048576 \
       --lock "${isolation_lock}" "${argv0_args[@]}" -- "${command_parts[@]}"
     local isolation_status=$?
     set -e
