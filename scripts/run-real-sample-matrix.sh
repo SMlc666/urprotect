@@ -279,7 +279,8 @@ PYAPK
   if "${dotnet_cli[@]}" validate "${artifact}" --no-analysis --json "${sample_root}/urprotect-report.json" > "${sample_root}/logs/urprotect.log" 2>&1; then :; else validator_status=$?; fi
   local actual_static
   if [[ "${fingerprint_status}" -ne 0 ]]; then actual_static=unexpected-rejection
-  elif [[ "${validator_status}" -eq 0 ]]; then actual_static=accepted-and-runs
+  elif [[ "${validator_status}" -eq 0 && "${expected_static}" == expected-rejected ]]; then actual_static=unexpected-acceptance
+  elif [[ "${validator_status}" -eq 0 ]]; then actual_static=validated
   elif [[ "${expected_static}" == expected-rejected ]]; then actual_static=expected-rejected
   else actual_static=unexpected-rejection
   fi
@@ -304,7 +305,7 @@ PYAPK
   fi
   FIRST_FAILURE_LAYER="${first_failure}" write_result "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" not-applicable not-applicable \
     "${actual_static}" "${actual_baseline}" "${actual_outer}" "${actual_host}" "${artifact_sha}" \
-    "fingerprintStatus=${fingerprint_status}; validatorStatus=${validator_status}" "${reason_baseline}"
+    "validation-only; fingerprintStatus=${fingerprint_status}; validatorStatus=${validator_status}" "${reason_baseline}"
   printf 'raw-inputs-removed=true\n' > "${sample_root}/raw-inputs-removed.txt"
   rm -rf -- "${sample_tmp}"
   local result_status=0

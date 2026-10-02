@@ -358,9 +358,10 @@ public sealed class ElfPackService
         }
 
         var path = Encoding.UTF8.GetString(bytes[..terminator]);
-        if (path[0] != '/'
-            || (!path.EndsWith("ld-linux-aarch64.so.1", StringComparison.Ordinal)
-                && !path.EndsWith("ld-musl-aarch64.so.1", StringComparison.Ordinal)))
+        var isRecognizedInterpreter = path.Equals("/system/bin/linker64", StringComparison.Ordinal)
+            || path.EndsWith("ld-linux-aarch64.so.1", StringComparison.Ordinal)
+            || path.EndsWith("ld-musl-aarch64.so.1", StringComparison.Ordinal);
+        if (path[0] != '/' || !isRecognizedInterpreter)
         {
             diagnostics.Error(
                 DiagnosticCode.UnsupportedInterpreter,

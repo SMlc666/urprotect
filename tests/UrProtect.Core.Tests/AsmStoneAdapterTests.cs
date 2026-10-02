@@ -82,4 +82,39 @@ public sealed class AsmStoneAdapterTests
         var store = new AsmStoneAdapter().Decode(0xF9000020, 0x1000);
         Assert.True(store.Instruction!.Properties.HasFlag(Aarch64InstructionProperties.Store));
     }
+
+    [Fact]
+    public void AsmStoneEncoderPermutesGeneralRegistersThroughTheProjectAdapter()
+    {
+        const uint addX9X10X9 = 0x8B090149;
+        var adapter = new AsmStoneAdapter();
+
+        var result = adapter.TryPermuteGeneralRegisters(
+            addX9X10X9,
+            0x1000,
+            new Dictionary<byte, byte> { [9] = 10, [10] = 9 });
+
+        Assert.True(result.IsSuccess, result.Diagnostic);
+        Assert.NotEqual(addX9X10X9, result.Encoding);
+        var decoded = adapter.Decode(result.Encoding, 0x1000);
+        Assert.True(decoded.IsSuccess, decoded.Diagnostic);
+        Assert.Contains(decoded.Instruction!.Operands, operand =>
+            operand.Register is { Class: Aarch64RegisterClass.General, Index: 10 });
+    }
+
+    [Fact]
+    public void AdapterRetainsImplicitAndSpecialRegisterSemantics()
+    {
+        var adapter = new AsmStoneAdapter();
+        var addSp = adapter.Decode(0x910003E0, 0x1000);
+
+        Assert.True(addSp.IsSuccess, addSp.Diagnostic);
+        Assert.Contains(addSp.Instruction!.Operands, operand =>
+            operand.Register is { Role: Aarch64RegisterRole.StackPointer });
+
+        var zeroRegister = adapter.Decode(0x8B0903E0, 0x1000);
+        Assert.True(zeroRegister.IsSuccess, zeroRegister.Diagnostic);
+        Assert.Contains(zeroRegister.Instruction!.Operands, operand =>
+            operand.Register is { Role: Aarch64RegisterRole.Zero });
+    }
 }

@@ -7,6 +7,7 @@ using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Elf;
 using UrProtect.Core.Pack;
 using UrProtect.Core.Pipeline;
+using UrProtect.Core.Protect;
 
 namespace UrProtect.Cli;
 
@@ -68,6 +69,18 @@ public sealed class CliApplication
                 }
 
                 return RunPack(options, stdout, stderr);
+            }
+
+            if (string.Equals(args[0], "protect", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryParseProtectOptions(args, out var options, out var usageError))
+                {
+                    stderr.WriteLine(usageError);
+                    PrintUsage(stderr);
+                    return (int)ProductExitCode.Usage;
+                }
+
+                return RunProtect(options, stdout, stderr);
             }
 
             stderr.WriteLine($"Usage: unknown command '{args[0]}'.");
@@ -296,6 +309,7 @@ public sealed class CliApplication
         writer.WriteLine("Usage:");
         writer.WriteLine("  urprotect validate <input> [--copy <output>] [--json <path|->] [--no-analysis]");
         writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime]");
+        writer.WriteLine("  urprotect protect <input> --output <protected> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--json <path|->]");
     }
 
     private static int RunValidation(CliOptions options, TextWriter stdout, TextWriter stderr)
@@ -424,6 +438,73 @@ public sealed class CliApplication
                 EntrySymbol: options.EntrySymbol,
                 RequireThreadLifetime: options.RequireThreadLifetime));
         return WritePackResult(options, result, stdout, stderr);
+    }
+
+    private static int RunProtect(ProtectOptions options, TextWriter stdout, TextWriter stderr)
+    {
+        if (HasConflictingProtectPaths(options, out var conflictMessage))
+        {
+            return WriteProtectionUsageFailure(options, conflictMessage, stdout, stderr);
+        }
+
+        byte[] input;
+        try
+        {
+            input = File.ReadAllBytes(options.InputPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            var failureReport = new ProductProtectionReport(
+                1,
+                ToolVersion,
+                false,
+                new ProductProtectionInputReport(null, null),
+                options.Passes.Select(pass => pass.ToString()).ToArray(),
+                Array.Empty<ProductFunctionProtectionReport>(),
+                new ProductProtectionOutputReport(false, null),
+                new[]
+                {
+                    ProductDiagnosticReport.From(
+                        DiagnosticSeverity.Error,
+                        DiagnosticCode.InputIoFailure.ToString(),
+                        exception.Message),
+                });
+            return WriteProtectionResult(options, failureReport, stdout, stderr, ProductExitCode.FileSystem);
+        }
+
+        var request = new FunctionProtectionOptions(options.Functions, options.Passes);
+        var result = new FunctionProtectionService().Protect(input, request);
+        var published = false;
+        if (result.IsSuccess && result.OutputBytes is not null)
+        {
+            try
+            {
+                var sourceMode = OperatingSystem.IsWindows()
+                    ? (UnixFileMode?)null
+                    : File.GetUnixFileMode(options.InputPath);
+                WriteAtomicBytes(options.OutputPath, result.OutputBytes, sourceMode);
+                published = true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                var diagnostics = result.Diagnostics.ToList();
+                diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCode.OutputIoFailure,
+                    exception.Message));
+                result = result with { OutputBytes = null, Diagnostics = diagnostics.ToArray() };
+            }
+        }
+
+        var reportResult = result with { OutputBytes = published ? result.OutputBytes : null };
+        var report = ProductReportFactory.CreateProtection(ToolVersion, input, request, reportResult);
+        var exitCode = result.IsSuccess && published
+            ? ProductExitCode.Success
+            : result.Diagnostics.Any(diagnostic => diagnostic.Code is
+                DiagnosticCode.InputIoFailure or DiagnosticCode.OutputIoFailure)
+                ? ProductExitCode.FileSystem
+                : ProductExitCode.Validation;
+        return WriteProtectionResult(options, report, stdout, stderr, exitCode);
     }
 
     private static bool TryParseValidationOptions(
@@ -606,6 +687,225 @@ public sealed class CliApplication
         return true;
     }
 
+    private static bool TryParseProtectOptions(
+        string[] args,
+        out ProtectOptions options,
+        out string error)
+    {
+        options = null!;
+        error = string.Empty;
+        if (args.Length < 2 || args[1].StartsWith('-'))
+        {
+            error = "Usage: the protect command requires an input path.";
+            return false;
+        }
+
+        string? outputPath = null;
+        string? jsonPath = null;
+        var functions = new List<FunctionSelector>();
+        var passes = new List<ProtectionPass>();
+        for (var index = 2; index < args.Length; index++)
+        {
+            switch (args[index])
+            {
+                case "--output" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
+                    if (outputPath is not null)
+                    {
+                        error = "Usage: --output may be specified only once.";
+                        return false;
+                    }
+
+                    outputPath = args[++index];
+                    break;
+                case "--function" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
+                    functions.Add(FunctionSelector.ByName(args[++index]));
+                    break;
+                case "--function-id" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
+                    var identity = args[++index].Split(':', 2);
+                    if (identity.Length != 2
+                        || !TryParseSymbolTable(identity[0], out var symbolTable)
+                        || !uint.TryParse(
+                            identity[1],
+                            System.Globalization.NumberStyles.None,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var symbolIndex))
+                    {
+                        error = "Usage: --function-id must be symtab:<decimal-index> or dynsym:<decimal-index>.";
+                        return false;
+                    }
+
+                    var identitySelector = new FunctionSelector(null, symbolTable, symbolIndex);
+                    if (!TryAddFunctionSelector(
+                            functions,
+                            identitySelector,
+                            out error))
+                    {
+                        return false;
+                    }
+
+                    break;
+                case "--function-address" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
+                    var addressText = args[++index];
+                    if (!addressText.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                        || !ulong.TryParse(
+                            addressText[2..],
+                            System.Globalization.NumberStyles.AllowHexSpecifier,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var address))
+                    {
+                        error = "Usage: --function-address must be a hexadecimal virtual address such as 0x1234.";
+                        return false;
+                    }
+
+                    if (!TryAddFunctionSelector(
+                            functions,
+                            new FunctionSelector(null, Address: address),
+                            out error))
+                    {
+                        return false;
+                    }
+
+                    break;
+                case "--pass" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
+                    var passValue = args[++index];
+                    if (!TryParseProtectionPass(passValue, out var pass))
+                    {
+                        error = "Usage: --pass must be control-flow-flattening or register-permutation.";
+                        return false;
+                    }
+
+                    if (!passes.Contains(pass))
+                    {
+                        passes.Add(pass);
+                    }
+                    break;
+                case "--json" when index + 1 < args.Length
+                    && (args[index + 1] == "-" || !args[index + 1].StartsWith('-')):
+                    if (jsonPath is not null)
+                    {
+                        error = "Usage: --json may be specified only once.";
+                        return false;
+                    }
+
+                    jsonPath = args[++index];
+                    break;
+                case "-h":
+                case "--help":
+                    error = "Usage: help is only valid before the command.";
+                    return false;
+                default:
+                    error = $"Usage: unknown argument '{args[index]}'.";
+                    return false;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            error = "Usage: protect requires --output <protected>.";
+            return false;
+        }
+
+        if (functions.Count == 0)
+        {
+            error = "Usage: protect requires at least one --function <name>.";
+            return false;
+        }
+
+        if (passes.Count == 0)
+        {
+            error = "Usage: protect requires at least one --pass.";
+            return false;
+        }
+
+        options = new ProtectOptions(args[1], outputPath, jsonPath, functions, passes);
+        return true;
+    }
+
+    private static bool TryAddFunctionSelector(
+        List<FunctionSelector> selectors,
+        FunctionSelector disambiguator,
+        out string error)
+    {
+        error = string.Empty;
+        if (selectors.Count == 0)
+        {
+            selectors.Add(disambiguator);
+            return true;
+        }
+
+        var lastIndex = selectors.Count - 1;
+        var previous = selectors[lastIndex];
+        var canRefinePrevious = previous.Name is not null
+            || previous.Table.HasValue
+            || previous.TableIndex.HasValue;
+        if (!canRefinePrevious)
+        {
+            selectors.Add(disambiguator);
+            return true;
+        }
+
+        if (disambiguator.Table.HasValue
+            && previous.Table.HasValue
+            && previous.Table.Value != disambiguator.Table.Value)
+        {
+            error = "Usage: a function selector cannot combine two different symbol tables.";
+            return false;
+        }
+
+        if (disambiguator.TableIndex.HasValue
+            && previous.TableIndex.HasValue
+            && previous.TableIndex.Value != disambiguator.TableIndex.Value)
+        {
+            error = "Usage: a function selector cannot combine two different symbol indices.";
+            return false;
+        }
+
+        if (disambiguator.Address.HasValue
+            && previous.Address.HasValue
+            && previous.Address.Value != disambiguator.Address.Value)
+        {
+            error = "Usage: a function selector cannot combine two different function addresses.";
+            return false;
+        }
+
+        selectors[lastIndex] = previous with
+        {
+            Table = previous.Table ?? disambiguator.Table,
+            TableIndex = previous.TableIndex ?? disambiguator.TableIndex,
+            Address = previous.Address ?? disambiguator.Address,
+        };
+        return true;
+    }
+
+    private static bool TryParseSymbolTable(string value, out ElfSymbolTableKind table)
+    {
+        if (string.Equals(value, "symtab", StringComparison.Ordinal))
+        {
+            table = ElfSymbolTableKind.Static;
+            return true;
+        }
+
+        if (string.Equals(value, "dynsym", StringComparison.Ordinal))
+        {
+            table = ElfSymbolTableKind.Dynamic;
+            return true;
+        }
+
+        table = default;
+        return false;
+    }
+
+    private static bool TryParseProtectionPass(string value, out ProtectionPass pass)
+    {
+        pass = value switch
+        {
+            "control-flow-flattening" => ProtectionPass.ControlFlowFlattening,
+            "register-permutation" => ProtectionPass.RegisterPermutation,
+            _ => default,
+        };
+        return value is "control-flow-flattening" or "register-permutation";
+    }
+
     private static bool HasConflictingOutputPaths(CliOptions options, out string message)
     {
         message = string.Empty;
@@ -681,6 +981,40 @@ public sealed class CliApplication
         return false;
     }
 
+    private static bool HasConflictingProtectPaths(ProtectOptions options, out string message)
+    {
+        message = string.Empty;
+        try
+        {
+            var input = Path.GetFullPath(options.InputPath);
+            var output = Path.GetFullPath(options.OutputPath);
+            var json = options.JsonPath is null or "-" ? null : Path.GetFullPath(options.JsonPath);
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            if (string.Equals(input, output, comparison))
+            {
+                message = "Usage: --output must point to a path different from the input.";
+                return true;
+            }
+
+            if (json is not null
+                && (string.Equals(input, json, comparison)
+                    || string.Equals(output, json, comparison)))
+            {
+                message = "Usage: --json must point to a path different from input and protected output.";
+                return true;
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+        {
+            message = $"Usage: invalid output path: {exception.Message}";
+            return true;
+        }
+
+        return false;
+    }
+
     private static int WriteUsageFailure(
         CliOptions options,
         string message,
@@ -694,6 +1028,34 @@ public sealed class CliApplication
                 ProductReportFactory.Serialize(ProductReportFactory.CreateFailure(
                     ToolVersion,
                     ProductDiagnosticReport.From(DiagnosticSeverity.Error, "InvalidArgument", message))));
+        }
+        else
+        {
+            stderr.WriteLine(message);
+            PrintUsage(stderr);
+        }
+
+        return (int)ProductExitCode.Usage;
+    }
+
+    private static int WriteProtectionUsageFailure(
+        ProtectOptions options,
+        string message,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        if (options.JsonPath == "-")
+        {
+            var report = new ProductProtectionReport(
+                1,
+                ToolVersion,
+                false,
+                new ProductProtectionInputReport(null, null),
+                options.Passes.Select(pass => pass.ToString()).ToArray(),
+                Array.Empty<ProductFunctionProtectionReport>(),
+                new ProductProtectionOutputReport(false, null),
+                new[] { ProductDiagnosticReport.From(DiagnosticSeverity.Error, "InvalidArgument", message) });
+            WriteJson(stdout, ProductReportFactory.Serialize(report));
         }
         else
         {
@@ -793,6 +1155,48 @@ public sealed class CliApplication
         return (int)ProductExitCode.Validation;
     }
 
+    private static int WriteProtectionResult(
+        ProtectOptions options,
+        ProductProtectionReport report,
+        TextWriter stdout,
+        TextWriter stderr,
+        ProductExitCode exitCode)
+    {
+        if (options.JsonPath == "-")
+        {
+            WriteJson(stdout, ProductReportFactory.Serialize(report));
+        }
+        else
+        {
+            foreach (var diagnostic in report.Diagnostics)
+            {
+                var writer = diagnostic.Severity == nameof(DiagnosticSeverity.Error) ? stderr : stdout;
+                writer.WriteLine($"{diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
+            }
+
+            if (report.Success)
+            {
+                stdout.WriteLine($"Protected {report.Functions.Count(function => function.Transformed)} selected function(s).");
+                stdout.WriteLine($"Protected output written to {options.OutputPath}.");
+            }
+        }
+
+        if (options.JsonPath is { Length: > 0 } and not "-")
+        {
+            try
+            {
+                WriteAtomicJson(options.JsonPath, ProductReportFactory.Serialize(report));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                stderr.WriteLine($"OutputIoFailure: {exception.Message}");
+                return (int)ProductExitCode.FileSystem;
+            }
+        }
+
+        return (int)exitCode;
+    }
+
     private static void WriteHumanResult(
         NoOpValidationResult result,
         string? copyPath,
@@ -871,6 +1275,65 @@ public sealed class CliApplication
         }
     }
 
+    private static void WriteAtomicBytes(string path, byte[] bytes, UnixFileMode? sourceMode = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(bytes);
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+        {
+            throw new DirectoryNotFoundException($"The output directory does not exist: {directory}");
+        }
+
+        var temporaryPath = fullPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 64 * 1024,
+                       options: FileOptions.SequentialScan))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (sourceMode is { } mode && !OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(temporaryPath, mode);
+            }
+
+            var published = File.ReadAllBytes(temporaryPath);
+            if (!published.AsSpan().SequenceEqual(bytes))
+            {
+                throw new IOException("The protected output changed before publication.");
+            }
+
+            File.Move(temporaryPath, fullPath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (IOException)
+            {
+                // Preserve the original publication error.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Preserve the original publication error.
+            }
+        }
+    }
+
     private sealed record CliOptions(
         string InputPath,
         string? CopyPath,
@@ -885,4 +1348,11 @@ public sealed class CliApplication
         PayloadDispatchProfile Profile,
         string EntrySymbol,
         bool RequireThreadLifetime);
+
+    private sealed record ProtectOptions(
+        string InputPath,
+        string OutputPath,
+        string? JsonPath,
+        IReadOnlyList<FunctionSelector> Functions,
+        IReadOnlyList<ProtectionPass> Passes);
 }

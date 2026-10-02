@@ -5,6 +5,7 @@ using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Elf;
 using UrProtect.Core.Pack;
 using UrProtect.Core.Pipeline;
+using UrProtect.Core.Protect;
 
 namespace UrProtect.Cli;
 
@@ -96,6 +97,45 @@ public sealed record ProductPackPayloadReport(
 
 public sealed record ProductPackOutputReport(bool Published, string? Sha256);
 
+public sealed record ProductProtectionReport(
+    int SchemaVersion,
+    string ToolVersion,
+    bool Success,
+    ProductProtectionInputReport Input,
+    IReadOnlyList<string> Passes,
+    IReadOnlyList<ProductFunctionProtectionReport> Functions,
+    ProductProtectionOutputReport Output,
+    IReadOnlyList<ProductDiagnosticReport> Diagnostics)
+{
+    public IReadOnlyList<string> Selectors { get; init; } = Array.Empty<string>();
+}
+
+public sealed record ProductProtectionInputReport(long? ByteLength, string? Sha256);
+
+public sealed record ProductFunctionProtectionReport(
+    string Name,
+    string Table,
+    uint TableIndex,
+    ulong Address,
+    ulong Size,
+    bool Selected,
+    bool Transformed,
+    IReadOnlyList<string> AppliedPasses,
+    IReadOnlyList<ProductDiagnosticReport> Diagnostics)
+{
+    public ProductProtectionResourceReport? ResourcePlan { get; init; }
+}
+
+public sealed record ProductProtectionResourceReport(
+    IReadOnlyList<int> UsedGeneralRegisters,
+    IReadOnlyList<int> ReservedGeneralRegisters,
+    IReadOnlyList<int> AvailableScratchRegisters,
+    int Pressure,
+    bool Sufficient,
+    string? FailureReason);
+
+public sealed record ProductProtectionOutputReport(bool Published, string? Sha256);
+
 public static class ProductReportFactory
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -180,6 +220,64 @@ public static class ProductReportFactory
     }
 
     public static string Serialize(ProductPackReport report) =>
+        JsonSerializer.Serialize(report, JsonOptions);
+
+    public static ProductProtectionReport CreateProtection(
+        string toolVersion,
+        byte[] input,
+        FunctionProtectionOptions options,
+        FunctionProtectionResult result)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(result);
+        return new ProductProtectionReport(
+            1,
+            toolVersion,
+            result.IsSuccess,
+            new ProductProtectionInputReport(
+                input.Length,
+                Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant()),
+            ProtectionPassOrdering.Normalize(options.Passes)
+                .Select(ProtectionPassOrdering.Describe)
+                .ToArray(),
+            result.Functions.Select(function =>
+            {
+                var report = new ProductFunctionProtectionReport(
+                    function.Function.Name,
+                    function.Function.IsDynamic ? "dynsym" : "symtab",
+                    function.Function.TableIndex,
+                    function.Function.Value,
+                    function.Function.Size,
+                    function.Selected,
+                    function.Transformed,
+                    function.AppliedPasses.Select(ProtectionPassOrdering.Describe).ToArray(),
+                    function.Diagnostics.Select(ProductDiagnosticReport.From).ToArray());
+                return function.ResourcePlan is null
+                    ? report
+                    : report with
+                    {
+                        ResourcePlan = new ProductProtectionResourceReport(
+                            function.ResourcePlan.UsedGeneralRegisters.Select(register => (int)register).ToArray(),
+                            function.ResourcePlan.ReservedGeneralRegisters.Select(register => (int)register).ToArray(),
+                            function.ResourcePlan.AvailableScratchRegisters.Select(register => (int)register).ToArray(),
+                            function.ResourcePlan.Pressure,
+                            function.ResourcePlan.IsSufficient,
+                            function.ResourcePlan.FailureReason),
+                    };
+            }).ToArray(),
+            new ProductProtectionOutputReport(
+                result.OutputBytes is not null,
+                result.OutputBytes is null
+                    ? null
+                    : Convert.ToHexString(SHA256.HashData(result.OutputBytes)).ToLowerInvariant()),
+            result.Diagnostics.Select(ProductDiagnosticReport.From).ToArray())
+        {
+            Selectors = options.Selectors.Select(selector => selector.ToDisplayString()).ToArray(),
+        };
+    }
+
+    public static string Serialize(ProductProtectionReport report) =>
         JsonSerializer.Serialize(report, JsonOptions);
 
     private static ProductElfReport? CreateElfReport(NoOpValidationResult result)

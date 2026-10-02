@@ -21,6 +21,7 @@ offset or limit.
 | Native rejection sentinels and mutation offsets | `native/urprotect-runtime/host_context_self_test.c` | native HostContext self-test | intentional wire mutation |
 | SHA-256 round constants and known-answer digests | `native/urprotect-launcher/sha256.c` / `self_test.c` | native self-test | algorithm/test vector, not protocol layout |
 | CLI exit codes and command limits | `src/UrProtect.Cli/CliApplication.cs` | CLI tests and E2E scripts | public CLI contract |
+| Explicit function selectors, pass ordering, register-resource plans, and atomic protected-output publication | `src/UrProtect.Core/Protect/`, `src/UrProtect.Core/Aarch64/FunctionAnalysis.cs`, and `src/UrProtect.Cli/ProductReport.cs` | function-protection tests, `run-protection-e2e.sh`, protection evidence validator | opt-in transformation contract |
 
 Raw ELF and frame byte arrays remain in tests only where changing an individual
 byte is the behavior under test. New tests should reference the owning layout

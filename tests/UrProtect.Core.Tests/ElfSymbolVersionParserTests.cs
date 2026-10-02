@@ -10,6 +10,21 @@ namespace UrProtect.Core.Tests;
 public sealed class ElfSymbolVersionParserTests
 {
     private const string FixturePath = "Fixtures/SymbolVersions/liburp-versioned.so";
+
+    [Fact]
+    public void MaterializesStaticAndDynamicFunctionSymbolsForExplicitSelection()
+    {
+        var result = ElfParser.Parse(ReadVersionedFixture());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.File);
+        Assert.Contains(
+            result.File!.FunctionSymbols,
+            symbol => symbol.Table == ElfSymbolTableKind.Static && symbol.Name == "urp_api_v1");
+        Assert.Contains(
+            result.File.FunctionSymbols,
+            symbol => symbol.Table == ElfSymbolTableKind.Dynamic && symbol.Name == "urp_api_v1");
+    }
     private static readonly string[] ExpectedDefinitionNames =
         { "liburp-versioned.so", "URP_1.0", "URP_2.0" };
     private static readonly ushort[] ExpectedDefinitionIndices = { 1, 2, 3 };

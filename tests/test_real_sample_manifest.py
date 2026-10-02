@@ -75,6 +75,10 @@ class RealSampleManifestTests(unittest.TestCase):
             {project["target"]["runtime"] for project in projects},
             {"glibc", "musl", "bionic"},
         )
+        self.assertEqual(
+            {project["executionPolicy"]["static"]["expectedResult"] for project in projects},
+            {"validated"},
+        )
 
     def test_candidate_ledger_is_broader_than_locked_selection(self) -> None:
         self.assertGreaterEqual(len(self.candidates["candidates"]), self.manifest["corpus"]["targetProjectCount"])
@@ -96,9 +100,16 @@ class RealSampleManifestTests(unittest.TestCase):
                 project["featureFingerprint"]["interpreter"],
                 "/lib/ld-linux-aarch64.so.1",
             )
-            self.assertEqual(project["executionPolicy"]["static"]["expectedResult"], "accepted-and-runs")
+            self.assertEqual(project["executionPolicy"]["static"]["expectedResult"], "validated")
             self.assertEqual(project["executionPolicy"]["outerWrapper"]["expectedResult"], "not-applicable")
             self.assertEqual(project["executionPolicy"]["hostContext"]["expectedResult"], "not-applicable")
+
+    def test_static_policy_cannot_claim_execution_success(self) -> None:
+        data = copy.deepcopy(self.manifest)
+        data["corpus"]["projects"][0]["executionPolicy"]["static"]["expectedResult"] = "accepted-and-runs"
+        result = self.validate(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("static", result.stderr or result.stdout)
 
     def test_duplicate_candidate_identity_is_rejected(self) -> None:
         candidates = copy.deepcopy(self.candidates)

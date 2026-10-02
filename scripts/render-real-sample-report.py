@@ -23,6 +23,7 @@ from real_sample_schema import (  # noqa: E402
     FIRST_FAILURE_LAYERS,
     LAYERS,
     RESULTS,
+    STATIC_RESULTS,
     diagnostic_code,
     first_failure_layer,
     observed_features,
@@ -134,6 +135,10 @@ def expected_layers(project: dict[str, Any]) -> dict[str, dict[str, Any]]:
     for layer in LAYERS:
         declaration = as_mapping(policy.get(layer))
         expected = declaration.get("expectedResult", "environment-unavailable")
+        if layer == "static" and expected not in STATIC_RESULTS:
+            raise ReportError(
+                f"{project.get('projectId', '<unknown>')}: static policy uses execution result {expected!r}"
+            )
         values[layer] = {
             "expected": expected,
             "actual": expected,
@@ -294,6 +299,10 @@ def build_report(
             value = value if isinstance(value, dict) else {}
             expected = value.get("expected")
             actual = value.get("actual", "environment-unavailable")
+            if layer == "static" and actual not in STATIC_RESULTS:
+                raise ReportError(
+                    f"{project_id}: retained static result uses execution result {actual!r}"
+                )
             layer_counts[layer][str(actual)] += 1
             if isinstance(actual, str):
                 result_counts[actual] += 1

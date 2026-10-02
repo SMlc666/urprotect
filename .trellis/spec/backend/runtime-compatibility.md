@@ -125,8 +125,9 @@ executable pathname.
   `elf.outer.dynamic-et-exec`. Its exact pack predicate is ELF64,
   little-endian AArch64 `ET_EXEC`, an entry point within an executable
   `PT_LOAD`, a bounded `PT_DYNAMIC`, one terminated absolute `PT_INTERP` whose
-  path ends in a recognized AArch64 glibc or musl loader name, and no
-  `DT_RPATH` or `DT_RUNPATH`.
+  path ends in a recognized AArch64 glibc or musl loader name, or is the
+  exact bionic loader path `/system/bin/linker64`, and no `DT_RPATH` or
+  `DT_RUNPATH`.
 - `ElfParser`/`ElfValidator` may classify ET_EXEC images for observation, but
   that layer is recorded separately as `elf.identity.aarch64-et-exec`;
   parser success does not establish packability or launchability. The
@@ -142,9 +143,9 @@ executable pathname.
 - The retained native glibc fixture compares baseline and wrapped status,
   stdout/stderr, arguments and source-name `argv[0]`, environment, cwd, an
   inherited descriptor, a declared file, and signal termination. The current
-  validated runtime cell is native AArch64 glibc; accepting a musl interpreter
-  path is not a musl runtime claim without its own native oracle and retained
-  evidence.
+  validated runtime cell is native AArch64 glibc; recognizing a musl or bionic
+  interpreter path is not a musl or bionic runtime claim without its own native
+  oracle and retained evidence.
 
 #### HostContext
 
@@ -541,9 +542,11 @@ as evidence rather than guessed support claims. Hash drift stops acquisition
 before extraction or execution.
 
 Layer policy uses the fixed result vocabulary
-`accepted-and-runs`, `expected-rejected`, `unexpected-rejection`,
+`validated`, `accepted-and-runs`, `expected-rejected`, `unexpected-rejection`,
 `unexpected-acceptance`, `runtime-failure`, `environment-unavailable`, and
-`not-applicable`. Static evidence is required for all projects. An applicable
+`not-applicable`. `validated` is reserved for static validation that did not
+launch a sample process; `accepted-and-runs` requires an execution oracle.
+Static evidence is required for all projects. An applicable
 baseline/outer/HostContext oracle runs with network disabled, read-only inputs,
 a bounded temporary filesystem, dropped capabilities, resource/time/output
 limits, and cleanup. A normal ELF without the declared `urp_entry` ABI is

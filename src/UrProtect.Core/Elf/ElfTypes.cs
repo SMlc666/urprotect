@@ -18,6 +18,10 @@ public static class ElfConstants
     public const ushort SymbolEntrySize64 = 24;
     public const ushort RelaEntrySize64 = 24;
     public const ushort RelrEntrySize64 = 8;
+    public const uint ShtSymTab = 2;
+    public const uint ShtStrTab = 3;
+    public const uint ShtDynSym = 11;
+    public const byte SttFunc = 2;
     public const ushort PnXnum = ushort.MaxValue;
     public const ushort ShnXindex = ushort.MaxValue;
 
@@ -258,6 +262,33 @@ public readonly record struct DynamicSymbol(
     ulong Value,
     ulong Size);
 
+public enum ElfSymbolTableKind
+{
+    Static,
+    Dynamic,
+}
+
+public readonly record struct ElfFunctionSymbol(
+    string Name,
+    ElfSymbolTableKind Table,
+    uint TableIndex,
+    byte Binding,
+    byte Other,
+    ushort SectionIndex,
+    ulong Value,
+    ulong Size)
+{
+    public ulong End => TryGetEnd(out var end) ? end : ulong.MaxValue;
+
+    public bool TryGetEnd(out ulong end)
+    {
+        end = Value + Size;
+        return end >= Value;
+    }
+
+    public bool IsDynamic => Table == ElfSymbolTableKind.Dynamic;
+}
+
 public readonly record struct SymbolVersionIndex(ushort RawValue)
 {
     public const ushort HiddenMask = 0x8000;
@@ -453,7 +484,8 @@ public sealed class ElfFile
         IReadOnlyList<RelaRelocation> relaRelocations,
         IReadOnlyList<RelrWord> relrWords,
         IReadOnlyList<AndroidPackedRelocationTable> androidPackedRelocations,
-        IReadOnlyList<DynamicSymbol> dynamicSymbols)
+        IReadOnlyList<DynamicSymbol> dynamicSymbols,
+        IReadOnlyList<ElfFunctionSymbol> functionSymbols)
     {
         Bytes = bytes;
         Header = header;
@@ -468,6 +500,7 @@ public sealed class ElfFile
         RelrWords = relrWords;
         AndroidPackedRelocations = androidPackedRelocations;
         DynamicSymbols = dynamicSymbols;
+        FunctionSymbols = functionSymbols;
     }
 
     public ReadOnlyMemory<byte> Bytes { get; }
@@ -495,6 +528,8 @@ public sealed class ElfFile
     public IReadOnlyList<AndroidPackedRelocationTable> AndroidPackedRelocations { get; }
 
     public IReadOnlyList<DynamicSymbol> DynamicSymbols { get; }
+
+    public IReadOnlyList<ElfFunctionSymbol> FunctionSymbols { get; }
 
     public ElfFileKind Kind =>
         Header.Type == ElfConstants.TypeExec
