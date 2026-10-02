@@ -440,7 +440,7 @@ PYAPK
     closure_reason='runtime closure cannot provide an isolated writable /tmp'
   fi
   local command_json
-  if [[ -n "${baseline_command_b64}" ]]; then
+  if [[ -n "${baseline_command_b64}" && "${baseline_command_b64}" != W10= ]]; then
     command_json="${baseline_command_b64}"
   else
     command_json="$(python3 - "${artifact_path}" <<'PYCOMMAND'
