@@ -413,14 +413,16 @@ PYBIONIC
   local wrapper="${sample_tmp}/outer-wrapper"
   if [[ "${runtime}" != bionic && "${actual_baseline}" == accepted-and-runs ]]; then
     if "${dotnet_cli[@]}" pack "${artifact}" --output "${wrapper}" --launcher "${launcher_path}" \
-        --profile outer-execveat --json "${sample_root}/outer-pack.json" \
+        --profile outer-execveat --path-preserving --json "${sample_root}/outer-pack.json" \
         > "${sample_root}/logs/outer-pack.log" 2>&1; then
       mkdir -p "${runtime_root}/usr/local/bin"
       cp --preserve=mode "${wrapper}" "${runtime_root}/usr/local/bin/urprotect-packed"
       local outer_command
-      outer_command="$(python3 <<'PYOUTER'
-import base64, json
-print(base64.urlsafe_b64encode(json.dumps(['/usr/local/bin/urprotect-packed', '--version']).encode()).decode())
+      outer_command="$(python3 - "${command_json}" <<'PYOUTER'
+import base64, json, sys
+values=json.loads(base64.urlsafe_b64decode(sys.argv[1]).decode())
+values[0]='/usr/local/bin/urprotect-packed'
+print(base64.urlsafe_b64encode(json.dumps(values).encode()).decode())
 PYOUTER
       )"
       if run_isolated_command "${runtime_root}" "${sample_root}" outer "${outer_command}"; then :; else wrapper_status=$?; fi

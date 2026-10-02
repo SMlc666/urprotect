@@ -308,7 +308,7 @@ public sealed class CliApplication
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  urprotect validate <input> [--copy <output>] [--json <path|->] [--no-analysis]");
-        writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime]");
+        writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime] [--path-preserving]");
         writer.WriteLine("  urprotect protect <input> --output <protected> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--json <path|->]");
     }
 
@@ -436,7 +436,8 @@ public sealed class CliApplication
             new ElfPackOptions(
                 Profile: options.Profile,
                 EntrySymbol: options.EntrySymbol,
-                RequireThreadLifetime: options.RequireThreadLifetime));
+                RequireThreadLifetime: options.RequireThreadLifetime,
+                AllowPathSensitiveOuter: options.AllowPathSensitiveOuter));
         return WritePackResult(options, result, stdout, stderr);
     }
 
@@ -597,6 +598,7 @@ public sealed class CliApplication
         var profile = PayloadDispatchProfile.OuterExecveat;
         var entrySymbol = HostContextContract.EntrySymbol;
         var requireThreadLifetime = false;
+        var allowPathSensitiveOuter = false;
         for (var index = 2; index < args.Length; index++)
         {
             switch (args[index])
@@ -645,6 +647,15 @@ public sealed class CliApplication
                     }
                     requireThreadLifetime = true;
                     break;
+                case "--path-preserving":
+                    if (allowPathSensitiveOuter)
+                    {
+                        error = "Usage: --path-preserving may be specified only once.";
+                        return false;
+                    }
+
+                    allowPathSensitiveOuter = true;
+                    break;
                 case "--entry-symbol" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (entrySymbol != HostContextContract.EntrySymbol)
                     {
@@ -683,7 +694,7 @@ public sealed class CliApplication
             return false;
         }
 
-        options = new PackOptions(args[1], outputPath, jsonPath, launcherPath, profile, entrySymbol, requireThreadLifetime);
+        options = new PackOptions(args[1], outputPath, jsonPath, launcherPath, profile, entrySymbol, requireThreadLifetime, allowPathSensitiveOuter);
         return true;
     }
 
@@ -1347,7 +1358,8 @@ public sealed class CliApplication
         string? LauncherPath,
         PayloadDispatchProfile Profile,
         string EntrySymbol,
-        bool RequireThreadLifetime);
+        bool RequireThreadLifetime,
+        bool AllowPathSensitiveOuter);
 
     private sealed record ProtectOptions(
         string InputPath,

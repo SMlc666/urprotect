@@ -32,6 +32,8 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$artifact_root"
 chmod a+rwx "$artifact_root"
+mkdir -p "$artifact_root/node-apt-archives"
+chmod a+rwx "$artifact_root/node-apt-archives"
 for command in docker dotnet readelf sha256sum; do
   command -v "$command" >/dev/null 2>&1 || { echo "$command is required for bionic Node.js evidence" >&2; exit 127; }
 done

@@ -96,10 +96,11 @@ def safe_extract_tar(archive: Path, root: Path, apk: bool) -> None:
         tar.extractall(root, filter="data")
 
 
-def parse_debian_index(index: Path) -> tuple[dict[str, dict], dict[str, dict]]:
+def parse_debian_index(index: Path) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
     records = parse_stanzas(lzma.decompress(index.read_bytes()))
     by_name: dict[str, dict] = {}
     by_filename: dict[str, dict] = {}
+    providers: dict[str, dict] = {}
     for record in records:
         if record.get("Architecture") not in {"arm64", "all"}:
             continue
@@ -111,13 +112,17 @@ def parse_debian_index(index: Path) -> tuple[dict[str, dict], dict[str, dict]]:
         if record.get("Architecture") == "arm64" or package not in by_name:
             by_name[package] = record
         by_filename[filename] = record
-    return by_name, by_filename
+        for provided in record.get("Provides", "").split(","):
+            provided_name = provided.split("(", 1)[0].strip().split(":", 1)[0]
+            if provided_name:
+                providers.setdefault(provided_name, record)
+    return by_name, by_filename, providers
 
 
 def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
     index = args.index_dir / "debian-Packages.xz"
     download(runtime["packageIndexUrl"], index, runtime["packageIndexSha256"])
-    by_name, by_filename = parse_debian_index(index)
+    by_name, by_filename, providers = parse_debian_index(index)
     source_path = project["provenance"]["archivePath"]
     seed = by_filename.get(source_path)
     if seed is None:
@@ -128,7 +133,7 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
         name = pending.popleft()
         if name in selected:
             continue
-        record = by_name.get(name)
+        record = by_name.get(name) or providers.get(name)
         if record is None:
             fail(f"Debian dependency is absent from the locked index: {name}")
         selected[name] = record
