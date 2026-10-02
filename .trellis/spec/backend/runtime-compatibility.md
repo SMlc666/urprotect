@@ -555,6 +555,23 @@ The current BusyBox Alpine record is the explicit musl baseline: its policy
 command must name the extracted `/bin/busybox` artifact and runs only inside
 its archive-derived rootfs, never through a host fallback.
 
+The full-corpus runner may use a bounded `REAL_SAMPLE_PARALLELISM` value (default
+`4`, maximum `8`) because each project owns an independent extraction root and
+evidence directory. Parallel execution must not share extracted roots or raw
+inputs; only the content-addressed runtime package/index cache is shared.
+Package cache entries are keyed by the locked digest and archive identity,
+written through a temporary file plus atomic rename, and re-verified for the
+locked digest and size on every reuse. A cache miss, stale entry, or cache
+restore failure must fall back to verified acquisition without changing the
+result classification.
+
+The runner invokes the already-built `src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll`
+for repeated validation and packing; it must not run project restore/build work
+inside the per-sample loop. CI may restore/save only the package and verified
+index cache under `RUNNER_TEMP`; extracted roots, source executables, wrappers,
+package-manager state, and evidence remain temporary and are never cache or
+evidence artifacts.
+
 For future compatibility work, the plan must include a real-sample impact table
 (project IDs, feature, layer, oracle, expected classification, and artifact
 path). An unexpected result blocks completion. Support expansion additionally

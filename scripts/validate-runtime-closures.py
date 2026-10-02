@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import re
 from pathlib import Path
 
 
@@ -39,7 +39,7 @@ def validate(closure_path: Path, manifest_path: Path) -> None:
             if not isinstance(entry.get("packageIndexUrl"), str):
                 fail(f"{runtime}: packageIndexUrl is required")
             digest = entry.get("packageIndexSha256")
-            if not isinstance(digest, str) or len(digest) != 64:
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
                 fail(f"{runtime}: packageIndexSha256 must be a SHA-256")
             if runtime == "glibc" and entry["archiveFormat"] != "deb":
                 fail("glibc closure must resolve deb archives")

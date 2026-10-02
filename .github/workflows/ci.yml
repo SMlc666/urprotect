@@ -220,8 +220,36 @@ jobs:
       contents: read
     env:
       REAL_SAMPLE_CI: 'true'
+      REAL_SAMPLE_PARALLELISM: '4'
     steps:
       - uses: actions/checkout@v4
+      - name: Restore real-sample package and index cache
+        id: real-sample-package-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/archives
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/indexes
+          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py') }}
+          restore-keys: |
+            real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Record real-sample package cache status
+        if: always()
+        env:
+          CACHE_HIT: ${{ steps.real-sample-package-cache.outputs.cache-hit }}
+        run: |
+          cache_hit="${CACHE_HIT:-false}"
+          if [[ "${cache_hit}" == true ]]; then
+            cache_status=hit
+          else
+            cache_status=miss
+          fi
+          {
+            echo '## Real-sample package cache'
+            echo
+            echo "Cache status: **${cache_status}** (cache-hit=${cache_hit})"
+            echo "Key scope: ${RUNNER_OS}/${RUNNER_ARCH}; Debian/APK archives and verified indexes only"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Select locked real-sample tier
         run: |
           case "${GITHUB_EVENT_NAME}" in
@@ -296,6 +324,24 @@ jobs:
             --runtime-closures fixtures/real-samples/runtime-closures.json \
             --tier "${REAL_SAMPLE_TIER}" \
             --artifact-root ".artifacts/real-samples/${REAL_SAMPLE_TIER}"
+      # The restore-only action above deliberately leaves saving explicit so a
+      # completed-but-failing matrix still contributes verified cache entries.
+      # Interrupted downloads are temporary .tmp files and must not enter the
+      # shared cache.
+      - name: Remove incomplete real-sample cache downloads
+        if: always()
+        run: |
+          find "${RUNNER_TEMP}/urprotect-real-sample-package-cache/archives" \
+            "${RUNNER_TEMP}/urprotect-real-sample-package-cache/indexes" \
+            -type f -name '*.tmp' -delete 2>/dev/null || true
+      - name: Save verified real-sample package and index cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/archives
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/indexes
+          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py') }}
       - name: Upload real-sample evidence (never raw inputs)
         if: always()
         uses: actions/upload-artifact@v4

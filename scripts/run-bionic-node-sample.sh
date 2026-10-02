@@ -30,6 +30,8 @@ if [[ -z "$input" || -z "$artifact_root" || -z "$image" || -z "$version" || -z "
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cli_dll="${URPROTECT_CLI_DLL:-${repo_root}/src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll}"
+[[ -f "${cli_dll}" ]] || { echo "the Release CLI assembly is required: ${cli_dll}" >&2; exit 127; }
 mkdir -p "$artifact_root"
 chmod a+rwx "$artifact_root"
 mkdir -p "$artifact_root/node-apt-archives"
@@ -38,6 +40,9 @@ cleanup_raw_inputs() {
   rm -rf -- "$artifact_root/node" "$artifact_root/node-wrapper" "$artifact_root/node-apt-archives"
 }
 trap cleanup_raw_inputs EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 for command in docker dotnet readelf sha256sum; do
   command -v "$command" >/dev/null 2>&1 || { echo "$command is required for bionic Node.js evidence" >&2; exit 127; }
 done
@@ -54,17 +59,34 @@ done
 
 input_dir="$(cd "$(dirname "$input")" && pwd)"
 input_name="$(basename "$input")"
+termux_prefix="/data/data/com.termux/files/usr"
+termux_library_path="${termux_prefix}/lib"
 container_args=(
   run --rm --platform linux/arm64 --user 1000:1000
   --mount "type=bind,src=${input_dir},dst=/input,readonly"
   --mount "type=bind,src=${artifact_root},dst=/artifacts"
-  --env PREFIX=/data/data/com.termux/files/usr
+  --env "PREFIX=${termux_prefix}"
+  # bionic's linker does not infer the Termux prefix for an execveat memfd;
+  # make baseline and recovered outer execution use the identical library path.
+  --env "LD_LIBRARY_PATH=${termux_library_path}"
   "$image"
   /data/data/com.termux/files/usr/bin/sh
 )
 
 run_shell() { docker "${container_args[@]}" -c "$1"; }
 run_shell 'set -eu; test -x /system/bin/linker64; test "$(uname -m)" = aarch64'
+
+host_wrapper="${artifact_root}/node-wrapper"
+dotnet "$cli_dll" \
+  pack "$input" --output "$host_wrapper" --launcher "$launcher" --profile outer-execveat \
+  --path-preserving \
+  --json "${artifact_root}/node-pack.json" > "${artifact_root}/node-pack.stdout" \
+  2> "${artifact_root}/node-pack.stderr"
+readelf -hW -lW "$host_wrapper" > "${artifact_root}/node-wrapper-readelf.txt"
+
+# Install the locked Node.js closure and run both payload forms in one
+# container.  A fresh container for the outer call would discard the baseline
+# package installation and invalidate the identical-library comparison.
 run_shell "set -eu
   export PATH=\"\${PREFIX}/bin:\${PATH}\"
   apt-get update > /artifacts/node-apt-update.log 2>&1
@@ -73,16 +95,11 @@ run_shell "set -eu
   cp /input/${input_name} /artifacts/node
   chmod 0755 /artifacts/node
   /artifacts/node --version > /artifacts/node-baseline.stdout 2> /artifacts/node-baseline.stderr
-  printf '0\\n' > /artifacts/node-baseline.status"
-
-host_wrapper="${artifact_root}/node-wrapper"
-dotnet run --project "$repo_root/src/UrProtect.Cli" --configuration Release --no-restore -- \
-  pack "$input" --output "$host_wrapper" --launcher "$launcher" --profile outer-execveat \
-  --path-preserving \
-  --json "${artifact_root}/node-pack.json" > "${artifact_root}/node-pack.stdout" \
-  2> "${artifact_root}/node-pack.stderr"
-readelf -hW -lW "$host_wrapper" > "${artifact_root}/node-wrapper-readelf.txt"
-run_shell '/artifacts/node-wrapper --version > /artifacts/node-outer.stdout 2> /artifacts/node-outer.stderr; printf "%s\n" "$?" > /artifacts/node-outer.status'
+  printf '0\\n' > /artifacts/node-baseline.status
+  outer_status=0
+  /artifacts/node-wrapper --version > /artifacts/node-outer.stdout 2> /artifacts/node-outer.stderr || outer_status=\$?
+  printf '%s\\n' \"\$outer_status\" > /artifacts/node-outer.status
+  test \"\$outer_status\" -eq 0"
 
 cmp -- "$artifact_root/node-baseline.stdout" "$artifact_root/node-outer.stdout"
 cmp -- "$artifact_root/node-baseline.stderr" "$artifact_root/node-outer.stderr"
@@ -90,5 +107,5 @@ cmp -- "$artifact_root/node-baseline.stderr" "$artifact_root/node-outer.stderr"
 sha256sum "$input" "$host_wrapper" > "$artifact_root/node-hashes.txt"
 rm -f -- "$artifact_root/node" "$host_wrapper"
 rm -rf -- "$artifact_root/node-apt-archives"
-printf 'runtime=bionic\nloader=/system/bin/linker64\nstatus=accepted-and-runs\nsourceArchiveSha256=%s\nartifactSha256=%s\n' \
-  "$archive_sha256" "$sha256" > "$artifact_root/node-result.txt"
+printf 'runtime=bionic\nloader=/system/bin/linker64\nstatus=accepted-and-runs\nsourceArchiveSha256=%s\nartifactSha256=%s\nbaselineLibraryPath=%s\nouterLibraryPath=%s\n' \
+  "$archive_sha256" "$sha256" "$termux_library_path" "$termux_library_path" > "$artifact_root/node-result.txt"

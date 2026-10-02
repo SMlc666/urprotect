@@ -44,17 +44,33 @@ if [[ -z "${runner_temp}" || "${runner_temp}" != /* ]]; then
   exit 2
 fi
 mkdir -p "${runner_temp}"
+# Keep package archives and verified indexes outside each sample's temporary
+# root so every identity shares them, while extracted roots and evidence stay
+# private and are still removed by the normal cleanup trap.
+package_cache_root="${runner_temp%/}/urprotect-real-sample-package-cache"
+package_archive_cache="${package_cache_root}/archives"
+package_index_cache="${package_cache_root}/indexes"
+mkdir -p "${package_archive_cache}" "${package_index_cache}"
 temp_root="$(mktemp -d "${runner_temp%/}/urprotect-real-samples-${requested_tier}.XXXXXX")"
 chmod 700 "${temp_root}"
+parallelism="${REAL_SAMPLE_PARALLELISM:-4}"
+if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 8 ]]; then
+  echo 'REAL_SAMPLE_PARALLELISM must be an integer from 1 through 8' >&2
+  exit 2
+fi
+active_pids=()
 sanitize_evidence() {
   [[ -d "${artifact_root}" ]] || return 0
-  python3 - "${artifact_root}" "${temp_root}" <<'PYSANITIZE'
+  python3 - "${artifact_root}" "${temp_root}" "${runner_temp}" "${package_cache_root}" <<'PYSANITIZE'
 from pathlib import Path
 import sys
 
 root = Path(sys.argv[1])
-temporary = sys.argv[2].encode("utf-8")
-replacement = b"<runner-temp>"
+replacements = [
+    value.encode("utf-8")
+    for value in sys.argv[2:]
+    if value
+]
 for path in root.rglob("*"):
     if not path.is_file() or path.is_symlink():
         continue
@@ -62,23 +78,44 @@ for path in root.rglob("*"):
         data = path.read_bytes()
     except OSError:
         continue
-    if b"\0" in data[:4096] or temporary not in data:
+    if b"\0" in data[:4096]:
         continue
-    path.write_bytes(data.replace(temporary, replacement))
+    sanitized = data
+    for value in replacements:
+        sanitized = sanitized.replace(value, b"<runner-temp>")
+    if sanitized != data:
+        path.write_bytes(sanitized)
 PYSANITIZE
 }
 cleanup() {
+  local pid
+  for pid in "${active_pids[@]}"; do
+    kill "${pid}" 2>/dev/null || true
+  done
+  for pid in "${active_pids[@]}"; do
+    wait "${pid}" 2>/dev/null || true
+  done
   sanitize_evidence || true
   rm -rf -- "${temp_root}"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 manifest_sha="$(sha256sum "${manifest}" | awk '{print $1}')"
 overall_status=0
 max_archive_bytes="$(PYTHONPATH="${repo_root}/scripts${PYTHONPATH:+:${PYTHONPATH}}" \
   python3 -c 'from real_sample_schema import MAX_REAL_SAMPLE_ARCHIVE_BYTES; print(MAX_REAL_SAMPLE_ARCHIVE_BYTES)')"
 
-dotnet_cli=(dotnet run --project "${repo_root}/src/UrProtect.Cli" --configuration Release --no-restore --)
+cli_dll="${URPROTECT_CLI_DLL:-${repo_root}/src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll}"
+if [[ ! -f "${cli_dll}" ]]; then
+  echo "the Release CLI assembly is required: ${cli_dll}" >&2
+  exit 127
+fi
+# The matrix invokes the already-built assembly directly; project-driven
+# invocation would re-evaluate restore/build coordination for every sample.
+dotnet_cli=(dotnet "${cli_dll}")
 
 project_fields() {
   python3 - "$1" <<'PY'
@@ -234,6 +271,7 @@ process_project() {
     printf 'projectId=%s\nversion=%s\narchiveUrl=%s\narchivePath=%s\narchiveSha256=%s\nartifactPath=%s\narchiveFormat=%s\n' \
       "${id}" "${version}" "${archive_url}" "${archive_path}" "${archive_sha}" "${artifact_path}" "${archive_format}"
     printf 'manifestSha256=%s\ntier=%s\nrawArtifactsUploaded=false\n' "${manifest_sha}" "${requested_tier}"
+    printf 'parallelism=%s\n' "${parallelism}"
   } > "${sample_root}/source.txt"
   {
     uname -a; printf 'architecture=%s\n' "$(uname -m)"; getconf PAGESIZE 2>/dev/null || true
@@ -311,7 +349,8 @@ PYAPK
     if python3 "${repo_root}/scripts/build-runtime-closure.py" \
         --runtime "${runtime}" --runtime-closures "${runtime_closures}" \
         --project "${sample_tmp}/project.json" --rootfs "${runtime_root}" \
-        --work-root "${sample_tmp}/closure-work" --index-dir "${temp_root}/indexes" \
+        --work-root "${sample_tmp}/closure-work" --index-dir "${package_index_cache}" \
+        --package-cache "${package_archive_cache}" \
         --lock-output "${sample_root}/runtime-closure.json" \
         > "${sample_root}/logs/closure.log" 2>&1; then
       :
@@ -367,7 +406,9 @@ PYCOMMAND
   local wrapper_status=0
   if [[ "${runtime}" == bionic ]]; then
     local bionic_root="${sample_root}/bionic-evidence"
-    local bionic_input="${sample_root}/bionic-input"
+    # Keep the acquired executable under RUNNER_TEMP, never under the upload
+    # root.  The bionic helper mounts this path read-only for both oracles.
+    local bionic_input="${sample_tmp}/bionic-input"
     cp --preserve=mode "${artifact}" "${bionic_input}"
     chmod 0755 "${bionic_input}"
     local bionic_image
@@ -383,30 +424,48 @@ PYBIONIC
         --version "${version}" --sha256 "${artifact_sha}" --archive-sha256 "${archive_sha}" \
         --launcher "${launcher_path}" \
         > "${sample_root}/logs/bionic-node.log" 2>&1; then
-      actual_baseline=runtime-failure
+      if [[ -f "${bionic_root}/node-baseline.status" ]] \
+          && [[ "$(<"${bionic_root}/node-baseline.status")" == 0 ]]; then
+        actual_baseline=accepted-and-runs
+        reason_baseline='locked bionic Node.js baseline status=0'
+      else
+        actual_baseline=runtime-failure
+        reason_baseline='locked bionic Node.js baseline or preparation failed'
+      fi
       actual_outer=runtime-failure
-        reason_baseline='locked bionic Node.js baseline failed'
-      reason_outer='locked bionic Node.js outer wrapper failed'
-    else
-      cp "${bionic_root}/node-baseline.stdout" "${sample_root}/logs/baseline.stdout"
-      cp "${bionic_root}/node-baseline.stderr" "${sample_root}/logs/baseline.stderr"
-      cp "${bionic_root}/node-outer.stdout" "${sample_root}/logs/outer.stdout"
-      cp "${bionic_root}/node-outer.stderr" "${sample_root}/logs/outer.stderr"
+      reason_outer='locked bionic Node.js outer wrapper or equivalence check failed'
+    fi
+    # Preserve any bounded text streams/statuses produced before a bionic
+    # failure.  The helper removes only raw node/wrapper/package files.
+    local evidence target
+    for evidence in node-baseline.stdout node-baseline.stderr node-outer.stdout node-outer.stderr \
+        node-baseline.status node-outer.status; do
+      if [[ -f "${bionic_root}/${evidence}" ]]; then
+        case "${evidence}" in
+          node-baseline.*) target="${sample_root}/logs/baseline.${evidence#node-baseline.}" ;;
+          node-outer.*) target="${sample_root}/logs/outer.${evidence#node-outer.}" ;;
+        esac
+        cp "${bionic_root}/${evidence}" "${target}"
+      fi
+    done
+    if [[ -f "${bionic_root}/node-pack.json" ]]; then
       cp "${bionic_root}/node-pack.json" "${sample_root}/outer-pack.json"
-      printf '0\n' > "${sample_root}/logs/baseline.status"
-      cp "${bionic_root}/node-outer.status" "${sample_root}/logs/outer.status"
     fi
     rm -f -- "${bionic_input}"
   else
     if run_isolated_command "${runtime_root}" "${sample_root}" baseline "${command_json}"; then :; else run_status=$?; fi
-    actual_baseline=accepted-and-runs
-    reason_baseline="baseline status=${run_status}"
-    if [[ "${run_status}" -eq 125 ]]; then
+    if [[ "${run_status}" -eq 0 ]]; then
+      actual_baseline=accepted-and-runs
+      reason_baseline="baseline status=${run_status}"
+    elif [[ "${run_status}" -eq 125 ]]; then
       actual_baseline=environment-unavailable
       reason_baseline='bubblewrap isolation capability is unavailable'
     elif [[ "${run_status}" -eq 124 ]]; then
       actual_baseline=runtime-failure
       reason_baseline='baseline exceeded its bounded execution limit'
+    else
+      actual_baseline=runtime-failure
+      reason_baseline="baseline exited with status=${run_status}"
     fi
   fi
 
@@ -426,9 +485,19 @@ print(base64.urlsafe_b64encode(json.dumps(values).encode()).decode())
 PYOUTER
       )"
       if run_isolated_command "${runtime_root}" "${sample_root}" outer "${outer_command}"; then :; else wrapper_status=$?; fi
-      if [[ "${wrapper_status}" -eq 125 ]]; then actual_outer=environment-unavailable; reason_outer='bubblewrap isolation capability is unavailable'
-      elif [[ "${wrapper_status}" -eq 124 ]]; then actual_outer=runtime-failure; reason_outer='outer wrapper exceeded its bounded execution limit'
-      else actual_outer=accepted-and-runs; reason_outer="outer status=${wrapper_status}"; fi
+      if [[ "${wrapper_status}" -eq 0 ]]; then
+        actual_outer=accepted-and-runs
+        reason_outer="outer status=${wrapper_status}"
+      elif [[ "${wrapper_status}" -eq 125 ]]; then
+        actual_outer=environment-unavailable
+        reason_outer='bubblewrap isolation capability is unavailable'
+      elif [[ "${wrapper_status}" -eq 124 ]]; then
+        actual_outer=runtime-failure
+        reason_outer='outer wrapper exceeded its bounded execution limit'
+      else
+        actual_outer=runtime-failure
+        reason_outer="outer wrapper exited with status=${wrapper_status}"
+      fi
       if [[ "${actual_outer}" == accepted-and-runs ]] \
           && { ! cmp -- "${sample_root}/logs/baseline.stdout" "${sample_root}/logs/outer.stdout" \
             || ! cmp -- "${sample_root}/logs/baseline.stderr" "${sample_root}/logs/outer.stderr" \
@@ -466,10 +535,25 @@ PYOUTER
   return "${result_status}"
 }
 
+project_batch=()
 while IFS= read -r project_json; do
   [[ -z "${project_json}" ]] && continue
-  if process_project "${project_json}"; then :; else overall_status=1; fi
+  process_project "${project_json}" &
+  project_pid="$!"
+  project_batch+=("${project_pid}")
+  active_pids+=("${project_pid}")
+  if [[ "${#project_batch[@]}" -ge "${parallelism}" ]]; then
+    for pid in "${project_batch[@]}"; do
+      if wait "${pid}"; then :; else overall_status=1; fi
+    done
+    project_batch=()
+    active_pids=()
+  fi
 done < <(python3 "${repo_root}/scripts/validate-real-samples.py" "${manifest}" --candidates "${candidates}" --tier "${requested_tier}" --emit | tail -n +2)
+for pid in "${project_batch[@]}"; do
+  if wait "${pid}"; then :; else overall_status=1; fi
+done
+active_pids=()
 
 sanitize_evidence
 python3 "${repo_root}/scripts/render-real-sample-report.py" "${manifest}" --tier "${requested_tier}" \
