@@ -388,6 +388,41 @@ def dependency_names(value: str | None) -> list[str]:
     return names
 
 
+def closure_project_policy(closure: dict, project: dict) -> dict:
+    projects = closure.get("projects")
+    if not isinstance(projects, dict):
+        fail("runtime closure project policies must be an object")
+    project_id = project.get("projectId")
+    selected = projects.get(project_id, projects.get("*", {}))
+    if not isinstance(selected, dict):
+        fail(f"runtime closure policy for {project_id} must be an object")
+    return selected
+
+
+def policy_package_entries(policy: dict, field: str) -> list[dict[str, str]]:
+    raw_entries = policy.get(field, [])
+    if raw_entries is None:
+        return []
+    if not isinstance(raw_entries, list):
+        fail(f"runtime closure policy {field} must be a list")
+    entries: list[dict[str, str]] = []
+    for item in raw_entries:
+        if not isinstance(item, dict):
+            fail(f"runtime closure policy {field} entries must be objects")
+        package = item.get("package")
+        if not isinstance(package, str) or not package or any(
+            character.isspace() or ord(character) == 0 for character in package
+        ):
+            fail(f"runtime closure policy {field} contains an invalid package name")
+        reason = item.get("reason", "")
+        if not isinstance(reason, str) or any(
+            ord(character) == 0 or ord(character) in (10, 13) for character in reason
+        ):
+            fail(f"runtime closure policy {field} contains an invalid reason")
+        entries.append({"package": package, "reason": reason})
+    return entries
+
+
 def safe_extract_tar(archive: Path, root: Path, apk: bool) -> None:
     mode = "r:gz" if apk else "r:*"
     with tarfile.open(archive, mode) as tar:
@@ -484,12 +519,11 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
     if "libc6" in by_name and seed["Package"] != "libc6":
         pending.append("libc6")
     selected: dict[str, dict] = {}
-    project_policy = args.closure.get("projects", {}).get(project.get("projectId"), {})
-    excluded = {
-        item.get("package")
-        for item in project_policy.get("excludeDependencies", [])
-        if isinstance(item, dict) and isinstance(item.get("package"), str)
-    }
+    project_policy = closure_project_policy(args.closure, project)
+    included = policy_package_entries(project_policy, "includePackages")
+    for item in included:
+        pending.append(item["package"])
+    excluded = {item["package"] for item in policy_package_entries(project_policy, "excludeDependencies")}
     while pending:
         name = pending.popleft()
         if name in selected:
@@ -542,6 +576,7 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
         "resolver": "deb-depends-v1",
         "indexSha256": runtime["packageIndexSha256"],
         "packages": locks,
+        "policyIncludes": included,
     }
 
 
@@ -588,12 +623,11 @@ def build_apk(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
         )
     pending = deque([source_package])
     selected: dict[str, dict] = {}
-    project_policy = args.closure.get("projects", {}).get(project.get("projectId"), {})
-    excluded = {
-        item.get("package")
-        for item in project_policy.get("excludeDependencies", [])
-        if isinstance(item, dict) and isinstance(item.get("package"), str)
-    }
+    project_policy = closure_project_policy(args.closure, project)
+    included = policy_package_entries(project_policy, "includePackages")
+    for item in included:
+        pending.append(item["package"])
+    excluded = {item["package"] for item in policy_package_entries(project_policy, "excludeDependencies")}
     while pending:
         name = pending.popleft()
         record = providers.get(name)
@@ -653,6 +687,7 @@ def build_apk(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
         "resolver": "apk-depends-v1",
         "indexSha256": runtime["packageIndexSha256"],
         "packages": locks,
+        "policyIncludes": included,
     }
 
 

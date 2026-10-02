@@ -7,11 +7,13 @@ import io
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +50,113 @@ class RuntimeClosureContractTests(unittest.TestCase):
         self.assertEqual(default["baseline"]["expectedResult"], "accepted-and-runs")
         self.assertEqual(default["outerWrapper"]["expectedResult"], "accepted-and-runs")
         self.assertEqual(default["outerWrapper"]["mode"], "outer-execveat")
+
+
+    def test_project_policy_inclusions_are_resolved_and_retained(self) -> None:
+        closure = {
+            "projects": {
+                "*": {"includePackages": [{"package": "base", "reason": "default"}]},
+                "sample": {
+                    "includePackages": [
+                        {"package": "locales-all", "reason": "UTF-8 oracle"}
+                    ]
+                },
+            }
+        }
+        project = {"projectId": "sample"}
+        policy = BUILDER.closure_project_policy(closure, project)
+        self.assertEqual(
+            BUILDER.policy_package_entries(policy, "includePackages"),
+            [{"package": "locales-all", "reason": "UTF-8 oracle"}],
+        )
+        self.assertEqual(
+            BUILDER.policy_package_entries(
+                BUILDER.closure_project_policy(closure, {"projectId": "other"}),
+                "includePackages",
+            ),
+            [{"package": "base", "reason": "default"}],
+        )
+        with self.assertRaises(SystemExit):
+            BUILDER.policy_package_entries(
+                {"includePackages": [{"package": "bad name"}]}, "includePackages"
+            )
+
+    def test_tmux_policy_locks_utf8_locale_and_zero_status_witness(self) -> None:
+        closure = json.loads(
+            (ROOT / "fixtures/real-samples/runtime-closures.json").read_text()
+        )
+        tmux = closure["projects"]["tmux"]
+        self.assertEqual(tmux["baseline"]["command"], ["/usr/bin/tmux", "-V"])
+        self.assertEqual(
+            [entry["package"] for entry in tmux["includePackages"]], ["locales-all"]
+        )
+
+    def test_debian_include_package_enters_selected_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            records = {
+                name: {
+                    "Package": name,
+                    "Filename": f"pool/main/{name}.deb",
+                    "SHA256": "0" * 64,
+                    "Size": "1",
+                    "Architecture": "arm64",
+                    "Depends": "",
+                }
+                for name in ("tmux", "libc6", "locales-all")
+            }
+            args = SimpleNamespace(
+                closure={
+                    "projects": {
+                        "tmux": {
+                            "includePackages": [
+                                {"package": "locales-all", "reason": "UTF-8 oracle"}
+                            ]
+                        }
+                    }
+                },
+                index_dir=root / "index",
+                work_root=root / "work",
+                rootfs=root / "rootfs",
+                package_cache=None,
+            )
+            runtime = {
+                "packageIndexUrl": "https://example.invalid/Packages.xz",
+                "packageIndexSha256": "0" * 64,
+                "repositoryRoot": "https://example.invalid/",
+            }
+            project = {
+                "projectId": "tmux",
+                "provenance": {"archivePath": "pool/main/tmux.deb"},
+            }
+
+            def fake_acquire(*_arguments: object, **_keywords: object) -> Path:
+                destination = _arguments[1]
+                assert isinstance(destination, Path)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(b"x")
+                return destination
+
+            with (
+                patch.object(BUILDER, "download"),
+                patch.object(
+                    BUILDER,
+                    "parse_debian_index",
+                    return_value=(records, {records["tmux"]["Filename"]: records["tmux"]}, {}),
+                ),
+                patch.object(BUILDER, "acquire_package", side_effect=fake_acquire),
+                patch.object(BUILDER.subprocess, "run"),
+            ):
+                lock = BUILDER.build_debian(args, runtime, project)
+
+            self.assertEqual(
+                {package["name"] for package in lock["packages"]},
+                {"tmux", "libc6", "locales-all"},
+            )
+            self.assertEqual(
+                lock["policyIncludes"],
+                [{"package": "locales-all", "reason": "UTF-8 oracle"}],
+            )
 
 
 class RuntimePackageCacheTests(unittest.TestCase):

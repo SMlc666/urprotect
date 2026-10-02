@@ -70,7 +70,7 @@
     "lsof": {"baseline": {"command": ["/usr/bin/lsof", "-v"]}},
     "lua": {"baseline": {"command": ["/usr/bin/lua5.4", "-v"]}},
     "micro": {"baseline": {"command": ["/usr/bin/micro", "-version"]}},
-    "minicom": {"baseline": {"command": ["/usr/bin/minicom", "-h"]}},
+    "minicom": {"baseline": {"command": ["/usr/bin/minicom", "-h"], "expectedStatus": 1}},
     "mpv": {"baseline": {"command": ["/usr/bin/mpv", "--version"]}},
     "nmap": {"baseline": {"command": ["/usr/bin/nmap", "--version"]}},
     "nginx": {"baseline": {"command": ["/usr/sbin/nginx", "-v"]}},
@@ -78,7 +78,12 @@
     "socat": {"baseline": {"command": ["/usr/bin/socat", "-V"]}},
     "squashfs-tools": {"baseline": {"command": ["/usr/bin/mksquashfs", "-version"]}},
     "sysstat": {"baseline": {"command": ["/usr/bin/iostat", "-V"]}},
-    "tmux": {"baseline": {"command": ["/usr/bin/tmux", "-V"]}},
+    "tmux": {
+      "baseline": {"command": ["/usr/bin/tmux", "-V"]},
+      "includePackages": [
+        {"package": "locales-all", "reason": "tmux requires a UTF-8 locale for its version oracle."}
+      ]
+    },
     "unzip": {"baseline": {"command": ["/usr/bin/unzip", "-v"]}},
     "sed": {"baseline": {"command": ["/bin/sed", "--version"]}},
     "alpine-fping": {"baseline": {"command": ["/usr/sbin/fping", "--version"]}},

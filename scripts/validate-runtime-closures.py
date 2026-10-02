@@ -16,6 +16,28 @@ def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+def validate_package_policy(project_id: str | None, policy: dict) -> None:
+    for field in ("includePackages", "excludeDependencies"):
+        entries = policy.get(field, [])
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            fail(f"{project_id}: {field} must be a list")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                fail(f"{project_id}: {field} entries must be objects")
+            package = entry.get("package")
+            if not isinstance(package, str) or not package or any(
+                character.isspace() or ord(character) == 0 for character in package
+            ):
+                fail(f"{project_id}: {field} contains an invalid package name")
+            reason = entry.get("reason", "")
+            if not isinstance(reason, str) or any(
+                ord(character) == 0 or ord(character) in (10, 13) for character in reason
+            ):
+                fail(f"{project_id}: {field} contains an invalid reason")
+
+
 def validate(closure_path: Path, manifest_path: Path) -> None:
     try:
         closure = json.loads(closure_path.read_text())
@@ -66,10 +88,14 @@ def validate(closure_path: Path, manifest_path: Path) -> None:
         policy = policies.get(project_id, default)
         if not isinstance(policy, dict):
             fail(f"{project_id}: runtime closure policy must be an object")
+        validate_package_policy(project_id, policy)
         baseline = policy.get("baseline", {})
         if not isinstance(baseline, dict):
             fail(f"{project_id}: baseline policy must be an object")
         command = baseline.get("command")
+        expected_status = baseline.get("expectedStatus", 0)
+        if isinstance(expected_status, bool) or not isinstance(expected_status, int) or not 0 <= expected_status <= 255:
+            fail(f"{project_id}: baseline expectedStatus must be an integer from 0 through 255")
         if command is not None:
             if not isinstance(command, list) or not command or any(not isinstance(item, str) for item in command):
                 fail(f"{project_id}: baseline command must be a non-empty string list")

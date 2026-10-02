@@ -172,7 +172,7 @@ values=[
  p['projectId'], prov['archiveUrl'], prov['version'], prov['archivePath'], prov['archiveSha256'],
  prov['archiveFormat'], prov['artifactPath'], p['featureFingerprint']['producer'],
  policy['static']['expectedResult'], str(baseline_policy.get('applicable', True)).lower(),
- baseline_policy.get('expectedResult', 'accepted-and-runs'), baseline_policy.get('mode','-'), base64.urlsafe_b64encode(json.dumps(baseline_policy.get('command', [])).encode()).decode(), target['runtime'], target['loader'],
+ baseline_policy.get('expectedResult', 'accepted-and-runs'), baseline_policy.get('mode','-'), base64.urlsafe_b64encode(json.dumps(baseline_policy.get('command', [])).encode()).decode(), str(baseline_policy.get('expectedStatus', 0)), target['runtime'], target['loader'],
  base64.urlsafe_b64encode(json.dumps(apk_metadata).encode()).decode(),
  prov.get('sourceKind',''),
 ]
@@ -325,8 +325,8 @@ PY
 
 process_project() {
   local json_record="$1"
-  local id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 runtime loader apk_metadata_b64 source_kind
-  IFS=$'\t' read -r id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 runtime loader apk_metadata_b64 source_kind < <(project_fields "${json_record}")
+  local id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 baseline_expected_status runtime loader apk_metadata_b64 source_kind
+  IFS=$'\t' read -r id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 baseline_expected_status runtime loader apk_metadata_b64 source_kind < <(project_fields "${json_record}")
   expected_baseline=accepted-and-runs
   local expected_outer=accepted-and-runs
   local sample_root="${artifact_root}/${id}" sample_tmp archive extract_root
@@ -440,7 +440,7 @@ PYAPK
     closure_reason='runtime closure cannot provide an isolated writable /tmp'
   fi
   local command_json
-  if [[ "${baseline_mode}" == "bubblewrap-rootfs" && -n "${baseline_command_b64}" ]]; then
+  if [[ -n "${baseline_command_b64}" ]]; then
     command_json="${baseline_command_b64}"
   else
     command_json="$(python3 - "${artifact_path}" <<'PYCOMMAND'
@@ -526,7 +526,7 @@ PYBIONIC
     rm -f -- "${bionic_input}"
   else
     if run_isolated_baseline "${runtime_root}" "${sample_root}" "${artifact_path}" "${command_json}"; then :; else run_status=$?; fi
-    if [[ "${run_status}" -eq 0 ]]; then
+    if [[ "${run_status}" -eq "${baseline_expected_status}" ]]; then
       actual_baseline=accepted-and-runs
       reason_baseline="baseline status=${run_status}"
     elif [[ "${run_status}" -eq 125 ]]; then
@@ -557,7 +557,7 @@ print(base64.urlsafe_b64encode(json.dumps(values).encode()).decode())
 PYOUTER
       )"
       if run_isolated_command "${runtime_root}" "${sample_root}" outer "${outer_command}" "/${artifact_path#/}"; then :; else wrapper_status=$?; fi
-      if [[ "${wrapper_status}" -eq 0 ]]; then
+      if [[ "${wrapper_status}" -eq "${run_status}" ]]; then
         actual_outer=accepted-and-runs
         reason_outer="outer status=${wrapper_status}"
       elif [[ "${wrapper_status}" -eq 125 ]]; then
