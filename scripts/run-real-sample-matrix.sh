@@ -57,8 +57,11 @@ temp_root="$(mktemp -d "${runner_temp%/}/urprotect-real-samples-${requested_tier
 chmod 711 "${temp_root}"
 isolation_lock="${temp_root}/isolation.lock"
 : > "${isolation_lock}"
-isolation_dropper="${temp_root}/urp-dropper"
-cat > "${temp_root}/urp-dropper.c" <<'DROPper'
+isolation_dropper_dir="${temp_root}/isolation-dropper"
+mkdir -p "${isolation_dropper_dir}"
+chmod 755 "${isolation_dropper_dir}"
+isolation_dropper="${isolation_dropper_dir}/urp-dropper"
+cat > "${isolation_dropper_dir}/urp-dropper.c" <<'DROPper'
 #include <errno.h>
 #include <grp.h>
 #include <stdio.h>
@@ -79,9 +82,9 @@ int main(int argc, char **argv) {
     return 127;
 }
 DROPper
-musl-gcc -static -O2 -s "${temp_root}/urp-dropper.c" -o "${isolation_dropper}"
+musl-gcc -static -O2 -s "${isolation_dropper_dir}/urp-dropper.c" -o "${isolation_dropper}"
 chmod 755 "${isolation_dropper}"
-rm -f "${temp_root}/urp-dropper.c"
+rm -f "${isolation_dropper_dir}/urp-dropper.c"
 parallelism="${REAL_SAMPLE_PARALLELISM:-4}"
 if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 8 ]]; then
   echo 'REAL_SAMPLE_PARALLELISM must be an integer from 1 through 8' >&2

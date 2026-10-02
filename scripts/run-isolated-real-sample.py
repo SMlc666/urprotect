@@ -113,10 +113,10 @@ def main() -> int:
         if not dropper.is_file() or dropper.is_symlink():
             print("environment-unavailable: isolation dropper is missing", file=sys.stderr)
             return 125
-        dropper_bind = ["--ro-bind", str(dropper), "/tmp/urp-dropper"]
+        dropper_bind = ["--dir", "/tmp/urp", "--ro-bind", str(dropper.parent), "/tmp/urp"]
         dropper_env = ["--setenv", "URP_ARGV0", arguments.argv0 or command[0]]
         argv0 = []
-        target_command = ["/tmp/urp-dropper", *command]
+        target_command = [f"/tmp/urp/{dropper.name}", *command]
     sudo = shutil.which("sudo") if os.geteuid() != 0 else None
     wrapped = ([sudo, "-n"] if sudo else []) + [
         bwrap,
