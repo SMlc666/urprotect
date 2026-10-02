@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--process-limit", required=True, type=int)
     parser.add_argument("--output-limit", required=True, type=int)
     parser.add_argument("--argv0", default=None)
+    parser.add_argument("--dropper", default=None)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser.parse_args()
 
@@ -91,15 +92,22 @@ def main() -> int:
 
     # Mount the archive-derived root as '/', not the checkout or the host's
     # writable filesystem.  /tmp is the only writable target mount.
+    # Mount the archive-derived root as '/', not the checkout or the host's
+    # writable filesystem.  /tmp is the only writable target mount.
     argv0 = ["--argv0", arguments.argv0] if arguments.argv0 is not None else []
-    try:
-        root_fd = os.open(rootfs, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    except OSError as error:
-        print(f"environment-unavailable: could not open rootfs: {error}", file=sys.stderr)
-        return 125
-    # Run bubblewrap directly as the unprivileged CI runner; this preserves
-    # the rootfs directory fd used by --ro-bind-fd and avoids sudo remapping.
-    sudo = None
+    dropper_bind: list[str] = []
+    dropper_env: list[str] = []
+    target_command = command
+    if arguments.dropper is not None:
+        dropper = Path(arguments.dropper).resolve()
+        if not dropper.is_file() or dropper.is_symlink():
+            print("environment-unavailable: isolation dropper is missing", file=sys.stderr)
+            return 125
+        dropper_bind = ["--ro-bind", str(dropper), "/bin/urp-dropper"]
+        dropper_env = ["--setenv", "URP_ARGV0", arguments.argv0 or command[0]]
+        argv0 = []
+        target_command = ["/bin/urp-dropper", *command]
+    sudo = shutil.which("sudo") if os.geteuid() != 0 else None
     wrapped = ([sudo, "-n"] if sudo else []) + [
         bwrap,
         "--die-with-parent",
@@ -110,7 +118,8 @@ def main() -> int:
         "--unshare-uts",
         "--clearenv",
         "--cap-drop", "ALL",
-        "--ro-bind-fd", str(root_fd), "/",
+        "--ro-bind", str(rootfs), "/",
+        *dropper_bind,
         "--tmpfs", "/tmp",
         "--proc", "/proc",
         "--dev", "/dev",
@@ -121,16 +130,16 @@ def main() -> int:
         "--setenv", "LANG", "C.UTF-8",
         "--setenv", "LC_ALL", "C.UTF-8",
         "--setenv", "LD_LIBRARY_PATH", "/lib:/usr/lib:/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/blas:/usr/lib/aarch64-linux-gnu/lapack:/lib/arm-linux-gnueabihf:/usr/lib/arm-linux-gnueabihf",
+        *dropper_env,
         *argv0,
         "--",
-        *command,
+        *target_command,
     ]
     try:
         process = subprocess.Popen(
             wrapped,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            pass_fds=(root_fd,),
             stderr=subprocess.PIPE,
             preexec_fn=lambda: bounded_preexec(
                 arguments.timeout,
@@ -140,11 +149,7 @@ def main() -> int:
                 set_no_new_privs=sudo is None,
             ),
         )
-        os.close(root_fd)
-        root_fd = -1
     except (OSError, ValueError) as error:
-        if root_fd >= 0:
-            os.close(root_fd)
         print(f"environment-unavailable: could not start bubblewrap: {error}", file=sys.stderr)
         return 125
 
