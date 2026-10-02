@@ -97,8 +97,8 @@ def main() -> int:
     except OSError as error:
         print(f"environment-unavailable: could not open rootfs: {error}", file=sys.stderr)
         return 125
-    # The user namespace owns the privilege drop; keeping bubblewrap direct
-    # preserves the rootfs directory fd used by --ro-bind-fd.
+    # Run bubblewrap directly as the unprivileged CI runner; this preserves
+    # the rootfs directory fd used by --ro-bind-fd and avoids sudo remapping.
     sudo = None
     wrapped = ([sudo, "-n"] if sudo else []) + [
         bwrap,
@@ -106,7 +106,6 @@ def main() -> int:
         "--new-session",
         "--unshare-net",
         "--unshare-pid",
-        "--unshare-user",
         "--unshare-ipc",
         "--unshare-uts",
         "--clearenv",
@@ -114,8 +113,6 @@ def main() -> int:
         "--ro-bind-fd", str(root_fd), "/",
         "--tmpfs", "/tmp",
         "--proc", "/proc",
-        "--uid", "65534",
-        "--gid", "65534",
         "--dev", "/dev",
         "--chdir", "/tmp",
         "--setenv", "PATH", "/bin:/usr/bin:/sbin:/usr/sbin",
