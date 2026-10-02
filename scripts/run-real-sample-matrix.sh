@@ -123,6 +123,8 @@ import base64, json, sys
 p=json.loads(sys.argv[1]); closures=json.load(open(sys.argv[2])); prov=p['provenance']; target=p['target']; policy=p['executionPolicy']
 closure_policy=closures.get('projects', {}).get(p['projectId'], closures['projects']['*'])
 baseline_policy={**policy['baseline'], **closure_policy.get('baseline', {})}
+if 'command' in closure_policy.get('baseline', {}):
+    baseline_policy['mode']='bubblewrap-rootfs'
 apk_metadata={
  'package': prov.get('packageName',''),
  'version': prov.get('version',''),
