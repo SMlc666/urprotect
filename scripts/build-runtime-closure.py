@@ -478,6 +478,11 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
     if seed is None:
         fail(f"source package is absent from the locked Debian index: {source_path}")
     pending = deque([seed["Package"]])
+    # Some Go/C packages omit libc6 from package metadata while still being
+    # dynamically linked. Keep every glibc closure executable by including
+    # the locked loader package as a runtime invariant.
+    if "libc6" in by_name and seed["Package"] != "libc6":
+        pending.append("libc6")
     selected: dict[str, dict] = {}
     project_policy = args.closure.get("projects", {}).get(project.get("projectId"), {})
     excluded = {
@@ -681,8 +686,11 @@ def main() -> None:
         lock = build_apk(args, runtime, project)
     (args.rootfs / "etc").mkdir(parents=True, exist_ok=True)
     (args.rootfs / "etc/hostname").write_text("urprotect\n")
-    (args.rootfs / "etc/passwd").write_text("root:x:0:0:root:/root:/bin/sh\n")
-    (args.rootfs / "etc/group").write_text("root:x:0:\n")
+    (args.rootfs / "etc/passwd").write_text(
+        "root:x:0:0:root:/root:/bin/sh\n"
+        "nobody:x:65534:65534:nobody:/nonexistent:/sbin/nologin\n"
+    )
+    (args.rootfs / "etc/group").write_text("root:x:0:\nnogroup:x:65534:\n")
     args.lock_output.parent.mkdir(parents=True, exist_ok=True)
     args.lock_output.write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n")
 

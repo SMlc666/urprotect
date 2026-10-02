@@ -525,7 +525,7 @@ PYBIONIC
     fi
     rm -f -- "${bionic_input}"
   else
-    if run_isolated_command "${runtime_root}" "${sample_root}" baseline "${command_json}"; then :; else run_status=$?; fi
+    if run_isolated_baseline "${runtime_root}" "${sample_root}" "${artifact_path}" "${command_json}"; then :; else run_status=$?; fi
     if [[ "${run_status}" -eq 0 ]]; then
       actual_baseline=accepted-and-runs
       reason_baseline="baseline status=${run_status}"
