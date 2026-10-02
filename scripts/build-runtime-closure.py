@@ -21,17 +21,73 @@ import os
 from pathlib import Path
 import posixpath
 import re
+import select
+import signal
 import subprocess
+import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zlib
 from typing import Iterable, Iterator
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from real_sample_schema import (
+    MAX_RUNTIME_CLOSURE_EXPANDED_BYTES,
+    MAX_RUNTIME_CLOSURE_MEMBERS,
+    MAX_RUNTIME_CLOSURE_OPERATION_SECONDS,
+    MAX_RUNTIME_CLOSURE_PACKAGES,
+)
+
 
 MAX_INDEX_BYTES = 64 * 1024 * 1024
 MAX_PACKAGE_BYTES = 1024 * 1024 * 1024
+
+# Keep these limits aligned with the shared real-sample archive bounds while
+# applying them to the aggregate closure, not just one package at a time.
+MAX_CLOSURE_PACKAGES = MAX_RUNTIME_CLOSURE_PACKAGES
+MAX_CLOSURE_MEMBERS = MAX_RUNTIME_CLOSURE_MEMBERS
+MAX_CLOSURE_EXPANDED_BYTES = MAX_RUNTIME_CLOSURE_EXPANDED_BYTES
+MAX_CLOSURE_OPERATION_SECONDS = MAX_RUNTIME_CLOSURE_OPERATION_SECONDS
+
+
+class ExtractionBudget:
+    def __init__(self) -> None:
+        self.packages = 0
+        self.members = 0
+        self.expanded_bytes = 0
+        self.operations = 0
+        self.deadline = time.monotonic() + MAX_CLOSURE_OPERATION_SECONDS
+
+    def check_deadline(self, package_name: str) -> None:
+        if time.monotonic() > self.deadline:
+            fail(f"runtime closure extraction exceeded its operation limit at {package_name}")
+
+    def reserve_package(self, package_name: str) -> None:
+        self.check_deadline(package_name)
+        self.packages += 1
+        if self.packages > MAX_CLOSURE_PACKAGES:
+            fail(f"runtime closure contains too many packages: {package_name}")
+
+    def reserve_archive(self, package_name: str, member_count: int, expanded_bytes: int) -> None:
+        self.check_deadline(package_name)
+        if member_count > MAX_CLOSURE_MEMBERS:
+            fail(f"package {package_name} contains too many members")
+        if expanded_bytes < 0:
+            fail(f"package {package_name} has a negative expanded size")
+        if self.members + member_count > MAX_CLOSURE_MEMBERS:
+            fail("runtime closure contains too many aggregate members")
+        if self.expanded_bytes + expanded_bytes > MAX_CLOSURE_EXPANDED_BYTES:
+            fail("runtime closure exceeds its aggregate expanded-size limit")
+        if self.operations + member_count > MAX_CLOSURE_MEMBERS:
+            fail("runtime closure exceeds its aggregate extraction-operation limit")
+        self.members += member_count
+        self.expanded_bytes += expanded_bytes
+        self.operations += member_count
 
 
 def fail(message: str) -> None:
@@ -423,62 +479,189 @@ def policy_package_entries(policy: dict, field: str) -> list[dict[str, str]]:
     return entries
 
 
-def safe_extract_tar(archive: Path, root: Path, apk: bool) -> None:
+def safe_extract_tar(
+    archive: Path,
+    root: Path,
+    apk: bool,
+    budget: ExtractionBudget | None = None,
+    package_name: str = "archive",
+) -> None:
     mode = "r:gz" if apk else "r:*"
-    with tarfile.open(archive, mode) as tar:
-        members = tar.getmembers()
-        if len(members) > 100_000:
-            fail(f"archive has too many members: {archive}")
-        root_resolved = root.resolve()
-        archive_links = {
-            posixpath.normpath(member.name).lstrip("./")
-            for member in members
-            if member.issym() or member.islnk()
-        }
-        safe_members: list[tarfile.TarInfo] = []
-        for member in members:
-            normalized_name = posixpath.normpath(member.name).lstrip("./")
-            name_parts = normalized_name.split("/")
-            if any("/".join(name_parts[:index]) in archive_links for index in range(1, len(name_parts))):
-                fail(f"archive member traverses an archive link: {member.name}")
-            for parent in Path(member.name).parents:
-                if str(parent) == ".":
-                    continue
-                if (root / parent).is_symlink():
-                    fail(f"archive member traverses an existing link: {member.name}")
-            target = (root / member.name).resolve()
-            if target != root_resolved and root_resolved not in target.parents:
-                fail(f"archive traversal: {member.name}")
-            if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
-                fail(f"unsupported special archive member: {member.name}")
-            if member.issym() or member.islnk():
-                if member.islnk():
-                    link_target = (
-                        root / member.linkname.lstrip("/")
-                        if member.linkname.startswith("/")
-                        else root / member.linkname
-                    ).resolve()
-                else:
-                    link_target = (
-                        root / member.linkname.lstrip("/")
-                        if member.linkname.startswith("/")
-                        else root / Path(member.name).parent / member.linkname
-                    ).resolve()
-                if link_target != root_resolved and root_resolved not in link_target.parents:
-                    fail(f"archive link escapes root: {member.name} -> {member.linkname}")
-                if member.linkname.startswith("/"):
-                    rewritten = copy.copy(member)
-                    if member.issym():
-                        link_parent = (root / Path(member.name).parent).resolve()
+    deadline = min(
+        budget.deadline if budget is not None else time.monotonic() + MAX_CLOSURE_OPERATION_SECONDS,
+        time.monotonic() + MAX_CLOSURE_OPERATION_SECONDS,
+    )
+    previous_alarm_handler = signal.getsignal(signal.SIGALRM)
+
+    def extraction_timeout(_signum: int, _frame: object) -> None:
+        raise TimeoutError(f"archive extraction exceeded the operation limit: {archive}")
+
+    remaining = max(0.001, deadline - time.monotonic())
+    signal.signal(signal.SIGALRM, extraction_timeout)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, remaining)
+    try:
+        with tarfile.open(archive, mode) as tar:
+            members: list[tarfile.TarInfo] = []
+            for member in tar:
+                if len(members) >= MAX_CLOSURE_MEMBERS:
+                    fail(f"archive has too many members: {archive}")
+                members.append(member)
+                if time.monotonic() > deadline:
+                    fail(f"archive extraction exceeded the operation limit: {archive}")
+            expanded_bytes = sum(max(0, member.size) for member in members)
+            if budget is not None:
+                budget.reserve_archive(package_name, len(members), expanded_bytes)
+            root_resolved = root.resolve()
+            archive_links = {
+                posixpath.normpath(member.name).lstrip("./")
+                for member in members
+                if member.issym() or member.islnk()
+            }
+            safe_members: list[tarfile.TarInfo] = []
+            for member in members:
+                normalized_name = posixpath.normpath(member.name).lstrip("./")
+                name_parts = normalized_name.split("/")
+                if any("/".join(name_parts[:index]) in archive_links for index in range(1, len(name_parts))):
+                    fail(f"archive member traverses an archive link: {member.name}")
+                for parent in Path(member.name).parents:
+                    if str(parent) == ".":
+                        continue
+                    if (root / parent).is_symlink():
+                        fail(f"archive member traverses an existing link: {member.name}")
+                target = (root / member.name).resolve()
+                if target != root_resolved and root_resolved not in target.parents:
+                    fail(f"archive traversal: {member.name}")
+                if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
+                    fail(f"unsupported special archive member: {member.name}")
+                if member.issym() or member.islnk():
+                    if member.islnk():
+                        link_target = (
+                            root / member.linkname.lstrip("/")
+                            if member.linkname.startswith("/")
+                            else root / member.linkname
+                        ).resolve()
                     else:
-                        link_parent = root_resolved
-                    rewritten.linkname = os.path.relpath(link_target, link_parent)
-                    member = rewritten
-            safe_members.append(member)
-        # Rewrite absolute links such as /bin/sh to equivalent links relative
-        # to this private root.  Keeping the link absolute on the build host
-        # would point at the host filesystem rather than the eventual chroot.
-        tar.extractall(root, members=safe_members)
+                        link_target = (
+                            root / member.linkname.lstrip("/")
+                            if member.linkname.startswith("/")
+                            else root / Path(member.name).parent / member.linkname
+                        ).resolve()
+                    if link_target != root_resolved and root_resolved not in link_target.parents:
+                        fail(f"archive link escapes root: {member.name} -> {member.linkname}")
+                    if member.linkname.startswith("/"):
+                        rewritten = copy.copy(member)
+                        if member.issym():
+                            link_parent = (root / Path(member.name).parent).resolve()
+                        else:
+                            link_parent = root_resolved
+                        rewritten.linkname = os.path.relpath(link_target, link_parent)
+                        member = rewritten
+                safe_members.append(member)
+            # Rewrite absolute links such as /bin/sh to equivalent links relative
+            # to this private root. Keeping the link absolute on the build host
+            # would point at the host filesystem rather than the eventual chroot.
+            if time.monotonic() > deadline:
+                fail(f"archive extraction exceeded the operation limit: {archive}")
+            tar.extractall(root, members=safe_members)
+    except TimeoutError as error:
+        fail(str(error))
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+        signal.signal(signal.SIGALRM, previous_alarm_handler)
+
+
+def _kill_and_reap_process_group(
+    process: subprocess.Popen[bytes],
+    *,
+    force_group_kill: bool = False,
+) -> None:
+    if force_group_kill or process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def extract_deb(
+    archive: Path,
+    destination: Path,
+    budget: ExtractionBudget,
+    package_name: str,
+) -> None:
+    """Extract only a bounded dpkg filesystem tar stream.
+
+    ``select`` only promises that a descriptor has some data available.  A
+    buffered ``stdout.read(size)`` may still wait for the requested amount or
+    EOF, allowing a child that writes one byte and keeps the pipe open to
+    bypass the deadline.  The descriptor is therefore put in nonblocking mode
+    and consumed with ``os.read`` while the deadline is checked on every loop.
+    """
+    deadline = min(
+        budget.deadline,
+        time.monotonic() + MAX_CLOSURE_OPERATION_SECONDS,
+    )
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{package_name}-fs.", suffix=".tar", dir=str(archive.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        process = subprocess.Popen(
+            ["dpkg-deb", "--fsys-tarfile", str(archive)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        assert process.stdout is not None
+        stdout_fd = process.stdout.fileno()
+        os.set_blocking(stdout_fd, False)
+        total = 0
+        with temporary.open("wb") as output:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("dpkg-deb filesystem tar exceeded the operation limit")
+                ready, _, _ = select.select([stdout_fd], [], [], min(remaining, 0.25))
+                if not ready:
+                    continue
+                try:
+                    chunk = os.read(stdout_fd, 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_CLOSURE_EXPANDED_BYTES:
+                    raise ValueError("dpkg-deb filesystem tar exceeds the aggregate byte limit")
+                output.write(chunk)
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("dpkg-deb filesystem tar exceeded the operation limit")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("dpkg-deb filesystem tar exceeded the operation limit")
+        try:
+            return_code = process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            raise TimeoutError("dpkg-deb filesystem tar exceeded the operation limit") from error
+        if return_code != 0:
+            fail(f"dpkg-deb filesystem tar failed for {package_name}: status {return_code}")
+        safe_extract_tar(temporary, destination, apk=False, budget=budget, package_name=package_name)
+    except (OSError, ValueError, TimeoutError, subprocess.SubprocessError) as error:
+        if process is not None:
+            _kill_and_reap_process_group(process, force_group_kill=True)
+        fail(f"could not bounded-extract Debian package {package_name}: {error}")
+    finally:
+        if process is not None:
+            _kill_and_reap_process_group(process)
+        if process is not None and process.stdout is not None:
+            process.stdout.close()
+        temporary.unlink(missing_ok=True)
 
 
 def parse_debian_index(index: Path) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
@@ -537,11 +720,14 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
                 continue
             if dependency not in selected:
                 pending.append(dependency)
+        if len(pending) + len(selected) > MAX_CLOSURE_PACKAGES:
+            fail("Debian dependency closure exceeds the package-count limit")
 
     packages_root = args.work_root / "deb-packages"
     root = args.rootfs
     root.mkdir(parents=True, exist_ok=True)
     locks: list[dict] = []
+    budget = ExtractionBudget()
     for name in sorted(selected):
         record = selected[name]
         relative = record["Filename"]
@@ -561,7 +747,8 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
         )
         if archive.stat().st_size > MAX_PACKAGE_BYTES:
             fail(f"package exceeds bounded size: {archive}")
-        subprocess.run(["dpkg-deb", "-x", str(archive), str(root)], check=True)
+        budget.reserve_package(name)
+        extract_deb(archive, root, budget, name)
         locks.append({
             "name": name,
             "version": record.get("Version", ""),
@@ -572,6 +759,8 @@ def build_debian(args: argparse.Namespace, runtime: dict, project: dict) -> dict
             "depends": record.get("Depends", ""),
         })
     return {
+        "schemaVersion": 1,
+        "projectId": project.get("projectId"),
         "runtime": "glibc",
         "resolver": "deb-depends-v1",
         "indexSha256": runtime["packageIndexSha256"],
@@ -646,11 +835,14 @@ def build_apk(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
                 continue
             if dependency:
                 pending.append(dependency)
+        if len(pending) + len(selected) > MAX_CLOSURE_PACKAGES:
+            fail("Alpine dependency closure exceeds the package-count limit")
 
     packages_root = args.work_root / "apk-packages"
     root = args.rootfs
     root.mkdir(parents=True, exist_ok=True)
     locks: list[dict] = []
+    budget = ExtractionBudget()
     for name in sorted(selected):
         record = selected[name]
         filename = f"{record['P']}-{record['V']}.apk"
@@ -669,7 +861,8 @@ def build_apk(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
         )
         if archive.stat().st_size > MAX_PACKAGE_BYTES:
             fail(f"package exceeds bounded size: {archive}")
-        safe_extract_tar(archive, root, apk=True)
+        budget.reserve_package(name)
+        safe_extract_tar(archive, root, apk=True, budget=budget, package_name=name)
         locks.append({
             "name": name,
             "version": record.get("V", ""),
@@ -683,6 +876,8 @@ def build_apk(args: argparse.Namespace, runtime: dict, project: dict) -> dict:
             "depends": record.get("D", ""),
         })
     return {
+        "schemaVersion": 1,
+        "projectId": project.get("projectId"),
         "runtime": "musl",
         "resolver": "apk-depends-v1",
         "indexSha256": runtime["packageIndexSha256"],

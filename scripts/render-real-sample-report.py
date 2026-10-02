@@ -148,17 +148,31 @@ def expected_layers(project: dict[str, Any], closures: dict[str, Any] | None = N
         }
     if closures is not None:
         runtime = as_mapping(project.get("target")).get("runtime")
-        default = as_mapping(closures.get("projects")).get("*")
-        if runtime in {"glibc", "musl", "bionic"} and isinstance(default, dict):
-            for layer in ("baseline", "outerWrapper"):
-                declaration = as_mapping(default.get(layer))
-                if isinstance(declaration.get("expectedResult"), str):
-                    values[layer]["expected"] = declaration["expectedResult"]
-                    values[layer]["actual"] = declaration["expectedResult"]
-            host = as_mapping(default.get("hostContext"))
-            if isinstance(host.get("expectedResult"), str):
-                values["hostContext"]["expected"] = host["expectedResult"]
-                values["hostContext"]["actual"] = host["expectedResult"]
+        project_policies = as_mapping(closures.get("projects"))
+        project_id = project.get("projectId")
+        project_override = project_policies.get(project_id)
+        closure_policy = project_override if isinstance(project_override, dict) else project_policies.get("*")
+        if runtime in {"glibc", "musl", "bionic"} and isinstance(closure_policy, dict):
+            declared_policy = as_mapping(project.get("executionPolicy"))
+            for layer in ("baseline", "outerWrapper", "hostContext"):
+                declared = as_mapping(declared_policy.get(layer))
+                declaration = as_mapping(closure_policy.get(layer))
+                closure_result = declaration.get("expectedResult")
+                registry_result = values[layer]["expected"]
+                if declared.get("applicable") is False or registry_result == "not-applicable":
+                    continue
+                # A wildcard closure describes execution mechanics; it cannot
+                # promote an explicit registry environment boundary. A
+                # project-specific closure is an intentional per-sample override.
+                if (
+                    not isinstance(project_override, dict)
+                    and registry_result == "environment-unavailable"
+                    and closure_result == "accepted-and-runs"
+                ):
+                    continue
+                if isinstance(closure_result, str):
+                    values[layer]["expected"] = closure_result
+                    values[layer]["actual"] = closure_result
     return values
 
 
@@ -456,6 +470,16 @@ def markdown_report(aggregate: dict[str, Any]) -> str:
     ]
     for layer in FIRST_FAILURE_LAYERS:
         lines.append(f"| `{layer}` | {aggregate['firstFailureLayers'].get(layer, 0)} |")
+    lines.extend(["", "## Runtime layer outcomes", "", "| Project | Runtime | Layer | Result |", "| --- | --- | --- | --- |"])
+    runtime_outcomes = []
+    for record in aggregate["records"]:
+        for layer in ("baseline", "outerWrapper", "hostContext"):
+            outcome = as_mapping(record.get("layers")).get(layer)
+            actual = as_mapping(outcome).get("actual")
+            if actual != "not-applicable":
+                runtime_outcomes.append((record.get("projectId", "unknown"), record.get("runtime", "unknown"), layer, actual))
+    for project_id, runtime, layer, actual in sorted(runtime_outcomes):
+        lines.append(f"| `{project_id}` | `{runtime}` | `{layer}` | `{actual}` |")
     lines.extend(["", "## Feature frequency", "", "| Feature | Identities | Percent | Disposition |", "| --- | ---: | ---: | --- |"])
     for item in aggregate["featureHistogram"]:
         disposition = item["disposition"]["status"]

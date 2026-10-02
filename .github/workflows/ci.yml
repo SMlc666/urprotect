@@ -27,6 +27,13 @@ on:
         required: false
         default: false
         type: boolean
+      capture_bionic_node_closure:
+        description: >-
+          Manually capture a reviewed candidate-lock for the Termux/bionic Node.js
+          dependency closure; this never establishes compatibility support.
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 3 * * *'
   release:
@@ -452,6 +459,29 @@ jobs:
             aarch64 native-arm64-bionic-container
       - name: Verify Docker runtime
         run: docker version
+      - name: Capture bionic Node.js candidate lock (manual only; not compatibility evidence)
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_bionic_node_closure == true
+        run: |
+          set -euo pipefail
+          candidate_root=.artifacts/bionic/c-termux-bionic-pie
+          candidate_path="${candidate_root}/nodejs-candidate-lock.json"
+          mkdir -p "${candidate_root}"
+          python3 scripts/capture-bionic-node-closure.py \
+            --docker-command "${BIONIC_CONTAINER_RUNTIME:-docker}" \
+            --output "${candidate_path}"
+          python3 scripts/capture-bionic-node-closure.py \
+            --validate-candidate "${candidate_path}"
+          if grep -Eiq 'accepted-and-runs|proven|runtime-failure' "${candidate_path}"; then
+            echo 'candidate-lock metadata contains a compatibility result' >&2
+            exit 1
+          fi
+          printf '%s\n' \
+            'candidate-lock=true' \
+            'runtimeEvidence=false' \
+            'compatibilityStatus=not-established' \
+            'rawArchives=temporary-only-and-removed' \
+            'rawNodeBinary=not-captured' \
+            > "${candidate_root}/nodejs-candidate-lock-status.txt"
       - name: Run native ARM64 bionic fixture
         env:
           BIONIC_PROTECTION_E2E: 'true'

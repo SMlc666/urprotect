@@ -91,6 +91,22 @@ class RealSampleManifestTests(unittest.TestCase):
         self.assertEqual(selected, {project["projectId"] for project in self.manifest["corpus"]["projects"]})
         self.assertTrue(any(candidate["disposition"] in {"rejected", "deferred"} for candidate in self.candidates["candidates"]))
 
+    def test_pr_runtime_witness_policies_are_explicit_and_bionic_fails_closed(self) -> None:
+        projects = {project["projectId"]: project for project in self.manifest["corpus"]["projects"]}
+        busybox = projects["busybox"]["executionPolicy"]
+        coreutils = projects["gnu-coreutils"]["executionPolicy"]
+        node = projects["nodejs"]["executionPolicy"]
+        for policy in (busybox, coreutils):
+            self.assertTrue(policy["baseline"]["applicable"])
+            self.assertTrue(policy["outerWrapper"]["applicable"])
+            self.assertEqual(policy["baseline"]["expectedResult"], "accepted-and-runs")
+            self.assertEqual(policy["outerWrapper"]["expectedResult"], "accepted-and-runs")
+        self.assertTrue(node["baseline"]["applicable"])
+        self.assertTrue(node["outerWrapper"]["applicable"])
+        self.assertEqual(node["baseline"]["expectedResult"], "environment-unavailable")
+        self.assertEqual(node["outerWrapper"]["expectedResult"], "environment-unavailable")
+        self.assertIn("not yet locked", node["baseline"]["reason"])
+
     def test_dynamic_et_exec_samples_have_parser_only_static_policy(self) -> None:
         projects = {project["projectId"]: project for project in self.manifest["corpus"]["projects"]}
         for project_id in ("caddy", "python"):

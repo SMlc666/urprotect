@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -41,6 +42,114 @@ class RuntimeClosureContractTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
+
+    def test_isolation_protocol_separates_helper_and_target_statuses(self) -> None:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        try:
+            import real_sample_schema
+
+            self.assertEqual(
+                real_sample_schema.classify_isolated_result(
+                    attempted=False,
+                    helper_status=125,
+                    target_status=None,
+                    expected=0,
+                ),
+                "environment-unavailable",
+            )
+            self.assertEqual(
+                real_sample_schema.classify_isolated_result(
+                    attempted=True,
+                    helper_status=124,
+                    target_status=None,
+                    expected=0,
+                ),
+                "runtime-failure",
+            )
+            self.assertEqual(
+                real_sample_schema.classify_isolated_result(
+                    attempted=True,
+                    helper_status=None,
+                    target_status=124,
+                    expected=0,
+                ),
+                "runtime-failure",
+            )
+            self.assertEqual(
+                real_sample_schema.classify_isolated_result(
+                    attempted=True,
+                    helper_status=None,
+                    target_status=125,
+                    expected=125,
+                ),
+                "runtime-failure",
+            )
+            self.assertEqual(
+                real_sample_schema.classify_isolated_result(
+                    attempted=True,
+                    helper_status=None,
+                    target_status=7,
+                    expected=7,
+                ),
+                "accepted-and-runs",
+            )
+            self.assertEqual(
+                real_sample_schema.classify_isolated_result(
+                    attempted=True,
+                    helper_status=None,
+                    target_status=8,
+                    expected=7,
+                ),
+                "runtime-failure",
+            )
+        finally:
+            sys.path.pop(0)
+
+    def test_reserved_isolation_status_cannot_be_expected_target_status(self) -> None:
+        closure = json.loads(
+            (ROOT / "fixtures/real-samples/runtime-closures.json").read_text()
+        )
+        closure["projects"]["minicom"]["baseline"]["expectedStatus"] = 124
+        with tempfile.TemporaryDirectory() as temporary:
+            closure_path = Path(temporary) / "runtime-closures.json"
+            closure_path.write_text(json.dumps(closure), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts/validate-runtime-closures.py"),
+                    str(closure_path),
+                    str(ROOT / "fixtures/real-samples/manifest.json"),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("reserved", completed.stderr)
+
+    def test_control_characters_in_declared_command_are_rejected(self) -> None:
+        closure = json.loads(
+            (ROOT / "fixtures/real-samples/runtime-closures.json").read_text()
+        )
+        closure["projects"]["busybox"] = {
+            "baseline": {"command": ["/bin/busybox", "true\n--version"]}
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            closure_path = Path(temporary) / "runtime-closures.json"
+            closure_path.write_text(json.dumps(closure), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts/validate-runtime-closures.py"),
+                    str(closure_path),
+                    str(ROOT / "fixtures/real-samples/manifest.json"),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("control-free", completed.stderr)
 
     def test_default_policy_requires_baseline_and_outer_execution(self) -> None:
         closure = json.loads(
@@ -90,6 +199,25 @@ class RuntimeClosureContractTests(unittest.TestCase):
         self.assertEqual(
             [entry["package"] for entry in tmux["includePackages"]], ["locales-all"]
         )
+
+    def test_extract_deb_deadline_does_not_block_on_buffered_pipe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_dpkg = fake_bin / "dpkg-deb"
+            fake_dpkg.write_text("#!/bin/sh\nprintf x\nsleep 60\n", encoding="utf-8")
+            fake_dpkg.chmod(0o755)
+            archive = root / "sample.deb"
+            archive.write_bytes(b"placeholder")
+            budget = BUILDER.ExtractionBudget()
+            budget.deadline = time.monotonic() + 0.2
+            started = time.monotonic()
+            with patch.dict("os.environ", {"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}):
+                with self.assertRaises(SystemExit) as failure:
+                    BUILDER.extract_deb(archive, root / "rootfs", budget, "demo")
+            self.assertIn("bounded-extract Debian package demo", str(failure.exception))
+            self.assertLess(time.monotonic() - started, 3.0)
 
     def test_debian_include_package_enters_selected_closure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -145,7 +273,7 @@ class RuntimeClosureContractTests(unittest.TestCase):
                     return_value=(records, {records["tmux"]["Filename"]: records["tmux"]}, {}),
                 ),
                 patch.object(BUILDER, "acquire_package", side_effect=fake_acquire),
-                patch.object(BUILDER.subprocess, "run"),
+                patch.object(BUILDER, "extract_deb"),
             ):
                 lock = BUILDER.build_debian(args, runtime, project)
 
@@ -255,6 +383,15 @@ class RuntimePackageCacheTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 BUILDER.safe_extract_tar(unsafe_archive, root / "unsafe-output", apk=True)
             self.assertFalse((outside / "payload").exists())
+
+    def test_aggregate_extraction_budget_rejects_member_and_package_overflow(self) -> None:
+        budget = BUILDER.ExtractionBudget()
+        with self.assertRaises(SystemExit):
+            budget.reserve_archive("oversized", BUILDER.MAX_CLOSURE_MEMBERS + 1, 0)
+        for index in range(BUILDER.MAX_CLOSURE_PACKAGES):
+            budget.reserve_package(f"package-{index}")
+        with self.assertRaises(SystemExit):
+            budget.reserve_package("overflow")
 
     def test_package_expectation_requires_locked_sizes(self) -> None:
         digest = "Q1" + base64.b64encode(bytes(range(20))).decode()

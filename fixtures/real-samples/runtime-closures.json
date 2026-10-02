@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "registryName": "public-real-aarch64-100",
-  "policy": "Every registry identity receives baseline and outer-wrapper execution in its declared runtime; function protection remains separately opt-in.",
+  "policy": "Every applicable registry identity receives baseline and outer-wrapper execution in its declared runtime; unavailable runtime closures remain explicit failures and function protection remains separately opt-in.",
   "runtimes": {
     "glibc": {
       "family": "debian-bookworm-arm64",
@@ -87,6 +87,20 @@
     "unzip": {"baseline": {"command": ["/usr/bin/unzip", "-v"]}},
     "sed": {"baseline": {"command": ["/bin/sed", "--version"]}},
     "alpine-fping": {"baseline": {"command": ["/usr/sbin/fping", "--version"]}},
+    "nodejs": {
+      "baseline": {
+        "expectedResult": "environment-unavailable",
+        "mode": "termux-container-unavailable",
+        "invocation": "declared-artifact-version",
+        "reason": "The bionic Node.js dependency archive closure is not locked; live apt acquisition is not an evidence oracle."
+      },
+      "outerWrapper": {
+        "expectedResult": "environment-unavailable",
+        "mode": "outer-execveat",
+        "compare": ["status", "stdout", "stderr"],
+        "reason": "The bionic Node.js dependency archive closure is not locked."
+      }
+    },
     "*": {
       "baseline": {
         "expectedResult": "accepted-and-runs",

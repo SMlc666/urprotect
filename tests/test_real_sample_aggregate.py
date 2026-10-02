@@ -25,6 +25,14 @@ def load_schema():
     return module
 
 
+def load_renderer():
+    spec = importlib.util.spec_from_file_location("real_sample_report", RENDERER)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class RealSampleAggregateTests(unittest.TestCase):
     def test_checked_in_baseline_is_distinct_identity_schema_two(self) -> None:
         aggregate = json.loads(BASELINE.read_text(encoding="utf-8"))
@@ -46,6 +54,47 @@ class RealSampleAggregateTests(unittest.TestCase):
                 if item["thresholdTriggered"]
             )
         )
+        records = {record["projectId"]: record for record in aggregate["records"]}
+        self.assertEqual(records["busybox"]["layers"]["outerWrapper"]["actual"], "accepted-and-runs")
+        for layer in ("baseline", "outerWrapper"):
+            self.assertEqual(records["gnu-coreutils"]["layers"][layer]["actual"], "accepted-and-runs")
+            self.assertEqual(records["nodejs"]["layers"][layer]["actual"], "environment-unavailable")
+        markdown = BASELINE.with_suffix(".md").read_text(encoding="utf-8")
+        self.assertIn("| `busybox` | `musl` | `outerWrapper` | `accepted-and-runs` |", markdown)
+        self.assertIn("| `gnu-coreutils` | `glibc` | `baseline` | `accepted-and-runs` |", markdown)
+        self.assertIn("| `gnu-coreutils` | `glibc` | `outerWrapper` | `accepted-and-runs` |", markdown)
+        self.assertIn("| `nodejs` | `bionic` | `baseline` | `environment-unavailable` |", markdown)
+        self.assertIn("| `nodejs` | `bionic` | `outerWrapper` | `environment-unavailable` |", markdown)
+
+    def test_renderer_prefers_project_closure_and_preserves_node_boundary(self) -> None:
+        renderer = load_renderer()
+        manifest = json.loads((ROOT / "fixtures/real-samples/manifest.json").read_text(encoding="utf-8"))
+        closures = json.loads((ROOT / "fixtures/real-samples/runtime-closures.json").read_text(encoding="utf-8"))
+        projects = {project["projectId"]: project for project in manifest["corpus"]["projects"]}
+        node = projects["nodejs"]
+        self.assertEqual(renderer.expected_layers(node, closures)["baseline"]["actual"], "environment-unavailable")
+        self.assertEqual(renderer.expected_layers(node, closures)["outerWrapper"]["actual"], "environment-unavailable")
+
+        # A per-project closure entry takes precedence over the wildcard even
+        # when both entries describe the same runtime layer.
+        closures["projects"]["gnu-coreutils"] = {
+            "baseline": {"expectedResult": "accepted-and-runs"}
+        }
+        closures["projects"]["*"]["baseline"]["expectedResult"] = "environment-unavailable"
+        self.assertEqual(
+            renderer.expected_layers(projects["gnu-coreutils"], closures)["baseline"]["actual"],
+            "accepted-and-runs",
+        )
+
+    def test_renderer_preserves_not_applicable_registry_boundary(self) -> None:
+        renderer = load_renderer()
+        manifest = json.loads((ROOT / "fixtures/real-samples/manifest.json").read_text(encoding="utf-8"))
+        closures = json.loads((ROOT / "fixtures/real-samples/runtime-closures.json").read_text(encoding="utf-8"))
+        project = next(project for project in manifest["corpus"]["projects"] if project["projectId"] == "gnu-coreutils")
+        closures["projects"]["*"]["hostContext"] = {"expectedResult": "accepted-and-runs"}
+        layers = renderer.expected_layers(project, closures)
+        self.assertEqual(layers["hostContext"]["expected"], "not-applicable")
+        self.assertEqual(layers["hostContext"]["actual"], "not-applicable")
 
     def test_first_failure_mapping_keeps_environment_separate(self) -> None:
         schema = load_schema()

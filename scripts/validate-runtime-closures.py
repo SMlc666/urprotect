@@ -7,6 +7,13 @@ import argparse
 import json
 import re
 from pathlib import Path
+import sys
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from real_sample_schema import RESERVED_HELPER_STATUSES
 
 
 RUNTIMES = {"glibc", "musl", "bionic"}
@@ -96,12 +103,46 @@ def validate(closure_path: Path, manifest_path: Path) -> None:
         expected_status = baseline.get("expectedStatus", 0)
         if isinstance(expected_status, bool) or not isinstance(expected_status, int) or not 0 <= expected_status <= 255:
             fail(f"{project_id}: baseline expectedStatus must be an integer from 0 through 255")
+        if expected_status in RESERVED_HELPER_STATUSES:
+            fail(
+                f"{project_id}: baseline expectedStatus {expected_status} is reserved for isolation helper outcomes"
+            )
+        invocation = baseline.get("invocation")
+        if invocation is not None and (not isinstance(invocation, str) or not invocation.strip()):
+            fail(f"{project_id}: baseline invocation must be a non-empty string when present")
         if command is not None:
-            if not isinstance(command, list) or not command or any(not isinstance(item, str) for item in command):
-                fail(f"{project_id}: baseline command must be a non-empty string list")
+            if not isinstance(command, list) or not command or any(
+                not isinstance(item, str) or any(character in item for character in ("\0", "\n", "\r"))
+                for item in command
+            ):
+                fail(f"{project_id}: baseline command must be a non-empty control-free string list")
             artifact = "/" + project.get("provenance", {}).get("artifactPath", "").lstrip("/")
             if command[0] != artifact:
                 fail(f"{project_id}: baseline command must launch declared artifact {artifact}")
+        elif invocation != "declared-artifact-version":
+            fail(
+                f"{project_id}: baseline without command must use the validated declared-artifact-version invocation"
+            )
+        outer = policy.get("outerWrapper", {})
+        if not isinstance(outer, dict):
+            fail(f"{project_id}: outerWrapper policy must be an object")
+        outer_mode = outer.get("mode", "outer-execveat")
+        if outer_mode not in {"outer-execveat", "outer-path-preserving"}:
+            fail(f"{project_id}: outerWrapper mode is unsupported: {outer_mode!r}")
+        outer_expected_status = outer.get("expectedStatus")
+        if outer_expected_status is not None:
+            if (
+                isinstance(outer_expected_status, bool)
+                or not isinstance(outer_expected_status, int)
+                or not 0 <= outer_expected_status <= 255
+            ):
+                fail(f"{project_id}: outerWrapper expectedStatus must be an integer from 0 through 255")
+            if outer_expected_status in RESERVED_HELPER_STATUSES:
+                fail(
+                    f"{project_id}: outerWrapper expectedStatus {outer_expected_status} is reserved for isolation helper outcomes"
+                )
+            if outer_expected_status != expected_status:
+                fail(f"{project_id}: outerWrapper expectedStatus must equal the baseline expectedStatus")
     print(f"PASS runtime closures: 100 identities, {len(runtimes)} runtime families")
 
 

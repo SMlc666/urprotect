@@ -26,12 +26,25 @@ Alpine APKINDEX SHA-256 is
 
 `runtime-closures.json` is the execution policy for the complete registry. It
 locks the Debian `Packages.xz` and Alpine `APKINDEX` inputs, resolver family,
-loader identity, and the required `accepted-and-runs` baseline/outer layers.
-The runner resolves only the locked transitive Debian `Depends` and Alpine
-providers into a temporary rootfs; it never uses ambient host libraries. The
-bionic identity is executed through the locked native ARM64 Termux container
-and `/system/bin/linker64`.
+loader identity, and the required `accepted-and-runs` baseline/outer layers
+where the registry policy marks those layers applicable. The runner resolves
+only the locked transitive Debian `Depends` and Alpine providers into a
+temporary rootfs; it never uses ambient host libraries. The bionic identity
+has a locked loader/container identity, but no locked Node.js dependency
+archive closure; the current runner records an applicable bionic attempt as
+`environment-unavailable` until that dependency closure is
+reviewed; a live package-install helper is not promoted to compatibility
+success through `/system/bin/linker64`; the legacy `run-bionic-node-sample.sh`
+probe exits with `environment-unavailable` before live apt acquisition.
 
+
+A maintainer may dispatch CI with `capture_bionic_node_closure=true` to produce
+`.artifacts/bionic/c-termux-bionic-pie/nodejs-candidate-lock.json`. This is
+candidate metadata only: the capture uses a live Termux package index to locate
+archives, records and verifies each downloaded package's SHA-256 and control
+metadata, then deletes all raw archives. Review the package set and image
+identity before promoting it into `runtime-closures.json`; the candidate does not
+establish runtime support or satisfy a baseline/outer execution gate.
 ## Local boundary
 
 Local commands are metadata-only:
@@ -60,7 +73,9 @@ Raw archives and binaries are never copied into the repository or uploaded.
 Every pull request runs all 100 approved projects. Scheduled and release runs
 reuse the exact registry and runner and may add repeatability or release
 evidence, never a subset. A sample that is not applicable to a layer receives
-an explicit `not-applicable` result; it is not silently omitted.
+an explicit `not-applicable` result; it is not silently omitted. Bionic closure
+assembly and path-preserving outer execution remain explicit unavailable
+boundaries until their locked closure and runner path are complete.
 
 The runner records these layers. Static success is `validated`: it proves
 bounded fingerprinting and UrProtect validation only, and never claims that the
@@ -86,6 +101,17 @@ runtime-failure
 environment-unavailable
 not-applicable
 ```
+
+For each applicable baseline or outer-wrapper layer, `execution.json` records
+whether the isolated helper was actually invoked. A real helper invocation
+points to `logs/*.helper.json`; that record separates `attempted`, `targetStatus`,
+and the helper-only 124/125 `helperStatus` sentinels. Runner failures before
+helper invocation (for example, a missing closure or unsupported path mode)
+point instead to `logs/*.preflight.json` and use
+`outcome=preflight-environment-unavailable`, with `attempted=false` and null
+helper/target statuses. A target that exits 124 or 125 after readiness remains a
+`runtime-failure`; a helper timeout or pre-readiness namespace/setup failure
+retains its helper sentinel and has no target status.
 
 The evidence root is `.artifacts/real-samples/<tier>/`. It contains normalized
 fingerprints, bounded readelf output, reports, hashes, environment facts,
@@ -117,9 +143,14 @@ in `feature-dispositions.json`; this record does not promote product support.
 
 The post-run gate checks all 100 project directories, all four layers, the
 runtime-closure expectations, aggregate project IDs, non-empty evidence,
-cleanup markers, and the absence of raw binary-like files. A missing runtime
-or isolation capability is recorded as `environment-unavailable` and fails the
-required CI job; it is not relabeled as a compatibility pass.
+cleanup markers, and the absence of raw binary-like files. Coverage is
+tier-specific: PR requires applicable baseline and outer-wrapper policies for
+BusyBox/musl, GNU coreutils `ls`/glibc, and Termux Node.js/bionic; nightly and
+release require both policies for every registry identity. A closure default
+of `accepted-and-runs` never promotes a registry `not-applicable` policy. A
+missing policy, runtime closure, or isolation capability is recorded as an
+explicit failure and fails the required CI job; it is not relabeled as a
+compatibility pass.
 
 ## CI-first compatibility workflow
 
