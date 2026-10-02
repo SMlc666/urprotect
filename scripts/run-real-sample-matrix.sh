@@ -245,7 +245,7 @@ PYISO
     echo "baseline policy command does not launch declared artifact ${declared_path}" >&2
     return 125
   fi
-  run_isolated_command "${extract_root}" "${sample_root}" baseline "${command_b64}"
+  run_isolated_command "${extract_root}" "${sample_root}" baseline "${command_b64}" "$(basename -- "${declared_path}")"
 }
 prepare_runtime_root() {
   local root="$1" temporary_directory="${1%/}/tmp" proc_directory="${1%/}/proc" dev_directory="${1%/}/dev"
