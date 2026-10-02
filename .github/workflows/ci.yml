@@ -67,6 +67,8 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Check explicit protection policy
+        run: python3 scripts/validate-protection-policy.py fixtures/real-samples/protection-policy.json
       - name: Run required glibc protection smoke
         run: |
           case "${GITHUB_EVENT_NAME}" in
