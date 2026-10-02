@@ -92,8 +92,6 @@ def main() -> int:
 
     # Mount the archive-derived root as '/', not the checkout or the host's
     # writable filesystem.  /tmp is the only writable target mount.
-    # Mount the archive-derived root as '/', not the checkout or the host's
-    # writable filesystem.  /tmp is the only writable target mount.
     argv0 = ["--argv0", arguments.argv0] if arguments.argv0 is not None else []
     dropper_bind: list[str] = []
     dropper_env: list[str] = []
@@ -103,10 +101,10 @@ def main() -> int:
         if not dropper.is_file() or dropper.is_symlink():
             print("environment-unavailable: isolation dropper is missing", file=sys.stderr)
             return 125
-        dropper_bind = ["--ro-bind", str(dropper), "/bin/urp-dropper"]
+        dropper_bind = ["--ro-bind", str(dropper), "/tmp/urp-dropper"]
         dropper_env = ["--setenv", "URP_ARGV0", arguments.argv0 or command[0]]
         argv0 = []
-        target_command = ["/bin/urp-dropper", *command]
+        target_command = ["/tmp/urp-dropper", *command]
     sudo = shutil.which("sudo") if os.geteuid() != 0 else None
     wrapped = ([sudo, "-n"] if sudo else []) + [
         bwrap,
@@ -119,8 +117,8 @@ def main() -> int:
         "--clearenv",
         "--cap-drop", "ALL",
         "--ro-bind", str(rootfs), "/",
-        *dropper_bind,
         "--tmpfs", "/tmp",
+        *dropper_bind,
         "--proc", "/proc",
         "--dev", "/dev",
         "--chdir", "/tmp",
