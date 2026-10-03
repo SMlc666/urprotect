@@ -120,7 +120,9 @@
     "zip": 1,
     "zstd": 1
   },
-  "diagnosticCoverage": {},
+  "diagnosticCoverage": {
+    "environment-unavailable": 2
+  },
   "evidenceMode": "registry-baseline",
   "featureCoverage": {
     "elf.class.ELF64": 100,
@@ -134,7 +136,9 @@
   },
   "featureHistogram": [
     {
-      "diagnostics": {},
+      "diagnostics": {
+        "environment-unavailable": 2
+      },
       "disposition": {
         "reason": "Identity invariant is already locked by the static registry; no separate support claim is derived from the histogram.",
         "source": "reviewed-feature-dispositions",
@@ -471,7 +475,9 @@
       ]
     },
     {
-      "diagnostics": {},
+      "diagnostics": {
+        "environment-unavailable": 2
+      },
       "disposition": {
         "reason": "Little-endian AArch64 is an identity invariant; feature work remains owned by the parser contract.",
         "source": "reviewed-feature-dispositions",
@@ -808,7 +814,9 @@
       ]
     },
     {
-      "diagnostics": {},
+      "diagnostics": {
+        "environment-unavailable": 2
+      },
       "disposition": {
         "reason": "AArch64 identity is the product boundary and is not promoted by ecology frequency.",
         "source": "reviewed-feature-dispositions",
@@ -1145,7 +1153,9 @@
       ]
     },
     {
-      "diagnostics": {},
+      "diagnostics": {
+        "environment-unavailable": 2
+      },
       "disposition": {
         "reason": "Dynamic PIE observations feed layer-specific parser and outer-profile planning; they do not widen a support row by themselves.",
         "source": "reviewed-feature-dispositions",
@@ -1863,7 +1873,9 @@
       ]
     },
     {
-      "diagnostics": {},
+      "diagnostics": {
+        "environment-unavailable": 2
+      },
       "disposition": {
         "reason": "The bionic loader identity is retained as an environment fact and does not promote Android packaging support.",
         "source": "reviewed-feature-dispositions",
@@ -1998,14 +2010,17 @@
   ],
   "layerCounts": {
     "baseline": {
-      "accepted-and-runs": 1,
-      "not-applicable": 99
+      "accepted-and-runs": 2,
+      "environment-unavailable": 1,
+      "not-applicable": 97
     },
     "hostContext": {
       "not-applicable": 100
     },
     "outerWrapper": {
-      "not-applicable": 100
+      "accepted-and-runs": 2,
+      "environment-unavailable": 1,
+      "not-applicable": 97
     },
     "static": {
       "validated": 100
@@ -2511,8 +2526,8 @@
           "status": "metadata-only"
         },
         "outerWrapper": {
-          "actual": "not-applicable",
-          "expected": "not-applicable",
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
           "reason": "Registry policy baseline; CI oracle has not been acquired.",
           "status": "metadata-only"
         },
@@ -2543,8 +2558,8 @@
       "identityKey": "GNU coreutils",
       "layers": {
         "baseline": {
-          "actual": "not-applicable",
-          "expected": "not-applicable",
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
           "reason": "Registry policy baseline; CI oracle has not been acquired.",
           "status": "metadata-only"
         },
@@ -2555,8 +2570,8 @@
           "status": "metadata-only"
         },
         "outerWrapper": {
-          "actual": "not-applicable",
-          "expected": "not-applicable",
+          "actual": "accepted-and-runs",
+          "expected": "accepted-and-runs",
           "reason": "Registry policy baseline; CI oracle has not been acquired.",
           "status": "metadata-only"
         },
@@ -3115,8 +3130,8 @@
       "identityKey": "Node.js",
       "layers": {
         "baseline": {
-          "actual": "not-applicable",
-          "expected": "not-applicable",
+          "actual": "environment-unavailable",
+          "expected": "environment-unavailable",
           "reason": "Registry policy baseline; CI oracle has not been acquired.",
           "status": "metadata-only"
         },
@@ -3127,8 +3142,8 @@
           "status": "metadata-only"
         },
         "outerWrapper": {
-          "actual": "not-applicable",
-          "expected": "not-applicable",
+          "actual": "environment-unavailable",
+          "expected": "environment-unavailable",
           "reason": "Registry policy baseline; CI oracle has not been acquired.",
           "status": "metadata-only"
         },
@@ -6844,8 +6859,9 @@
   ],
   "requiredProjectCount": 100,
   "resultClassification": {
-    "accepted-and-runs": 1,
-    "not-applicable": 299,
+    "accepted-and-runs": 4,
+    "environment-unavailable": 2,
+    "not-applicable": 294,
     "validated": 100
   },
   "runtimeCoverage": {

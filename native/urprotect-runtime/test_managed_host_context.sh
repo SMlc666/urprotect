@@ -337,7 +337,7 @@ printf 'gnu_property=BTI\nproperty_status=%s\n' "${property_status}" \
   >"${artifact_root}/property-result.txt"
 sha256sum "${property_output}" "${script_dir}/build/host-context-property-fixture.so" \
   >>"${artifact_root}/sha256.txt"
-make -C "${script_dir}" threaded-tls-fixture threaded-tls-harness threaded-tls-runtime-test thread-adapter-test >>"${artifact_root}/build.log" 2>&1
+make -C "${script_dir}" threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test >>"${artifact_root}/build.log" 2>&1
 threaded_fixture="${script_dir}/build/host-context-threaded-tls-fixture.so"
 cp "${threaded_fixture}" "${artifact_root}/host-context-threaded-tls-fixture.so"
 readelf -lW -dW -rW "${threaded_fixture}" >"${artifact_root}/threaded-tls-readelf.txt"
@@ -367,6 +367,8 @@ if struct.unpack_from("<Q", frame, 120)[0] != 27:
 PYFRAME
 "${script_dir}/build/host-context-threaded-tls-harness" "${threaded_output}" \
   >"${artifact_root}/threaded-tls-lifecycle.txt" 2>&1
+"${script_dir}/build/host-context-threaded-tls-trace-test" \
+  >"${artifact_root}/threaded-tls-trace-parser.txt" 2>&1
 "${script_dir}/build/host-context-threaded-tls-runtime-test" "${threaded_output}" \
   >"${artifact_root}/threaded-tls-concurrent.txt" 2>&1
 cp "${script_dir}/build/host-context-dynamic-tls-fixture.so" \

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "registryName": "public-real-aarch64-100",
+  "policy": "Every applicable registry identity receives baseline and outer-wrapper execution in its declared runtime; unavailable runtime closures remain explicit failures and function protection remains separately opt-in.",
+  "runtimes": {
+    "glibc": {
+      "family": "debian-bookworm-arm64",
+      "packageIndexUrl": "https://deb.debian.org/debian/dists/bookworm/main/binary-arm64/Packages.xz",
+      "packageIndexSha256": "2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00",
+      "repositoryRoot": "https://deb.debian.org/debian/",
+      "loader": "/lib/ld-linux-aarch64.so.1",
+      "archiveFormat": "deb",
+      "resolver": "deb-depends-v1"
+    },
+    "musl": {
+      "family": "alpine-v3.22-main-aarch64",
+      "packageIndexUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz",
+      "packageIndexSha256": "4d5e75508936b08bed7423bb9e9039a669eadc05323189a9c31c90573766ab99",
+      "registryObservationIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+      "repositoryRoot": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/",
+      "loader": "/lib/ld-musl-aarch64.so.1",
+      "archiveFormat": "apk",
+      "resolver": "apk-depends-v1"
+    },
+    "bionic": {
+      "family": "termux-bionic-locked",
+      "loader": "/system/bin/linker64",
+      "archiveFormat": "deb",
+      "resolver": "termux-container-v1",
+      "execution": "locked-native-arm64-termux-container"
+    }
+  },
+  "projects": {
+    "zero-ad": {
+      "baseline": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "runtime-closure",
+        "invocation": "declared-artifact-version",
+        "command": ["/usr/games/pyrogenesis", "--version"]
+      },
+      "outerWrapper": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "outer-execveat",
+        "compare": ["status", "stdout", "stderr"]
+      },
+      "hostContext": {
+        "expectedResult": "not-applicable",
+        "reason": "Ordinary public executable does not declare urp_entry."
+      },
+      "excludeDependencies": [
+        {
+          "package": "0ad-data",
+          "reason": "The bounded --version invocation does not access the optional 0ad data tree."
+        }
+      ]
+    },
+    "alpine-7zip": {"baseline": {"command": ["/usr/bin/7z", "-h"]}},
+    "alpine-dosfstools": {"baseline": {"command": ["/sbin/fsck.fat", "--help"]}},
+    "alpine-dropbear": {"baseline": {"command": ["/usr/sbin/dropbear", "-h"]}},
+    "alpine-mandoc": {"baseline": {"command": ["/usr/bin/mandoc", "-T", "ascii", "/dev/null"]}},
+    "alpine-mc": {"baseline": {"command": ["/usr/bin/mc", "--version"]}},
+    "alpine-openssh": {"baseline": {"command": ["/usr/bin/ssh", "-V"]}},
+    "alpine-bluez": {"baseline": {"command": ["/usr/bin/hciconfig", "--help"]}},
+    "apache2": {"baseline": {"command": ["/usr/sbin/apache2", "-v"]}},
+    "bind9": {"baseline": {"command": ["/usr/bin/dig", "-v"]}},
+    "caddy": {"baseline": {"command": ["/usr/bin/caddy", "version"]}},
+    "ffmpeg": {"baseline": {"command": ["/usr/bin/ffmpeg", "-version"]}},
+    "graphviz": {"baseline": {"command": ["/usr/bin/dot_builtins", "-V"]}},
+    "iproute2": {"baseline": {"command": ["/sbin/ip", "-V"]}},
+    "lsof": {"baseline": {"command": ["/usr/bin/lsof", "-v"]}},
+    "lua": {"baseline": {"command": ["/usr/bin/lua5.4", "-v"]}},
+    "micro": {"baseline": {"command": ["/usr/bin/micro", "-version"]}},
+    "minicom": {"baseline": {"command": ["/usr/bin/minicom", "-h"], "expectedStatus": 1}},
+    "mpv": {"baseline": {"command": ["/usr/bin/mpv", "--version"]}},
+    "nmap": {"baseline": {"command": ["/usr/bin/nmap", "--version"]}},
+    "nginx": {"baseline": {"command": ["/usr/sbin/nginx", "-v"]}},
+    "openssl": {"baseline": {"command": ["/usr/bin/openssl", "version"]}},
+    "socat": {"baseline": {"command": ["/usr/bin/socat", "-V"]}},
+    "squashfs-tools": {"baseline": {"command": ["/usr/bin/mksquashfs", "-version"]}},
+    "sysstat": {"baseline": {"command": ["/usr/bin/iostat", "-V"]}},
+    "tmux": {
+      "baseline": {"command": ["/usr/bin/tmux", "-V"]},
+      "includePackages": [
+        {"package": "locales-all", "reason": "tmux requires a UTF-8 locale for its version oracle."}
+      ]
+    },
+    "unzip": {"baseline": {"command": ["/usr/bin/unzip", "-v"]}},
+    "sed": {"baseline": {"command": ["/bin/sed", "--version"]}},
+    "alpine-fping": {"baseline": {"command": ["/usr/sbin/fping", "--version"]}},
+    "nodejs": {
+      "baseline": {
+        "expectedResult": "environment-unavailable",
+        "mode": "termux-container-unavailable",
+        "invocation": "declared-artifact-version",
+        "reason": "The bionic Node.js dependency archive closure is not locked; live apt acquisition is not an evidence oracle."
+      },
+      "outerWrapper": {
+        "expectedResult": "environment-unavailable",
+        "mode": "outer-execveat",
+        "compare": ["status", "stdout", "stderr"],
+        "reason": "The bionic Node.js dependency archive closure is not locked."
+      }
+    },
+    "*": {
+      "baseline": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "runtime-closure",
+        "invocation": "declared-artifact-version"
+      },
+      "outerWrapper": {
+        "expectedResult": "accepted-and-runs",
+        "mode": "outer-execveat",
+        "compare": ["status", "stdout", "stderr"]
+      },
+      "hostContext": {
+        "expectedResult": "not-applicable",
+        "reason": "Ordinary public executable does not declare urp_entry."
+      }
+    }
+  }
+}

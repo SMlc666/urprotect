@@ -27,6 +27,13 @@ on:
         required: false
         default: false
         type: boolean
+      capture_bionic_node_closure:
+        description: >-
+          Manually capture a reviewed candidate-lock for the Termux/bionic Node.js
+          dependency closure; this never establishes compatibility support.
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '17 3 * * *'
   release:
@@ -99,6 +106,10 @@ jobs:
         run: |
           python3 tests/test_runtime_matrix.py
           python3 scripts/validate-runtime-matrix.py fixtures/runtime-matrix.json
+          python3 tests/test_runtime_closures.py
+          python3 scripts/validate-runtime-closures.py \
+            fixtures/real-samples/runtime-closures.json \
+            fixtures/real-samples/manifest.json
       - name: Render PR regression matrix plan
         run: |
           mkdir -p .artifacts/regression-matrix/pr
@@ -216,8 +227,36 @@ jobs:
       contents: read
     env:
       REAL_SAMPLE_CI: 'true'
+      REAL_SAMPLE_PARALLELISM: '4'
     steps:
       - uses: actions/checkout@v4
+      - name: Restore real-sample package and index cache
+        id: real-sample-package-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/archives
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/indexes
+          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py') }}
+          restore-keys: |
+            real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Record real-sample package cache status
+        if: always()
+        env:
+          CACHE_HIT: ${{ steps.real-sample-package-cache.outputs.cache-hit }}
+        run: |
+          cache_hit="${CACHE_HIT:-false}"
+          if [[ "${cache_hit}" == true ]]; then
+            cache_status=hit
+          else
+            cache_status=miss
+          fi
+          {
+            echo '## Real-sample package cache'
+            echo
+            echo "Cache status: **${cache_status}** (cache-hit=${cache_hit})"
+            echo "Key scope: ${RUNNER_OS}/${RUNNER_ARCH}; Debian/APK archives and verified indexes only"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Select locked real-sample tier
         run: |
           case "${GITHUB_EVENT_NAME}" in
@@ -244,11 +283,12 @@ jobs:
       - name: Install bounded isolation and inspection tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap binutils curl dpkg-dev
+          sudo apt-get install -y --no-install-recommends bubblewrap binutils curl dpkg-dev make musl-tools
           {
             echo "bubblewrap=$(bwrap --version)"
             echo "readelf=$(readelf --version | head -n 1)"
             echo "runner_arch=$(uname -m)"
+            echo "docker=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
           } | tee -a .artifacts/real-samples/runner/environment.txt
       - uses: actions/setup-dotnet@v4
         with:
@@ -263,13 +303,23 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build product
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Build static AArch64 outer launcher
+        run: |
+          make -C native/urprotect-launcher \
+            CC=musl-gcc MUSL_REAL_CC=aarch64-linux-gnu-gcc \
+            launcher check-elf
       - name: Recheck metadata without acquisition
         run: |
           python3 scripts/validate-real-samples.py \
             fixtures/real-samples/manifest.json \
             --candidates fixtures/real-samples/candidates.json \
             --tier "${REAL_SAMPLE_TIER}"
+          python3 scripts/validate-runtime-closures.py \
+            fixtures/real-samples/runtime-closures.json \
+            fixtures/real-samples/manifest.json
       - name: Run required full approved real-sample suite
+        env:
+          REAL_SAMPLE_LAUNCHER: native/urprotect-launcher/build/urprotect-launcher
         run: |
           ./scripts/run-real-sample-matrix.sh --tier "${REAL_SAMPLE_TIER}"
       - name: Recheck retained real-sample evidence
@@ -278,8 +328,27 @@ jobs:
           python3 scripts/check-real-sample-evidence.py \
             fixtures/real-samples/manifest.json \
             --candidates fixtures/real-samples/candidates.json \
+            --runtime-closures fixtures/real-samples/runtime-closures.json \
             --tier "${REAL_SAMPLE_TIER}" \
             --artifact-root ".artifacts/real-samples/${REAL_SAMPLE_TIER}"
+      # The restore-only action above deliberately leaves saving explicit so a
+      # completed-but-failing matrix still contributes verified cache entries.
+      # Interrupted downloads are temporary .tmp files and must not enter the
+      # shared cache.
+      - name: Remove incomplete real-sample cache downloads
+        if: always()
+        run: |
+          find "${RUNNER_TEMP}/urprotect-real-sample-package-cache/archives" \
+            "${RUNNER_TEMP}/urprotect-real-sample-package-cache/indexes" \
+            -type f -name '*.tmp' -delete 2>/dev/null || true
+      - name: Save verified real-sample package and index cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/archives
+            ${{ runner.temp }}/urprotect-real-sample-package-cache/indexes
+          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py') }}
       - name: Upload real-sample evidence (never raw inputs)
         if: always()
         uses: actions/upload-artifact@v4
@@ -390,6 +459,29 @@ jobs:
             aarch64 native-arm64-bionic-container
       - name: Verify Docker runtime
         run: docker version
+      - name: Capture bionic Node.js candidate lock (manual only; not compatibility evidence)
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_bionic_node_closure == true
+        run: |
+          set -euo pipefail
+          candidate_root=.artifacts/bionic/c-termux-bionic-pie
+          candidate_path="${candidate_root}/nodejs-candidate-lock.json"
+          mkdir -p "${candidate_root}"
+          python3 scripts/capture-bionic-node-closure.py \
+            --docker-command "${BIONIC_CONTAINER_RUNTIME:-docker}" \
+            --output "${candidate_path}"
+          python3 scripts/capture-bionic-node-closure.py \
+            --validate-candidate "${candidate_path}"
+          if grep -Eiq 'accepted-and-runs|proven|runtime-failure' "${candidate_path}"; then
+            echo 'candidate-lock metadata contains a compatibility result' >&2
+            exit 1
+          fi
+          printf '%s\n' \
+            'candidate-lock=true' \
+            'runtimeEvidence=false' \
+            'compatibilityStatus=not-established' \
+            'rawArchives=temporary-only-and-removed' \
+            'rawNodeBinary=not-captured' \
+            > "${candidate_root}/nodejs-candidate-lock-status.txt"
       - name: Run native ARM64 bionic fixture
         env:
           BIONIC_PROTECTION_E2E: 'true'

@@ -15,6 +15,17 @@ Evidence mode: `registry-baseline`; report schema: `2`.
 | `host-context` | 0 |
 | `environment` | 0 |
 
+## Runtime layer outcomes
+
+| Project | Runtime | Layer | Result |
+| --- | --- | --- | --- |
+| `busybox` | `musl` | `baseline` | `accepted-and-runs` |
+| `busybox` | `musl` | `outerWrapper` | `accepted-and-runs` |
+| `gnu-coreutils` | `glibc` | `baseline` | `accepted-and-runs` |
+| `gnu-coreutils` | `glibc` | `outerWrapper` | `accepted-and-runs` |
+| `nodejs` | `bionic` | `baseline` | `environment-unavailable` |
+| `nodejs` | `bionic` | `outerWrapper` | `environment-unavailable` |
+
 ## Feature frequency
 
 | Feature | Identities | Percent | Disposition |

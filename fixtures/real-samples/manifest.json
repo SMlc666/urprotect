@@ -274,9 +274,15 @@
             "rootfs": "provenance-archive"
           },
           "outerWrapper": {
-            "applicable": false,
-            "expectedResult": "not-applicable",
-            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+            "applicable": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "The pinned Alpine minirootfs provides the complete musl runtime for the profile-matched outer-execveat comparison.",
+            "mode": "outer-execveat",
+            "compare": [
+              "status",
+              "stdout",
+              "stderr"
+            ]
           },
           "hostContext": {
             "applicable": false,
@@ -297,7 +303,7 @@
         "expectedResults": {
           "static": "validated",
           "baseline": "accepted-and-runs",
-          "outerWrapper": "not-applicable",
+          "outerWrapper": "accepted-and-runs",
           "hostContext": "not-applicable"
         },
         "acquisition": {
@@ -419,14 +425,28 @@
             "reason": "Every one of the locked 100 receives static ELF and UrProtect evidence before any dynamic oracle."
           },
           "baseline": {
-            "applicable": false,
-            "expectedResult": "not-applicable",
-            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+            "applicable": true,
+            "required": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "The locked Debian Bookworm AArch64 package closure provides GNU coreutils ls and its declared runtime dependencies.",
+            "mode": "bubblewrap-rootfs",
+            "invocation": "declared-artifact-version",
+            "command": [
+              "/bin/ls",
+              "--version"
+            ],
+            "rootfs": "runtime-closure"
           },
           "outerWrapper": {
-            "applicable": false,
-            "expectedResult": "not-applicable",
-            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+            "applicable": true,
+            "expectedResult": "accepted-and-runs",
+            "reason": "The locked Debian Bookworm AArch64 closure supports the profile-matched outer-execveat comparison for GNU coreutils ls.",
+            "mode": "outer-execveat",
+            "compare": [
+              "status",
+              "stdout",
+              "stderr"
+            ]
           },
           "hostContext": {
             "applicable": false,
@@ -446,8 +466,8 @@
         },
         "expectedResults": {
           "static": "validated",
-          "baseline": "not-applicable",
-          "outerWrapper": "not-applicable",
+          "baseline": "accepted-and-runs",
+          "outerWrapper": "accepted-and-runs",
           "hostContext": "not-applicable"
         },
         "acquisition": {
@@ -2365,14 +2385,23 @@
             "reason": "Every one of the locked 100 receives static ELF and UrProtect evidence before any dynamic oracle."
           },
           "baseline": {
-            "applicable": false,
-            "expectedResult": "not-applicable",
-            "reason": "The registry artifact is a single package/rootfs file without its complete dependency closure; no ambient host execution is inferred."
+            "applicable": true,
+            "required": true,
+            "expectedResult": "environment-unavailable",
+            "reason": "The bionic Node.js dependency closure is not yet locked; live Termux acquisition is deliberately not an evidence oracle.",
+            "mode": "runtime-closure",
+            "invocation": "declared-artifact-version"
           },
           "outerWrapper": {
-            "applicable": false,
-            "expectedResult": "not-applicable",
-            "reason": "An outer comparison requires an explicit profile-matched launcher and is enabled only by a reviewed policy variant."
+            "applicable": true,
+            "expectedResult": "environment-unavailable",
+            "reason": "The bionic Node.js dependency closure is not yet locked, so outer execution remains an explicit environment boundary.",
+            "mode": "outer-execveat",
+            "compare": [
+              "status",
+              "stdout",
+              "stderr"
+            ]
           },
           "hostContext": {
             "applicable": false,
@@ -2392,8 +2421,8 @@
         },
         "expectedResults": {
           "static": "validated",
-          "baseline": "not-applicable",
-          "outerWrapper": "not-applicable",
+          "baseline": "environment-unavailable",
+          "outerWrapper": "environment-unavailable",
           "hostContext": "not-applicable"
         },
         "acquisition": {
