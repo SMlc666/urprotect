@@ -263,15 +263,14 @@ def load_pinned_inputs(
     }
 
 
-def _capture_cleanup_script(host_uid: int, host_gid: int) -> str:
+def _capture_cleanup_script() -> str:
     """Return the bounded root cleanup command for the bind-mounted capture."""
     return (
+        "set -eu; "
         f"export PATH=\"{TERMUX_PREFIX}/bin:$PATH\"; "
         f"if find /capture/debs /capture/apt-lists -mindepth 1 -print "
         f"| awk -v limit={MAX_CAPTURE_ENTRIES} 'NR > limit {{ exit 1 }}'; then "
-        "find /capture/debs /capture/apt-lists -type d "
-        "-exec chmod 0777 {} + 2>/dev/null || true; "
-        f"chown -R {host_uid}:{host_gid} /capture; "
+        "find /capture/debs /capture/apt-lists -type d -exec chmod 0777 {} +; "
         "else echo 'temporary capture tree exceeded its entry-count limit' >&2; exit 1; fi"
     )
 
@@ -353,7 +352,7 @@ def _repair_capture_permissions(
     capture_directory: Path,
     deadline: float,
 ) -> None:
-    """Repair the bind mount as root without running a package-management command."""
+    """Repair bind-mounted directory modes as root without package management."""
     cleanup_name = _container_name("capture-cleanup")
     command = [
         docker_command,
@@ -381,7 +380,7 @@ def _repair_capture_permissions(
         image,
         TERMUX_SHELL,
         "-c",
-        _capture_cleanup_script(os.getuid(), os.getgid()),
+        _capture_cleanup_script(),
     ]
     repair_error: CaptureError | None = None
     try:
@@ -427,7 +426,7 @@ def _run_capture_with_cleanup(
         capture_error = error
 
     # A killed Docker client does not itself prove that the named container is
-    # gone. Reap it before the root ownership repair and before TemporaryDirectory
+    # gone. Reap it before the root permission repair and before TemporaryDirectory
     # removes the bind-mounted tree.
     reap_error: CaptureError | None = None
     reap_deadline = min(cleanup_deadline, time.monotonic() + CONTAINER_REAP_WINDOW_SECONDS)
@@ -488,8 +487,19 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
-def _capture_directory_bytes(directory: Path, deadline: float | None = None) -> int:
-    """Bound capture-tree inspection by both bytes and entry count."""
+def _require_removable_directory(path: Path, mode: int) -> None:
+    required_bits = stat.S_IWOTH | stat.S_IXOTH
+    if stat.S_IMODE(mode) & required_bits != required_bits:
+        fail(f"temporary capture directory is not writable and searchable: {path.name or '.'}")
+
+
+def _capture_directory_bytes(
+    directory: Path,
+    deadline: float | None = None,
+    *,
+    require_removable: bool = False,
+) -> int:
+    """Bound capture-tree inspection by bytes, entry count, and cleanup modes."""
     _check_deadline(deadline, "capture tree traversal")
     try:
         exists = directory.exists()
@@ -497,7 +507,18 @@ def _capture_directory_bytes(directory: Path, deadline: float | None = None) -> 
         fail(f"could not inspect temporary capture data: {error}")
     _check_deadline(deadline, "capture tree traversal")
     if not exists:
+        if require_removable:
+            fail("temporary capture root is missing before cleanup validation")
         return 0
+
+    try:
+        root_info = directory.lstat()
+    except OSError as error:
+        fail(f"could not inspect temporary capture data: {error}")
+    if stat.S_ISLNK(root_info.st_mode) or not stat.S_ISDIR(root_info.st_mode):
+        fail("temporary capture root is not a directory")
+    if require_removable:
+        _require_removable_directory(directory, root_info.st_mode)
 
     total = 0
     entry_count = 0
@@ -514,7 +535,10 @@ def _capture_directory_bytes(directory: Path, deadline: float | None = None) -> 
             _check_deadline(deadline, "capture tree traversal")
             if stat.S_ISLNK(info.st_mode):
                 fail(f"unexpected symbolic link in temporary capture: {path.name}")
-            if stat.S_ISREG(info.st_mode):
+            if stat.S_ISDIR(info.st_mode):
+                if require_removable:
+                    _require_removable_directory(path, info.st_mode)
+            elif stat.S_ISREG(info.st_mode):
                 total += info.st_size
                 if total > MAX_CAPTURE_BYTES:
                     fail("live package capture exceeded the 1 GiB download and metadata budget")
@@ -1166,7 +1190,7 @@ def validate_candidate_against_pins(
 def _container_capture_script() -> str:
     return r'''set -eu
 capture_tree_within_limit() {
-  find /capture/debs /capture/apt-lists -mindepth 1 -print |
+  find /capture -mindepth 1 -print |
     awk -v limit="${MAX_CAPTURE_ENTRIES}" 'NR > limit { exit 1 }'
 }
 cleanup_capture_mount() {
@@ -1174,7 +1198,7 @@ cleanup_capture_mount() {
   if ! capture_tree_within_limit; then
     return
   fi
-  find /capture/debs /capture/apt-lists -type d -exec chmod 0777 {} + 2>/dev/null || true
+  find /capture/debs /capture/apt-lists -type d -exec chmod 0777 {} +
 }
 trap cleanup_capture_mount 0
 export PATH="${PREFIX}/bin:${PATH}"
@@ -1542,7 +1566,11 @@ def capture(
             capture_deadline=capture_deadline,
             cleanup_deadline=workflow_deadline,
         )
-        _capture_directory_bytes(capture_directory, deadline=workflow_deadline)
+        _capture_directory_bytes(
+            capture_directory,
+            deadline=workflow_deadline,
+            require_removable=True,
+        )
 
         before_text = _check_text_file(
             capture_directory / "packages-before.tsv", MAX_METADATA_BYTES, "base package inventory", workflow_deadline

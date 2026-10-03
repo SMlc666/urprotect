@@ -353,30 +353,68 @@ class BionicNodeClosureTests(unittest.TestCase):
                 self.assertTrue(any(marker in error for error in pinned_errors), pinned_errors)
 
     def test_bind_mount_capture_repairs_permissions_before_host_cleanup(self) -> None:
-        cleanup = CAPTURE._capture_cleanup_script(123, 456)
-        self.assertIn("chown -R 123:456 /capture", cleanup)
+        cleanup = CAPTURE._capture_cleanup_script()
+        self.assertIn("set -eu", cleanup)
+        self.assertNotIn("chown", cleanup)
+        self.assertNotIn("|| true", cleanup)
         self.assertIn(
             "find /capture/debs /capture/apt-lists -type d -exec chmod 0777 {} +",
             cleanup,
         )
         self.assertIn("entry-count limit", cleanup)
-        self.assertIn("MAX_CAPTURE_ENTRIES", CAPTURE._container_capture_script())
-        self.assertIn("trap cleanup_capture_mount 0", CAPTURE._container_capture_script())
+        capture_script = CAPTURE._container_capture_script()
+        self.assertIn("MAX_CAPTURE_ENTRIES", capture_script)
+        self.assertIn("trap cleanup_capture_mount 0", capture_script)
+        self.assertIn(
+            "find /capture/debs /capture/apt-lists -type d -exec chmod 0777 {} +",
+            capture_script,
+        )
+        self.assertNotIn("|| true", capture_script)
+
+    def test_cleanup_mode_validation_preserves_archive_contents_without_chown(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            capture_tree = Path(temporary) / "capture"
+            debs = capture_tree / "debs"
+            partial = debs / "partial"
+            apt_lists = capture_tree / "apt-lists"
+            partial.mkdir(parents=True)
+            apt_lists.mkdir()
+            archive = debs / "nodejs.deb"
+            payload = b"foreign-owned package archive"
+            archive.write_bytes(payload)
+            expected_hash = CAPTURE.hashlib.sha256(payload).hexdigest()
+            for directory in (capture_tree, debs, partial, apt_lists):
+                directory.chmod(0o700)
+
+            with self.assertRaises(CAPTURE.CaptureError):
+                CAPTURE._capture_directory_bytes(capture_tree, require_removable=True)
+
+            for directory in (capture_tree, debs, partial, apt_lists):
+                directory.chmod(0o777)
+
+            self.assertEqual(
+                CAPTURE._capture_directory_bytes(capture_tree, require_removable=True),
+                len(payload),
+            )
+            self.assertEqual(CAPTURE.hashlib.sha256(archive.read_bytes()).hexdigest(), expected_hash)
+            for directory in (capture_tree, debs, partial, apt_lists):
+                self.assertEqual(CAPTURE.stat.S_IMODE(directory.stat().st_mode), 0o777)
 
     def _run_capture_failure_with_mocked_docker(
         self,
         failure_message: str,
         *,
         repair_failure: bool = False,
+        cleanup_validation_failure: bool = False,
         main_failure: bool = True,
     ) -> tuple[list[list[str]], list[bool], Path]:
         if os.geteuid() != 0:
-            self.skipTest("root-owned bind-mount behavior requires a root-capable test host")
+            self.skipTest("foreign-owned bind-mount behavior requires a root-capable test host")
         inputs = CAPTURE.load_pinned_inputs(
             ROOT / "fixtures/manifest.json", ROOT / "fixtures/real-samples/manifest.json"
         )
         calls: list[list[str]] = []
-        repair_saw_root_owned_directory: list[bool] = []
+        repair_saw_foreign_owned_directory: list[bool] = []
         repaired_directory: Path | None = None
 
         def fake_run(command: list[str], **kwargs: Any) -> tuple[bytes, bytes]:
@@ -408,8 +446,8 @@ class BionicNodeClosureTests(unittest.TestCase):
                     partial = capture_directory / "debs" / "partial"
                     partial.mkdir(parents=True)
                     if hasattr(os, "chown") and os.geteuid() == 0:
-                        os.chown(capture_directory / "debs", 0, 0)
-                        os.chown(partial, 0, 0)
+                        os.chown(capture_directory / "debs", 1000, 1000)
+                        os.chown(partial, 1000, 1000)
                     partial.chmod(0o700)
                     if main_failure:
                         raise CAPTURE.CaptureError(failure_message)
@@ -425,15 +463,14 @@ class BionicNodeClosureTests(unittest.TestCase):
                     next(value.removeprefix("type=bind,src=") for value in command if value.startswith("type=bind,src="))
                 )
                 partial = repaired_directory / "debs" / "partial"
-                repair_saw_root_owned_directory.append(
-                    os.geteuid() == 0 and partial.stat().st_uid == 0
+                repair_saw_foreign_owned_directory.append(
+                    os.geteuid() == 0 and partial.stat().st_uid == 1000
                 )
                 if repair_failure:
                     raise CAPTURE.CaptureError("permission repair failed")
-                for directory in (repaired_directory, repaired_directory / "debs", partial):
-                    directory.chmod(0o777)
-                    if hasattr(os, "chown") and os.geteuid() == 0:
-                        os.chown(directory, os.getuid(), os.getgid())
+                if not cleanup_validation_failure:
+                    for directory in (repaired_directory, repaired_directory / "debs", partial):
+                        directory.chmod(0o777)
                 return b"", b""
             if command[1] == "inspect":
                 # The package container is still considered running after the
@@ -467,13 +504,13 @@ class BionicNodeClosureTests(unittest.TestCase):
                     )
             self.assertFalse(output.exists())
             self.assertFalse((Path(temporary) / "candidate.json.tmp").exists())
-            self.assertTrue(repair_saw_root_owned_directory)
+            self.assertTrue(repair_saw_foreign_owned_directory)
             if not repair_failure:
-                self.assertTrue(repair_saw_root_owned_directory[0])
+                self.assertTrue(repair_saw_foreign_owned_directory[0])
             self.assertIsNotNone(repaired_directory)
-        return calls, repair_saw_root_owned_directory, output
+        return calls, repair_saw_foreign_owned_directory, output
 
-    def test_capture_nonzero_and_timeout_repair_root_owned_partial_before_temp_cleanup(self) -> None:
+    def test_capture_nonzero_and_timeout_repair_foreign_owned_partial_before_temp_cleanup(self) -> None:
         for message in (
             "command exited with status 17: docker run: apt failed",
             "command exceeded its 33-second wall-time limit: docker run",
@@ -508,6 +545,17 @@ class BionicNodeClosureTests(unittest.TestCase):
         ]
         self.assertEqual(len(repair_commands), 1)
         self.assertNotIn("apt-get", " ".join(repair_commands[0]))
+
+    def test_capture_cleanup_validation_failure_does_not_publish_candidate(self) -> None:
+        calls, _, output = self._run_capture_failure_with_mocked_docker(
+            "cleanup validation failed", cleanup_validation_failure=True, main_failure=False
+        )
+        self.assertFalse(output.exists())
+        repair_commands = [
+            command for command in calls if command[1] == "run" and "none" in command and "--user" in command
+        ]
+        self.assertEqual(len(repair_commands), 1)
+        self.assertNotIn("chown", " ".join(repair_commands[0]))
 
     def test_native_and_image_guards_fail_closed(self) -> None:
         with self.assertRaises(CAPTURE.CaptureError):
