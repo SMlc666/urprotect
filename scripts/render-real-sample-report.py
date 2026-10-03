@@ -25,6 +25,7 @@ from real_sample_schema import (  # noqa: E402
     RESULTS,
     STATIC_RESULTS,
     diagnostic_code,
+    effective_execution_policy,
     first_failure_layer,
     observed_features,
 )
@@ -130,8 +131,12 @@ def project_identity(project: dict[str, Any]) -> tuple[str, str]:
     return project_id, identity
 
 
-def expected_layers(project: dict[str, Any], closures: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    policy = as_mapping(project.get("executionPolicy"))
+def expected_layers(
+    project: dict[str, Any],
+    closures: dict[str, Any] | None = None,
+    tier: str = "pr",
+) -> dict[str, dict[str, Any]]:
+    policy = effective_execution_policy(project, tier)
     values: dict[str, dict[str, Any]] = {}
     for layer in LAYERS:
         declaration = as_mapping(policy.get(layer))
@@ -140,11 +145,20 @@ def expected_layers(project: dict[str, Any], closures: dict[str, Any] | None = N
             raise ReportError(
                 f"{project.get('projectId', '<unknown>')}: static policy uses execution result {expected!r}"
             )
+        # Registry-only output is metadata, not an execution oracle. Static
+        # validation is the one non-process fact represented as ``validated``;
+        # dynamic layers use an explicit non-success placeholder.
+        actual = "validated" if layer == "static" else "not-applicable"
         values[layer] = {
             "expected": expected,
-            "actual": expected,
+            "actual": actual,
             "status": "metadata-only",
-            "reason": "Registry policy baseline; CI oracle has not been acquired.",
+            "actualSource": "registry-baseline",
+            "reason": (
+                "Registry metadata records structural validation; no process was executed."
+                if layer == "static"
+                else "Metadata-only registry baseline; no process was executed for this layer."
+            ),
         }
     if closures is not None:
         runtime = as_mapping(project.get("target")).get("runtime")
@@ -153,7 +167,7 @@ def expected_layers(project: dict[str, Any], closures: dict[str, Any] | None = N
         project_override = project_policies.get(project_id)
         closure_policy = project_override if isinstance(project_override, dict) else project_policies.get("*")
         if runtime in {"glibc", "musl", "bionic"} and isinstance(closure_policy, dict):
-            declared_policy = as_mapping(project.get("executionPolicy"))
+            declared_policy = effective_execution_policy(project, tier)
             for layer in ("baseline", "outerWrapper", "hostContext"):
                 declared = as_mapping(declared_policy.get(layer))
                 declaration = as_mapping(closure_policy.get(layer))
@@ -172,7 +186,6 @@ def expected_layers(project: dict[str, Any], closures: dict[str, Any] | None = N
                     continue
                 if isinstance(closure_result, str):
                     values[layer]["expected"] = closure_result
-                    values[layer]["actual"] = closure_result
     return values
 
 
@@ -183,10 +196,11 @@ def load_project_evidence(
     registry_only: bool,
     require_evidence: bool,
     closures: dict[str, Any] | None,
+    tier: str,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
     project_id, _ = project_identity(project)
     if registry_only:
-        return expected_layers(project, closures), declared_fingerprint(project), "registry-baseline"
+        return expected_layers(project, closures, tier), declared_fingerprint(project), "registry-baseline"
     sample_root = artifact_root / project_id
     result_path = sample_root / "result.json"
     fingerprint_path = sample_root / "elf-fingerprint.json"
@@ -194,7 +208,7 @@ def load_project_evidence(
     fingerprint = load(fingerprint_path, {})
     if require_evidence and (not isinstance(result, dict) or not isinstance(fingerprint, dict)):
         raise ReportError(f"{project_id}: result.json and elf-fingerprint.json are required")
-    policy = as_mapping(project.get("executionPolicy"))
+    policy = effective_execution_policy(project, tier)
     if isinstance(result, dict) and isinstance(result.get("layers"), dict):
         layers: dict[str, Any] = {}
         for layer in LAYERS:
@@ -211,7 +225,7 @@ def load_project_evidence(
     else:
         if require_evidence:
             raise ReportError(f"{project_id}: result.json has no layers")
-        layers = expected_layers(project, closures)
+        layers = expected_layers(project, closures, tier)
     if not isinstance(fingerprint, dict) or not fingerprint:
         if require_evidence:
             raise ReportError(f"{project_id}: fingerprint evidence is missing")
@@ -305,6 +319,7 @@ def build_report(
             registry_only=registry_only,
             require_evidence=require_evidence,
             closures=closures,
+            tier=tier,
         )
         observation_sources[source] += 1
         runtime_value = str(fingerprint.get("runtime", runtime))
@@ -358,11 +373,21 @@ def build_report(
 
         explicit_failure = None
         result_path = artifact_root / project_id / "result.json"
+        result_evidence: dict[str, Any] = {}
         if not registry_only:
-            result = load(result_path, {})
-            if isinstance(result, dict):
-                explicit_failure = result.get("firstFailureLayer")
-        failure = first_failure_layer(layers, explicit_failure)
+            loaded_result = load(result_path, {})
+            if isinstance(loaded_result, dict):
+                result_evidence = loaded_result
+                explicit_failure = loaded_result.get("firstFailureLayer")
+        # Aggregate first-failure state is derived from the retained layer
+        # outcomes.  The result-level field is retained for early acquisition /
+        # fingerprint diagnostics, but it cannot override a passing or later
+        # layer with an arbitrary valid taxonomy value.
+        failure = first_failure_layer(layers)
+        if failure is None and explicit_failure in {"acquisition", "fingerprint", "parse-model"}:
+            fingerprint_error = isinstance(fingerprint, dict) and "error" in fingerprint
+            if fingerprint_error:
+                failure = explicit_failure
         if failure:
             first_failure_counts[failure] += 1
             failure_record = {
@@ -385,6 +410,9 @@ def build_report(
                 "fingerprintSource": source,
                 "features": feature_list,
                 "artifact": f"{project_id}/result.json",
+                "artifactSha256": result_evidence.get("artifactSha256") if result_evidence else None,
+                "sourceArtifactSha256": result_evidence.get("sourceArtifactSha256") if result_evidence else None,
+                "runtimeArtifactSha256": result_evidence.get("runtimeArtifactSha256") if result_evidence else None,
                 "firstFailureLayer": failure,
                 "layers": {layer: layers.get(layer, {}) for layer in LAYERS},
             }
@@ -424,7 +452,7 @@ def build_report(
         "observedProjectCount": current_count,
         "identityCount": identity_count,
         "projectIds": sorted(seen_projects),
-        "identityKeys": sorted({identity for values in seen_identities.values() for identity in values}),
+        "identityKeys": sorted(seen_identities),
         "coverage": {
             "approvedTargetProjectCount": target_count,
             "currentIdentityCount": identity_count,

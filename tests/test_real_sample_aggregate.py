@@ -55,16 +55,16 @@ class RealSampleAggregateTests(unittest.TestCase):
             )
         )
         records = {record["projectId"]: record for record in aggregate["records"]}
-        self.assertEqual(records["busybox"]["layers"]["outerWrapper"]["actual"], "accepted-and-runs")
+        for project_id in ("busybox", "gnu-coreutils", "nodejs"):
+            for layer in ("baseline", "outerWrapper"):
+                self.assertEqual(records[project_id]["layers"][layer]["actual"], "not-applicable")
+                self.assertEqual(records[project_id]["layers"][layer]["actualSource"], "registry-baseline")
         for layer in ("baseline", "outerWrapper"):
-            self.assertEqual(records["gnu-coreutils"]["layers"][layer]["actual"], "accepted-and-runs")
-            self.assertEqual(records["nodejs"]["layers"][layer]["actual"], "environment-unavailable")
+            self.assertEqual(aggregate["layerCounts"][layer], {"not-applicable": 100})
+            self.assertNotIn("accepted-and-runs", aggregate["layerCounts"][layer])
         markdown = BASELINE.with_suffix(".md").read_text(encoding="utf-8")
-        self.assertIn("| `busybox` | `musl` | `outerWrapper` | `accepted-and-runs` |", markdown)
-        self.assertIn("| `gnu-coreutils` | `glibc` | `baseline` | `accepted-and-runs` |", markdown)
-        self.assertIn("| `gnu-coreutils` | `glibc` | `outerWrapper` | `accepted-and-runs` |", markdown)
-        self.assertIn("| `nodejs` | `bionic` | `baseline` | `environment-unavailable` |", markdown)
-        self.assertIn("| `nodejs` | `bionic` | `outerWrapper` | `environment-unavailable` |", markdown)
+        self.assertNotIn("| `busybox` | `musl` | `outerWrapper` | `accepted-and-runs` |", markdown)
+        self.assertIn("Registry-only baseline facts are labeled metadata", markdown)
 
     def test_renderer_prefers_project_closure_and_preserves_node_boundary(self) -> None:
         renderer = load_renderer()
@@ -72,8 +72,10 @@ class RealSampleAggregateTests(unittest.TestCase):
         closures = json.loads((ROOT / "fixtures/real-samples/runtime-closures.json").read_text(encoding="utf-8"))
         projects = {project["projectId"]: project for project in manifest["corpus"]["projects"]}
         node = projects["nodejs"]
-        self.assertEqual(renderer.expected_layers(node, closures)["baseline"]["actual"], "environment-unavailable")
-        self.assertEqual(renderer.expected_layers(node, closures)["outerWrapper"]["actual"], "environment-unavailable")
+        self.assertEqual(renderer.expected_layers(node, closures)["baseline"]["expected"], "accepted-and-runs")
+        self.assertEqual(renderer.expected_layers(node, closures)["outerWrapper"]["expected"], "accepted-and-runs")
+        self.assertEqual(renderer.expected_layers(node, closures)["baseline"]["actual"], "not-applicable")
+        self.assertEqual(renderer.expected_layers(node, closures)["outerWrapper"]["actual"], "not-applicable")
 
         # A per-project closure entry takes precedence over the wildcard even
         # when both entries describe the same runtime layer.
@@ -82,7 +84,7 @@ class RealSampleAggregateTests(unittest.TestCase):
         }
         closures["projects"]["*"]["baseline"]["expectedResult"] = "environment-unavailable"
         self.assertEqual(
-            renderer.expected_layers(projects["gnu-coreutils"], closures)["baseline"]["actual"],
+            renderer.expected_layers(projects["gnu-coreutils"], closures)["baseline"]["expected"],
             "accepted-and-runs",
         )
 

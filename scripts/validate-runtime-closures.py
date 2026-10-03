@@ -13,7 +13,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from real_sample_schema import RESERVED_HELPER_STATUSES
+from real_sample_schema import RESERVED_HELPER_STATUSES, required_execution_policy_errors
+from bionic_node_lock import lock_file_sha256, validate_lock_document
 
 
 RUNTIMES = {"glibc", "musl", "bionic"}
@@ -45,6 +46,44 @@ def validate_package_policy(project_id: str | None, policy: dict) -> None:
                 fail(f"{project_id}: {field} contains an invalid reason")
 
 
+def _resolve_bionic_lock_path(closure_path: Path, lock_name: str) -> Path:
+    if not isinstance(lock_name, str) or not lock_name or Path(lock_name).is_absolute() or ".." in Path(lock_name).parts:
+        fail("bionic nodejsLock must be a safe relative path")
+    local_path = closure_path.parent / lock_name
+    if local_path.is_file():
+        return local_path
+    repository_path = Path(__file__).resolve().parents[1] / "fixtures" / "real-samples" / lock_name
+    if repository_path.is_file():
+        return repository_path
+    fail(f"bionic runtime lock is missing: {lock_name}")
+
+
+def validate_bionic_lock(closure_path: Path, manifest: dict, runtime: dict) -> dict:
+    for key in ("packageRepository", "nodejsLock", "nodejsLockSha256"):
+        if key not in runtime:
+            fail(f"bionic runtime closure is missing {key}")
+    if runtime.get("packageRepository") != "https://packages-cf.termux.dev/apt/termux-main":
+        fail("bionic runtime closure packageRepository does not match the reviewed Termux repository")
+    lock_path = _resolve_bionic_lock_path(closure_path, runtime["nodejsLock"])
+    expected_sha = runtime["nodejsLockSha256"]
+    if not isinstance(expected_sha, str) or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None:
+        fail("bionic nodejsLockSha256 must be a lowercase SHA-256")
+    try:
+        actual_sha = lock_file_sha256(lock_path)
+    except OSError as error:
+        fail(f"could not hash bionic runtime lock: {error}")
+    if actual_sha != expected_sha:
+        fail(f"bionic runtime lock SHA-256 mismatch: expected {expected_sha}, got {actual_sha}")
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        fail(f"could not read bionic runtime lock: {error}")
+    errors = validate_lock_document(lock, manifest=manifest, expected_lock_sha256=expected_sha)
+    if errors:
+        fail("bionic runtime lock validation failed: " + "; ".join(errors))
+    return lock
+
+
 def validate(closure_path: Path, manifest_path: Path) -> None:
     try:
         closure = json.loads(closure_path.read_text())
@@ -58,12 +97,29 @@ def validate(closure_path: Path, manifest_path: Path) -> None:
     runtimes = closure.get("runtimes")
     if not isinstance(runtimes, dict) or set(runtimes) != RUNTIMES:
         fail("runtime closures must define glibc, musl, and bionic")
+    bionic_lock: dict | None = None
     for runtime, entry in runtimes.items():
         if not isinstance(entry, dict):
             fail(f"{runtime}: runtime closure entry must be an object")
         for key in ("family", "loader", "archiveFormat", "resolver"):
             if not isinstance(entry.get(key), str) or not entry[key]:
                 fail(f"{runtime}: missing {key}")
+        if runtime == "bionic":
+            if entry.get("family") != "termux-bionic-locked":
+                fail("bionic runtime closure family is not the reviewed locked Termux family")
+            if entry.get("loader") != "/system/bin/linker64":
+                fail("bionic runtime closure loader must be /system/bin/linker64")
+            if entry.get("archiveFormat") != "deb" or entry.get("resolver") != "termux-container-v1":
+                fail("bionic runtime closure must use the locked Termux deb resolver")
+            bionic_lock = validate_bionic_lock(closure_path, manifest, entry)
+            expected_identity = {
+                "image": bionic_lock.get("baseImage", {}).get("requestedRef"),
+                "imageId": bionic_lock.get("baseImage", {}).get("id"),
+                "loader": bionic_lock.get("execution", {}).get("loader"),
+            }
+            for field, expected in expected_identity.items():
+                if entry.get(field) != expected:
+                    fail(f"bionic runtime closure {field} does not match the reviewed runtime lock")
         if runtime != "bionic":
             if not isinstance(entry.get("packageIndexUrl"), str):
                 fail(f"{runtime}: packageIndexUrl is required")
@@ -87,7 +143,7 @@ def validate(closure_path: Path, manifest_path: Path) -> None:
     for layer in ("baseline", "outerWrapper"):
         value = default.get(layer)
         if not isinstance(value, dict) or value.get("expectedResult") != "accepted-and-runs":
-            fail(f"default {layer} policy must require accepted-and-runs")
+            fail(f"default {layer} policy must require accepted-and-runs; environment-unavailable is an observed failure")
     if default["outerWrapper"].get("mode") != "outer-execveat":
         fail("default outer-wrapper mode must be outer-execveat")
     for project in projects:
@@ -143,6 +199,16 @@ def validate(closure_path: Path, manifest_path: Path) -> None:
                 )
             if outer_expected_status != expected_status:
                 fail(f"{project_id}: outerWrapper expectedStatus must equal the baseline expectedStatus")
+        if project_id == "nodejs":
+            if outer_mode != "outer-path-preserving":
+                fail("nodejs outerWrapper mode must remain outer-path-preserving")
+            locked_status = bionic_lock.get("execution", {}).get("expectedStatus") if isinstance(bionic_lock, dict) else None
+            if expected_status != locked_status or outer_expected_status != locked_status:
+                fail("nodejs baseline and outer expectedStatus must match the reviewed bionic runtime lock")
+    for tier in ("nightly", "release"):
+        policy_errors = required_execution_policy_errors(projects, tier, closure)
+        if policy_errors:
+            fail(f"{tier} execution policy coverage is incomplete: " + "; ".join(policy_errors))
     print(f"PASS runtime closures: 100 identities, {len(runtimes)} runtime families")
 
 

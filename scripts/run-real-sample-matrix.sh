@@ -16,6 +16,11 @@ fi
 case "$(uname -m)" in aarch64|arm64) ;; *) echo "real-sample suite requires native AArch64; got $(uname -m)" >&2; exit 2 ;; esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Parallel workers run in private sessions so an interrupt can stop the full
+# worker/Docker descendant tree before the source archive and rootfs are
+# removed by the parent trap.
+# shellcheck source=scripts/real_sample_worker_cleanup.sh
+source "${repo_root}/scripts/real_sample_worker_cleanup.sh"
 manifest="${repo_root}/fixtures/real-samples/manifest.json"
 candidates="${repo_root}/fixtures/real-samples/candidates.json"
 runtime_closures="${repo_root}/fixtures/real-samples/runtime-closures.json"
@@ -23,7 +28,7 @@ artifact_root="${REAL_SAMPLE_ARTIFACT_ROOT:-${repo_root}/.artifacts/real-samples
 mkdir -p "${artifact_root}"
 artifact_root="$(cd "${artifact_root}" && pwd)"
 
-for command in curl sha256sum python3 readelf timeout dotnet musl-gcc; do
+for command in curl sha256sum python3 readelf timeout dotnet musl-gcc setsid ps; do
   command -v "${command}" >/dev/null 2>&1 || { echo "${command} is required" >&2; exit 127; }
 done
 
@@ -31,6 +36,36 @@ python3 "${repo_root}/scripts/validate-real-samples.py" "${manifest}" \
   --candidates "${candidates}" --tier "${requested_tier}" >/dev/null
 python3 "${repo_root}/scripts/validate-runtime-closures.py" \
   "${runtime_closures}" "${manifest}" >/dev/null
+bionic_lock="${repo_root}/fixtures/real-samples/bionic-node-runtime-lock.json"
+mapfile -t bionic_identity < <(python3 - "${bionic_lock}" <<'PY_BIONIC_IMAGE'
+import json
+import sys
+lock = json.load(open(sys.argv[1], encoding="utf-8"))
+print(lock["baseImage"]["requestedRef"])
+print(lock["baseImage"]["id"])
+print(lock["execution"]["loader"])
+PY_BIONIC_IMAGE
+)
+bionic_image="${bionic_identity[0]}"
+bionic_image_id="${bionic_identity[1]}"
+bionic_loader="${bionic_identity[2]}"
+bionic_lock_sha="$(sha256sum "${bionic_lock}" | awk '{print $1}')"
+mapfile -t bionic_locked_limits < <(python3 - "${bionic_lock}" <<'PY_BIONIC_LIMITS'
+import json
+import sys
+lock=json.load(open(sys.argv[1], encoding="utf-8"))
+execution=lock["execution"]
+for key in ("timeoutSeconds", "outputBytes", "memoryBytes", "processLimit", "outerMode", "pathPolicy", "runpath"):
+    print(execution[key])
+PY_BIONIC_LIMITS
+)
+bionic_timeout_seconds="${bionic_locked_limits[0]}"
+bionic_output_limit="${bionic_locked_limits[1]}"
+bionic_memory_bytes="${bionic_locked_limits[2]}"
+bionic_process_limit="${bionic_locked_limits[3]}"
+bionic_outer_mode="${bionic_locked_limits[4]}"
+bionic_path_policy="${bionic_locked_limits[5]}"
+bionic_runpath="${bionic_locked_limits[6]}"
 
 launcher_path="${REAL_SAMPLE_LAUNCHER:-${repo_root}/native/urprotect-launcher/build/urprotect-launcher}"
 if [[ ! -x "${launcher_path}" ]]; then
@@ -113,43 +148,100 @@ if [[ ! "${parallelism}" =~ ^[1-9][0-9]*$ || "${parallelism}" -gt 8 ]]; then
   exit 2
 fi
 active_pids=()
-sanitize_evidence() {
+active_pgids=()
+active_pid_registries=()
+active_container_registries=()
+worker_registry_dir="${temp_root}/worker-registry"
+mkdir -m 700 -p "${worker_registry_dir}"
+mark_sanitization_failure() {
   [[ -d "${artifact_root}" ]] || return 0
-  python3 - "${artifact_root}" "${temp_root}" "${runner_temp}" "${package_cache_root}" <<'PYSANITIZE'
+  printf 'evidence-sanitized=false\n' > "${artifact_root}/evidence-sanitized.txt" 2>/dev/null || true
+}
+sanitize_evidence() {
+  if [[ ! -d "${artifact_root}" || -L "${artifact_root}" ]]; then
+    mark_sanitization_failure
+    return 1
+  fi
+  rm -f -- "${artifact_root}/evidence-sanitized.txt"
+  if ! python3 - "${artifact_root}" "${temp_root}" "${runner_temp}" "${package_cache_root}" "${package_archive_cache}" "${package_index_cache}" <<'PYSANITIZE'
 from pathlib import Path
+import re
 import sys
 
 root = Path(sys.argv[1])
-replacements = [
-    value.encode("utf-8")
-    for value in sys.argv[2:]
-    if value
-]
-for path in root.rglob("*"):
-    if not path.is_file() or path.is_symlink():
-        continue
+replacements = [value.encode("utf-8") for value in sys.argv[2:] if value]
+try:
+    paths = list(root.rglob("*"))
+except OSError as error:
+    print(f"evidence sanitizer cannot enumerate artifact root: {error}", file=sys.stderr)
+    raise SystemExit(1)
+for path in paths:
     try:
+        if path.is_symlink():
+            print(f"evidence sanitizer found a symlink: {path}", file=sys.stderr)
+            raise SystemExit(1)
+        if not path.is_file():
+            continue
         data = path.read_bytes()
-    except OSError:
-        continue
-    if b"\0" in data[:4096]:
-        continue
-    sanitized = data
-    for value in replacements:
-        sanitized = sanitized.replace(value, b"<runner-temp>")
-    if sanitized != data:
-        path.write_bytes(sanitized)
+        if b"\0" in data[:4096]:
+            print(f"evidence sanitizer found a binary file: {path}", file=sys.stderr)
+            raise SystemExit(1)
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as error:
+            print(f"evidence sanitizer found non-text evidence {path}: {error}", file=sys.stderr)
+            raise SystemExit(1)
+        sanitized = data
+        for value in replacements:
+            sanitized = sanitized.replace(value, b"<runner-temp>")
+        if sanitized != data:
+            path.write_bytes(sanitized)
+        for value in replacements:
+            if value and value in sanitized:
+                print(f"evidence sanitizer left a raw temporary path in {path}", file=sys.stderr)
+                raise SystemExit(1)
+except (OSError, UnicodeError) as error:
+    print(f"evidence sanitizer could not sanitize retained evidence: {error}", file=sys.stderr)
+    raise SystemExit(1)
 PYSANITIZE
+  then
+    mark_sanitization_failure
+    return 1
+  fi
+  printf 'evidence-sanitized=true\n' > "${artifact_root}/evidence-sanitized.txt"
 }
 cleanup() {
-  local pid
-  for pid in "${active_pids[@]}"; do
-    kill "${pid}" 2>/dev/null || true
+  local index pid pgid cleanup_pid cleanup_ok=true
+  local cleanup_pids=()
+  # Signal and reap all workers concurrently.  Sequential ten-second grace
+  # periods would make shutdown scale with the parallelism setting.
+  for index in "${!active_pids[@]}"; do
+    pid="${active_pids[${index}]}"
+    pgid="${active_pgids[${index}]:-}"
+    urp_stop_worker_group "${pid}" "${pgid}" 10 \
+      "${active_pid_registries[${index}]:-}" "${active_container_registries[${index}]:-}" &
+    cleanup_pids+=("$!")
+  done
+  for index in "${!cleanup_pids[@]}"; do
+    cleanup_pid="${cleanup_pids[${index}]}"
+    if ! wait "${cleanup_pid}"; then
+      cleanup_ok=false
+      pid="${active_pids[${index}]}"
+      printf 'worker cleanup did not prove process-group reaping for pid %s\n' "${pid}" >&2
+    fi
   done
   for pid in "${active_pids[@]}"; do
     wait "${pid}" 2>/dev/null || true
   done
-  sanitize_evidence || true
+  if [[ "${cleanup_ok}" != true ]]; then
+    printf 'refusing to remove real-sample temporary root while cleanup is unproven: %s\n' "${temp_root}" >&2
+    mark_sanitization_failure
+    return 0
+  fi
+  if ! sanitize_evidence; then
+    printf 'refusing to declare complete evidence because sanitization failed\n' >&2
+    return 0
+  fi
   rm -rf -- "${temp_root}"
 }
 trap cleanup EXIT
@@ -172,7 +264,7 @@ fi
 dotnet_cli=(dotnet "${cli_dll}")
 
 project_fields() {
-  python3 "${repo_root}/scripts/real_sample_project_fields.py" "$1" "${runtime_closures}"
+  python3 "${repo_root}/scripts/real_sample_project_fields.py" "$1" "${runtime_closures}" "${requested_tier}"
 }
 
 write_result() {
@@ -257,34 +349,102 @@ PY_PACK_STATUS
 
 write_outer_pack_boundary() {
   local sample_root="$1" reason="$2" failed="${3:-false}" cli_status="${4:-}" diagnostic_code="${5:-environment-unavailable}"
+  local sample_id="${id:-}" bionic_lock_sha_value="${bionic_lock_sha:-}" bionic_runpath_value="${bionic_runpath:-}"
+  local bionic_image_value="${bionic_image:-}" bionic_image_id_value="${bionic_image_id:-}" bionic_loader_value="${bionic_loader:-}"
   if [[ "${failed}" == true ]]; then
-    python3 - "${sample_root}/outer-pack.json" "${reason}" "${cli_status}" "${diagnostic_code}" <<'PY_PACKFAIL'
+    BIONIC_IMAGE="${bionic_image_value}" BIONIC_IMAGE_ID="${bionic_image_id_value}" BIONIC_LOADER="${bionic_loader_value}" \
+    python3 - "${sample_root}/outer-pack.json" "${reason}" "${cli_status}" "${diagnostic_code}" "${sample_id}" "${bionic_lock_sha_value}" "${bionic_runpath_value}" <<'PY_PACKFAIL'
 import json
+import os
 import sys
 from pathlib import Path
 record = {
     "schemaVersion": 1,
     "toolVersion": "runner-boundary",
     "success": False,
+    "category": "pack" if sys.argv[3] not in {"", "null"} else "preflight",
     "payload": {},
     "output": {"published": False},
     "diagnostics": [{"code": sys.argv[4], "message": sys.argv[2]}],
 }
-if sys.argv[3] not in {"", "null"}:
-    record["cliExitCode"] = int(sys.argv[3])
+record["cliExitCode"] = int(sys.argv[3]) if sys.argv[3] not in {"", "null"} else None
+if sys.argv[5] == "nodejs":
+    record.update({
+        "executionMode": "outer-path-preserving",
+        "pathPolicy": "absolute-dt-runpath-preserved",
+        "runpath": sys.argv[7],
+        "lockSha256": sys.argv[6],
+        "image": os.environ.get("BIONIC_IMAGE", ""),
+        "imageId": os.environ.get("BIONIC_IMAGE_ID", ""),
+        "loader": os.environ.get("BIONIC_LOADER", "/system/bin/linker64"),
+        "packInvocation": {"attempted": bool(sys.argv[3] not in {"", "null"}), "dispatchProfile": "outer-execveat", "pathPreserving": True, "executionMode": "outer-path-preserving"},
+    })
 Path(sys.argv[1]).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY_PACKFAIL
   else
-    python3 - "${sample_root}/outer-pack.json" "${reason}" <<'PY_PACKNA'
+    python3 - "${sample_root}/outer-pack.json" "${reason}" "${sample_id}" "${bionic_lock_sha_value}" "${bionic_runpath_value}" <<'PY_PACKNA'
+import json
+import os
+import sys
+from pathlib import Path
+record = {"schemaVersion": 1, "status": "not-applicable", "reason": sys.argv[2]}
+if sys.argv[3] == "nodejs":
+    record.update({
+        "executionMode": "outer-path-preserving",
+        "pathPolicy": "absolute-dt-runpath-preserved",
+        "runpath": sys.argv[5],
+        "lockSha256": sys.argv[4],
+        "image": os.environ.get("BIONIC_IMAGE", ""),
+        "imageId": os.environ.get("BIONIC_IMAGE_ID", ""),
+        "loader": os.environ.get("BIONIC_LOADER", "/system/bin/linker64"),
+        "packInvocation": {"attempted": False, "dispatchProfile": "outer-execveat", "pathPreserving": True, "executionMode": "outer-path-preserving"},
+    })
+Path(sys.argv[1]).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY_PACKNA
+  fi
+}
+
+remove_unreferenced_preflight_markers() {
+  local sample_root="$1" layer="$2" pack_status="${3:-}"
+  local log_layer="${layer}"
+  [[ "${layer}" == "outerWrapper" ]] && log_layer=outer
+
+  # A runner preflight has no target process and therefore cannot retain the
+  # helper/target status files emitted by an earlier bionic runner phase.  The
+  # execution record intentionally carries null statuses and only the
+  # preflight JSON owns that outcome.
+  rm -f -- \
+    "${sample_root}/logs/${log_layer}.helper-status" \
+    "${sample_root}/logs/${log_layer}.status"
+
+  # A pack-status marker is retained only when the managed pack command was
+  # actually attempted.  The bionic no-pack preflight report explicitly uses
+  # packInvocation.attempted=false and cliExitCode=null.  The separate
+  # container-setup.status marker remains owned by the bionic host summary when
+  # that summary records a setup status; it is not a target-layer marker.
+  if [[ "${layer}" == "outerWrapper" && -z "${pack_status}" ]]; then
+    rm -f -- "${sample_root}/logs/outer-pack.status"
+  fi
+
+  # Keep the setup marker only when the host-generated bionic summary still
+  # owns a concrete setup status.  A failed/invalid runner preflight can leave
+  # this file behind even though the converted execution record has no such
+  # reference.
+  if [[ -f "${sample_root}/logs/container-setup.status" ]] && ! python3 - "${sample_root}/logs/bionic-node-result.json" <<'PY_BIONIC_SETUP_OWNER'
 import json
 import sys
 from pathlib import Path
-Path(sys.argv[1]).write_text(json.dumps({
-    "schemaVersion": 1,
-    "status": "not-applicable",
-    "reason": sys.argv[2],
-}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-PY_PACKNA
+try:
+    value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    statuses = value.get("containerStatuses") if isinstance(value, dict) else None
+    setup = statuses.get("setup") if isinstance(statuses, dict) else None
+except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+    raise SystemExit(1)
+if isinstance(setup, bool) or not isinstance(setup, int) or not 0 <= setup <= 255:
+    raise SystemExit(1)
+PY_BIONIC_SETUP_OWNER
+  then
+    rm -f -- "${sample_root}/logs/container-setup.status"
   fi
 }
 
@@ -293,7 +453,8 @@ write_execution_evidence() {
   local baseline_applicable="$4" baseline_expected="$5" baseline_expected_status="$6" baseline_invocation="$7" baseline_command_b64="$8" baseline_status="$9" baseline_result="${10}" baseline_attempted="${11}" baseline_helper_status="${12}"
   local outer_applicable="${13}" outer_expected="${14}" outer_mode="${15}" outer_command_b64="${16}" outer_status="${17}" outer_result="${18}" outer_attempted="${19}" outer_helper_status="${20}" outer_pack_status="${21}"
   local baseline_preflight_outcome="${22:-}" outer_preflight_outcome="${23:-}" baseline_preflight_reason="${24:-}" outer_preflight_reason="${25:-}"
-  python3 - "${sample_root}/execution.json" "${id}" "${artifact_path}" "${baseline_applicable}" "${baseline_expected}" "${baseline_expected_status}" "${baseline_invocation}" "${baseline_command_b64}" "${baseline_status}" "${baseline_result}" "${baseline_attempted}" "${baseline_helper_status}" "${outer_applicable}" "${outer_expected}" "${outer_mode}" "${outer_command_b64}" "${outer_status}" "${outer_result}" "${outer_attempted}" "${outer_helper_status}" "${outer_pack_status}" "${baseline_preflight_outcome}" "${outer_preflight_outcome}" "${baseline_preflight_reason}" "${outer_preflight_reason}" <<'PY_EXECUTION'
+  local bionic_lock_sha_value="${26:-}" bionic_timeout_value="${27:-}" bionic_output_value="${28:-}" bionic_memory_value="${29:-}" bionic_pids_value="${30:-}" bionic_mode_value="${31:-}" bionic_path_policy_value="${32:-}" bionic_runpath_value="${33:-}"
+  python3 - "${sample_root}/execution.json" "${id}" "${artifact_path}" "${baseline_applicable}" "${baseline_expected}" "${baseline_expected_status}" "${baseline_invocation}" "${baseline_command_b64}" "${baseline_status}" "${baseline_result}" "${baseline_attempted}" "${baseline_helper_status}" "${outer_applicable}" "${outer_expected}" "${outer_mode}" "${outer_command_b64}" "${outer_status}" "${outer_result}" "${outer_attempted}" "${outer_helper_status}" "${outer_pack_status}" "${baseline_preflight_outcome}" "${outer_preflight_outcome}" "${baseline_preflight_reason}" "${outer_preflight_reason}" "${bionic_lock_sha_value}" "${bionic_timeout_value}" "${bionic_output_value}" "${bionic_memory_value}" "${bionic_pids_value}" "${bionic_mode_value}" "${bionic_path_policy_value}" "${bionic_runpath_value}" <<'PY_EXECUTION'
 import base64
 import json
 import sys
@@ -328,6 +489,8 @@ def helper_outcome(*, attempted, helper_status, target_status):
         return "helper-timeout"
     if helper_status == 125:
         return "helper-environment"
+    if helper_status == 126:
+        return "helper-output-limit"
     if target_status is not None:
         return "target-exit"
     return "helper-protocol"
@@ -349,6 +512,51 @@ def execution_entry(*, applicable, expected, invocation, command_value, status_v
         else "runner-preflight" if is_preflight
         else invocation
     )
+    container_protocol = {}
+    if project_id == "nodejs" and bionic_lock_sha:
+        container_protocol = {
+            "containerStatus": None,
+            "dockerStatus": None,
+            "cleanupContainerStatus": None,
+            "timeoutSeconds": int(bionic_timeout),
+            "outputLimitBytes": int(bionic_output),
+            "outputBytes": 0,
+            "memoryBytes": int(bionic_memory),
+            "processLimit": int(bionic_pids),
+            "lockSha256": bionic_lock_sha,
+            "pathMode": bionic_mode,
+            "pathPolicy": bionic_path_policy,
+            "runpath": bionic_runpath,
+            "protocolAuthority": "host-generated-runner-preflight",
+            "cleanupAuthority": "host-generated-after-docker-inspect",
+            "runpathVerified": False,
+            "allNamedContainersReaped": False,
+        }
+    helper_path = root / f"logs/{log_layer}.helper.json"
+    if is_applicable and not is_preflight and helper_path.is_file():
+        try:
+            helper_value = json.loads(helper_path.read_text(encoding="utf-8"))
+            if helper_value.get("producer") == "run-bionic-node-sample.sh":
+                container_protocol = {
+                    "containerStatus": helper_value.get("containerStatus"),
+                    "dockerStatus": helper_value.get("dockerStatus"),
+                    "cleanupContainerStatus": helper_value.get("cleanupContainerStatus"),
+                    "timeoutSeconds": helper_value.get("timeoutSeconds"),
+                    "outputLimitBytes": helper_value.get("outputLimitBytes"),
+                    "outputBytes": helper_value.get("outputBytes"),
+                    "lockSha256": helper_value.get("lockSha256"),
+                    "pathMode": helper_value.get("pathMode"),
+                    "pathPolicy": helper_value.get("pathPolicy"),
+                    "protocolAuthority": helper_value.get("protocolAuthority"),
+                    "cleanupAuthority": helper_value.get("cleanupAuthority"),
+                    "runpathVerified": helper_value.get("runpathVerified"),
+                    "allNamedContainersReaped": helper_value.get("allNamedContainersReaped"),
+                    "memoryBytes": helper_value.get("memoryBytes"),
+                    "processLimit": helper_value.get("processLimit"),
+                    "runpath": helper_value.get("runpath"),
+                }
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            container_protocol = {}
     return {
         "applicable": is_applicable,
         "attempted": is_attempted,
@@ -373,6 +581,7 @@ def execution_entry(*, applicable, expected, invocation, command_value, status_v
         "stdoutPath": f"logs/{log_layer}.stdout" if is_applicable else None,
         "stderrPath": f"logs/{log_layer}.stderr" if is_applicable else None,
         "statusPath": f"logs/{log_layer}.status" if is_applicable and status is not None else None,
+        **container_protocol,
         "reason": f"{layer} policy is not applicable" if not is_applicable else preflight_reason or None,
         "expectedResult": expected,
     }
@@ -385,6 +594,8 @@ def execution_entry(*, applicable, expected, invocation, command_value, status_v
     outer_expected, outer_mode, outer_command_b64, outer_status, outer_result,
     outer_attempted, outer_helper_status, outer_pack_status, baseline_preflight_outcome,
     outer_preflight_outcome, baseline_preflight_reason, outer_preflight_reason,
+    bionic_lock_sha, bionic_timeout, bionic_output, bionic_memory, bionic_pids,
+    bionic_mode, bionic_path_policy, bionic_runpath,
 ) = sys.argv
 root = Path(execution_path).parent
 record = {
@@ -513,7 +724,7 @@ PY_FAILURE_REPORT
   write_execution_evidence "${sample_root}" "${id}" "${artifact_path:-unknown}" \
     "${baseline_applicable:-false}" "${expected_baseline}" "${baseline_expected_status:-0}" "${baseline_invocation:-}" "${baseline_command_b64:-W10=}" "" "${baseline_actual}" false "" \
     "${outer_applicable:-false}" "${expected_outer}" "${outer_mode:-outer-execveat}" W10= "" "${outer_actual}" false "" "" \
-    "preflight-environment-unavailable" "preflight-environment-unavailable" "${reason}" "${reason}"
+    "preflight-environment-unavailable" "preflight-environment-unavailable" "${reason}" "${reason}" "${bionic_lock_sha}" "${bionic_timeout_seconds}" "${bionic_output_limit}" "${bionic_memory_bytes}" "${bionic_process_limit}" "${bionic_outer_mode}" "${bionic_path_policy}" "${bionic_runpath}"
   rm -rf -- "${temp_root}/${id}"
   printf 'raw-inputs-removed=true\n' > "${sample_root}/raw-inputs-removed.txt"
 }
@@ -752,6 +963,7 @@ PYAPK
   printf '%s\n' "${json_record}" > "${sample_tmp}/project.json"
   local runtime_root="${sample_tmp}/runtime-root"
   local closure_failed=false closure_reason='' runtime_artifact='' runtime_artifact_sha=''
+  local bionic_pending=false
   local needs_runtime_oracle=false
   if [[ "${expected_baseline}" != not-applicable || "${expected_outer}" != not-applicable ]]; then
     needs_runtime_oracle=true
@@ -759,14 +971,16 @@ PYAPK
   if [[ "${needs_runtime_oracle}" == false ]]; then
     printf 'resolver=not-applicable\n' > "${sample_root}/runtime-closure.txt"
     write_runtime_closure_record "${sample_root}" "${id}" "${runtime}" "${loader}" not-applicable "${artifact_sha}" "" 'No applicable baseline or outer-wrapper policy is enabled for this identity.'
-  elif [[ "${runtime}" == bionic ]]; then
-    # The current Termux helper uses a live apt transaction rather than the
-    # reviewed closure lock. Keep this explicit boundary until the locked
-    # bionic dependency closure is available; never report that live path as
-    # reproducible compatibility evidence.
+  elif [[ "${baseline_mode}" == runtime-closure-unavailable ]]; then
     closure_failed=true
-    closure_reason='locked bionic runtime closure is unavailable; live Termux acquisition is not an evidence oracle'
-    printf 'resolver=termux-container-unavailable\n' > "${sample_root}/runtime-closure.txt"
+    closure_reason="locked runtime closure policy explicitly declares environment-unavailable for ${id}"
+    printf 'resolver=policy-environment-boundary\n' > "${sample_root}/runtime-closure.txt"
+  elif [[ "${runtime}" == bionic ]]; then
+    # The bionic helper assembles the reviewed closure inside the fresh native
+    # Termux container after the source archive has already been acquired and
+    # fingerprinted by this runner. It owns both bionic process oracles.
+    bionic_pending=true
+    printf 'resolver=termux-node-lock-v1\n' > "${sample_root}/runtime-closure.txt"
   elif [[ "${source_kind}" == "alpine-minirootfs" ]]; then
     runtime_root="${extract_root}"
     printf 'resolver=provenance-archive\n' > "${sample_root}/runtime-closure.txt"
@@ -789,7 +1003,7 @@ PYAPK
     closure_reason="unsupported runtime closure family: ${runtime}"
     printf 'resolver=unsupported\n' > "${sample_root}/runtime-closure.txt"
   fi
-  if [[ "${closure_failed}" == false && "${needs_runtime_oracle}" == true ]]; then
+  if [[ "${closure_failed}" == false && "${needs_runtime_oracle}" == true && "${bionic_pending}" == false ]]; then
     if ! runtime_artifact="$(resolve_artifact "${runtime_root}" "${artifact_path}")"; then
       closure_failed=true
       closure_reason='runtime closure does not contain the declared artifact'
@@ -805,7 +1019,7 @@ PYAPK
       fi
     fi
   fi
-  if [[ "${closure_failed}" == false && "${needs_runtime_oracle}" == true ]]; then
+  if [[ "${closure_failed}" == false && "${needs_runtime_oracle}" == true && "${bionic_pending}" == false ]]; then
     write_runtime_closure_record "${sample_root}" "${id}" "${runtime}" "${loader}" assembled "${artifact_sha}" "${runtime_artifact_sha}" ''
   elif [[ "${closure_failed}" == true ]]; then
     write_runtime_closure_record "${sample_root}" "${id}" "${runtime}" "${loader}" environment-unavailable "${artifact_sha}" "${runtime_artifact_sha}" "${closure_reason}"
@@ -815,13 +1029,16 @@ PYAPK
     if [[ -n "${baseline_command_b64}" && "${baseline_command_b64}" != W10= ]]; then
       command_json="${baseline_command_b64}"
       invocation_source=declared
-    elif [[ "${baseline_invocation}" == declared-artifact-version ]]; then
+    elif [[ "${baseline_invocation}" == declared-artifact-version && "${runtime}" != bionic ]]; then
       command_json="$(python3 - "${artifact_path}" <<'PYCOMMAND'
 import base64, json, sys
 print(base64.urlsafe_b64encode(json.dumps(["/" + sys.argv[1].lstrip("/"), "--version"]).encode()).decode())
 PYCOMMAND
       )"
       invocation_source=validated-wildcard
+    elif [[ "${runtime}" == bionic ]]; then
+      command_json=W10=
+      invocation_source=declared
     else
       closure_failed=true
       closure_reason='baseline command is absent and its invocation policy is not the validated wildcard'
@@ -869,7 +1086,7 @@ PYOUTERPLAN
       "validation-only; fingerprintStatus=${fingerprint_status}; validatorStatus=${validator_status}" \
       "${closure_baseline_reason}" "${closure_outer_reason}"
     write_execution_evidence "${sample_root}" "${id}" "${artifact_path}" "${baseline_applicable}" "${expected_baseline}" "${baseline_expected_status}" "${invocation_source}" "${command_json}" "" "${closure_baseline_actual}" false "" "${outer_applicable}" "${expected_outer}" "${outer_mode}" "${outer_command_json}" "" "${closure_outer_actual}" false "" "" \
-      "preflight-environment-unavailable" "preflight-environment-unavailable" "${closure_baseline_reason}" "${closure_outer_reason}"
+      "preflight-environment-unavailable" "preflight-environment-unavailable" "${closure_baseline_reason}" "${closure_outer_reason}" "${bionic_lock_sha}" "${bionic_timeout_seconds}" "${bionic_output_limit}" "${bionic_memory_bytes}" "${bionic_process_limit}" "${bionic_outer_mode}" "${bionic_path_policy}" "${bionic_runpath}"
     printf 'raw-inputs-removed=true\n' > "${sample_root}/raw-inputs-removed.txt"
     rm -rf -- "${sample_tmp}"
     return 1
@@ -883,7 +1100,7 @@ PYOUTERPLAN
   : > "${sample_root}/logs/outer.stdout"
   : > "${sample_root}/logs/outer.stderr"
   write_outer_pack_boundary "${sample_root}" 'Outer-wrapper policy is not applicable.' false
-  if [[ "${expected_baseline}" != not-applicable ]]; then
+  if [[ "${expected_baseline}" != not-applicable && "${bionic_pending}" == false ]]; then
     run_isolated_baseline "${runtime_root}" "${sample_root}" "${artifact_path}" "${command_json}" || true
     if baseline_protocol="$(read_isolation_result "${sample_root}/logs/baseline.helper.json")"; then
       IFS='|' read -r baseline_attempted baseline_helper_status baseline_target_status <<< "${baseline_protocol}"
@@ -914,6 +1131,222 @@ PYOUTERPLAN
       reason_baseline="baseline target exited with status=${baseline_target_status}"
     else
       reason_baseline='baseline isolation result protocol was incomplete'
+    fi
+  fi
+
+  if [[ "${bionic_pending}" == true && "${expected_baseline}" != not-applicable ]]; then
+    bionic_cache_root="${package_archive_cache}/bionic-node"
+    mkdir -p "${bionic_cache_root}"
+    mapfile -t bionic_policy_values < <(python3 - "${repo_root}" "${bionic_lock}" "${manifest}" "${artifact_path}" <<'PY_BIONIC_POLICY'
+import base64
+import json
+import sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+from bionic_node_lock import lock_file_sha256, validate_lock_document
+from pathlib import Path
+_, lock_path, manifest_path, artifact_path = sys.argv
+lock = json.load(open(lock_path, encoding="utf-8"))
+manifest = json.load(open(manifest_path, encoding="utf-8"))
+errors = validate_lock_document(lock, manifest=manifest)
+if errors:
+    raise SystemExit("; ".join(errors))
+execution = lock["execution"]
+if execution["artifactPath"] != "/" + artifact_path.lstrip("/"):
+    raise SystemExit("Node.js artifact path differs from bionic runtime lock")
+print(base64.urlsafe_b64encode(json.dumps(execution["argv"]).encode()).decode())
+print(execution["expectedStatus"])
+print(execution["outerMode"])
+print(lock_file_sha256(Path(lock_path)))
+print(execution["runpath"])
+PY_BIONIC_POLICY
+    )
+    if [[ "${#bionic_policy_values[@]}" -ne 5 ]]; then
+      actual_baseline=unexpected-rejection
+      actual_outer=unexpected-rejection
+      reason_baseline='bionic lock argv/status could not be resolved'
+      reason_outer="${reason_baseline}"
+      baseline_attempted=false; outer_attempted=false
+      baseline_helper_status=""; outer_helper_status=""
+      baseline_target_status=""; outer_target_status=""
+      baseline_status=""; outer_status=""
+      baseline_preflight_outcome=preflight-product-failure
+      outer_preflight_outcome=preflight-product-failure
+      baseline_preflight_reason="${reason_baseline}"
+      outer_preflight_reason="${reason_outer}"
+      bionic_runner_status=1
+    else
+      command_json="${bionic_policy_values[0]}"
+      baseline_expected_status="${bionic_policy_values[1]}"
+      outer_mode="${bionic_policy_values[2]}"
+      bionic_expected_lock_sha="${bionic_policy_values[3]}"
+      bionic_expected_runpath="${bionic_policy_values[4]}"
+      invocation_source=declared
+      outer_command_json="$(python3 - "${command_json}" <<'PY_LOCK_OUTER'
+import base64, json, sys
+argv=json.loads(base64.urlsafe_b64decode(sys.argv[1]).decode("utf-8"))
+argv[0]="/usr/local/bin/urprotect-packed"
+print(base64.urlsafe_b64encode(json.dumps(argv).encode()).decode())
+PY_LOCK_OUTER
+      )"
+    fi
+    if [[ "${#bionic_policy_values[@]}" -eq 5 ]]; then
+    set +e
+    "${repo_root}/scripts/run-bionic-node-sample.sh" \
+      --input "${artifact}" \
+      --source-archive "${archive}" \
+      --artifact-root "${sample_root}" \
+      --image "${bionic_image}" \
+      --version "${version}" \
+      --sha256 "${artifact_sha}" \
+      --archive-sha256 "${archive_sha}" \
+      --launcher "${launcher_path}" \
+      --cli-dll "${cli_dll}" \
+      --lock "${bionic_lock}" \
+      --manifest "${manifest}" \
+      --cache-root "${bionic_cache_root}" \
+      --outer-mode "${outer_mode}" \
+      > "${sample_root}/logs/bionic-runner.log" 2>&1
+    bionic_runner_status=$?
+    set -e
+    bionic_result_valid=false
+    if [[ -f "${sample_root}/bionic-node-result.json" && "${#bionic_policy_values[@]}" -eq 5 ]]; then
+      if bionic_values_text="$(python3 - "${sample_root}/bionic-node-result.json" "${bionic_expected_lock_sha}" "${bionic_expected_runpath}" "${bionic_runner_status}" "${bionic_image}" "${bionic_image_id}" "${bionic_loader}" "${repo_root}/scripts" <<'PY_BIONIC_RESULT'
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[8])
+from real_sample_schema import validate_bionic_node_result
+path, expected_lock, expected_runpath, runner_status, expected_image, expected_image_id, expected_loader = sys.argv[1:8]
+value = json.loads(Path(path).read_text(encoding="utf-8"))
+errors = validate_bionic_node_result(
+    value,
+    expected_lock_sha256=expected_lock,
+    expected_runpath=expected_runpath,
+    expected_image=expected_image,
+    expected_image_id=expected_image_id,
+    expected_loader=expected_loader,
+)
+if int(runner_status) == 0 and value.get("status") != "passed":
+    errors.append("runner exited 0 without a passed host-generated result")
+if int(runner_status) == 125 and not any(value.get(layer, {}).get("actual") == "environment-unavailable" for layer in ("baseline", "outer")):
+    errors.append("runner exited 125 without an environment-unavailable result")
+if int(runner_status) == 124 and not any(value.get(layer, {}).get("protocol", {}).get("outcome") == "helper-timeout" for layer in ("baseline", "outer")):
+    errors.append("runner exited 124 without a timeout protocol")
+if int(runner_status) == 1 and value.get("status") == "passed":
+    errors.append("runner exited nonzero despite a passed result")
+if errors:
+    raise SystemExit("; ".join(errors))
+for layer in ("baseline", "outer"):
+    item = value[layer]
+    protocol = item["protocol"]
+    print(item["actual"])
+    print("true" if item.get("attempted") is True else "false")
+    print("" if item.get("helperStatus") is None else str(item["helperStatus"]))
+    print("" if item.get("targetStatus") is None else str(item["targetStatus"]))
+    print(item.get("reason", "bionic helper result is incomplete").replace("\\n", " "))
+    print(item.get("preflightOutcome") or "")
+    print(item.get("reason", "bionic helper result is incomplete").replace("\\n", " ") if item.get("preflightOutcome") else "")
+    print("" if item.get("containerStatus") is None else str(item["containerStatus"]))
+print(value.get("runtimeArtifactSha256") or "")
+print(value.get("packStatus") if value.get("packStatus") is not None else "")
+print(value.get("status", "failed"))
+PY_BIONIC_RESULT
+      )"; then
+        mapfile -t bionic_values <<< "${bionic_values_text}"
+        if [[ "${#bionic_values[@]}" -eq 19 ]]; then
+          bionic_result_valid=true
+          actual_baseline="${bionic_values[0]}"
+          baseline_attempted="${bionic_values[1]}"
+          baseline_helper_status="${bionic_values[2]}"
+          baseline_target_status="${bionic_values[3]}"
+          reason_baseline="${bionic_values[4]}"
+          baseline_preflight_outcome="${bionic_values[5]}"
+          baseline_preflight_reason="${bionic_values[6]}"
+          baseline_container_status="${bionic_values[7]}"
+          actual_outer="${bionic_values[8]}"
+          outer_attempted="${bionic_values[9]}"
+          outer_helper_status="${bionic_values[10]}"
+          outer_target_status="${bionic_values[11]}"
+          reason_outer="${bionic_values[12]}"
+          outer_preflight_outcome="${bionic_values[13]}"
+          outer_preflight_reason="${bionic_values[14]}"
+          outer_container_status="${bionic_values[15]}"
+          runtime_artifact_sha="${bionic_values[16]}"
+          outer_pack_status="${bionic_values[17]}"
+          bionic_result_status="${bionic_values[18]}"
+          baseline_status="${baseline_target_status}"
+          outer_status="${outer_target_status}"
+          if [[ -n "${outer_pack_status}" && -f "${sample_root}/outer-pack.json" ]]; then
+            record_pack_cli_status "${sample_root}" "${outer_pack_status}" 'bionic outer pack report is missing or malformed'
+          fi
+          if [[ -n "${runtime_artifact_sha}" ]]; then
+            printf 'runtimeArtifactSha256=%s\n' "${runtime_artifact_sha}" >> "${sample_root}/hashes.txt"
+          fi
+          if [[ -n "${baseline_preflight_outcome}" ]]; then
+            baseline_attempted=false; baseline_helper_status=""; baseline_target_status=""; baseline_status=""
+            remove_unreferenced_preflight_markers "${sample_root}" baseline
+          fi
+          if [[ -n "${outer_preflight_outcome}" ]]; then
+            outer_attempted=false; outer_helper_status=""; outer_target_status=""; outer_status=""
+            remove_unreferenced_preflight_markers "${sample_root}" outerWrapper "${outer_pack_status}"
+            if [[ ! -f "${sample_root}/outer-pack.json" ]]; then
+              write_outer_pack_boundary "${sample_root}" "${outer_preflight_reason}" true
+            fi
+          fi
+        else
+          bionic_result_valid=false
+        fi
+      fi
+    fi
+    if [[ "${bionic_result_valid}" != true ]]; then
+      case "${bionic_runner_status}" in
+        125)
+          actual_baseline=environment-unavailable; actual_outer=environment-unavailable
+          bionic_preflight_outcome=preflight-environment-unavailable
+          ;;
+        124)
+          actual_baseline=runtime-failure; actual_outer=runtime-failure
+          bionic_preflight_outcome=preflight-runtime-failure
+          ;;
+        *)
+          actual_baseline=unexpected-rejection; actual_outer=unexpected-rejection
+          bionic_preflight_outcome=preflight-product-failure
+          ;;
+      esac
+      reason_baseline="bionic runner returned status ${bionic_runner_status} without a valid inspected-result protocol"
+      reason_outer="${reason_baseline}"
+      baseline_attempted=false; outer_attempted=false
+      baseline_helper_status=""; outer_helper_status=""
+      baseline_target_status=""; outer_target_status=""
+      baseline_status=""; outer_status=""
+      baseline_preflight_outcome="${bionic_preflight_outcome}"
+      outer_preflight_outcome="${bionic_preflight_outcome}"
+      baseline_preflight_reason="${reason_baseline}"
+      outer_preflight_reason="${reason_outer}"
+      remove_unreferenced_preflight_markers "${sample_root}" baseline
+      remove_unreferenced_preflight_markers "${sample_root}" outerWrapper "${outer_pack_status}"
+      [[ -f "${sample_root}/logs/baseline.stdout" ]] || : > "${sample_root}/logs/baseline.stdout"
+      [[ -f "${sample_root}/logs/baseline.stderr" ]] || : > "${sample_root}/logs/baseline.stderr"
+      [[ -f "${sample_root}/logs/outer.stdout" ]] || : > "${sample_root}/logs/outer.stdout"
+      [[ -f "${sample_root}/logs/outer.stderr" ]] || : > "${sample_root}/logs/outer.stderr"
+      if ! python3 - "${sample_root}/outer-pack.json" <<'PY_BIONIC_PACK_PRESENT'
+import json
+import sys
+from pathlib import Path
+try:
+    value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError):
+    raise SystemExit(1)
+if not isinstance(value, dict) or not isinstance(value.get("success"), bool):
+    raise SystemExit(1)
+PY_BIONIC_PACK_PRESENT
+      then
+        write_outer_pack_boundary "${sample_root}" "${reason_outer}" true
+      fi
+    fi
+    fi
+    if [[ ! -f "${sample_root}/runtime-closure.json" ]]; then
+      write_runtime_closure_record "${sample_root}" "${id}" "${runtime}" "${loader}" environment-unavailable "${artifact_sha}" "${runtime_artifact_sha}" "${reason_baseline}"
     fi
   fi
 
@@ -1029,25 +1462,8 @@ PYOUTER
     outer_preflight_reason="${reason_outer}"
     write_outer_pack_boundary "${sample_root}" "${reason_outer}" true
   fi
-  if [[ "${runtime}" == bionic && "${expected_baseline}" != not-applicable ]]; then
-    actual_baseline=environment-unavailable
-    reason_baseline='locked bionic runtime closure is unavailable; live Termux acquisition is not an evidence oracle'
-    actual_outer=environment-unavailable
-    reason_outer='locked bionic runtime closure is unavailable; outer execution is not attempted'
-    write_outer_pack_boundary "${sample_root}" "${reason_outer}" true
-    baseline_status=""
-    outer_status=""
-    baseline_attempted=false
-    outer_attempted=false
-    baseline_helper_status=""
-    outer_helper_status=""
-    baseline_preflight_outcome=preflight-environment-unavailable
-    baseline_preflight_reason="${reason_baseline}"
-    outer_preflight_outcome=preflight-environment-unavailable
-    outer_preflight_reason="${reason_outer}"
-  fi
   write_execution_evidence "${sample_root}" "${id}" "${artifact_path}" "${baseline_applicable}" "${expected_baseline}" "${baseline_expected_status}" "${invocation_source}" "${command_json}" "${baseline_status}" "${actual_baseline}" "${baseline_attempted}" "${baseline_helper_status}" "${outer_applicable}" "${expected_outer}" "${outer_mode}" "${outer_command_json}" "${outer_status}" "${actual_outer}" "${outer_attempted}" "${outer_helper_status}" "${outer_pack_status}" \
-    "${baseline_preflight_outcome}" "${outer_preflight_outcome}" "${baseline_preflight_reason}" "${outer_preflight_reason}"
+    "${baseline_preflight_outcome}" "${outer_preflight_outcome}" "${baseline_preflight_reason}" "${outer_preflight_reason}" "${bionic_lock_sha}" "${bionic_timeout_seconds}" "${bionic_output_limit}" "${bionic_memory_bytes}" "${bionic_process_limit}" "${bionic_outer_mode}" "${bionic_path_policy}" "${bionic_runpath}"
   local first_failure=""
   if [[ "${fingerprint_status}" -ne 0 ]]; then
     first_failure=fingerprint
@@ -1070,27 +1486,85 @@ PYOUTER
   return "${result_status}"
 }
 
+# Export the worker function graph into a fresh bash session.  The dotnet CLI
+# command is reconstructed in that session because bash does not export arrays.
+export repo_root manifest candidates runtime_closures artifact_root requested_tier \
+  runner_temp package_cache_root package_archive_cache package_index_cache temp_root \
+  isolation_lock isolation_dropper_dir isolation_dropper parallelism manifest_sha \
+  max_archive_bytes cli_dll bionic_lock bionic_image bionic_lock_sha \
+  bionic_timeout_seconds bionic_output_limit bionic_memory_bytes bionic_process_limit \
+  bionic_outer_mode bionic_path_policy bionic_runpath bionic_image bionic_image_id bionic_loader
+export -f project_fields write_result write_runtime_closure_record \
+  record_pack_cli_status write_outer_pack_boundary remove_unreferenced_preflight_markers write_execution_evidence \
+  write_failure_evidence classify_isolation_result read_isolation_result \
+  run_isolated_command run_isolated_baseline prepare_runtime_root resolve_artifact \
+  process_project
+
 project_batch=()
+worker_registry_index=0
 while IFS= read -r project_json; do
   [[ -z "${project_json}" ]] && continue
-  process_project "${project_json}" &
+  worker_registry_index=$((worker_registry_index + 1))
+  pid_registry="${worker_registry_dir}/worker-${worker_registry_index}.pids"
+  container_registry="${worker_registry_dir}/worker-${worker_registry_index}.containers"
+  : > "${pid_registry}"
+  : > "${container_registry}"
+  chmod 600 "${pid_registry}" "${container_registry}"
+  URP_WORKER_CONTAINER_REGISTRY="${container_registry}" setsid --wait \
+    python3 "${repo_root}/scripts/real_sample_worker_supervisor.py" \
+      --pid-registry "${pid_registry}" --container-registry "${container_registry}" -- \
+      bash -c 'set -euo pipefail; dotnet_cli=(dotnet "${cli_dll}"); process_project "$1"' \
+      _ "${project_json}" &
   project_pid="$!"
+  self_pgid="$(urp_worker_pgid "$$" || true)"
+  project_pgid=""
+  for _ in {1..20}; do
+    candidate_pgid="$(urp_worker_pgid "${project_pid}" || true)"
+    if [[ "${candidate_pgid}" =~ ^[0-9]+$ && "${candidate_pgid}" != "${self_pgid}" ]]; then
+      project_pgid="${candidate_pgid}"
+      break
+    fi
+    sleep 0.01
+  done
   project_batch+=("${project_pid}")
   active_pids+=("${project_pid}")
+  active_pgids+=("${project_pgid}")
+  active_pid_registries+=("${pid_registry}")
+  active_container_registries+=("${container_registry}")
   if [[ "${#project_batch[@]}" -ge "${parallelism}" ]]; then
-    for pid in "${project_batch[@]}"; do
+    for index in "${!project_batch[@]}"; do
+      pid="${project_batch[${index}]}"
       if wait "${pid}"; then :; else overall_status=1; fi
+      if ! urp_stop_worker_group "${pid}" "${active_pgids[${index}]}" 1 \
+        "${active_pid_registries[${index}]}" "${active_container_registries[${index}]}"; then
+        printf 'worker descendants or named containers remain after project %s\n' "${pid}" >&2
+        exit 1
+      fi
     done
     project_batch=()
     active_pids=()
+    active_pgids=()
+    active_pid_registries=()
+    active_container_registries=()
   fi
 done < <(python3 "${repo_root}/scripts/validate-real-samples.py" "${manifest}" --candidates "${candidates}" --tier "${requested_tier}" --emit | tail -n +2)
-for pid in "${project_batch[@]}"; do
+for index in "${!project_batch[@]}"; do
+  pid="${project_batch[${index}]}"
   if wait "${pid}"; then :; else overall_status=1; fi
+  if ! urp_stop_worker_group "${pid}" "${active_pgids[${index}]}" 1 \
+    "${active_pid_registries[${index}]}" "${active_container_registries[${index}]}"; then
+    printf 'worker descendants or named containers remain after project %s\n' "${pid}" >&2
+    exit 1
+  fi
 done
 active_pids=()
+active_pgids=()
+active_pid_registries=()
+active_container_registries=()
 
-sanitize_evidence
+if ! sanitize_evidence; then
+  overall_status=1
+fi
 python3 "${repo_root}/scripts/render-real-sample-report.py" "${manifest}" --tier "${requested_tier}" \
   --runtime-closures "${runtime_closures}" --artifact-root "${artifact_root}" --output-json "${artifact_root}/aggregate.json" \
   --output-markdown "${artifact_root}/aggregate.md" --require-evidence || overall_status=1

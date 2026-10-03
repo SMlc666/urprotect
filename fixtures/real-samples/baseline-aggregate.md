@@ -13,18 +13,12 @@ Evidence mode: `registry-baseline`; report schema: `2`.
 | `static-validation` | 0 |
 | `outer` | 0 |
 | `host-context` | 0 |
-| `environment` | 0 |
+| `environment` | 3 |
 
 ## Runtime layer outcomes
 
 | Project | Runtime | Layer | Result |
 | --- | --- | --- | --- |
-| `busybox` | `musl` | `baseline` | `accepted-and-runs` |
-| `busybox` | `musl` | `outerWrapper` | `accepted-and-runs` |
-| `gnu-coreutils` | `glibc` | `baseline` | `accepted-and-runs` |
-| `gnu-coreutils` | `glibc` | `outerWrapper` | `accepted-and-runs` |
-| `nodejs` | `bionic` | `baseline` | `environment-unavailable` |
-| `nodejs` | `bionic` | `outerWrapper` | `environment-unavailable` |
 
 ## Feature frequency
 
@@ -81,7 +75,12 @@ Evidence mode: `registry-baseline`; report schema: `2`.
 
 ## Unexpected outcomes
 
-- None recorded in the aggregate input.
+- `busybox` / `baseline` expected `accepted-and-runs` but observed `not-applicable` (diagnostic `none`).
+- `busybox` / `outerWrapper` expected `accepted-and-runs` but observed `not-applicable` (diagnostic `none`).
+- `gnu-coreutils` / `baseline` expected `accepted-and-runs` but observed `not-applicable` (diagnostic `none`).
+- `gnu-coreutils` / `outerWrapper` expected `accepted-and-runs` but observed `not-applicable` (diagnostic `none`).
+- `nodejs` / `baseline` expected `accepted-and-runs` but observed `not-applicable` (diagnostic `none`).
+- `nodejs` / `outerWrapper` expected `accepted-and-runs` but observed `not-applicable` (diagnostic `none`).
 
 Registry-only baseline facts are labeled metadata; they do not promote product support.
 Per-sample evidence is linked by `projectId`; raw archives and binaries are never retained here.

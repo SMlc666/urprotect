@@ -9,11 +9,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from real_sample_schema import effective_execution_policy
 
-def project_fields(project: dict[str, Any], closures: dict[str, Any]) -> list[str]:
+
+def project_fields(project: dict[str, Any], closures: dict[str, Any], tier: str = "pr") -> list[str]:
     provenance = project["provenance"]
     target = project["target"]
-    policy = project["executionPolicy"]
+    policy = effective_execution_policy(project, tier)
     closure_projects = closures.get("projects", {})
     closure_policy = closure_projects.get(project["projectId"], closure_projects["*"])
     baseline_policy = dict(policy["baseline"])
@@ -31,7 +33,7 @@ def project_fields(project: dict[str, Any], closures: dict[str, Any]) -> list[st
 
     merge_closure_policy(baseline_policy, closure_policy.get("baseline"))
     merge_closure_policy(outer_policy, closure_policy.get("outerWrapper"))
-    if "command" in closure_policy.get("baseline", {}):
+    if baseline_policy.get("applicable") is not False and "command" in closure_policy.get("baseline", {}):
         baseline_policy["mode"] = "bubblewrap-rootfs"
 
     apk_metadata = {
@@ -71,15 +73,16 @@ def project_fields(project: dict[str, Any], closures: dict[str, Any]) -> list[st
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: real_sample_project_fields.py PROJECT_JSON RUNTIME_CLOSURES", file=sys.stderr)
+    if len(sys.argv) not in {3, 4}:
+        print("usage: real_sample_project_fields.py PROJECT_JSON RUNTIME_CLOSURES [TIER]", file=sys.stderr)
         return 2
     project = json.loads(sys.argv[1])
     closures = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    tier = sys.argv[3] if len(sys.argv) == 4 else "pr"
     if not isinstance(project, dict) or not isinstance(closures, dict):
         print("project and runtime closures must be JSON objects", file=sys.stderr)
         return 2
-    print("\t".join(project_fields(project, closures)))
+    print("\t".join(project_fields(project, closures, tier)))
     return 0
 
 

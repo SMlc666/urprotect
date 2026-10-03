@@ -618,34 +618,21 @@ class BionicNodeClosureTests(unittest.TestCase):
         self.assertIn("rawArchives=temporary-only-and-removed", workflow)
         self.assertIn("rawNodeBinary=not-captured", workflow)
 
-    def test_nodejs_runner_remains_fail_closed_until_a_lock_is_reviewed(self) -> None:
-        result = subprocess.run(
-            [
-                str(ROOT / "scripts/run-bionic-node-sample.sh"),
-                "--input",
-                "TARGET",
-                "--artifact-root",
-                "/tmp/urprotect-bionic-node-test",
-                "--image",
-                "TARGET",
-                "--version",
-                "TARGET",
-                "--sha256",
-                "0" * 64,
-                "--archive-sha256",
-                "0" * 64,
-                "--launcher",
-                "TARGET",
-            ],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(result.returncode, 125)
-        self.assertIn("environment-unavailable", result.stderr)
+    def test_nodejs_runner_uses_the_reviewed_locked_path(self) -> None:
+        source = (ROOT / "scripts/bionic_node_runner.py").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "scripts/run-bionic-node-sample.sh").read_text(encoding="utf-8")
+        self.assertIn("--source-archive", source)
+        self.assertIn("--outer-mode", source)
+        self.assertIn("dpkg-deb --extract", source)
+        self.assertIn('"--network", "none"', source)
+        self.assertNotIn("apt-get", source)
+        self.assertNotIn("environment-unavailable: bionic Node.js dependency closure is not locked", source)
+        self.assertIn("bionic_node_runner.py", entrypoint)
+        self.assertIn("containerStatus", source)
+        self.assertIn("outputLimitBytes", source)
+        self.assertIn("host-generated-after-docker-inspect", source)
 
-    def test_nodejs_runtime_policy_remains_environment_unavailable(self) -> None:
+    def test_nodejs_runtime_policy_uses_the_reviewed_path_preserving_lock(self) -> None:
         closures = json.loads(
             (ROOT / "fixtures/real-samples/runtime-closures.json").read_text(encoding="utf-8")
         )
@@ -653,13 +640,28 @@ class BionicNodeClosureTests(unittest.TestCase):
             (ROOT / "fixtures/real-samples/manifest.json").read_text(encoding="utf-8")
         )
         for layer in ("baseline", "outerWrapper"):
-            self.assertEqual(closures["projects"]["nodejs"][layer]["expectedResult"], "environment-unavailable")
+            self.assertEqual(closures["projects"]["nodejs"][layer]["expectedResult"], "accepted-and-runs")
+        self.assertEqual(closures["projects"]["nodejs"]["outerWrapper"]["mode"], "outer-path-preserving")
         node = next(project for project in manifest["corpus"]["projects"] if project["projectId"] == "nodejs")
         for layer in ("baseline", "outerWrapper"):
-            self.assertEqual(node["executionPolicy"][layer]["expectedResult"], "environment-unavailable")
+            self.assertEqual(node["executionPolicy"][layer]["expectedResult"], "accepted-and-runs")
+        self.assertEqual(node["executionPolicy"]["outerWrapper"]["mode"], "outer-path-preserving")
+
+    def test_matrix_bionic_exit_classification_uses_helper_status_classes(self) -> None:
+        matrix = (ROOT / "scripts/run-real-sample-matrix.sh").read_text(encoding="utf-8")
+        self.assertIn('125)\n          actual_baseline=environment-unavailable', matrix)
+        self.assertIn('124)\n          actual_baseline=runtime-failure', matrix)
+        self.assertIn('bionic_preflight_outcome=preflight-runtime-failure', matrix)
+        self.assertIn('actual_baseline=unexpected-rejection', matrix)
+        self.assertIn("validate_bionic_node_result", matrix)
+        self.assertNotIn("without a structured result\"\n      actual_baseline=runtime-failure", matrix)
 
     def test_shell_entrypoints_remain_syntactically_valid(self) -> None:
-        for path in (ROOT / "scripts/run-bionic-fixture.sh", ROOT / "scripts/run-bionic-node-sample.sh"):
+        for path in (
+            ROOT / "scripts/run-bionic-fixture.sh",
+            ROOT / "scripts/run-bionic-node-sample.sh",
+            ROOT / "scripts/run-real-sample-matrix.sh",
+        ):
             result = subprocess.run(["bash", "-n", str(path)], cwd=ROOT, check=False, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, f"{path}: {result.stderr}")
 

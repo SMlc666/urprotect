@@ -27,25 +27,1070 @@
       "loader": "/system/bin/linker64",
       "archiveFormat": "deb",
       "resolver": "termux-container-v1",
-      "execution": "locked-native-arm64-termux-container"
+      "execution": "locked-native-arm64-termux-container",
+      "nodejsLock": "bionic-node-runtime-lock.json",
+      "nodejsLockSha256": "a21172380567011c490435ce2ea1dc9ed2d7f8e519be9c0071d0981a5e80e4fb",
+      "packageRepository": "https://packages-cf.termux.dev/apt/termux-main",
+      "image": "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4",
+      "imageId": "sha256:4afeef45d346a5e377724efede889c9ccad1046a71e097037494d16f15467c2e"
     }
   },
   "projects": {
-    "zero-ad": {
+    "gnu-bash": {
       "baseline": {
+        "command": [
+          "/bin/bash",
+          "--version"
+        ],
         "expectedResult": "accepted-and-runs",
-        "mode": "runtime-closure",
+        "expectedStatus": 0,
         "invocation": "declared-artifact-version",
-        "command": ["/usr/games/pyrogenesis", "--version"]
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
       },
       "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
         "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
         "mode": "outer-execveat",
-        "compare": ["status", "stdout", "stderr"]
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "busybox": {
+      "baseline": {
+        "command": [
+          "/bin/busybox",
+          "true"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "bubblewrap-rootfs",
+        "reason": "The pinned Alpine minirootfs is the complete declared musl rootfs; run only its extracted BusyBox artifact inside the isolated read-only rootfs."
       },
-      "hostContext": {
-        "expectedResult": "not-applicable",
-        "reason": "Ordinary public executable does not declare urp_entry."
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The pinned Alpine minirootfs provides the complete musl runtime for the profile-matched outer-execveat comparison."
+      }
+    },
+    "gnu-coreutils": {
+      "baseline": {
+        "command": [
+          "/bin/ls",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "bubblewrap-rootfs",
+        "reason": "The locked Debian Bookworm AArch64 package closure provides GNU coreutils ls and its declared runtime dependencies."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked Debian Bookworm AArch64 closure supports the profile-matched outer-execveat comparison for GNU coreutils ls."
+      }
+    },
+    "curl": {
+      "baseline": {
+        "command": [
+          "/usr/bin/curl",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "git": {
+      "baseline": {
+        "command": [
+          "/usr/bin/git",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "openssl": {
+      "baseline": {
+        "command": [
+          "/usr/bin/openssl",
+          "version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "perl": {
+      "baseline": {
+        "command": [
+          "/usr/bin/perl",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "sqlite": {
+      "baseline": {
+        "command": [
+          "/usr/bin/sqlite3",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "vim": {
+      "baseline": {
+        "command": [
+          "/usr/bin/vim.tiny",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "nano": {
+      "baseline": {
+        "command": [
+          "/bin/nano",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "jq": {
+      "baseline": {
+        "command": [
+          "/usr/bin/jq",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "ripgrep": {
+      "baseline": {
+        "command": [
+          "/usr/bin/rg",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "cmake": {
+      "baseline": {
+        "command": [
+          "/usr/bin/cmake",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "ffmpeg": {
+      "baseline": {
+        "command": [
+          "/usr/bin/ffmpeg",
+          "-version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "nginx": {
+      "baseline": {
+        "command": [
+          "/usr/sbin/nginx",
+          "-v"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "nodejs": {
+      "baseline": {
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The reviewed five-archive Termux/bionic Node.js closure is acquired and extracted without package-manager execution."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-path-preserving",
+        "reason": "Node.js declares an absolute DT_RUNPATH; the locked runner preserves the Termux prefix and executes the packed wrapper through the reviewed path-preserving profile."
+      }
+    },
+    "python": {
+      "baseline": {
+        "command": [
+          "/usr/bin/python3.11",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "postgresql": {
+      "baseline": {
+        "command": [
+          "/usr/lib/postgresql/15/bin/psql",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "redis": {
+      "baseline": {
+        "command": [
+          "/usr/bin/redis-check-rdb",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "caddy": {
+      "baseline": {
+        "command": [
+          "/usr/bin/caddy",
+          "version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "ruby": {
+      "baseline": {
+        "command": [
+          "/usr/bin/ruby3.1",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "gawk": {
+      "baseline": {
+        "command": [
+          "/usr/bin/gawk",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "grep": {
+      "baseline": {
+        "command": [
+          "/bin/grep",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "sed": {
+      "baseline": {
+        "command": [
+          "/bin/sed",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "findutils": {
+      "baseline": {
+        "command": [
+          "/usr/bin/find",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "gnu-tar": {
+      "baseline": {
+        "command": [
+          "/bin/tar",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "gnu-gzip": {
+      "baseline": {
+        "command": [
+          "/bin/gzip",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "less": {
+      "baseline": {
+        "command": [
+          "/usr/bin/less",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "screen": {
+      "baseline": {
+        "command": [
+          "/usr/bin/screen",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "tmux": {
+      "baseline": {
+        "command": [
+          "/usr/bin/tmux",
+          "-V"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "includePackages": [
+        {
+          "package": "locales-all",
+          "reason": "tmux requires a UTF-8 locale for its version oracle."
+        }
+      ]
+    },
+    "rsync": {
+      "baseline": {
+        "command": [
+          "/usr/bin/rsync",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "wget": {
+      "baseline": {
+        "command": [
+          "/usr/bin/wget",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "lua": {
+      "baseline": {
+        "command": [
+          "/usr/bin/lua5.4",
+          "-v"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "php": {
+      "baseline": {
+        "command": [
+          "/usr/bin/php8.2",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "graphviz": {
+      "baseline": {
+        "command": [
+          "/usr/bin/dot_builtins",
+          "-V"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "strace": {
+      "baseline": {
+        "command": [
+          "/usr/bin/strace",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "file": {
+      "baseline": {
+        "command": [
+          "/usr/bin/file",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "m4": {
+      "baseline": {
+        "command": [
+          "/usr/bin/m4",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "bzip2": {
+      "baseline": {
+        "command": [
+          "/bin/bzip2",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "ncdu": {
+      "baseline": {
+        "command": [
+          "/usr/bin/ncdu",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "htop": {
+      "baseline": {
+        "command": [
+          "/usr/bin/htop",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "nmap": {
+      "baseline": {
+        "command": [
+          "/usr/bin/nmap",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "socat": {
+      "baseline": {
+        "command": [
+          "/usr/bin/socat",
+          "-V"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "zero-ad": {
+      "baseline": {
+        "command": [
+          "/usr/games/pyrogenesis",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
       },
       "excludeDependencies": [
         {
@@ -54,51 +1099,1350 @@
         }
       ]
     },
-    "alpine-7zip": {"baseline": {"command": ["/usr/bin/7z", "-h"]}},
-    "alpine-dosfstools": {"baseline": {"command": ["/sbin/fsck.fat", "--help"]}},
-    "alpine-dropbear": {"baseline": {"command": ["/usr/sbin/dropbear", "-h"]}},
-    "alpine-mandoc": {"baseline": {"command": ["/usr/bin/mandoc", "-T", "ascii", "/dev/null"]}},
-    "alpine-mc": {"baseline": {"command": ["/usr/bin/mc", "--version"]}},
-    "alpine-openssh": {"baseline": {"command": ["/usr/bin/ssh", "-V"]}},
-    "alpine-bluez": {"baseline": {"command": ["/usr/bin/hciconfig", "--help"]}},
-    "apache2": {"baseline": {"command": ["/usr/sbin/apache2", "-v"]}},
-    "bind9": {"baseline": {"command": ["/usr/bin/dig", "-v"]}},
-    "caddy": {"baseline": {"command": ["/usr/bin/caddy", "version"]}},
-    "ffmpeg": {"baseline": {"command": ["/usr/bin/ffmpeg", "-version"]}},
-    "graphviz": {"baseline": {"command": ["/usr/bin/dot_builtins", "-V"]}},
-    "iproute2": {"baseline": {"command": ["/sbin/ip", "-V"]}},
-    "lsof": {"baseline": {"command": ["/usr/bin/lsof", "-v"]}},
-    "lua": {"baseline": {"command": ["/usr/bin/lua5.4", "-v"]}},
-    "micro": {"baseline": {"command": ["/usr/bin/micro", "-version"]}},
-    "minicom": {"baseline": {"command": ["/usr/bin/minicom", "-h"], "expectedStatus": 1}},
-    "mpv": {"baseline": {"command": ["/usr/bin/mpv", "--version"]}},
-    "nmap": {"baseline": {"command": ["/usr/bin/nmap", "--version"]}},
-    "nginx": {"baseline": {"command": ["/usr/sbin/nginx", "-v"]}},
-    "openssl": {"baseline": {"command": ["/usr/bin/openssl", "version"]}},
-    "socat": {"baseline": {"command": ["/usr/bin/socat", "-V"]}},
-    "squashfs-tools": {"baseline": {"command": ["/usr/bin/mksquashfs", "-version"]}},
-    "sysstat": {"baseline": {"command": ["/usr/bin/iostat", "-V"]}},
-    "tmux": {
-      "baseline": {"command": ["/usr/bin/tmux", "-V"]},
-      "includePackages": [
-        {"package": "locales-all", "reason": "tmux requires a UTF-8 locale for its version oracle."}
-      ]
-    },
-    "unzip": {"baseline": {"command": ["/usr/bin/unzip", "-v"]}},
-    "sed": {"baseline": {"command": ["/bin/sed", "--version"]}},
-    "alpine-fping": {"baseline": {"command": ["/usr/sbin/fping", "--version"]}},
-    "nodejs": {
+    "acl": {
       "baseline": {
-        "expectedResult": "environment-unavailable",
-        "mode": "termux-container-unavailable",
+        "command": [
+          "/bin/getfacl",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
         "invocation": "declared-artifact-version",
-        "reason": "The bionic Node.js dependency archive closure is not locked; live apt acquisition is not an evidence oracle."
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
       },
       "outerWrapper": {
-        "expectedResult": "environment-unavailable",
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
         "mode": "outer-execveat",
-        "compare": ["status", "stdout", "stderr"],
-        "reason": "The bionic Node.js dependency archive closure is not locked."
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "apache2": {
+      "baseline": {
+        "command": [
+          "/usr/sbin/apache2",
+          "-v"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "aria2": {
+      "baseline": {
+        "command": [
+          "/usr/bin/aria2c",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "attr": {
+      "baseline": {
+        "command": [
+          "/usr/bin/getfattr",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "bind9": {
+      "baseline": {
+        "command": [
+          "/usr/bin/dig",
+          "-v"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "bison": {
+      "baseline": {
+        "command": [
+          "/usr/bin/bison",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "cpio": {
+      "baseline": {
+        "command": [
+          "/bin/cpio",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "dos2unix": {
+      "baseline": {
+        "command": [
+          "/usr/bin/dos2unix",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "flex": {
+      "baseline": {
+        "command": [
+          "/usr/bin/flex",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "gdb": {
+      "baseline": {
+        "command": [
+          "/usr/bin/gdb",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "git-lfs": {
+      "baseline": {
+        "command": [
+          "/usr/bin/git-lfs",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "imagemagick": {
+      "baseline": {
+        "command": [
+          "/usr/bin/identify-im6.q16",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "iperf3": {
+      "baseline": {
+        "command": [
+          "/usr/bin/iperf3",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "iproute2": {
+      "baseline": {
+        "command": [
+          "/sbin/ip",
+          "-V"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "irssi": {
+      "baseline": {
+        "command": [
+          "/usr/bin/irssi",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "kmod": {
+      "baseline": {
+        "command": [
+          "/bin/kmod",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "logrotate": {
+      "baseline": {
+        "command": [
+          "/usr/sbin/logrotate",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "lsof": {
+      "baseline": {
+        "command": [
+          "/usr/bin/lsof",
+          "-v"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "man-db": {
+      "baseline": {
+        "command": [
+          "/usr/bin/man",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "micro": {
+      "baseline": {
+        "command": [
+          "/usr/bin/micro",
+          "-version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "minicom": {
+      "baseline": {
+        "command": [
+          "/usr/bin/minicom",
+          "-h"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 1,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 1,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "mosh": {
+      "baseline": {
+        "command": [
+          "/usr/bin/mosh-client",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "mpv": {
+      "baseline": {
+        "command": [
+          "/usr/bin/mpv",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "neovim": {
+      "baseline": {
+        "command": [
+          "/usr/bin/nvim",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "ninja-build": {
+      "baseline": {
+        "command": [
+          "/usr/bin/ninja",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "pigz": {
+      "baseline": {
+        "command": [
+          "/usr/bin/pigz",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "squashfs-tools": {
+      "baseline": {
+        "command": [
+          "/usr/bin/mksquashfs",
+          "-version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "subversion": {
+      "baseline": {
+        "command": [
+          "/usr/bin/svn",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "sysstat": {
+      "baseline": {
+        "command": [
+          "/usr/bin/iostat",
+          "-V"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "tcpdump": {
+      "baseline": {
+        "command": [
+          "/usr/bin/tcpdump",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "tig": {
+      "baseline": {
+        "command": [
+          "/usr/bin/tig",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "traceroute": {
+      "baseline": {
+        "command": [
+          "/usr/bin/traceroute.db",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "unzip": {
+      "baseline": {
+        "command": [
+          "/usr/bin/unzip",
+          "-v"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "util-linux": {
+      "baseline": {
+        "command": [
+          "/bin/lsblk",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "whois": {
+      "baseline": {
+        "command": [
+          "/usr/bin/whois",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "zip": {
+      "baseline": {
+        "command": [
+          "/usr/bin/zip",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-7zip": {
+      "baseline": {
+        "command": [
+          "/usr/bin/7z",
+          "-h"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-apk-tools": {
+      "baseline": {
+        "command": [
+          "/sbin/apk",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-bc": {
+      "baseline": {
+        "command": [
+          "/usr/bin/bc",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-diffutils": {
+      "baseline": {
+        "command": [
+          "/usr/bin/diff",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-dosfstools": {
+      "baseline": {
+        "command": [
+          "/sbin/fsck.fat",
+          "--help"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-ed": {
+      "baseline": {
+        "command": [
+          "/bin/ed",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-fish": {
+      "baseline": {
+        "command": [
+          "/usr/bin/fish",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-fping": {
+      "baseline": {
+        "command": [
+          "/usr/sbin/fping",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-fsarchiver": {
+      "baseline": {
+        "command": [
+          "/usr/sbin/fsarchiver",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-libarchive": {
+      "baseline": {
+        "command": [
+          "/usr/bin/bsdtar",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-mandoc": {
+      "baseline": {
+        "command": [
+          "/usr/bin/mandoc",
+          "-T",
+          "ascii",
+          "/dev/null"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-mc": {
+      "baseline": {
+        "command": [
+          "/usr/bin/mc",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-memcached": {
+      "baseline": {
+        "command": [
+          "/usr/bin/memcached",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-openssh": {
+      "baseline": {
+        "command": [
+          "/usr/bin/ssh",
+          "-V"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-parted": {
+      "baseline": {
+        "command": [
+          "/usr/sbin/parted",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-patch": {
+      "baseline": {
+        "command": [
+          "/usr/bin/patch",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-patchelf": {
+      "baseline": {
+        "command": [
+          "/usr/bin/patchelf",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-dropbear": {
+      "baseline": {
+        "command": [
+          "/usr/sbin/dropbear",
+          "-h"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-zstd": {
+      "baseline": {
+        "command": [
+          "/usr/bin/zstd",
+          "--version"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      }
+    },
+    "alpine-bluez": {
+      "baseline": {
+        "command": [
+          "/usr/bin/hciconfig",
+          "--help"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "invocation": "declared-artifact-version",
+        "mode": "runtime-closure",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
+      },
+      "outerWrapper": {
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ],
+        "expectedResult": "accepted-and-runs",
+        "expectedStatus": 0,
+        "mode": "outer-execveat",
+        "reason": "The locked runtime closure and bounded oracle are required; acquisition or execution failure is an explicit environment/runtime failure."
       }
     },
     "*": {
@@ -110,7 +2454,11 @@
       "outerWrapper": {
         "expectedResult": "accepted-and-runs",
         "mode": "outer-execveat",
-        "compare": ["status", "stdout", "stderr"]
+        "compare": [
+          "status",
+          "stdout",
+          "stderr"
+        ]
       },
       "hostContext": {
         "expectedResult": "not-applicable",

@@ -74,6 +74,12 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Run required bionic Node.js Python contracts
+        run: |
+          python3 tests/test_bionic_node_runner.py
+          python3 tests/test_bionic_node_runtime_lock.py
+          python3 tests/test_bionic_node_closure.py
+          tests/test_real_sample_worker_cleanup.sh
       - name: Check explicit protection policy
         run: python3 scripts/validate-protection-policy.py fixtures/real-samples/protection-policy.json
       - name: Run required glibc protection smoke
@@ -237,7 +243,7 @@ jobs:
           path: |
             ${{ runner.temp }}/urprotect-real-sample-package-cache/archives
             ${{ runner.temp }}/urprotect-real-sample-package-cache/indexes
-          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py') }}
+          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/bionic-node-runtime-lock.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py', 'scripts/run-bionic-node-sample.sh') }}
           restore-keys: |
             real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Record real-sample package cache status
@@ -348,7 +354,7 @@ jobs:
           path: |
             ${{ runner.temp }}/urprotect-real-sample-package-cache/archives
             ${{ runner.temp }}/urprotect-real-sample-package-cache/indexes
-          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py') }}
+          key: real-sample-package-cache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fixtures/real-samples/runtime-closures.json', 'fixtures/real-samples/bionic-node-runtime-lock.json', 'fixtures/real-samples/manifest.json', 'scripts/build-runtime-closure.py', 'scripts/run-bionic-node-sample.sh') }}
       - name: Upload real-sample evidence (never raw inputs)
         if: always()
         uses: actions/upload-artifact@v4
