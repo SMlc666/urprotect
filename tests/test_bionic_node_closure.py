@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
 from typing import Any
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/capture-bionic-node-closure.py"
@@ -139,6 +142,133 @@ class BionicNodeClosureTests(unittest.TestCase):
                     archive, fields, index, "https://packages-cf.termux.dev/apt/termux-main"
                 )
 
+    def test_capture_tree_entry_bound_and_deadline_are_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            capture_tree = Path(temporary) / "capture"
+            (capture_tree / "debs").mkdir(parents=True)
+            for index in range(3):
+                (capture_tree / "debs" / f"package-{index}.deb").write_bytes(b"x")
+            with patch.object(CAPTURE, "MAX_CAPTURE_ENTRIES", 2):
+                with self.assertRaises(CAPTURE.CaptureError):
+                    CAPTURE._capture_directory_bytes(capture_tree)
+
+            clock = [0.0]
+
+            def advancing_clock() -> float:
+                clock[0] += 1.0
+                return clock[0]
+
+            with patch.object(CAPTURE.time, "monotonic", side_effect=advancing_clock):
+                with self.assertRaises(CAPTURE.CaptureDeadlineExceeded):
+                    CAPTURE._capture_directory_bytes(capture_tree, deadline=2.0)
+
+    def test_package_hash_checks_deadline_between_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "nodejs.deb"
+            payload = b"x" * (CAPTURE.SHA256_CHUNK_BYTES * 2 + 1)
+            archive.write_bytes(payload)
+            real_sha256 = CAPTURE.hashlib.sha256
+            expected_sha256 = real_sha256(payload).hexdigest()
+            fields = {
+                "Package": "nodejs",
+                "Version": "26.4.0-1",
+                "Architecture": "aarch64",
+            }
+            index = {
+                **fields,
+                "Filename": "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+                "Size": str(len(payload)),
+                "SHA256": expected_sha256,
+            }
+            clock = [0.0]
+
+            class AdvancingDigest:
+                def __init__(self) -> None:
+                    self.inner = real_sha256()
+
+                def update(self, block: bytes) -> None:
+                    self.inner.update(block)
+                    clock[0] = 11.0
+
+                def hexdigest(self) -> str:
+                    return self.inner.hexdigest()
+
+            with (
+                patch.object(CAPTURE.time, "monotonic", side_effect=lambda: clock[0]),
+                patch.object(CAPTURE.hashlib, "sha256", return_value=AdvancingDigest()),
+            ):
+                with self.assertRaises(CAPTURE.CaptureDeadlineExceeded):
+                    CAPTURE.build_package_record(
+                        archive,
+                        fields,
+                        index,
+                        "https://packages-cf.termux.dev/apt/termux-main",
+                        deadline=10.0,
+                    )
+
+    def test_post_capture_expiration_leaves_no_candidate_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_output = Path(temporary) / "candidate.json.tmp"
+            output = Path(temporary) / "candidate.json"
+            with patch.object(CAPTURE.time, "monotonic", return_value=11.0):
+                with self.assertRaises(CAPTURE.CaptureDeadlineExceeded):
+                    CAPTURE._publish_candidate_document(
+                        temporary_output,
+                        output,
+                        self.candidate_document(),
+                        deadline=10.0,
+                    )
+            self.assertFalse(output.exists())
+            self.assertFalse(temporary_output.exists())
+
+    def test_capture_rejects_expiry_after_container_cleanup_before_publication(self) -> None:
+        inputs = CAPTURE.load_pinned_inputs(
+            ROOT / "fixtures/manifest.json", ROOT / "fixtures/real-samples/manifest.json"
+        )
+        image_inspect = {
+            "Id": "sha256:" + "0" * 64,
+            "Os": "linux",
+            "Architecture": "arm64",
+            "RepoDigests": [inputs["image"]],
+        }
+        clock = [0.0]
+
+        def controlled_clock() -> float:
+            return clock[0]
+
+        def fake_run(command: list[str], **kwargs: Any) -> tuple[bytes, bytes]:
+            if command[1] == "version":
+                return b"linux/arm64\n", b""
+            if command[1] == "pull":
+                return b"", b""
+            raise AssertionError(f"unexpected command: {command}")
+
+        def fake_capture(command: list[str], **kwargs: Any) -> None:
+            del command, kwargs
+            clock[0] = 41.0
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "candidate.json"
+            with (
+                patch.object(CAPTURE.time, "monotonic", side_effect=controlled_clock),
+                patch.object(CAPTURE.shutil, "which", return_value="/usr/bin/tool"),
+                patch.object(CAPTURE.platform, "machine", return_value="aarch64"),
+                patch.object(CAPTURE, "host_android_context", return_value=False),
+                patch.object(CAPTURE, "run_bounded", side_effect=fake_run),
+                patch.object(CAPTURE, "_load_image_identity", return_value=image_inspect),
+                patch.object(CAPTURE, "_run_capture_with_cleanup", side_effect=fake_capture),
+            ):
+                with self.assertRaises(CAPTURE.CaptureDeadlineExceeded):
+                    CAPTURE.capture(
+                        fixture_manifest_path=ROOT / "fixtures/manifest.json",
+                        real_sample_manifest_path=ROOT / "fixtures/real-samples/manifest.json",
+                        output_path=output,
+                        docker_command="docker",
+                        timeout_seconds=40,
+                    )
+            self.assertFalse(output.exists())
+            self.assertFalse(output.with_name(output.name + ".tmp").exists())
+
     def test_package_inventory_parser_accepts_delimiters_and_rejects_other_controls(self) -> None:
         inventory = CAPTURE.parse_package_inventory(
             "base-package\t1\taarch64\tinstall ok installed\n", "base package inventory"
@@ -221,6 +351,163 @@ class BionicNodeClosureTests(unittest.TestCase):
                 self.assertTrue(any(marker in error for error in errors), errors)
                 pinned_errors = CAPTURE.validate_candidate_against_pins(document, inputs)
                 self.assertTrue(any(marker in error for error in pinned_errors), pinned_errors)
+
+    def test_bind_mount_capture_repairs_permissions_before_host_cleanup(self) -> None:
+        cleanup = CAPTURE._capture_cleanup_script(123, 456)
+        self.assertIn("chown -R 123:456 /capture", cleanup)
+        self.assertIn(
+            "find /capture/debs /capture/apt-lists -type d -exec chmod 0777 {} +",
+            cleanup,
+        )
+        self.assertIn("entry-count limit", cleanup)
+        self.assertIn("MAX_CAPTURE_ENTRIES", CAPTURE._container_capture_script())
+        self.assertIn("trap cleanup_capture_mount 0", CAPTURE._container_capture_script())
+
+    def _run_capture_failure_with_mocked_docker(
+        self,
+        failure_message: str,
+        *,
+        repair_failure: bool = False,
+        main_failure: bool = True,
+    ) -> tuple[list[list[str]], list[bool], Path]:
+        if os.geteuid() != 0:
+            self.skipTest("root-owned bind-mount behavior requires a root-capable test host")
+        inputs = CAPTURE.load_pinned_inputs(
+            ROOT / "fixtures/manifest.json", ROOT / "fixtures/real-samples/manifest.json"
+        )
+        calls: list[list[str]] = []
+        repair_saw_root_owned_directory: list[bool] = []
+        repaired_directory: Path | None = None
+
+        def fake_run(command: list[str], **kwargs: Any) -> tuple[bytes, bytes]:
+            nonlocal repaired_directory
+            command = list(command)
+            calls.append(command)
+            if command[1] == "version":
+                return b"linux/arm64\n", b""
+            if command[1] == "pull":
+                return b"", b""
+            if command[1] == "image":
+                return (
+                    json.dumps(
+                        {
+                            "Id": "sha256:" + "0" * 64,
+                            "Os": "linux",
+                            "Architecture": "arm64",
+                            "RepoDigests": [inputs["image"]],
+                        }
+                    ).encode(),
+                    b"",
+                )
+            if command[1] == "run":
+                network = command[command.index("--network") + 1]
+                if network == "bridge":
+                    capture_directory = Path(
+                        next(value.removeprefix("type=bind,src=") for value in command if value.startswith("type=bind,src="))
+                    )
+                    partial = capture_directory / "debs" / "partial"
+                    partial.mkdir(parents=True)
+                    if hasattr(os, "chown") and os.geteuid() == 0:
+                        os.chown(capture_directory / "debs", 0, 0)
+                        os.chown(partial, 0, 0)
+                    partial.chmod(0o700)
+                    if main_failure:
+                        raise CAPTURE.CaptureError(failure_message)
+                    inventory = "base-package\t1\taarch64\tinstall ok installed\n"
+                    (capture_directory / "packages-before.tsv").write_text(inventory, encoding="utf-8")
+                    (capture_directory / "packages-after.tsv").write_text(inventory, encoding="utf-8")
+                    (capture_directory / "apt-update.log").write_text("update\n", encoding="utf-8")
+                    (capture_directory / "apt-download.log").write_text("download\n", encoding="utf-8")
+                    return b"", b""
+                if command[command.index("--user") + 1] != "0:0":
+                    raise AssertionError("unexpected non-root cleanup helper")
+                repaired_directory = Path(
+                    next(value.removeprefix("type=bind,src=") for value in command if value.startswith("type=bind,src="))
+                )
+                partial = repaired_directory / "debs" / "partial"
+                repair_saw_root_owned_directory.append(
+                    os.geteuid() == 0 and partial.stat().st_uid == 0
+                )
+                if repair_failure:
+                    raise CAPTURE.CaptureError("permission repair failed")
+                for directory in (repaired_directory, repaired_directory / "debs", partial):
+                    directory.chmod(0o777)
+                    if hasattr(os, "chown") and os.geteuid() == 0:
+                        os.chown(directory, os.getuid(), os.getgid())
+                return b"", b""
+            if command[1] == "inspect":
+                # The package container is still considered running after the
+                # mocked Docker client timeout; the cleanup helper has exited.
+                return (b"true\n" if "package-capture" in command[-1] else b"false\n"), b""
+            if command[1] in {"stop", "wait", "rm"}:
+                return b"", b""
+            raise AssertionError(f"unexpected mocked command: {command}")
+
+        collector_context = (
+            patch.object(CAPTURE, "_collect_package_records", return_value=self.candidate_document()["packages"])
+            if not main_failure
+            else nullcontext()
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "candidate.json"
+            with (
+                patch.object(CAPTURE.shutil, "which", return_value="/usr/bin/tool"),
+                patch.object(CAPTURE.platform, "machine", return_value="aarch64"),
+                patch.object(CAPTURE, "host_android_context", return_value=False),
+                patch.object(CAPTURE, "run_bounded", side_effect=fake_run),
+                collector_context,
+            ):
+                with self.assertRaises(CAPTURE.CaptureError):
+                    CAPTURE.capture(
+                        fixture_manifest_path=ROOT / "fixtures/manifest.json",
+                        real_sample_manifest_path=ROOT / "fixtures/real-samples/manifest.json",
+                        output_path=output,
+                        docker_command="docker",
+                        timeout_seconds=40,
+                    )
+            self.assertFalse(output.exists())
+            self.assertFalse((Path(temporary) / "candidate.json.tmp").exists())
+            self.assertTrue(repair_saw_root_owned_directory)
+            if not repair_failure:
+                self.assertTrue(repair_saw_root_owned_directory[0])
+            self.assertIsNotNone(repaired_directory)
+        return calls, repair_saw_root_owned_directory, output
+
+    def test_capture_nonzero_and_timeout_repair_root_owned_partial_before_temp_cleanup(self) -> None:
+        for message in (
+            "command exited with status 17: docker run: apt failed",
+            "command exceeded its 33-second wall-time limit: docker run",
+        ):
+            with self.subTest(message=message):
+                calls, _, _ = self._run_capture_failure_with_mocked_docker(message)
+                main_index = next(
+                    index for index, command in enumerate(calls)
+                    if command[1] == "run" and "bridge" in command
+                )
+                repair_index = next(
+                    index for index, command in enumerate(calls)
+                    if command[1] == "run" and "none" in command and "--user" in command
+                )
+                reap_indexes = [
+                    index for index, command in enumerate(calls)
+                    if command[1] in {"stop", "wait", "rm"}
+                    and "package-capture" in command[-1]
+                ]
+                self.assertTrue(reap_indexes)
+                self.assertLess(main_index, min(reap_indexes))
+                self.assertLess(max(reap_indexes), repair_index)
+                self.assertNotIn("apt-get", " ".join(calls[repair_index]))
+
+    def test_capture_repair_failure_does_not_publish_candidate(self) -> None:
+        calls, _, output = self._run_capture_failure_with_mocked_docker(
+            "command exited with status 0: docker run", repair_failure=True, main_failure=False
+        )
+        self.assertFalse(output.exists())
+        repair_commands = [
+            command for command in calls if command[1] == "run" and "none" in command and "--user" in command
+        ]
+        self.assertEqual(len(repair_commands), 1)
+        self.assertNotIn("apt-get", " ".join(repair_commands[0]))
 
     def test_native_and_image_guards_fail_closed(self) -> None:
         with self.assertRaises(CAPTURE.CaptureError):

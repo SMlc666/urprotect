@@ -41,6 +41,7 @@ TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-tls-fixture.o
 THREADED_TLS_FIXTURE := $(BUILD_DIR)/host-context-threaded-tls-fixture.so
 THREADED_TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-threaded-tls-fixture.o
 THREADED_TLS_HARNESS := $(BUILD_DIR)/host-context-threaded-tls-harness
+THREADED_TLS_TRACE_TEST := $(BUILD_DIR)/host-context-threaded-tls-trace-test
 THREADED_TLS_RUNTIME_TEST := $(BUILD_DIR)/host-context-threaded-tls-runtime-test
 THREAD_ADAPTER_TEST := $(BUILD_DIR)/host-context-thread-adapter-test
 DYNAMIC_TLS_FIXTURE := $(BUILD_DIR)/host-context-dynamic-tls-fixture.so
@@ -53,7 +54,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl -pthread
 
-.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-runtime-test thread-adapter-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
+.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -92,6 +93,9 @@ threaded-tls-fixture: $(THREADED_TLS_FIXTURE)
 
 threaded-tls-harness: $(THREADED_TLS_HARNESS)
 
+threaded-tls-trace-test: $(THREADED_TLS_TRACE_TEST)
+	"$(THREADED_TLS_TRACE_TEST)"
+
 threaded-tls-runtime-test: $(THREADED_TLS_RUNTIME_TEST)
 
 thread-adapter-test: $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(DYNAMIC_TLS_FIXTURE)
@@ -105,9 +109,10 @@ graph-self-test: $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_REVERSED_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
 
-test: check-host $(SELF_TEST) $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(DYNAMIC_TLS_FIXTURE) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE) $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE)
+test: check-host $(SELF_TEST) $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(THREADED_TLS_TRACE_TEST) $(DYNAMIC_TLS_FIXTURE) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE) $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
 	"$(THREAD_ADAPTER_TEST)" "$(THREADED_TLS_FIXTURE)" "$(DYNAMIC_TLS_FIXTURE)"
+	"$(THREADED_TLS_TRACE_TEST)"
 	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
 	"$(VERSION_SELF_TEST)" "$(DEPENDENCY_FIXTURE)"
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
@@ -215,9 +220,13 @@ $(DYNAMIC_TLS_FIXTURE): $(DYNAMIC_TLS_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
 	$(LD) -shared --build-id=none -z now "$<" -o "$@"
 
-$(THREADED_TLS_HARNESS): host_context_threaded_tls_harness.c
+$(THREADED_TLS_HARNESS): host_context_threaded_tls_harness.c host_context_threaded_tls_trace.c host_context_threaded_tls_trace.h
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CFLAGS) "$<" -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) host_context_threaded_tls_harness.c host_context_threaded_tls_trace.c -o "$@"
+
+$(THREADED_TLS_TRACE_TEST): host_context_threaded_tls_trace_test.c host_context_threaded_tls_trace.c host_context_threaded_tls_trace.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) host_context_threaded_tls_trace_test.c host_context_threaded_tls_trace.c -o "$@"
 
 
 $(THREAD_ADAPTER_TEST): host_context_thread_adapter_test.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o

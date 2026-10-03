@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#include "host_context_threaded_tls_trace.h"
+
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -65,19 +67,12 @@ static int run_once(const char *wrapper, const char *mode)
     int expected_status = strcmp(mode, "failure") == 0 ? 4 : 61;
     if (waitpid(child, &state, 0) != child || !WIFEXITED(state) || WEXITSTATUS(state) != expected_status)
         return 14;
-    const char *required[] = { "constructor\n", "entry-tls data=4660 zero=0\n", "entry\n",
-        "entry-tls-isolated zero=17185\n", "worker-start tls=4660 zero=0\n",
-        "worker-complete tls=4660 zero=22136\n", "tls-teardown\n", "destructor\n" };
-    size_t last = 0U;
-    for (size_t i = 0U; i < sizeof(required) / sizeof(required[0]); ++i) {
-        char *found = strstr(output + last, required[i]);
-        if (found == NULL) {
-            fprintf(stderr, "missing marker: %s\nobserved:\n%s", required[i], output);
-            return 15;
-        }
-        last = (size_t)(found - output) + strlen(required[i]);
+    int trace_status = urp_validate_threaded_tls_trace(output, mode);
+    if (trace_status != URP_THREADED_TLS_TRACE_OK) {
+        fprintf(stderr, "threaded TLS trace validation failed: code=%d mode=%s\nobserved:\n%s",
+            trace_status, mode, output);
+        return 15;
     }
-    if (strcmp(mode, "explicit") == 0 && strstr(output, "entry-joined\n") == NULL) return 16;
     printf("mode=%s status=%d markers=ordered\n%s", mode, expected_status, output);
     return 0;
 }

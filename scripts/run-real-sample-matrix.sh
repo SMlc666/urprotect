@@ -172,45 +172,7 @@ fi
 dotnet_cli=(dotnet "${cli_dll}")
 
 project_fields() {
-  python3 - "$1" "${runtime_closures}" <<'PY'
-import base64, json, sys
-p=json.loads(sys.argv[1]); closures=json.load(open(sys.argv[2])); prov=p['provenance']; target=p['target']; policy=p['executionPolicy']
-closure_policy=closures.get('projects', {}).get(p['projectId'], closures['projects']['*'])
-baseline_policy=dict(policy['baseline'])
-outer_policy=dict(policy['outerWrapper'])
-# Closure policy fills an explicitly applicable registry layer. It must not
-# turn an explicit not-applicable boundary into a runtime claim.
-def merge_closure_policy(declared, closure_layer):
-    if declared.get('applicable') is False or not isinstance(closure_layer, dict):
-        return
-    # The registry owns the expected result. In particular, an explicit
-    # environment-unavailable boundary must not be promoted by a generic
-    # closure default that says accepted-and-runs.
-    declared.update({key: value for key, value in closure_layer.items() if key != 'expectedResult'})
-
-merge_closure_policy(baseline_policy, closure_policy.get('baseline'))
-merge_closure_policy(outer_policy, closure_policy.get('outerWrapper'))
-if 'command' in closure_policy.get('baseline', {}):
-    baseline_policy['mode']='bubblewrap-rootfs'
-apk_metadata={
- 'package': prov.get('packageName',''),
- 'version': prov.get('version',''),
- 'architecture': target.get('architecture',''),
- 'origin': prov.get('origin',''),
- 'license': prov.get('license',''),
-}
-values=[
- p['projectId'], prov['archiveUrl'], prov['version'], prov['archivePath'], prov['archiveSha256'],
- prov['archiveFormat'], prov['artifactPath'], p['featureFingerprint']['producer'],
- policy['static']['expectedResult'], str(baseline_policy.get('applicable', False)).lower(),
- baseline_policy.get('expectedResult', 'not-applicable'), baseline_policy.get('mode','-'), base64.urlsafe_b64encode(json.dumps(baseline_policy.get('command', [])).encode()).decode(), str(baseline_policy.get('expectedStatus', 0)), baseline_policy.get('invocation',''),
- str(outer_policy.get('applicable', False)).lower(), outer_policy.get('expectedResult', 'not-applicable'), outer_policy.get('mode','outer-execveat'),
- target['runtime'], target['loader'],
- base64.urlsafe_b64encode(json.dumps(apk_metadata).encode()).decode(),
- prov.get('sourceKind',''),
-]
-print('\t'.join(values))
-PY
+  python3 "${repo_root}/scripts/real_sample_project_fields.py" "$1" "${runtime_closures}"
 }
 
 write_result() {

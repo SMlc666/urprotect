@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "fixtures/real-samples/manifest.json"
 CANDIDATES = ROOT / "fixtures/real-samples/candidates.json"
 GATE = ROOT / "scripts/check-real-sample-evidence.py"
+PROJECT_FIELDS = ROOT / "scripts/real_sample_project_fields.py"
 RUNTIME_CLOSURES = ROOT / "fixtures/real-samples/runtime-closures.json"
 
 
@@ -311,6 +313,60 @@ class RealSampleEvidenceTests(unittest.TestCase):
         self.active_closures.write_text(json.dumps(closures), encoding="utf-8")
         self.write_complete_text_evidence(root, manifest_path)
         return manifest_path
+
+    def test_project_fields_producer_and_bash_consumer_preserve_empty_invocation_fields(self) -> None:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        project = next(project for project in manifest["corpus"]["projects"] if project["projectId"] == "alpine-7zip")
+        produced = subprocess.run(
+            [sys.executable, str(PROJECT_FIELDS), json.dumps(project), str(RUNTIME_CLOSURES)],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(produced.returncode, 0, produced.stderr)
+        consumer = r'''set -euo pipefail
+IFS=$'\t' read -r id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 baseline_expected_status baseline_invocation outer_applicable expected_outer outer_mode runtime loader apk_metadata_b64 source_kind <<< "${PROJECT_FIELDS}"
+python3 - "${runtime}" "${loader}" "${apk_metadata_b64}" "${source_kind}" "${baseline_invocation}" "${outer_applicable}" "${baseline_command_b64}" <<'PY'
+import base64
+import json
+import sys
+print(json.dumps({
+    "runtime": sys.argv[1],
+    "loader": sys.argv[2],
+    "apk": json.loads(base64.urlsafe_b64decode(sys.argv[3]).decode("utf-8")),
+    "sourceKind": sys.argv[4],
+    "invocation": sys.argv[5],
+    "outerApplicable": sys.argv[6],
+    "command": json.loads(base64.urlsafe_b64decode(sys.argv[7]).decode("utf-8")),
+}, sort_keys=True))
+PY'''
+        consumed = subprocess.run(
+            ["bash", "-c", consumer],
+            cwd=ROOT,
+            env={**os.environ, "PROJECT_FIELDS": produced.stdout},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(consumed.returncode, 0, consumed.stderr)
+        fields = json.loads(consumed.stdout)
+        self.assertEqual(fields["runtime"], "musl")
+        self.assertEqual(fields["loader"], "/lib/ld-musl-aarch64.so.1")
+        self.assertEqual(
+            fields["apk"],
+            {
+                "architecture": "aarch64",
+                "license": "LGPL-2.0-only",
+                "origin": "7zip",
+                "package": "7zip",
+                "version": "24.09-r0",
+            },
+        )
+        self.assertEqual(fields["sourceKind"], "alpine-v3.22-main-aarch64-apk")
+        self.assertEqual(fields["invocation"], "-")
+        self.assertEqual(fields["outerApplicable"], "false")
+        self.assertEqual(fields["command"], [])
 
     def test_missing_root_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
