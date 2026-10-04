@@ -184,6 +184,15 @@ class BionicNodeRunnerTests(unittest.TestCase):
             self.assertEqual(rows[0], {"kind": "image", "name": "urprotect-bionic-node:test-image"})
             self.assertEqual(rows[1], {"kind": "image", "name": "urprotect-bionic-node:test-image", "state": "removed"})
 
+    def test_baseline_launch_argv_is_exactly_locked_argv_without_loader_prefix(self) -> None:
+        locked_argv = list(self.execution["argv"])
+
+        self.assertEqual(RUNNER.build_direct_baseline_argv(locked_argv), locked_argv)
+        self.assertNotEqual(
+            RUNNER.build_direct_baseline_argv(locked_argv),
+            [self.execution["loader"], *locked_argv],
+        )
+
     def test_locked_argv_status_limits_and_outer_substitution_are_used(self) -> None:
         context = RUNNER.load_lock_context(
             LOCK_PATH,

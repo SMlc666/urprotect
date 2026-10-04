@@ -778,6 +778,12 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
   ID, `/system/bin/linker64`, exact archive URLs/sizes/digests, base inventory,
   dependency fields, argv, expected status, absolute RUNPATH, outer mode, and
   resource limits are cross-checked by the runner and evidence gate.
+- The bionic baseline target is launched directly from the locked
+  `execution.argv` inside the prepared Termux root. Baseline argv construction
+  must not prepend `execution.loader`: the kernel must honor the Node
+  executable's `PT_INTERP` naturally. `/system/bin/linker64` remains a required
+  loader identity in the lock/profile and is validated independently; the outer
+  invocation continues to replace only `argv[0]` with the packed wrapper.
 - Bionic package replay uses direct HTTPS archive acquisition with exact
   size/hash verification. For each package, the locked base Bash runs
   `dpkg-deb --fsys-tarfile` through a `pipefail`-enabled GNU `tar` into a
@@ -846,6 +852,10 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
 
 - Lock tests mutate image ID/ref, archive digest/size, dependency syntax,
   inventory, argv, expected status, and RUNPATH and require rejection.
+- The focused runner test asserts
+  `build_direct_baseline_argv(execution["argv"]) == execution["argv"]` and
+  that the result is not `[execution["loader"], *execution["argv"]]`; the
+  loader remains metadata/profile validation rather than a baseline argv prefix.
 - Runner tests cover output/timeout/helper sentinels, target status 125,
   Docker status mismatch, cache symlink traversal, image-removal failure,
   complete `No such object` absence proof, transient inspect retries, rejection

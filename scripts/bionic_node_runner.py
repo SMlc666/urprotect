@@ -191,6 +191,13 @@ def decode_locked_argv(value: Any, artifact_path: str) -> list[str]:
     return list(value)
 
 
+def build_direct_baseline_argv(argv: Sequence[str]) -> list[str]:
+    """Launch the locked application directly so the kernel honors its PT_INTERP."""
+    if not argv or any(not isinstance(item, str) or not item for item in argv):
+        raise RunnerError("baseline launch requires a non-empty locked argument array")
+    return list(argv)
+
+
 def substitute_outer_argv(argv: Sequence[str], wrapper_path: str) -> list[str]:
     if not argv or not wrapper_path.startswith("/"):
         raise RunnerError("outer argv substitution requires a locked argv and absolute wrapper path")
@@ -1885,7 +1892,7 @@ def _run(args: argparse.Namespace) -> int:
         names.append(baseline_name)
         _register_container_name(baseline_name)
         baseline_argv = context["argv"]
-        baseline_launch_argv = [execution["loader"], *baseline_argv]
+        baseline_launch_argv = build_direct_baseline_argv(baseline_argv)
         baseline_create_args = build_target_container_args(
             baseline_name, transient_image, execution, baseline_launch_argv, exec_script=target_script
         )
