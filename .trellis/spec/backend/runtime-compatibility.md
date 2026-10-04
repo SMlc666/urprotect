@@ -810,6 +810,7 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
   owned by a matching execution record. Detached workers, named containers,
   and transient images must be proven reaped/absent before temporary roots are
   removed or evidence is accepted.
+- The target runner keeps captured stdout/stderr as separate bounded byte-stream returns and log files; baseline/outer protocol dictionaries and all JSON evidence objects must contain only JSON-serializable scalars, arrays, and objects. A raw byte value in a result record is a producer defect and must fail before evidence publication.
 - Aggregate CI records and histograms are recomputed from retained fingerprints,
   per-sample results, closures, and policy. Forged record fields, layer counts,
   feature histograms, first-failure values, missing records, and stale marker
@@ -849,7 +850,7 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
   Docker status mismatch, cache symlink traversal, image-removal failure,
   complete `No such object` absence proof, transient inspect retries, rejection
   of timeout/output-limited absence claims, package extraction without apt,
-  host-owned streams, and cleanup registries.
+  host-owned streams, cleanup registries, and JSON-safe result dictionaries.
 - Evidence tests cover stale baseline/outer/pack/setup markers, missing or false
   sanitizer markers, raw temp paths, bionic identity/path drift, closure drift,
   helper/target status confusion, forged aggregate records/histograms/counts,

@@ -923,6 +923,41 @@ class BionicNodeRunnerTests(unittest.TestCase):
         self.assertEqual(result["attempted"], False)
         self.assertEqual(validate_isolation_result(result["protocol"]), [])
 
+    def test_started_target_result_is_json_safe_and_returns_streams_separately(self) -> None:
+        context = {"execution": self.execution, "lockSha256": self.lock_sha, "runpath": self.execution["runpath"]}
+        for status, actual in ((0, "accepted-and-runs"), (1, "runtime-failure")):
+            with self.subTest(status=status):
+                started = RUNNER.CommandResult(status=status, stdout=b"target stdout", stderr=b"target stderr")
+                inspect_result = RUNNER.CommandResult(status=0, stdout=b"", stderr=b"")
+                with (
+                    patch.object(
+                        RUNNER,
+                        "_create_container",
+                        return_value=RUNNER.CommandResult(status=0, stdout=b"", stderr=b""),
+                    ),
+                    patch.object(RUNNER, "_start_attached", return_value=started),
+                    patch.object(
+                        RUNNER,
+                        "_container_state",
+                        return_value=({"Status": "exited", "ExitCode": status}, inspect_result),
+                    ),
+                ):
+                    result, stdout, stderr = RUNNER._run_one_target(
+                        docker=["docker"],
+                        name="named-container",
+                        create_args=["docker", "create"],
+                        budget=RUNNER.OutputBudget(self.execution["outputBytes"]),
+                        deadline=RUNNER.time.monotonic() + 5,
+                        context=context,
+                        setup_ready=True,
+                    )
+
+                self.assertEqual(stdout, b"target stdout")
+                self.assertEqual(stderr, b"target stderr")
+                self.assertEqual(result["actual"], actual)
+                self.assertEqual(result["cliStatus"], status)
+                json.dumps(result)
+
     def test_target_status_124_and_125_are_runtime_results_not_helper_sentinels(self) -> None:
         for status in (124, 125):
             with self.subTest(status=status):

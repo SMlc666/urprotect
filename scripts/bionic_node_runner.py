@@ -1213,7 +1213,7 @@ def _run_one_target(
     setup_ready: bool,
 ) -> tuple[dict[str, Any], bytes, bytes]:
     execution = context["execution"]
-    result_data = {"stdout": b"", "stderr": b"", "cliStatus": None, "containerStatus": None}
+    result_data: dict[str, Any] = {"cliStatus": None, "containerStatus": None}
     created = _create_container(docker, create_args, budget=budget, deadline=deadline)
     if created.error or created.status != 0 or created.timed_out or created.output_limited:
         if created.output_limited:
@@ -1240,8 +1240,6 @@ def _run_one_target(
         return result_data, b"", b""
 
     started = _start_attached(docker, name, budget=budget, deadline=deadline, timeout_seconds=execution["timeoutSeconds"])
-    result_data["stdout"] = started.stdout
-    result_data["stderr"] = started.stderr
     result_data["cliStatus"] = started.status
     if started.output_limited:
         protocol = _protocol(
