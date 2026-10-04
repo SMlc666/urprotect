@@ -107,7 +107,8 @@ class RealSampleWorkerTests(unittest.TestCase):
     @staticmethod
     def _heredoc_markers(script: str) -> tuple[list[str], list[str]]:
         opening = re.compile(
-            r"(?<!<)<<-?[ \t]*(?:['\"]?)(PY[A-Za-z0-9_]*)(?:['\"]?)[ \t]*$"
+            r"(?<!<)<<-?[ \t]*(?:['\"]?)(PY[A-Za-z0-9_]*)(?:['\"]?)"
+            r"(?:[ \t]*(?:(?:;[ \t]*(?:then|do)\b)|(?:\|\||&&)|(?:#[^\r\n]*)))?[ \t]*$"
         )
         terminator = re.compile(r"[ \t]*(PY[A-Za-z0-9_]*)[ \t]*$")
         openings: list[str] = []

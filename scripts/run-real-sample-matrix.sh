@@ -363,7 +363,8 @@ PY_CLOSURE
 
 record_pack_cli_status() {
   local sample_root="$1" cli_status="$2" reason="$3"
-  if ! python3 - "${sample_root}/outer-pack.json" "${cli_status}" <<'PY_PACK_STATUS'; then
+  local update_status=0
+  python3 - "${sample_root}/outer-pack.json" "${cli_status}" <<'PY_PACK_STATUS' || update_status=$?
 import json
 import sys
 from pathlib import Path
@@ -377,10 +378,10 @@ if not isinstance(value, dict) or not isinstance(value.get("success"), bool):
 value["cliExitCode"] = int(sys.argv[2])
 path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY_PACK_STATUS
+  if (( update_status != 0 )); then
     write_outer_pack_boundary "${sample_root}" "${reason}" true "${cli_status}" pack-failed
   fi
 }
-
 write_outer_pack_boundary() {
   local sample_root="$1" reason="$2" failed="${3:-false}" cli_status="${4:-}" diagnostic_code="${5:-environment-unavailable}"
   local sample_id="${id:-}" bionic_lock_sha_value="${bionic_lock_sha:-}" bionic_runpath_value="${bionic_runpath:-}"
@@ -441,6 +442,7 @@ PY_PACKNA
 remove_unreferenced_preflight_markers() {
   local sample_root="$1" layer="$2" pack_status="${3:-}"
   local log_layer="${layer}"
+  local setup_owner_status=0
   [[ "${layer}" == "outerWrapper" ]] && log_layer=outer
 
   # A runner preflight has no target process and therefore cannot retain the
@@ -464,7 +466,8 @@ remove_unreferenced_preflight_markers() {
   # owns a concrete setup status.  A failed/invalid runner preflight can leave
   # this file behind even though the converted execution record has no such
   # reference.
-  if [[ -f "${sample_root}/logs/container-setup.status" ]] && ! python3 - "${sample_root}/logs/bionic-node-result.json" <<'PY_BIONIC_SETUP_OWNER'; then
+  if [[ -f "${sample_root}/logs/container-setup.status" ]]; then
+    python3 - "${sample_root}/logs/bionic-node-result.json" <<'PY_BIONIC_SETUP_OWNER' || setup_owner_status=$?
 import json
 import sys
 from pathlib import Path
@@ -477,10 +480,11 @@ except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
 if isinstance(setup, bool) or not isinstance(setup, int) or not 0 <= setup <= 255:
     raise SystemExit(1)
 PY_BIONIC_SETUP_OWNER
+  fi
+  if (( setup_owner_status != 0 )); then
     rm -f -- "${sample_root}/logs/container-setup.status"
   fi
 }
-
 write_execution_evidence() {
   local sample_root="$1" id="$2" artifact_path="$3"
   local baseline_applicable="$4" baseline_expected="$5" baseline_expected_status="$6" baseline_invocation="$7" baseline_command_b64="$8" baseline_status="$9" baseline_result="${10}" baseline_attempted="${11}" baseline_helper_status="${12}"
@@ -1243,7 +1247,9 @@ PY_LOCK_OUTER
     set -e
     bionic_result_valid=false
     if [[ -f "${sample_root}/bionic-node-result.json" && "${#bionic_policy_values[@]}" -eq 5 ]]; then
-      if bionic_values_text="$(python3 - "${sample_root}/bionic-node-result.json" "${bionic_expected_lock_sha}" "${bionic_expected_runpath}" "${bionic_runner_status}" "${bionic_image}" "${bionic_image_id}" "${bionic_loader}" "${repo_root}/scripts" <<'PY_BIONIC_RESULT'
+      local bionic_result_parse_status=0
+      local bionic_values_file="${sample_root}/logs/bionic-result-values"
+      python3 - "${sample_root}/bionic-node-result.json" "${bionic_expected_lock_sha}" "${bionic_expected_runpath}" "${bionic_runner_status}" "${bionic_image}" "${bionic_image_id}" "${bionic_loader}" "${repo_root}/scripts" > "${bionic_values_file}" <<'PY_BIONIC_RESULT' || bionic_result_parse_status=$?
 import json
 import sys
 from pathlib import Path
@@ -1284,8 +1290,8 @@ print(value.get("runtimeArtifactSha256") or "")
 print(value.get("packStatus") if value.get("packStatus") is not None else "")
 print(value.get("status", "failed"))
 PY_BIONIC_RESULT
-      )"; then
-        mapfile -t bionic_values <<< "${bionic_values_text}"
+      if (( bionic_result_parse_status == 0 )); then
+        mapfile -t bionic_values < "${bionic_values_file}"
         if [[ "${#bionic_values[@]}" -eq 19 ]]; then
           bionic_result_valid=true
           actual_baseline="${bionic_values[0]}"
@@ -1330,6 +1336,7 @@ PY_BIONIC_RESULT
           bionic_result_valid=false
         fi
       fi
+      rm -f -- "${bionic_values_file}"
     fi
     if [[ "${bionic_result_valid}" != true ]]; then
       case "${bionic_runner_status}" in
@@ -1362,7 +1369,8 @@ PY_BIONIC_RESULT
       [[ -f "${sample_root}/logs/baseline.stderr" ]] || : > "${sample_root}/logs/baseline.stderr"
       [[ -f "${sample_root}/logs/outer.stdout" ]] || : > "${sample_root}/logs/outer.stdout"
       [[ -f "${sample_root}/logs/outer.stderr" ]] || : > "${sample_root}/logs/outer.stderr"
-      if ! python3 - "${sample_root}/outer-pack.json" <<'PY_BIONIC_PACK_PRESENT'; then
+      local bionic_pack_report_status=0
+      python3 - "${sample_root}/outer-pack.json" <<'PY_BIONIC_PACK_PRESENT' || bionic_pack_report_status=$?
 import json
 import sys
 from pathlib import Path
@@ -1373,6 +1381,7 @@ except (OSError, UnicodeError, json.JSONDecodeError):
 if not isinstance(value, dict) or not isinstance(value.get("success"), bool):
     raise SystemExit(1)
 PY_BIONIC_PACK_PRESENT
+      if (( bionic_pack_report_status != 0 )); then
         write_outer_pack_boundary "${sample_root}" "${reason_outer}" true
       fi
     fi
@@ -1533,7 +1542,7 @@ from pathlib import Path
 MAX_WORKER_SCRIPT_BYTES = 4 * 1024 * 1024
 OPENING = re.compile(
     r"(?<!<)<<-?[ \t]*(?P<quote>['\"]?)(?P<delimiter>PY[A-Za-z0-9_]*)(?P=quote)"
-    r"[ \t]*(?:(?:;[ \t]*(?:then|do)\b)|(?:#[^\r\n]*))?[ \t]*$"
+    r"(?:[ \t]*(?:(?:;[ \t]*(?:then|do)\b)|(?:\|\||&&)|(?:#[^\r\n]*)))?[ \t]*$"
 )
 STANDALONE_MARKER = re.compile(r"PY[A-Za-z0-9_]*$")
 
