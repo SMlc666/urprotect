@@ -79,6 +79,7 @@ jobs:
           python3 tests/test_bionic_node_runner.py
           python3 tests/test_bionic_node_runtime_lock.py
           python3 tests/test_bionic_node_closure.py
+          python3 tests/test_real_sample_worker.py
           tests/test_real_sample_worker_cleanup.sh
       - name: Check explicit protection policy
         run: python3 scripts/validate-protection-policy.py fixtures/real-samples/protection-policy.json

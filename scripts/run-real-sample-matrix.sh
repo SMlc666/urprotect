@@ -153,6 +153,21 @@ active_pid_registries=()
 active_container_registries=()
 worker_registry_dir="${temp_root}/worker-registry"
 mkdir -m 700 -p "${worker_registry_dir}"
+remove_worker_scripts() {
+  local worker_script
+  for worker_script in "${worker_registry_dir}"/worker-*.sh; do
+    [[ -e "${worker_script}" || -L "${worker_script}" ]] || continue
+    if [[ -L "${worker_script}" || ! -f "${worker_script}" ]]; then
+      printf 'worker script is missing or unsafe: %s\n' "${worker_script}" >&2
+      return 1
+    fi
+    rm -f -- "${worker_script}"
+    if [[ -e "${worker_script}" || -L "${worker_script}" ]]; then
+      printf 'worker script could not be removed: %s\n' "${worker_script}" >&2
+      return 1
+    fi
+  done
+}
 mark_sanitization_failure() {
   [[ -d "${artifact_root}" ]] || return 0
   printf 'evidence-sanitized=false\n' > "${artifact_root}/evidence-sanitized.txt" 2>/dev/null || true
@@ -235,6 +250,11 @@ cleanup() {
   done
   if [[ "${cleanup_ok}" != true ]]; then
     printf 'refusing to remove real-sample temporary root while cleanup is unproven: %s\n' "${temp_root}" >&2
+    mark_sanitization_failure
+    return 0
+  fi
+  if ! remove_worker_scripts; then
+    printf 'refusing to remove real-sample temporary root while worker scripts remain: %s\n' "${temp_root}" >&2
     mark_sanitization_failure
     return 0
   fi
@@ -1486,19 +1506,15 @@ PYOUTER
   return "${result_status}"
 }
 
-# Export the worker function graph into a fresh bash session.  The dotnet CLI
-# command is reconstructed in that session because bash does not export arrays.
+# Worker scripts inherit only scalar environment variables. Bash
+# function export/import is intentionally avoided because exported functions
+# containing heredocs are not portable across fresh bash sessions.
 export repo_root manifest candidates runtime_closures artifact_root requested_tier \
   runner_temp package_cache_root package_archive_cache package_index_cache temp_root \
   isolation_lock isolation_dropper_dir isolation_dropper parallelism manifest_sha \
-  max_archive_bytes cli_dll bionic_lock bionic_image bionic_lock_sha \
+  max_archive_bytes cli_dll launcher_path bionic_lock bionic_image bionic_lock_sha \
   bionic_timeout_seconds bionic_output_limit bionic_memory_bytes bionic_process_limit \
   bionic_outer_mode bionic_path_policy bionic_runpath bionic_image bionic_image_id bionic_loader
-export -f project_fields write_result write_runtime_closure_record \
-  record_pack_cli_status write_outer_pack_boundary remove_unreferenced_preflight_markers write_execution_evidence \
-  write_failure_evidence classify_isolation_result read_isolation_result \
-  run_isolated_command run_isolated_baseline prepare_runtime_root resolve_artifact \
-  process_project
 
 project_batch=()
 worker_registry_index=0
@@ -1510,11 +1526,49 @@ while IFS= read -r project_json; do
   : > "${pid_registry}"
   : > "${container_registry}"
   chmod 600 "${pid_registry}" "${container_registry}"
+  worker_script="$(
+    umask 077
+    mktemp "${worker_registry_dir}/worker-${worker_registry_index}.XXXXXX.sh"
+  )"
+  if [[ ! -f "${worker_script}" || -L "${worker_script}" ]]; then
+    printf 'generated worker script is missing or unsafe: %s\n' "${worker_script}" >&2
+    exit 1
+  fi
+  {
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'if [[ "$#" -ne 2 ]]; then printf "worker expects a dispatch marker and one project record\\n" >&2; exit 2; fi' \
+      'shift'
+    declare -f \
+      project_fields \
+      write_result \
+      write_runtime_closure_record \
+      record_pack_cli_status \
+      write_outer_pack_boundary \
+      remove_unreferenced_preflight_markers \
+      write_execution_evidence \
+      write_failure_evidence \
+      classify_isolation_result \
+      read_isolation_result \
+      run_isolated_command \
+      run_isolated_baseline \
+      prepare_runtime_root \
+      resolve_artifact \
+      process_project
+    printf '%s\n' \
+      'set -euo pipefail' \
+      'dotnet_cli=(dotnet "${cli_dll}")' \
+      'process_project "$1"'
+  } > "${worker_script}"
+  chmod 700 "${worker_script}"
+  if [[ ! -f "${worker_script}" || -L "${worker_script}" || ! -x "${worker_script}" ]]; then
+    printf 'generated worker script is not executable or regular: %s\n' "${worker_script}" >&2
+    exit 1
+  fi
   URP_WORKER_CONTAINER_REGISTRY="${container_registry}" setsid --wait \
     python3 "${repo_root}/scripts/real_sample_worker_supervisor.py" \
       --pid-registry "${pid_registry}" --container-registry "${container_registry}" -- \
-      bash -c 'set -euo pipefail; dotnet_cli=(dotnet "${cli_dll}"); process_project "$1"' \
-      _ "${project_json}" &
+      bash "${worker_script}" _ "${project_json}" &
   project_pid="$!"
   self_pgid="$(urp_worker_pgid "$$" || true)"
   project_pgid=""
