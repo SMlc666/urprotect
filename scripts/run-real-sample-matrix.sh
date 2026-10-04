@@ -1181,7 +1181,7 @@ import sys
 sys.path.insert(0, sys.argv[1] + "/scripts")
 from bionic_node_lock import lock_file_sha256, validate_lock_document
 from pathlib import Path
-_, lock_path, manifest_path, artifact_path = sys.argv
+_, repo_root, lock_path, manifest_path, artifact_path = sys.argv
 lock = json.load(open(lock_path, encoding="utf-8"))
 manifest = json.load(open(manifest_path, encoding="utf-8"))
 errors = validate_lock_document(lock, manifest=manifest)

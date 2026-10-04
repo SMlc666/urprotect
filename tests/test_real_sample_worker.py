@@ -87,6 +87,34 @@ class RealSampleWorkerTests(unittest.TestCase):
 
         compile(embedded_python, f"{MATRIX}:PYSANITIZE", "exec")
 
+    def test_bionic_policy_heredoc_keeps_repo_argument_in_argv_shape(self) -> None:
+        source = MATRIX.read_text(encoding="utf-8")
+        opening = source.index("<<'PY_BIONIC_POLICY'\n") + len("<<'PY_BIONIC_POLICY'\n")
+        closing = source.index("\nPY_BIONIC_POLICY\n", opening)
+        embedded_python = source[opening:closing]
+        lock = ROOT / "fixtures/real-samples/bionic-node-runtime-lock.json"
+        manifest = ROOT / "fixtures/real-samples/manifest.json"
+        result = subprocess.run(
+            [
+                "python3",
+                "-",
+                str(ROOT),
+                str(lock),
+                str(manifest),
+                "data/data/com.termux/files/usr/bin/node",
+            ],
+            cwd=ROOT,
+            input=embedded_python,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        values = result.stdout.splitlines()
+        self.assertEqual(len(values), 5)
+        self.assertEqual(values[1], "0")
+        self.assertEqual(values[2], "outer-path-preserving")
+
     @staticmethod
     def _worker_definition_source() -> str:
         source = MATRIX.read_text(encoding="utf-8")
