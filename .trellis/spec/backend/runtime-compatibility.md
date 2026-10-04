@@ -814,6 +814,7 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
   per-sample results, closures, and policy. Forged record fields, layer counts,
   feature histograms, first-failure values, missing records, and stale marker
   files fail the evidence gate.
+- Docker cleanup treats absence as a proof, not a best-effort result: a nonzero `inspect` response is accepted as absent only when it is complete (not timed out or output-limited) and contains Docker's explicit container/image absence marker, including `No such object`. Post-removal inspect responses classified as transient (for example, removal-in-progress or daemon connection races) may be retried within the existing bounded cleanup deadline. Unknown, malformed, live, timed-out, or truncated responses remain cleanup failures, retain the private work root, and prevent transient-image deletion. Diagnostics must distinguish verified absence, transient exhaustion, live resources, and unknown inspection responses.
 
 ### 4. Validation & Error Matrix
 
@@ -846,7 +847,9 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
   inventory, argv, expected status, and RUNPATH and require rejection.
 - Runner tests cover output/timeout/helper sentinels, target status 125,
   Docker status mismatch, cache symlink traversal, image-removal failure,
-  package extraction without apt, host-owned streams, and cleanup registries.
+  complete `No such object` absence proof, transient inspect retries, rejection
+  of timeout/output-limited absence claims, package extraction without apt,
+  host-owned streams, and cleanup registries.
 - Evidence tests cover stale baseline/outer/pack/setup markers, missing or false
   sanitizer markers, raw temp paths, bionic identity/path drift, closure drift,
   helper/target status confusion, forged aggregate records/histograms/counts,

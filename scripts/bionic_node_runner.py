@@ -28,6 +28,8 @@ MANIFEST_DEFAULT = REPO_ROOT / "fixtures/real-samples/manifest.json"
 OUTPUT_LIMIT_STATUS = 126
 PROTOCOL_AUTHORITY = "host-generated-after-docker-inspect"
 CLEANUP_AUTHORITY = "host-generated-after-docker-inspect"
+DOCKER_INSPECT_RETRY_ATTEMPTS = 3
+DOCKER_INSPECT_RETRY_DELAY_SECONDS = 0.05
 
 
 class RunnerError(Exception):
@@ -375,6 +377,121 @@ def _container_state(docker: list[str], name: str, *, timeout_seconds: float, de
     return (state if isinstance(state, dict) else None), result
 
 
+def _docker_result_detail(result: CommandResult) -> str:
+    parts: list[str] = []
+    if result.error:
+        parts.append(result.error)
+    for stream in (result.stderr, result.stdout):
+        value = stream.decode("utf-8", errors="replace").strip()
+        if value:
+            parts.append(value)
+    return " ".join(" ".join(parts).split())[:512]
+
+
+_DOCKER_ABSENT_MARKERS = {
+    "container": ("no such container", "container not found", "no such object"),
+    "image": ("no such image", "image not found", "no such object"),
+}
+_DOCKER_TRANSIENT_INSPECT_MARKERS = (
+    "already in progress",
+    "already marked for removal",
+    "cannot connect to the docker daemon",
+    "connection aborted",
+    "connection refused",
+    "connection reset",
+    "context deadline exceeded",
+    "deadline exceeded",
+    "error during connect",
+    "i/o timeout",
+    "internal server error",
+    "is being removed",
+    "removal of container",
+    "temporarily unavailable",
+    "timed out",
+    "timeout",
+    "unexpected eof",
+)
+
+
+def _docker_resource_absent(result: CommandResult, *, kind: str) -> bool:
+    """Return whether Docker explicitly reported that a resource is absent."""
+    if result.timed_out or result.output_limited:
+        return False
+    if result.status in (None, 0):
+        return False
+    detail = _docker_result_detail(result).lower()
+    markers = _DOCKER_ABSENT_MARKERS.get(kind, _DOCKER_ABSENT_MARKERS["image"])
+    return any(marker in detail for marker in markers)
+
+
+def _docker_inspect_observation(
+    result: CommandResult,
+    state: dict[str, Any] | None,
+    *,
+    kind: str,
+) -> str:
+    """Classify an inspect result without treating an unknown result as absence."""
+    if _docker_resource_absent(result, kind=kind):
+        return "absent"
+    detail = _docker_result_detail(result).lower()
+    if result.timed_out or any(marker in detail for marker in _DOCKER_TRANSIENT_INSPECT_MARKERS):
+        return "transient"
+    if result.status == 0 and state is not None:
+        return "present"
+    return "unknown"
+
+
+def _docker_inspect_diagnostic(
+    result: CommandResult,
+    state: dict[str, Any] | None,
+    observation: str,
+    attempts: int,
+) -> str:
+    detail = _docker_result_detail(result)
+    if result.timed_out:
+        detail = f"inspect command timed out; {detail}" if detail else "inspect command timed out"
+    if not detail:
+        detail = f"status={result.status}"
+    if observation == "transient":
+        return f"transient inspect after {attempts} attempt(s): {detail}"
+    if observation == "present":
+        status = state.get("Status") if isinstance(state, dict) else "unknown"
+        return f"container resource is still present (inspect Status={status!r})"
+    return f"unknown inspect response: {detail}"
+
+
+def _inspect_container_with_retry(
+    docker: list[str],
+    name: str,
+    *,
+    deadline: float,
+) -> tuple[dict[str, Any] | None, CommandResult, str, int]:
+    """Inspect a container with bounded retries for transient daemon responses."""
+    last_state: dict[str, Any] | None = None
+    last_result = CommandResult(None, b"", b"", error="container inspect was not attempted")
+    last_observation = "unknown"
+    attempts = 0
+    for attempt in range(1, DOCKER_INSPECT_RETRY_ATTEMPTS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return last_state, last_result, "transient", attempts
+        last_state, last_result = _container_state(
+            docker,
+            name,
+            timeout_seconds=min(1.0, max(0.01, remaining)),
+            deadline=deadline,
+        )
+        attempts = attempt
+        last_observation = _docker_inspect_observation(last_result, last_state, kind="container")
+        if last_observation != "transient" or attempt == DOCKER_INSPECT_RETRY_ATTEMPTS:
+            return last_state, last_result, last_observation, attempts
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(DOCKER_INSPECT_RETRY_DELAY_SECONDS * attempt, remaining))
+    return last_state, last_result, last_observation, attempts
+
+
 def _remaining(deadline: float, maximum: float) -> float:
     value = min(maximum, deadline - time.monotonic())
     if value <= 0:
@@ -455,16 +572,6 @@ def _start_attached(docker: list[str], name: str, *, budget: OutputBudget, deadl
         timeout_seconds=_remaining(deadline, timeout_seconds),
         deadline=deadline,
     )
-
-
-def _docker_resource_absent(result: CommandResult, *, kind: str) -> bool:
-    """Return whether Docker explicitly reported that a resource is absent."""
-    if result.status in (None, 0):
-        return False
-    detail = (result.stderr + result.stdout).decode("utf-8", errors="replace").lower()
-    if kind == "container":
-        return "no such container" in detail or "container not found" in detail
-    return "no such image" in detail or "image not found" in detail
 
 
 def _remove_transient_image(
@@ -619,20 +726,16 @@ def _reap_container(docker: list[str], name: str, *, budget_seconds: float = 5.0
                 hard_errors.append(f"{label} exited with status {result.status}")
         return result
 
-    state, inspected = _container_state(
+    state, inspected, inspection, inspection_attempts = _inspect_container_with_retry(
         docker,
         name,
-        timeout_seconds=min(1.0, max(0.01, deadline - time.monotonic())),
         deadline=deadline,
     )
-    if _docker_resource_absent(inspected, kind="container"):
+    if inspection == "absent":
         return [], None
-    if inspected.timed_out:
-        return ["timed out inspecting the container during cleanup"], None
-    if inspected.error:
-        return [f"container cleanup inspect failed: {inspected.error}"], None
-    if inspected.status != 0 or state is None:
-        return ["container exit status could not be inspected during cleanup"], None
+    if inspection != "present" or state is None:
+        diagnostic = _docker_inspect_diagnostic(inspected, state, inspection, inspection_attempts)
+        return [f"container exit status could not be inspected during cleanup: {diagnostic}"], None
 
     initial_status = state.get("Status")
     if initial_status == "exited":
@@ -662,19 +765,16 @@ def _reap_container(docker: list[str], name: str, *, budget_seconds: float = 5.0
         if remaining <= 0:
             hard_errors.append("container cleanup budget expired before exit inspection")
         else:
-            state, inspected = _container_state(
+            state, inspected, inspection, inspection_attempts = _inspect_container_with_retry(
                 docker,
                 name,
-                timeout_seconds=min(1.0, remaining),
                 deadline=deadline,
             )
-            if _docker_resource_absent(inspected, kind="container"):
+            if inspection == "absent":
                 state = None
-            elif inspected.timed_out:
-                hard_errors.append("timed out inspecting the container after stop/wait")
-                state = None
-            elif inspected.error or inspected.status != 0 or state is None:
-                hard_errors.append("container exit status could not be inspected after stop/wait")
+            elif inspection != "present" or state is None:
+                diagnostic = _docker_inspect_diagnostic(inspected, state, inspection, inspection_attempts)
+                hard_errors.append(f"container exit status could not be inspected after stop/wait: {diagnostic}")
                 state = None
             elif state.get("Status") == "exited":
                 value = state.get("ExitCode")
@@ -701,22 +801,27 @@ def _reap_container(docker: list[str], name: str, *, budget_seconds: float = 5.0
     if remaining <= 0:
         hard_errors.append("container cleanup budget expired after force removal")
         return hard_errors + status_one_errors, exit_status
-    final_state, final_inspected = _container_state(
+    final_state, final_inspected, final_inspection, final_inspection_attempts = _inspect_container_with_retry(
         docker,
         name,
-        timeout_seconds=min(1.0, remaining),
         deadline=deadline,
     )
-    if _docker_resource_absent(final_inspected, kind="container"):
+    if final_inspection == "absent":
         # Status one is tolerated only because this independent inspect proved
         # absence.  Other command failures remain hard failures.
         return hard_errors, exit_status
-    if final_inspected.timed_out:
-        hard_errors.append("timed out verifying container removal")
-    elif final_inspected.error or final_inspected.status != 0 or final_state is None:
-        hard_errors.append("container removal could not be verified")
+    final_diagnostic = _docker_inspect_diagnostic(
+        final_inspected,
+        final_state,
+        final_inspection,
+        final_inspection_attempts,
+    )
+    if final_inspection == "transient":
+        hard_errors.append(f"container removal could not be verified: {final_diagnostic}")
+    elif final_inspection == "present":
+        hard_errors.append(f"container still exists after docker rm --force: {final_diagnostic}")
     else:
-        hard_errors.append("container still exists after docker rm --force")
+        hard_errors.append(f"container removal could not be verified: {final_diagnostic}")
     return hard_errors + status_one_errors, exit_status
 
 

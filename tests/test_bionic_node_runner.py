@@ -686,6 +686,96 @@ class BionicNodeRunnerTests(unittest.TestCase):
         self.assertEqual([command[1] for command in calls], ["inspect", "rm", "inspect"])
         self.assertEqual(calls[1][2], "--force")
 
+    def test_docker_absence_accepts_no_such_object_inspect_response(self) -> None:
+        for kind in ("container", "image"):
+            with self.subTest(kind=kind):
+                result = RUNNER.CommandResult(1, b"", b"Error: No such object: named-resource\n")
+                self.assertTrue(RUNNER._docker_resource_absent(result, kind=kind))
+                successful_result = RUNNER.CommandResult(0, b"Error: No such object: named-resource\n", b"")
+                self.assertFalse(RUNNER._docker_resource_absent(successful_result, kind=kind))
+
+    def test_docker_absence_rejects_incomplete_no_such_object_results(self) -> None:
+        results = (
+            ("timed-out", RUNNER.CommandResult(1, b"", b"Error: No such object: named-resource\n", timed_out=True)),
+            ("output-limited", RUNNER.CommandResult(1, b"", b"Error: No such object: named-resource\n", output_limited=True)),
+        )
+        for kind in ("container", "image"):
+            for label, result in results:
+                with self.subTest(kind=kind, result=label):
+                    self.assertFalse(RUNNER._docker_resource_absent(result, kind=kind))
+
+    def test_container_cleanup_accepts_no_such_object_after_force_remove(self) -> None:
+        calls: list[list[str]] = []
+        inspect_count = 0
+
+        def fake_run(command, *, timeout_seconds, output_limit, deadline=None):
+            nonlocal inspect_count
+            del timeout_seconds, output_limit, deadline
+            command = list(command)
+            calls.append(command)
+            if command[1] == "inspect":
+                inspect_count += 1
+                if inspect_count == 1:
+                    return RUNNER.CommandResult(0, b'{"Status":"exited","ExitCode":0}', b"")
+                return RUNNER.CommandResult(1, b"", b"Error: No such object: named-container\n")
+            if command[1] == "rm":
+                return RUNNER.CommandResult(0, b"", b"")
+            raise AssertionError(command)
+
+        with patch.object(RUNNER, "run_bounded", side_effect=fake_run):
+            errors, status = RUNNER._reap_container(["docker"], "named-container", budget_seconds=3)
+        self.assertEqual(errors, [])
+        self.assertEqual(status, 0)
+        self.assertEqual([command[1] for command in calls], ["inspect", "rm", "inspect"])
+
+    def test_container_cleanup_reports_unknown_post_remove_inspect_without_removing_proof(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(command, *, timeout_seconds, output_limit, deadline=None):
+            del timeout_seconds, output_limit, deadline
+            command = list(command)
+            calls.append(command)
+            if command[1] == "inspect":
+                if len([item for item in calls if item[1] == "inspect"]) == 1:
+                    return RUNNER.CommandResult(0, b'{"Status":"exited","ExitCode":0}', b"")
+                return RUNNER.CommandResult(1, b"", b"permission denied\n")
+            if command[1] == "rm":
+                return RUNNER.CommandResult(0, b"", b"")
+            raise AssertionError(command)
+
+        with patch.object(RUNNER, "run_bounded", side_effect=fake_run):
+            errors, status = RUNNER._reap_container(["docker"], "named-container", budget_seconds=3)
+        self.assertTrue(errors)
+        self.assertEqual(status, 0)
+        self.assertIn("unknown inspect response", " ".join(errors))
+        self.assertEqual([command[1] for command in calls], ["inspect", "rm", "inspect"])
+
+    def test_container_cleanup_retries_transient_post_remove_inspect_before_absence(self) -> None:
+        calls: list[list[str]] = []
+        inspect_count = 0
+
+        def fake_run(command, *, timeout_seconds, output_limit, deadline=None):
+            nonlocal inspect_count
+            del timeout_seconds, output_limit, deadline
+            command = list(command)
+            calls.append(command)
+            if command[1] == "inspect":
+                inspect_count += 1
+                if inspect_count == 1:
+                    return RUNNER.CommandResult(0, b'{"Status":"exited","ExitCode":0}', b"")
+                if inspect_count == 2:
+                    return RUNNER.CommandResult(1, b"", b"Error response from daemon: removal of container named-container is already in progress\n")
+                return RUNNER.CommandResult(1, b"", b"Error: No such object: named-container\n")
+            if command[1] == "rm":
+                return RUNNER.CommandResult(0, b"", b"")
+            raise AssertionError(command)
+
+        with patch.object(RUNNER, "run_bounded", side_effect=fake_run):
+            errors, status = RUNNER._reap_container(["docker"], "named-container", budget_seconds=3)
+        self.assertEqual(errors, [])
+        self.assertEqual(status, 0)
+        self.assertEqual([command[1] for command in calls], ["inspect", "rm", "inspect", "inspect"])
+
     def test_container_cleanup_rejects_unverified_status_one_and_running_container(self) -> None:
         calls: list[list[str]] = []
 
@@ -704,6 +794,7 @@ class BionicNodeRunnerTests(unittest.TestCase):
         self.assertTrue(errors)
         self.assertIsNone(status)
         self.assertIn("status 1", " ".join(errors))
+        self.assertIn("inspect Status='running'", " ".join(errors))
         self.assertEqual([command[1] for command in calls], ["inspect", "stop", "wait", "inspect", "rm", "inspect"])
 
     def test_transient_image_cleanup_retries_and_requires_verified_absence(self) -> None:
