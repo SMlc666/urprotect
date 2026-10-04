@@ -144,7 +144,20 @@ class BionicNodeRuntimeLockTests(unittest.TestCase):
             "--no-overwrite-dir --no-same-owner --no-same-permissions --touch",
             source,
         )
-        self.assertIn('tar --create --file=- --directory="$stage_dir" . |', source)
+        self.assertIn('merge_list_file="${stage_dir}.merge-list"', source)
+        self.assertIn('replace_list_file="${stage_dir}.replace-list"', source)
+        self.assertIn(
+            'rm -rf -- "$stage_dir" "$merge_list_file" "$replace_list_file" "$tar_error_file"',
+            source,
+        )
+        self.assertIn('prepare_replace_list', source)
+        self.assertIn('xargs -0 -r rm -f -- < "$replace_list_file"', source)
+        self.assertIn(
+            'tar --create --file=- --directory="$stage_dir" --null '
+            '--no-recursion --files-from="$merge_list_file" |',
+            source,
+        )
+        self.assertNotIn('tar --create --file=- --directory="$stage_dir" . |', source)
         self.assertIn(
             'tar --extract --file=- --directory="$root_prefix" --no-overwrite-dir '
             '--no-same-owner --same-permissions --touch',

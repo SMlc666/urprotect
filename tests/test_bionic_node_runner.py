@@ -157,7 +157,15 @@ class BionicNodeRunnerTests(unittest.TestCase):
         setpriv = shutil.which("setpriv")
         if setpriv is not None and os.geteuid() == 0:
             command = [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", *command]
-        return subprocess.run(command, check=False, capture_output=True, text=True, env=environment, timeout=5)
+        temporary_paths_before = set(Path("/tmp").glob("urprotect-package.*"))
+        result = subprocess.run(command, check=False, capture_output=True, text=True, env=environment, timeout=5)
+        temporary_paths_after = set(Path("/tmp").glob("urprotect-package.*"))
+        self.assertEqual(
+            temporary_paths_after - temporary_paths_before,
+            set(),
+            "package stage or temporary merge lists were left behind",
+        )
+        return result
 
     def test_named_container_identity_is_written_to_worker_cleanup_registry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -384,7 +392,20 @@ class BionicNodeRunnerTests(unittest.TestCase):
             self.assertIn('trap cleanup_stage EXIT', setup_text)
             self.assertIn('umask 000', setup_text)
             self.assertIn('find "$stage_dir" -mindepth 1 -print0 | validate_stage', setup_text)
-            self.assertIn('tar --create --file=- --directory="$stage_dir" . |', setup_text)
+            self.assertIn('merge_list_file="${stage_dir}.merge-list"', setup_text)
+            self.assertIn('replace_list_file="${stage_dir}.replace-list"', setup_text)
+            self.assertIn(
+                'rm -rf -- "$stage_dir" "$merge_list_file" "$replace_list_file" "$tar_error_file"',
+                setup_text,
+            )
+            self.assertIn('prepare_replace_list', setup_text)
+            self.assertIn('xargs -0 -r rm -f -- < "$replace_list_file"', setup_text)
+            self.assertIn(
+                'tar --create --file=- --directory="$stage_dir" --null '
+                '--no-recursion --files-from="$merge_list_file" |',
+                setup_text,
+            )
+            self.assertNotIn('tar --create --file=- --directory="$stage_dir" . |', setup_text)
             self.assertIn(
                 'tar --extract --file=- --directory="$root_prefix" --no-overwrite-dir '
                 '--no-same-owner --same-permissions --touch',
@@ -436,6 +457,9 @@ class BionicNodeRunnerTests(unittest.TestCase):
             payload = root / "payload"
             payload_nested = payload / "data" / "data"
             payload_nested.mkdir(parents=True)
+            fresh_directory = payload_nested / "fresh-directory"
+            fresh_directory.mkdir(mode=0o751)
+            fresh_directory.chmod(0o751)
             executable = payload_nested / "node"
             executable.write_text("#!/bin/sh\\necho node\\n", encoding="utf-8")
             executable.chmod(0o755)
@@ -473,6 +497,8 @@ class BionicNodeRunnerTests(unittest.TestCase):
             if os.geteuid() == 0:
                 self.assertEqual(data.stat().st_uid, 0)
                 self.assertEqual(nested.stat().st_uid, 0)
+            installed_directory = nested / "fresh-directory"
+            self.assertEqual(stat.S_IMODE(installed_directory.stat().st_mode), 0o751)
             installed = nested / "node"
             self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o755)
             self.assertEqual(installed.read_text(encoding="utf-8"), "#!/bin/sh\\necho node\\n")
@@ -534,10 +560,111 @@ class BionicNodeRunnerTests(unittest.TestCase):
                 elif kind == "traversal":
                     self.assertFalse((root / "evil").exists())
                 elif kind == "symlink-parent":
-                    self.assertIn("package path traverses a symlink", result.stderr)
+                    self.assertIn("package directory conflicts with a symlink", result.stderr)
                     self.assertFalse((outside / "evil").exists())
                 else:
                     self.assertIn("unsupported package payload entry", result.stderr)
+
+    def test_staged_merge_replaces_existing_regular_files_and_symlinks(self) -> None:
+        if shutil.which("setpriv") is None:
+            self.skipTest("setpriv is unavailable")
+
+        cases = (
+            ("regular-to-regular", "regular", "regular"),
+            ("regular-to-symlink", "regular", "symlink"),
+            ("symlink-to-regular", "symlink", "regular"),
+            ("symlink-to-symlink", "symlink", "symlink"),
+        )
+        for kind, existing_type, staged_type in cases:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                root.chmod(0o755)
+                rootfs = root / "rootfs"
+                rootfs.mkdir()
+                rootfs.chmod(0o777)
+                destination = rootfs / "entry"
+                old_target = rootfs / "old-target"
+                new_target = rootfs / "new-target"
+                old_target.write_text("old-target\\n", encoding="utf-8")
+                new_target.write_text("new-target\\n", encoding="utf-8")
+
+                if existing_type == "regular":
+                    destination.write_text("old regular\\n", encoding="utf-8")
+                else:
+                    destination.symlink_to("old-target")
+
+                payload = root / "payload"
+                payload.mkdir()
+                staged_entry = payload / "entry"
+                if staged_type == "regular":
+                    staged_entry.write_text("new regular\\n", encoding="utf-8")
+                    staged_entry.chmod(0o755)
+                else:
+                    staged_entry.symlink_to("new-target")
+
+                archive = root / "package-data.tar"
+                with tarfile.open(archive, "w") as tar:
+                    tar.add(staged_entry, arcname="entry")
+
+                result = self._run_package_merge(root, archive, rootfs)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(old_target.read_text(encoding="utf-8"), "old-target\\n")
+                self.assertEqual(new_target.read_text(encoding="utf-8"), "new-target\\n")
+                if staged_type == "regular":
+                    self.assertFalse(destination.is_symlink())
+                    self.assertTrue(destination.is_file())
+                    self.assertEqual(destination.read_text(encoding="utf-8"), "new regular\\n")
+                    self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o755)
+                else:
+                    self.assertTrue(destination.is_symlink())
+                    self.assertEqual(os.readlink(destination), "new-target")
+
+    def test_staged_merge_rejects_directory_symlink_type_conflicts(self) -> None:
+        if shutil.which("setpriv") is None:
+            self.skipTest("setpriv is unavailable")
+
+        cases = (
+            ("directory-over-symlink", "package directory conflicts with a symlink"),
+            ("symlink-over-directory", "package symlink conflicts with a directory"),
+        )
+        for kind, diagnostic in cases:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                root.chmod(0o755)
+                rootfs = root / "rootfs"
+                rootfs.mkdir()
+                rootfs.chmod(0o755)
+                destination = rootfs / "conflict"
+                payload = root / "payload"
+                payload.mkdir()
+
+                if kind == "directory-over-symlink":
+                    outside = root / "outside"
+                    outside.mkdir()
+                    destination.symlink_to(outside, target_is_directory=True)
+                    payload_entry_type = tarfile.DIRTYPE
+                else:
+                    destination.mkdir()
+                    payload_entry_type = tarfile.SYMTYPE
+
+                archive = root / "package-data.tar"
+                with tarfile.open(archive, "w") as tar:
+                    info = tarfile.TarInfo("conflict")
+                    info.type = payload_entry_type
+                    info.mode = 0o755
+                    if payload_entry_type == tarfile.SYMTYPE:
+                        info.linkname = "target"
+                    tar.addfile(info)
+
+                result = self._run_package_merge(root, archive, rootfs)
+
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr.strip(), f"{diagnostic}: {destination}")
+                if kind == "directory-over-symlink":
+                    self.assertTrue(destination.is_symlink())
+                else:
+                    self.assertTrue(destination.is_dir())
 
     def test_container_cleanup_proves_normal_already_exited_container_is_removed(self) -> None:
         calls: list[list[str]] = []

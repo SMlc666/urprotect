@@ -722,6 +722,7 @@ def _reap_container(docker: list[str], name: str, *, budget_seconds: float = 5.0
 
 BIONIC_PACKAGE_MERGE_SCRIPT = """\\
 set -eu
+set -o pipefail
 archive=$1
 root_dir=$2
 case "$root_dir" in
@@ -731,10 +732,12 @@ esac
 root_prefix=${root_dir%/}
 [ -n "$root_prefix" ] || root_prefix=/
 stage_dir="$(mktemp -d /tmp/urprotect-package.XXXXXX)"
+merge_list_file="${stage_dir}.merge-list"
+replace_list_file="${stage_dir}.replace-list"
 tar_error_file="${stage_dir}.tar-errors"
 cleanup_stage() {
   status=$?
-  rm -rf -- "$stage_dir" "$tar_error_file" || status=74
+  rm -rf -- "$stage_dir" "$merge_list_file" "$replace_list_file" "$tar_error_file" || status=74
   exit "$status"
 }
 trap cleanup_stage EXIT
@@ -792,8 +795,12 @@ validate_stage_entry() {
     if [[ -L "$destination" ]]; then
       return 0
     fi
+    if [[ -d "$destination" ]]; then
+      echo "package symlink conflicts with a directory: $destination" >&2
+      return 1
+    fi
     if [[ -e "$destination" ]]; then
-      [[ -d "$destination" ]] || [[ -f "$destination" ]] || {
+      [[ -f "$destination" ]] || {
         echo "package symlink conflicts with a non-regular path: $destination" >&2
         return 1
       }
@@ -804,7 +811,8 @@ validate_stage_entry() {
 
   if [[ -d "$entry" ]]; then
     if [[ -L "$destination" ]]; then
-      return 0
+      echo "package directory conflicts with a symlink: $destination" >&2
+      return 1
     fi
     if [[ -e "$destination" ]]; then
       [[ -d "$destination" ]] || {
@@ -833,16 +841,45 @@ validate_stage_entry() {
 }
 
 validate_stage() {
-  local entry
+  local entry relative destination
+  : > "$merge_list_file" || return 1
   while IFS= read -r -d "" entry; do
     validate_stage_entry "$entry" || return 1
+    relative=${entry#"$stage_dir"/}
+    destination="$root_prefix/$relative"
+    if [[ ! -L "$entry" && -d "$entry" && ( -e "$destination" || -L "$destination" ) ]]; then
+      continue
+    fi
+    printf '%s\\0' "$relative" >> "$merge_list_file" || return 1
   done
 }
 
+# Run only after every staged path has passed validation. The replace list is
+# NUL-delimited and contains validated absolute leaf paths, never directories.
+prepare_replace_list() {
+  local relative entry destination
+  : > "$replace_list_file" || return 1
+  while IFS= read -r -d "" relative; do
+    validate_relative_path "$relative" || return 1
+    entry="$stage_dir/$relative"
+    destination="$root_prefix/$relative"
+    validate_destination_parent "$destination" || return 1
+    if [[ -L "$entry" || -f "$entry" ]]; then
+      if [[ -L "$destination" || -f "$destination" ]]; then
+        printf '%s\\0' "$destination" >> "$replace_list_file" || return 1
+      fi
+    elif [[ ! -d "$entry" ]]; then
+      echo "unsupported staged replacement entry: $entry" >&2
+      return 1
+    fi
+  done < "$merge_list_file"
+}
+
 # Keep the package's ordinary executable bits in the user-owned stage while
-# still dropping ownership and privileged mode bits. The destination tar pass
-# applies those staged modes only to new files/directories or replaced files;
-# --no-overwrite-dir leaves existing directory metadata alone.
+# still dropping ownership and privileged mode bits. The validated NUL list
+# contains every non-directory entry and only directories absent at the
+# destination, so the destination tar pass never receives existing directories;
+# staged modes apply to new files/directories or replaced files.
 if (
   umask 000
   dpkg-deb --fsys-tarfile "$archive" |
@@ -861,8 +898,12 @@ fi
 rm -f -- "$tar_error_file"
 
 find "$stage_dir" -mindepth 1 -print0 | validate_stage
+prepare_replace_list
+# xargs bounds rm's argument batches and preserves each validated path as one
+# argument, including names containing whitespace or newlines.
+xargs -0 -r rm -f -- < "$replace_list_file"
 
-tar --create --file=- --directory="$stage_dir" . |
+tar --create --file=- --directory="$stage_dir" --null --no-recursion --files-from="$merge_list_file" |
   tar --extract --file=- --directory="$root_prefix" --no-overwrite-dir --no-same-owner --same-permissions --touch
 """
 
