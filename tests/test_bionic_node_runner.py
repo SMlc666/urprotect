@@ -354,6 +354,14 @@ class BionicNodeRunnerTests(unittest.TestCase):
             self.assertNotIn("bionic-ready", setup_text)
             self.assertNotIn("/tmp/urp-packages", setup_text)
             self.assertIn("dpkg-query -W -f='${Package}", setup_text)
+            self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', setup_text)
+            self.assertIn(
+                'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
+                "--directory=/ --no-same-owner --no-same-permissions --touch",
+                setup_text,
+            )
+            self.assertIn('package data extraction failed: $package_name', setup_text)
+            self.assertNotIn("dpkg-deb --extract", setup_text)
 
     def test_container_cleanup_proves_normal_already_exited_container_is_removed(self) -> None:
         calls: list[list[str]] = []

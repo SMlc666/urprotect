@@ -779,9 +779,13 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
   dependency fields, argv, expected status, absolute RUNPATH, outer mode, and
   resource limits are cross-checked by the runner and evidence gate.
 - Bionic package replay uses direct HTTPS archive acquisition with exact
-  size/hash verification and `dpkg-deb --extract` only. It does not run apt,
-  consult a package index, execute maintainer scripts, or use a mutable host
-  library. Base and extracted package inventories use the same canonical
+  size/hash verification and streams each package's data archive through
+  `dpkg-deb --fsys-tarfile` into the locked Termux GNU `tar` with
+  `--no-same-owner --no-same-permissions --touch`, under the locked base
+  Bash's `pipefail` mode so producer or extractor failures remain fatal. This
+  applies the container umask while preserving executable bits. It does not run
+  apt, consult a package index, execute maintainer scripts, or use a mutable host library.
+  Base and extracted package inventories use the same canonical
   `${Package}\t${Version}\t${Architecture}\t${Status}` query.
 - The Node executable must have exactly one absolute `DT_RUNPATH` equal to
   `/data/data/com.termux/files/usr/lib`, no `DT_RPATH`, no `$ORIGIN`, and no

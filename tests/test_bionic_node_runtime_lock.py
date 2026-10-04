@@ -138,7 +138,13 @@ class BionicNodeRuntimeLockTests(unittest.TestCase):
         entrypoint = RUNNER.read_text(encoding="utf-8")
         self.assertIn("--source-archive", source)
         self.assertIn("--max-filesize", source)
-        self.assertIn("dpkg-deb --extract", source)
+        self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', source)
+        self.assertIn(
+            'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
+            "--directory=/ --no-same-owner --no-same-permissions --touch",
+            source,
+        )
+        self.assertNotIn("dpkg-deb --extract", source)
         self.assertIn('"--network", "none"', source)
         self.assertIn('"--user", "1000:1000"', source)
         self.assertIn("outer-path-preserving", source)

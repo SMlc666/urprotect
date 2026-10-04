@@ -623,7 +623,13 @@ class BionicNodeClosureTests(unittest.TestCase):
         entrypoint = (ROOT / "scripts/run-bionic-node-sample.sh").read_text(encoding="utf-8")
         self.assertIn("--source-archive", source)
         self.assertIn("--outer-mode", source)
-        self.assertIn("dpkg-deb --extract", source)
+        self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', source)
+        self.assertIn(
+            'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
+            "--directory=/ --no-same-owner --no-same-permissions --touch",
+            source,
+        )
+        self.assertNotIn("dpkg-deb --extract", source)
         self.assertIn('"--network", "none"', source)
         self.assertNotIn("apt-get", source)
         self.assertNotIn("environment-unavailable: bionic Node.js dependency closure is not locked", source)

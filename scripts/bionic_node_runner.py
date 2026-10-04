@@ -741,7 +741,10 @@ while IFS=\"$(printf '\\t')\" read -r package_name package_version package_arch 
   [ \"$(dpkg-deb -f \"$archive\" Package)\" = \"$package_name\" ] || { echo \"package identity mismatch: $package_name\" >&2; exit 68; }
   [ \"$(dpkg-deb -f \"$archive\" Version)\" = \"$package_version\" ] || { echo \"package version mismatch: $package_name\" >&2; exit 69; }
   [ \"$(dpkg-deb -f \"$archive\" Architecture)\" = \"$package_arch\" ] || { echo \"package architecture mismatch: $package_name\" >&2; exit 70; }
-  dpkg-deb --extract \"$archive\" /
+  "$PREFIX/bin/bash" -o pipefail -c '
+    archive=$1
+    dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- --directory=/ --no-same-owner --no-same-permissions --touch
+  ' -- "$archive" || { echo "package data extraction failed: $package_name" >&2; exit 74; }
 done < /metadata/packages.tsv
 dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\t${Status}\\n' | sort | cmp -- /metadata/base.tsv - || { echo 'package extraction changed the package inventory' >&2; exit 71; }
 [ -f \"__URP_ARTIFACT_PATH__\" ] || { echo 'extracted Node.js executable is missing' >&2; exit 72; }
