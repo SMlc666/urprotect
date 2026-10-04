@@ -87,6 +87,41 @@ class RealSampleWorkerTests(unittest.TestCase):
 
         compile(embedded_python, f"{MATRIX}:PYSANITIZE", "exec")
 
+    def test_evidence_sanitizer_redacts_transient_directory_names(self) -> None:
+        source = MATRIX.read_text(encoding="utf-8")
+        opening = source.index("<<'PYSANITIZE'; then\n") + len("<<'PYSANITIZE'; then\n")
+        closing = source.index("\nPYSANITIZE\n", opening)
+        embedded_python = source[opening:closing]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            retained = root / "diagnostic.txt"
+            retained.write_text(
+                "path=PosixPath('<runner-temp>/urprotect-bionic-node.ABC123/wrapper/urprotect-packed')\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    "-",
+                    str(root),
+                    "/tmp/source-root",
+                    "/tmp/runner-temp",
+                    "/tmp/package-cache",
+                    "/tmp/archive-cache",
+                    "/tmp/index-cache",
+                ],
+                cwd=ROOT,
+                input=embedded_python,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            sanitized = retained.read_text(encoding="utf-8")
+            self.assertNotIn("urprotect-bionic-node.", sanitized)
+            self.assertIn("<runner-temp>", sanitized)
+
     def test_bionic_policy_heredoc_keeps_repo_argument_in_argv_shape(self) -> None:
         source = MATRIX.read_text(encoding="utf-8")
         opening = source.index("<<'PY_BIONIC_POLICY'\n") + len("<<'PY_BIONIC_POLICY'\n")

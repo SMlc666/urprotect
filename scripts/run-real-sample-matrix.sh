@@ -194,6 +194,7 @@ import sys
 
 root = Path(sys.argv[1])
 replacements = [value.encode("utf-8") for value in sys.argv[2:] if value]
+transient_directory = re.compile(rb"urprotect-(?:real-samples|bionic-node)[A-Za-z0-9_.-]*")
 try:
     paths = list(root.rglob("*"))
 except OSError as error:
@@ -218,12 +219,16 @@ for path in paths:
         sanitized = data
         for value in replacements:
             sanitized = sanitized.replace(value, b"<runner-temp>")
+        sanitized = transient_directory.sub(b"<runner-temp>", sanitized)
         if sanitized != data:
             path.write_bytes(sanitized)
         for value in replacements:
             if value and value in sanitized:
                 print(f"evidence sanitizer left a raw temporary path in {path}", file=sys.stderr)
                 raise SystemExit(1)
+        if transient_directory.search(sanitized):
+            print(f"evidence sanitizer left a transient directory name in {path}", file=sys.stderr)
+            raise SystemExit(1)
     except (OSError, UnicodeError) as error:
         print(f"evidence sanitizer could not sanitize retained evidence: {error}", file=sys.stderr)
         raise SystemExit(1)
