@@ -245,6 +245,132 @@ normalize_worker_script "$2" "$3" "$4"
             )
             self.assertEqual(normalized_syntax.returncode, 0, normalized_syntax.stderr)
 
+    def test_worker_normalizer_handles_trailing_shell_syntax_and_tab_marker(self) -> None:
+        definitions = self._worker_definition_source()
+        fixture = """#!/usr/bin/env bash
+set -euo pipefail
+if ! python3 - <<-'PY_TRAILING'; then
+print("fixture")
+\tPY_TRAILING
+  printf '%s\\n' 'python failed' >&2
+  exit 1
+fi
+if ! python3 - <<PY_UNQUOTED; then
+print("unquoted fixture")
+PY_UNQUOTED
+  printf '%s\\n' 'python failed' >&2
+  exit 1
+fi
+"""
+        normalizer = r'''set -euo pipefail
+source "$1"
+normalize_worker_script "$2" "$3" "$4"
+'''
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            definitions_path = root / "worker-definitions.sh"
+            registry = root / "worker-registry"
+            worker_path = registry / "worker-1.TRAILING.sh"
+            registry.mkdir(mode=0o700)
+            registry.chmod(0o700)
+            definitions_path.write_text(definitions, encoding="utf-8")
+            worker_path.write_text(fixture, encoding="utf-8")
+            worker_path.chmod(0o600)
+
+            before = worker_path.read_text(encoding="utf-8")
+            self.assertIn("<<-'PY_TRAILING'; then\n", before)
+            self.assertIn("\tPY_TRAILING\n", before)
+            self.assertIn("<<PY_UNQUOTED; then\n", before)
+            initial_syntax = subprocess.run(
+                ["bash", "-n", str(worker_path)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(initial_syntax.returncode, 0, initial_syntax.stderr)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    normalizer,
+                    "worker-normalizer",
+                    str(definitions_path),
+                    str(worker_path),
+                    str(registry),
+                    "1",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            normalized = worker_path.read_text(encoding="utf-8")
+            for marker in ("PY_TRAILING", "PY_UNQUOTED"):
+                self.assertIn(f"\n{marker}\n", normalized)
+            self.assertNotIn("\tPY_TRAILING\n", normalized)
+            normalized_syntax = subprocess.run(
+                ["bash", "-n", str(worker_path)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(normalized_syntax.returncode, 0, normalized_syntax.stderr)
+
+    def test_worker_normalizer_rejects_unpaired_and_extra_markers(self) -> None:
+        definitions = self._worker_definition_source()
+        normalizer = r'''set -euo pipefail
+source "$1"
+normalize_worker_script "$2" "$3" "$4"
+'''
+        malformed_fixtures = {
+            "unpaired-opening": "#!/usr/bin/env bash\npython3 <<'PY_EXPECTED'\nprint('x')\n",
+            "unpaired-marker": (
+                "#!/usr/bin/env bash\npython3 <<'PY_EXPECTED'\n"
+                "PY_OTHER\nPY_EXPECTED\n"
+            ),
+            "duplicate-marker": (
+                "#!/usr/bin/env bash\npython3 <<'PY_EXPECTED'\n"
+                "PY_EXPECTED\nPY_EXPECTED\n"
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            definitions_path = root / "worker-definitions.sh"
+            registry = root / "worker-registry"
+            registry.mkdir(mode=0o700)
+            registry.chmod(0o700)
+            definitions_path.write_text(definitions, encoding="utf-8")
+
+            for suffix, fixture in malformed_fixtures.items():
+                with self.subTest(fixture=suffix):
+                    worker_path = registry / f"worker-1.{suffix}.sh"
+                    worker_path.write_text(fixture, encoding="utf-8")
+                    worker_path.chmod(0o600)
+                    result = subprocess.run(
+                        [
+                            "bash",
+                            "-c",
+                            normalizer,
+                            "worker-normalizer",
+                            str(definitions_path),
+                            str(worker_path),
+                            str(registry),
+                            "1",
+                        ],
+                        cwd=ROOT,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+
     def test_worker_normalizer_rejects_unexpected_and_symlink_paths(self) -> None:
         definitions = self._worker_definition_source()
         normalizer = r'''set -euo pipefail

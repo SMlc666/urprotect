@@ -1536,9 +1536,15 @@ from pathlib import Path
 
 MAX_WORKER_SCRIPT_BYTES = 4 * 1024 * 1024
 OPENING = re.compile(
-    r"(?<!<)<<-?[ \t]*(?P<quote>['\"]?)(?P<delimiter>PY[A-Za-z0-9_]*)(?P=quote)(?:[ \t]*(?:#.*)?)$"
+    r"(?<!<)<<-?[ \t]*(?P<quote>['\"]?)(?P<delimiter>PY[A-Za-z0-9_]*)(?P=quote)"
+    r"[ \t]*(?:(?:;[ \t]*(?:then|do)\b)|(?:#[^\r\n]*))?[ \t]*$"
 )
-STANDALONE_MARKER = re.compile(r"[ \t]*PY[A-Za-z0-9_]*[ \t]*(?:\r?\n)?$")
+STANDALONE_MARKER = re.compile(r"PY[A-Za-z0-9_]*$")
+
+
+def standalone_marker(line: str) -> str | None:
+    marker = line.rstrip("\r\n").strip(" \t")
+    return marker if STANDALONE_MARKER.fullmatch(marker) else None
 
 
 def fail(message: str) -> None:
@@ -1620,8 +1626,10 @@ while line_index < len(lines):
     delimiter = match.group("delimiter")
     terminator_index = None
     for candidate_index in range(line_index + 1, len(lines)):
-        candidate = lines[candidate_index].rstrip("\r\n")
-        if candidate.strip() == delimiter:
+        candidate_marker = standalone_marker(lines[candidate_index])
+        if candidate_marker is None:
+            continue
+        if candidate_marker == delimiter:
             terminator_index = candidate_index
             break
     if terminator_index is None:
@@ -1640,7 +1648,8 @@ while line_index < len(lines):
 if heredoc_count == 0:
     fail("worker function graph contains no Python heredocs")
 for index, line in enumerate(rewritten_lines):
-    if index not in terminator_indexes and STANDALONE_MARKER.fullmatch(line):
+    marker = standalone_marker(line)
+    if index not in terminator_indexes and marker is not None:
         fail(f"unexpected Python heredoc marker on line {index + 1}")
 
 rewritten = "".join(rewritten_lines)
