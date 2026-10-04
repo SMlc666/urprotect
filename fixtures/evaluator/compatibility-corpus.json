@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "kind": "compatibility-corpus",
+  "corpusVersion": "compat-corpus-v1",
+  "appendOnly": true,
+  "fixedRowIds": [
+    "compat.protection-symbolized-fixture.glibc.outer-execveat"
+  ],
+  "retainedEvidenceRegistries": [
+    {
+      "registryId": "fixture-matrix",
+      "path": "fixtures/manifest.json",
+      "sha256": "c354380e84234e6dd94a9d848956010a2d92ad4014dcec24bf5e466eb9a3ddab",
+      "role": "auxiliary-not-strict-chain"
+    },
+    {
+      "registryId": "public-real-sample-corpus",
+      "path": "fixtures/real-samples/manifest.json",
+      "sha256": "600b6ed362d440bab32eae7632899d40cdf607c0926150399477f057f0badabf",
+      "role": "auxiliary-not-strict-chain"
+    },
+    {
+      "registryId": "runtime-covering-matrix",
+      "path": "fixtures/runtime-matrix.json",
+      "sha256": "8d778d22926ba5e2791f46821623700e0baccad3fce26201e10ba6cf0ea0dac5",
+      "role": "auxiliary-runtime-environment"
+    },
+    {
+      "registryId": "explicit-protection-policy",
+      "path": "fixtures/real-samples/protection-policy.json",
+      "sha256": "bb4f7be9f3253c98d00da4404c3aec421bab76171bada60ff9dc9f63c8119666",
+      "role": "auxiliary-protection-evidence"
+    }
+  ],
+  "rows": [
+    {
+      "unitId": "compat.protection-symbolized-fixture.glibc.outer-execveat",
+      "identityKey": "protection-symbolized-fixture",
+      "sourceProvenance": "fixtures/samples/protection/main.c",
+      "sourceSha256": "4f26b59a88c9ccfac1edee65dddb5f3bef2db4d7e7cfad99ec1d032fd8864088",
+      "producerId": "gcc-c-protection-fixture",
+      "producerRecipeSha256": "11c1cb4ad423536b89d95219d45cdbee7d25ef92074fc933e19c18903555f433",
+      "featureTags": [
+        "AArch64",
+        "ET_DYN",
+        "PT_DYNAMIC",
+        "explicit-function-protection"
+      ],
+      "profile": "outer-execveat",
+      "runtimeCell": "glibc.current.native-arm64",
+      "targetLoader": "kernel.execveat-at-empty-path",
+      "oracleId": "fixture.process-oracle.v1",
+      "applicable": true,
+      "required": true,
+      "registrationStatus": "frozen",
+      "auxiliaryEvidence": [
+        "fixtures/real-samples/protection-policy.json",
+        "scripts/run-protection-e2e.sh",
+        "scripts/check-protection-evidence.py"
+      ]
+    }
+  ],
+  "negativeRows": [
+    {
+      "id": "compat.legacy-direct-protected-elf-not-strict-chain",
+      "reason": "A direct protected ELF has no Protected Image ABI or rehydration record and is retained only as auxiliary evidence.",
+      "required": false
+    }
+  ]
+}

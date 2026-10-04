@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review bounded evidence, stable status/error contracts, focused tests, fuzz retention, and CI behavior."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Review native runtime identity, no silent skips, and correct layer-specific claims."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Review placement and ownership of evaluator scripts, manifests, tests, and artifacts."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/compatibility-protocol.md","reason":"Verify fixed/growth corpus, six stages, baseline-zero, and exact compatibility gate."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/scheme-a-protocol.md","reason":"Verify per-family strict 100x, raw attack evidence, objective predicates, and anti-gaming."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/ci-evidence-contract.md","reason":"Verify artifact closure, failure retention, evaluator isolation, and analysis handoff."}

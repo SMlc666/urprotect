@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "kind": "scheme-a-manifest",
+  "protocolVersion": "scheme-a-v1",
+  "appendOnly": true,
+  "profile": "scheme-a-glibc-v1",
+  "fixtureId": "compat.protection-symbolized-fixture.glibc.outer-execveat",
+  "sourceSha256": "4f26b59a88c9ccfac1edee65dddb5f3bef2db4d7e7cfad99ec1d032fd8864088",
+  "publishedArtifactSha256": null,
+  "publishedArtifactStatus": "not-produced",
+  "baselineArtifactId": "scheme-a-baseline-v1",
+  "baselineStatus": "baseline-not-calibrated",
+  "replicaCount": 3,
+  "seed": "scheme-a-v1-fixed-seed-0001",
+  "threatModel": {
+    "version": 1,
+    "statement": "The attacker may read and execute the published artifact and use only the listed tools. The attacker may not modify the evaluator, oracle, manifests, or baseline and has no secret blue-team input.",
+    "network": "disabled",
+    "manualSteps": 0
+  },
+  "budget": {
+    "wallSeconds": 60,
+    "cpuSeconds": 45,
+    "rssBytes": 1073741824,
+    "processLimit": 32,
+    "outputBytes": 16777216,
+    "rawArtifactBytes": 268435456,
+    "manualSteps": 0,
+    "networkDisabled": true
+  },
+  "requiredFamilies": [
+    {
+      "familyId": "runtime_dump_reassembly",
+      "required": true,
+      "applicable": true,
+      "attackRecipeSha256": "6dfba53f079aac848aeca71482742140de88a5efdcfd4d77a848d50eb3774548",
+      "objective": "A reassembled artifact must be accepted by the target native loader and pass the frozen behavior oracle.",
+      "tool": {
+        "name": "scheme-a-dump-reassembly-toolset",
+        "version": null,
+        "binarySha256": null,
+        "availability": "not-calibrated"
+      }
+    },
+    {
+      "familyId": "patch_repack",
+      "required": true,
+      "applicable": true,
+      "attackRecipeSha256": "ba0b86f65133abf85dd7c85c17138f1705102ae7d24eb2565324282181ae9cf9",
+      "objective": "A pre-registered behavior mutation must survive patch/repack, reach the target loader, and be observed by the frozen oracle.",
+      "tool": {
+        "name": "scheme-a-patch-repack-toolset",
+        "version": null,
+        "binarySha256": null,
+        "availability": "not-calibrated"
+      }
+    },
+    {
+      "familyId": "function_logic_recovery",
+      "required": true,
+      "applicable": true,
+      "attackRecipeSha256": "ec60eab0ff9a470adaf41f5e97d6f5e814b2572b7919ad98f024b315b5006eef",
+      "objective": "Machine-readable recovered logic must meet frozen semantic and structural thresholds with zero manual steps.",
+      "tool": {
+        "name": "scheme-a-logic-recovery-toolset",
+        "version": null,
+        "binarySha256": null,
+        "availability": "not-calibrated"
+      }
+    },
+    {
+      "familyId": "static_decomposition",
+      "required": true,
+      "applicable": true,
+      "attackRecipeSha256": "be594731a9ed294a9726e5913230e012d8e9d6cd2ba865b49c73ec95ec03436a",
+      "objective": "Pinned static tools must recover the frozen segment, code/data, function, and CFG inventory thresholds.",
+      "tool": {
+        "name": "scheme-a-static-toolset",
+        "version": null,
+        "binarySha256": null,
+        "availability": "not-calibrated"
+      }
+    },
+    {
+      "familyId": "dynamic_instrumentation",
+      "required": true,
+      "applicable": true,
+      "attackRecipeSha256": "e91527c09cfe9bbccf1ec53cdb0963e96a3381d3dee15bdc0fd2ec9be608badb",
+      "objective": "The frozen internal trace/state threshold or a registered unauthorized replacement must be observed on a valid target.",
+      "tool": {
+        "name": "scheme-a-dynamic-instrumentation-toolset",
+        "version": null,
+        "binarySha256": null,
+        "availability": "not-calibrated"
+      }
+    },
+    {
+      "familyId": "integrity_handoff",
+      "required": true,
+      "applicable": true,
+      "attackRecipeSha256": "0cc17257737e9015ac391e544cd2cfcb05b86af31a1994e73c7f192f8d5390f5",
+      "objective": "A tampered or replayed artifact must reach forbidden behavior/loader markers or bypass a required pre-handoff rejection.",
+      "tool": {
+        "name": "scheme-a-integrity-toolset",
+        "version": null,
+        "binarySha256": null,
+        "availability": "not-calibrated"
+      }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Evaluator schemas, bounded evidence, stable diagnostics, tests, fuzzing, and CI retention follow backend quality rules."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Native AArch64 runtime cells, evidence layers, environment statuses, and profile-specific handoff rules."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Ownership of scripts, fixtures, tests, native runtime, and report artifacts."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/baseline-evaluator-protocol.md","reason":"Measured repository facts and evaluator residual blockers."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/compatibility-protocol.md","reason":"Strict six-stage compatibility and exact count gate."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/scheme-a-protocol.md","reason":"Scheme-A attack families, cost formula, replicas, evidence, and anti-gaming."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/ci-evidence-contract.md","reason":"Evaluator artifact tree, CI job, status semantics, and analysis handoff."}

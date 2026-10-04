@@ -894,3 +894,89 @@ attempt the required tier oracle
 -> sanitize and prove worker/container/image cleanup
 -> publish accepted-and-runs only after the target actually ran
 ```
+
+
+## Scenario: Independent compatibility and Scheme-A evaluator
+
+### 1. Scope / Trigger
+
+This contract applies when CI measures the parent 100x goal. The evaluator is a read-only control plane under `scripts/`, `fixtures/evaluator/`, `tests/`, and `.artifacts/evaluator/<tier>/`; it binds product evidence but does not implement a Protected Image, rehydrator, loader, protection pass, or attack tool. Existing fixture, real-sample, runtime, benchmark, test, and fuzz jobs remain separate required evidence.
+
+### 2. Signatures
+
+```sh
+python3 scripts/validate-evaluator-manifests.py
+./scripts/run-independent-evaluator.sh --tier pr|nightly|release
+python3 scripts/check-independent-evaluator.py .artifacts/evaluator/<tier>
+python3 scripts/check-independent-evaluator.py .artifacts/evaluator/<tier> \
+  --require-claimable-if-baseline-positive
+```
+
+The runner writes only `.artifacts/evaluator/<tier>/`. The checker accepts only an artifact root below `.artifacts/evaluator/` and verifies `gate.json`, `analysis-input.json`, closed `SHA256SUMS`, per-unit records, and six-family Scheme-A attempts.
+
+### 3. Contracts
+
+The strict compatibility chain is:
+
+```text
+Protector -> Protected Image -> rehydration -> Native Image
+          -> target native loader -> behavioral oracle
+```
+
+A complete unit requires all six stages to pass for the same registered `unitId`, source digest, profile, runtime cell, target loader, oracle, and run. `fixed view` contains immutable baseline rows; `growth view` is append-only and rejects duplicate identity keys. The exact growth condition is `candidateGrowthCompleteUnits >= 100 * baselineCompleteUnits`; a zero baseline produces `baseline-zero` with a null factor and never becomes claimable.
+
+The Scheme-A vector is the conjunction of six required families: `runtime_dump_reassembly`, `patch_repack`, `function_logic_recovery`, `static_decomposition`, `dynamic_instrumentation`, and `integrity_handoff`. Each family has three baseline and three candidate replicas, equal frozen budgets/tools/recipes, zero manual steps, and independent `factorLowerBound >= 100`. Missing attack tools or finite baseline successes are `baseline-not-calibrated`/`environment-unavailable`, never a pass.
+
+The evaluator evidence tree contains `environment.json`, copied protocol/corpus/oracle/scheme/baseline manifests, compatibility unit records, raw `SHA256SUMS`, Scheme-A attempts, `scheme-a-gate.json`, `gate.json`, `analysis-input.json`, and a closed top-level `SHA256SUMS`. `gate.json` is normative; `analysis-input.json` is the analysis-agent handoff. Baselines are content-addressed, immutable, and never overwritten. Stage records require stage-specific hashes and metadata; a generic shared hash cannot satisfy a passed stage.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Missing Protected Image or rehydration product stage | compatibility `baseline-zero`/`not-ready`; no strict unit |
+| Zero compatibility baseline | null factor; claim gate remains non-claimable |
+| Missing required corpus row, duplicate identity, changed frozen metadata | protocol failure |
+| Non-passed stage or missing stage-specific binding | unit incomplete with first-failure layer |
+| Missing attack tool or fewer than three finite baseline successes | Scheme-A `baseline-not-calibrated` |
+| Mixed candidate replica outcomes | `unknown`; no favorable averaging |
+| Missing raw evidence, unsafe path, symlink, checksum mismatch, duplicate JSON key, or self-referential manifest | evidence gate fails closed |
+| Required prior CI evidence job fails | evaluator preserves the result and CI fails the required evidence gate |
+| Positive strict baseline exists but compatibility or any Scheme-A family is below 100x | claim gate fails |
+
+### 5. Good / Base / Bad Cases
+
+- Good: native CI retains every evaluator row, rejects forged stage/gate fields by recomputation, and reports a positive claim only when compatibility and all six Scheme-A families independently pass.
+- Base: the current checkout produces `baseline-zero`, `baseline-not-calibrated`, complete raw unavailable evidence, and `claimable=false` without inventing native or attack results.
+- Bad: relabeling a compressed complete ELF as Protected Image, removing an inconvenient sample, weakening an oracle, treating missing tools as attack failure/pass, or accepting a hard-coded `claimable` marker.
+
+### 6. Tests Required
+
+- Manifest tests mutate duplicate keys, non-finite values, digests, frozen rows, unsafe paths, tool availability, budgets, and ABI/oracle fields and require rejection.
+- Compatibility tests assert six-stage completeness, stage-specific bindings, fixed/growth counting, baseline identity preservation, first-failure classification, and zero-denominator handling.
+- Scheme-A tests assert three replicas, equal budgets/tool/recipe identity, finite baseline requirements, censored lower bounds, mixed-result rejection, and per-family conjunction.
+- Evidence tests assert closed checksum coverage, raw-manifest ownership, symlink/root rejection, recomputed anti-gaming fields, read-only checkout behavior, and deferred claimability before a positive baseline.
+- CI tests parse the workflow and assert additive evaluator dependencies, existing evidence-job preservation, always-upload behavior, and conditional positive-baseline claim enforcement.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+if wrapper_decodes_to_elf:
+    count_compatibility_unit()
+if attack_tool_missing:
+    mark_attack_failed_and_continue()
+if gate.claimable:
+    trust_gate()
+```
+
+#### Correct
+
+```text
+validate frozen manifests and baseline digests
+-> require Protected Image + rehydration + Native Image + loader + oracle
+-> recompute stage/growth evidence from immutable records
+-> require every Scheme-A family and replica policy
+-> retain environment-unavailable/not-ready evidence
+-> derive claimable only from both independent gates
+```

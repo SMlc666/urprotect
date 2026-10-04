@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required bounded-binary, testing, fuzzing, CI, provenance, and failure-publication rules for the cross-layer implementation."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Current AArch64 profile, native-loader handoff, evidence-layer, environment, and compatibility-promotion contract."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Ownership boundaries for managed core, native runtime, scripts, fixtures, tests, and artifact contracts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Protected Image data-flow and managed/native/evaluator boundary review checklist."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/baseline-evaluator-protocol.md","reason":"Independent evaluator findings, strict compatibility/Scheme-A rules, measured gaps, and residual blockers."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/compatibility-protocol.md","reason":"Machine-checkable six-stage compatibility unit, corpus identity, baseline-zero, and exact growth-gate protocol."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/scheme-a-protocol.md","reason":"Scheme-A attack-family recipes, cost formula, replicas, budgets, objective predicates, and anti-gaming rules."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/ci-evidence-contract.md","reason":"Evaluator artifact tree, CI job graph, evidence status semantics, retention, fuzz/benchmark integration, and analysis handoff."}

@@ -868,3 +868,74 @@ jobs:
           name: release-${{ github.run_id }}
           path: .artifacts/release/
           if-no-files-found: warn
+
+  # Independent evaluator control plane. It is additive: existing product,
+  # fixture, runtime, benchmark, and fuzz jobs remain unchanged.
+  independent-evaluator:
+    if: always()
+    needs:
+      - build-and-test
+      - real-sample-matrix
+      - runtime-matrix-native-arm64
+      - bionic-native-arm64
+      - musl-container-smoke
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      EVALUATOR_BUILD_RESULT: ${{ needs['build-and-test'].result }}
+      EVALUATOR_REAL_SAMPLE_RESULT: ${{ needs['real-sample-matrix'].result }}
+      EVALUATOR_RUNTIME_RESULT: ${{ needs['runtime-matrix-native-arm64'].result }}
+      EVALUATOR_BIONIC_RESULT: ${{ needs['bionic-native-arm64'].result }}
+      EVALUATOR_MUSL_RESULT: ${{ needs['musl-container-smoke'].result }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select evaluator tier
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV" ;;
+            release) echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${{ inputs.run_release_rehearsal }}" == true ]]; then
+                echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV"
+              elif [[ "${{ inputs.run_nightly_rehearsal }}" == true ]]; then
+                echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV"
+              else
+                echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV"
+              fi
+              ;;
+            *) echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV" ;;
+          esac
+      - name: Validate frozen evaluator manifests
+        run: python3 scripts/validate-evaluator-manifests.py
+      - name: Run independent evaluator
+        run: ./scripts/run-independent-evaluator.sh --tier "${EVALUATOR_TIER}"
+      - name: Check independent evaluator evidence
+        if: always()
+        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}"
+      - name: Preserve existing required evidence gates
+        if: always()
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == pull_request || "${GITHUB_EVENT_NAME}" == schedule || "${GITHUB_EVENT_NAME}" == release || "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            for result in \
+              "${EVALUATOR_BUILD_RESULT}" \
+              "${EVALUATOR_REAL_SAMPLE_RESULT}" \
+              "${EVALUATOR_RUNTIME_RESULT}" \
+              "${EVALUATOR_BIONIC_RESULT}" \
+              "${EVALUATOR_MUSL_RESULT}"; do
+              if [[ "${result}" != success ]]; then
+                echo "an existing required evidence job did not pass: ${result}" >&2
+                exit 1
+              fi
+            done
+          fi
+      - name: Enforce independent evaluator claim gate after positive baseline
+        if: always()
+        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --require-claimable-if-baseline-positive
+      - name: Upload independent evaluator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-evaluator-${{ env.EVALUATOR_TIER }}-${{ github.run_id }}
+          path: .artifacts/evaluator/
+          if-no-files-found: warn
+          include-hidden-files: true

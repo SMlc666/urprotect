@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "evaluator-oracle-registry",
+  "oracles": [
+    {
+      "oracleId": "fixture.process-oracle.v1",
+      "version": 1,
+      "description": "Compare exit status, stdout, stderr, declared file effects, cwd, arguments, and signal termination for the protection fixture.",
+      "comparisonFields": [
+        "status",
+        "stdout",
+        "stderr",
+        "argv",
+        "cwd",
+        "declaredFiles",
+        "signal"
+      ],
+      "maxOutputBytes": 16777216,
+      "oracleDefinitionSha256": "71758e566cde17ef7054f42d9f5ed00dc146f6e7e57ad4b2ce2967cbc24e49c7",
+      "baselineObservation": {
+        "status": "not-captured",
+        "reason": "The local checkout does not contain a current strict Protected Image execution artifact; native observations are never inferred from registry metadata."
+      }
+    }
+  ]
+}
