@@ -178,6 +178,14 @@ class BionicNodeRunnerTests(unittest.TestCase):
         )
         self.assertEqual(RUNNER.substitute_outer_argv(["/node", "--version", "ARG"], "/wrapper"), ["/wrapper", "--version", "ARG"])
 
+    def test_container_common_args_keep_bounded_compatible_local_logging(self) -> None:
+        values = RUNNER._container_common_args("urp-bionic-node-test", self.execution, read_only=True)
+        self.assertEqual(values[values.index("--log-driver") + 1], "local")
+        log_options = [value for index, value in enumerate(values) if index > 0 and values[index - 1] == "--log-opt"]
+        self.assertIn("compress=false", log_options)
+        self.assertIn(f"max-size={self.execution['outputBytes']}", log_options)
+        self.assertIn("max-file=1", log_options)
+
     def test_wrapper_staging_skips_same_file_copy_and_preserves_packed_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             wrapper_root = Path(directory) / "wrapper"

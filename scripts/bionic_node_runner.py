@@ -392,6 +392,7 @@ def _container_common_args(name: str, execution: dict[str, Any], *, read_only: b
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
         "--log-driver", "local",
+        "--log-opt", "compress=false",
         "--log-opt", f"max-size={execution['outputBytes']}",
         "--log-opt", "max-file=1",
         "--user", "1000:1000",
