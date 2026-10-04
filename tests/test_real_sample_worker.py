@@ -81,7 +81,7 @@ class RealSampleWorkerTests(unittest.TestCase):
 
     def test_embedded_evidence_sanitizer_python_parses(self) -> None:
         source = MATRIX.read_text(encoding="utf-8")
-        opening = source.index("<<'PYSANITIZE'\n") + len("<<'PYSANITIZE'\n")
+        opening = source.index("<<'PYSANITIZE'; then\n") + len("<<'PYSANITIZE'; then\n")
         closing = source.index("\nPYSANITIZE\n", opening)
         embedded_python = source[opening:closing]
 

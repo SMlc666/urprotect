@@ -187,7 +187,7 @@ sanitize_evidence() {
     return 1
   fi
   rm -f -- "${artifact_root}/evidence-sanitized.txt"
-  if ! python3 - "${artifact_root}" "${temp_root}" "${runner_temp}" "${package_cache_root}" "${package_archive_cache}" "${package_index_cache}" <<'PYSANITIZE'
+  if ! python3 - "${artifact_root}" "${temp_root}" "${runner_temp}" "${package_cache_root}" "${package_archive_cache}" "${package_index_cache}" <<'PYSANITIZE'; then
 from pathlib import Path
 import re
 import sys
@@ -228,7 +228,6 @@ for path in paths:
         print(f"evidence sanitizer could not sanitize retained evidence: {error}", file=sys.stderr)
         raise SystemExit(1)
 PYSANITIZE
-  then
     mark_sanitization_failure
     return 1
   fi
@@ -364,7 +363,7 @@ PY_CLOSURE
 
 record_pack_cli_status() {
   local sample_root="$1" cli_status="$2" reason="$3"
-  if ! python3 - "${sample_root}/outer-pack.json" "${cli_status}" <<'PY_PACK_STATUS'
+  if ! python3 - "${sample_root}/outer-pack.json" "${cli_status}" <<'PY_PACK_STATUS'; then
 import json
 import sys
 from pathlib import Path
@@ -378,7 +377,6 @@ if not isinstance(value, dict) or not isinstance(value.get("success"), bool):
 value["cliExitCode"] = int(sys.argv[2])
 path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY_PACK_STATUS
-  then
     write_outer_pack_boundary "${sample_root}" "${reason}" true "${cli_status}" pack-failed
   fi
 }
@@ -466,7 +464,7 @@ remove_unreferenced_preflight_markers() {
   # owns a concrete setup status.  A failed/invalid runner preflight can leave
   # this file behind even though the converted execution record has no such
   # reference.
-  if [[ -f "${sample_root}/logs/container-setup.status" ]] && ! python3 - "${sample_root}/logs/bionic-node-result.json" <<'PY_BIONIC_SETUP_OWNER'
+  if [[ -f "${sample_root}/logs/container-setup.status" ]] && ! python3 - "${sample_root}/logs/bionic-node-result.json" <<'PY_BIONIC_SETUP_OWNER'; then
 import json
 import sys
 from pathlib import Path
@@ -479,7 +477,6 @@ except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
 if isinstance(setup, bool) or not isinstance(setup, int) or not 0 <= setup <= 255:
     raise SystemExit(1)
 PY_BIONIC_SETUP_OWNER
-  then
     rm -f -- "${sample_root}/logs/container-setup.status"
   fi
 }
@@ -1365,7 +1362,7 @@ PY_BIONIC_RESULT
       [[ -f "${sample_root}/logs/baseline.stderr" ]] || : > "${sample_root}/logs/baseline.stderr"
       [[ -f "${sample_root}/logs/outer.stdout" ]] || : > "${sample_root}/logs/outer.stdout"
       [[ -f "${sample_root}/logs/outer.stderr" ]] || : > "${sample_root}/logs/outer.stderr"
-      if ! python3 - "${sample_root}/outer-pack.json" <<'PY_BIONIC_PACK_PRESENT'
+      if ! python3 - "${sample_root}/outer-pack.json" <<'PY_BIONIC_PACK_PRESENT'; then
 import json
 import sys
 from pathlib import Path
@@ -1376,7 +1373,6 @@ except (OSError, UnicodeError, json.JSONDecodeError):
 if not isinstance(value, dict) or not isinstance(value.get("success"), bool):
     raise SystemExit(1)
 PY_BIONIC_PACK_PRESENT
-      then
         write_outer_pack_boundary "${sample_root}" "${reason_outer}" true
       fi
     fi
@@ -1524,7 +1520,7 @@ PYOUTER
 
 normalize_worker_script() {
   local worker_script="$1" worker_registry_dir="$2" worker_registry_index="$3"
-  if ! python3 - "${worker_script}" "${worker_registry_dir}" "${worker_registry_index}" <<'PY_NORMALIZE_WORKER'
+  if ! python3 - "${worker_script}" "${worker_registry_dir}" "${worker_registry_index}" <<'PY_NORMALIZE_WORKER'; then
 from __future__ import annotations
 
 import os
@@ -1684,7 +1680,6 @@ if stat.S_ISLNK(final_stat.st_mode) or not stat.S_ISREG(final_stat.st_mode):
 if stat.S_IMODE(final_stat.st_mode) & 0o077:
     fail("normalized worker script is not private")
 PY_NORMALIZE_WORKER
-  then
     return 1
   fi
 }
