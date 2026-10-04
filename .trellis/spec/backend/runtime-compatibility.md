@@ -781,9 +781,12 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
 - Bionic package replay uses direct HTTPS archive acquisition with exact
   size/hash verification and streams each package's data archive through
   `dpkg-deb --fsys-tarfile` into the locked Termux GNU `tar` with
-  `--no-same-owner --no-same-permissions --touch`, under the locked base
-  Bash's `pipefail` mode so producer or extractor failures remain fatal. This
-  applies the container umask while preserving executable bits. It does not run
+  `--no-overwrite-dir --no-same-owner --no-same-permissions --touch`, under the
+  locked base Bash's `pipefail` mode so producer or extractor failures remain
+  fatal. `--no-overwrite-dir` preserves metadata on existing base directories;
+  the remaining flags avoid archive ownership/permission restoration while
+  applying the container umask and preserving executable bits. Extraction
+  failures retain status 74. It does not run
   apt, consult a package index, execute maintainer scripts, or use a mutable host library.
   Base and extracted package inventories use the same canonical
   `${Package}\t${Version}\t${Architecture}\t${Status}` query.

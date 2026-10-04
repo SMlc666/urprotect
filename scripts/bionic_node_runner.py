@@ -743,7 +743,7 @@ while IFS=\"$(printf '\\t')\" read -r package_name package_version package_arch 
   [ \"$(dpkg-deb -f \"$archive\" Architecture)\" = \"$package_arch\" ] || { echo \"package architecture mismatch: $package_name\" >&2; exit 70; }
   "$PREFIX/bin/bash" -o pipefail -c '
     archive=$1
-    dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- --directory=/ --no-same-owner --no-same-permissions --touch
+    dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- --directory=/ --no-overwrite-dir --no-same-owner --no-same-permissions --touch
   ' -- "$archive" || { echo "package data extraction failed: $package_name" >&2; exit 74; }
 done < /metadata/packages.tsv
 dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\t${Status}\\n' | sort | cmp -- /metadata/base.tsv - || { echo 'package extraction changed the package inventory' >&2; exit 71; }

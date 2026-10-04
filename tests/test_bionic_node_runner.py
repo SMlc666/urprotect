@@ -357,10 +357,11 @@ class BionicNodeRunnerTests(unittest.TestCase):
             self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', setup_text)
             self.assertIn(
                 'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
-                "--directory=/ --no-same-owner --no-same-permissions --touch",
+                "--directory=/ --no-overwrite-dir --no-same-owner --no-same-permissions --touch",
                 setup_text,
             )
             self.assertIn('package data extraction failed: $package_name', setup_text)
+            self.assertIn('|| { echo "package data extraction failed: $package_name" >&2; exit 74; }', setup_text)
             self.assertNotIn("dpkg-deb --extract", setup_text)
 
     def test_container_cleanup_proves_normal_already_exited_container_is_removed(self) -> None:

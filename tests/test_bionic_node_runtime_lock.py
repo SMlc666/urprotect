@@ -141,7 +141,7 @@ class BionicNodeRuntimeLockTests(unittest.TestCase):
         self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', source)
         self.assertIn(
             'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
-            "--directory=/ --no-same-owner --no-same-permissions --touch",
+            "--directory=/ --no-overwrite-dir --no-same-owner --no-same-permissions --touch",
             source,
         )
         self.assertNotIn("dpkg-deb --extract", source)
