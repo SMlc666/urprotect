@@ -26,7 +26,9 @@ from real_sample_schema import (  # noqa: E402
     MAX_REAL_SAMPLE_ARCHIVE_BYTES,
     MAX_REAL_SAMPLE_ARCHIVE_MEMBERS,
     MAX_REAL_SAMPLE_UNCOMPRESSED_BYTES,
+    RESERVED_HELPER_STATUSES,
     RESULTS,
+    RUNTIME_EXECUTION_LAYERS,
     STATIC_RESULTS,
 )
 
@@ -38,6 +40,16 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,79}$")
 APPROVED_TARGET_COUNT = 100
 MINIMUM_ALPINE_APK_IDENTITIES = APPROVED_TARGET_COUNT // 5
+SUPPORTED_EXECUTION_MODES = frozenset({
+    "runtime-closure",
+    "bubblewrap-rootfs",
+    "outer-execveat",
+    "outer-path-preserving",
+})
+SUPPORTED_INVOCATIONS = frozenset({"declared-artifact-version"})
+MAX_EXECUTION_COMMAND_ITEMS = 128
+MAX_EXECUTION_COMPARE_ITEMS = 32
+MAX_EXECUTION_REASON_LENGTH = 2048
 
 
 class ValidationError(Exception):
@@ -486,6 +498,189 @@ def validate_fingerprint_policy(validator: Validator, project: dict[str, Any], l
     validator.string(policy.get("source"), f"{location}.fingerprintPolicy.source")
 
 
+def _validate_control_free_string(
+    validator: Validator,
+    value: Any,
+    location: str,
+    *,
+    maximum: int,
+    required: bool = False,
+) -> str | None:
+    if value is None and not required:
+        return None
+    text = validator.string(value, location)
+    if text is None:
+        return None
+    validator.require(
+        len(text) <= maximum,
+        location,
+        f"must contain at most {maximum} characters",
+    )
+    validator.require(
+        not any(ord(character) < 0x20 or ord(character) == 0x7F for character in text),
+        location,
+        "must not contain control characters",
+    )
+    return text
+
+
+def _validate_string_list(
+    validator: Validator,
+    value: Any,
+    location: str,
+    *,
+    maximum: int,
+    non_empty: bool,
+) -> None:
+    values = validator.sequence(value, location)
+    if values is None:
+        return
+    if non_empty:
+        validator.require(bool(values), location, "must not be empty")
+    validator.require(len(values) <= maximum, location, f"must contain at most {maximum} values")
+    for index, item in enumerate(values):
+        _validate_control_free_string(
+            validator,
+            item,
+            f"{location}[{index}]",
+            maximum=MAX_EXECUTION_REASON_LENGTH,
+            required=True,
+        )
+
+
+def _validate_execution_layer_fields(
+    validator: Validator,
+    layer_policy: dict[str, Any],
+    location: str,
+    layer: str,
+) -> None:
+    """Validate optional execution details shared by base policies and overrides."""
+    if layer not in RUNTIME_EXECUTION_LAYERS:
+        return
+
+    applicable = layer_policy.get("applicable")
+    mode = layer_policy.get("mode")
+    if applicable is True or "mode" in layer_policy:
+        mode_value = validator.string(mode, f"{location}.mode")
+        if mode_value is not None:
+            valid_mode = mode_value in SUPPORTED_EXECUTION_MODES or mode_value == "termux-container" or (
+                mode_value.startswith("termux-container-")
+                and len(mode_value) > len("termux-container-")
+                and all(character.isalnum() or character in ".-_" for character in mode_value[len("termux-container-"):])
+            )
+            validator.require(
+                valid_mode,
+                f"{location}.mode",
+                "must be a supported runtime execution mode",
+            )
+
+    if "expectedStatus" in layer_policy:
+        expected_status = layer_policy.get("expectedStatus")
+        validator.require(
+            isinstance(expected_status, int)
+            and not isinstance(expected_status, bool)
+            and 0 <= expected_status <= 255,
+            f"{location}.expectedStatus",
+            "must be an integer from 0 through 255",
+        )
+        if isinstance(expected_status, int) and not isinstance(expected_status, bool):
+            validator.require(
+                expected_status not in RESERVED_HELPER_STATUSES,
+                f"{location}.expectedStatus",
+                "must not use a reserved helper status",
+            )
+
+    if "command" in layer_policy:
+        _validate_string_list(
+            validator,
+            layer_policy.get("command"),
+            f"{location}.command",
+            maximum=MAX_EXECUTION_COMMAND_ITEMS,
+            non_empty=True,
+        )
+
+    if "invocation" in layer_policy:
+        invocation = validator.string(layer_policy.get("invocation"), f"{location}.invocation")
+        if invocation is not None:
+            validator.require(
+                invocation in SUPPORTED_INVOCATIONS,
+                f"{location}.invocation",
+                f"must be one of {sorted(SUPPORTED_INVOCATIONS)}",
+            )
+
+    if "compare" in layer_policy:
+        _validate_string_list(
+            validator,
+            layer_policy.get("compare"),
+            f"{location}.compare",
+            maximum=MAX_EXECUTION_COMPARE_ITEMS,
+            non_empty=True,
+        )
+
+    if "reason" in layer_policy:
+        _validate_control_free_string(
+            validator,
+            layer_policy.get("reason"),
+            f"{location}.reason",
+            maximum=MAX_EXECUTION_REASON_LENGTH,
+            required=applicable is False,
+        )
+
+    if "limits" in layer_policy:
+        _validate_limits(validator, layer_policy.get("limits"), f"{location}.limits")
+
+
+def _validate_limits(validator: Validator, value: Any, location: str) -> None:
+    limits = validator.mapping(value, location)
+    if limits is None:
+        return
+    for key in ("timeoutSeconds", "memoryBytes", "processLimit", "outputBytes"):
+        if key not in limits:
+            continue
+        limit = limits.get(key)
+        validator.require(
+            isinstance(limit, int) and not isinstance(limit, bool) and limit > 0,
+            f"{location}.{key}",
+            "must be a positive integer",
+        )
+
+
+def _validate_isolation(validator: Validator, value: Any, location: str) -> None:
+    isolation = validator.mapping(value, location)
+    if isolation is None:
+        return
+    for key in ("network", "filesystem", "privileges", "cleanup"):
+        if key in isolation:
+            _validate_control_free_string(
+                validator,
+                isolation.get(key),
+                f"{location}.{key}",
+                maximum=MAX_EXECUTION_REASON_LENGTH,
+                required=True,
+            )
+    for key in ("timeoutSeconds", "memoryBytes", "processLimit", "outputBytes"):
+        if key not in isolation:
+            continue
+        value = isolation.get(key)
+        validator.require(
+            isinstance(value, int) and not isinstance(value, bool) and value > 0,
+            f"{location}.{key}",
+            "must be a positive integer",
+        )
+    if "network" in isolation:
+        validator.require(
+            isolation.get("network") == "none",
+            f"{location}.network",
+            "must be none",
+        )
+    if "filesystem" in isolation:
+        validator.require(
+            isolation.get("filesystem") in {"read-only-inputs", "read-only-rootfs-temp-output"},
+            f"{location}.filesystem",
+            "must describe read-only inputs and bounded temporary output",
+        )
+
+
 def validate_policy(validator: Validator, project: dict[str, Any], location: str) -> None:
     policy = validator.mapping(project.get("executionPolicy"), f"{location}.executionPolicy")
     if policy is None:
@@ -504,6 +699,12 @@ def validate_policy(validator: Validator, project: dict[str, Any], location: str
                 f"{layer_location}.expectedResult",
                 f"must be one of {sorted(allowed_results)} for the {layer} layer",
             )
+            if layer in RUNTIME_EXECUTION_LAYERS:
+                validator.require(
+                    expected != "environment-unavailable",
+                    f"{layer_location}.expectedResult",
+                    "must be accepted-and-runs or not-applicable by tier override; environment-unavailable is observed evidence",
+                )
         if applicable is False:
             validator.require(
                 expected == "not-applicable",
@@ -519,6 +720,63 @@ def validate_policy(validator: Validator, project: dict[str, Any], location: str
             )
             if layer == "static":
                 validator.boolean(layer_policy.get("required"), f"{layer_location}.required")
+            _validate_execution_layer_fields(validator, layer_policy, layer_location, layer)
+
+    raw_tier_overrides = policy.get("tierOverrides")
+    tier_overrides = (
+        validator.mapping(raw_tier_overrides, f"{location}.executionPolicy.tierOverrides")
+        if raw_tier_overrides is not None
+        else None
+    )
+    if tier_overrides is not None:
+        for tier, override_value in tier_overrides.items():
+            override_location = f"{location}.executionPolicy.tierOverrides.{tier}"
+            validator.require(tier in TIERS, override_location, "must name a supported evidence tier")
+            override = validator.mapping(override_value, override_location)
+            if override is None:
+                continue
+            for layer in LAYERS:
+                layer_policy = override.get(layer)
+                if layer_policy is None:
+                    continue
+                layer_location = f"{override_location}.{layer}"
+                layer_policy = validator.mapping(layer_policy, layer_location)
+                if layer_policy is None:
+                    continue
+                applicable = validator.boolean(layer_policy.get("applicable"), f"{layer_location}.applicable")
+                expected = validator.string(layer_policy.get("expectedResult"), f"{layer_location}.expectedResult")
+                if expected is not None:
+                    allowed_results = STATIC_RESULTS if layer == "static" else RESULTS
+                    validator.require(
+                        expected in allowed_results,
+                        f"{layer_location}.expectedResult",
+                        f"must be one of {sorted(allowed_results)} for the {layer} layer",
+                    )
+                    if layer in RUNTIME_EXECUTION_LAYERS:
+                        validator.require(
+                            expected != "environment-unavailable",
+                            f"{layer_location}.expectedResult",
+                            "must be accepted-and-runs or not-applicable by tier override; environment-unavailable is observed evidence",
+                        )
+                if applicable is False:
+                    validator.require(
+                        expected == "not-applicable",
+                        f"{layer_location}.expectedResult",
+                        "must be not-applicable when applicable is false",
+                    )
+                    validator.string(layer_policy.get("reason"), f"{layer_location}.reason")
+                elif applicable is True:
+                    validator.require(
+                        expected != "not-applicable",
+                        f"{layer_location}.expectedResult",
+                        "must be an applicable result when applicable is true",
+                    )
+                _validate_execution_layer_fields(validator, layer_policy, layer_location, layer)
+            if "isolation" in override:
+                _validate_isolation(validator, override.get("isolation"), f"{override_location}.isolation")
+            if "limits" in override:
+                _validate_limits(validator, override.get("limits"), f"{override_location}.limits")
+
     isolation = validator.mapping(policy.get("isolation"), f"{location}.executionPolicy.isolation")
     if isolation is not None:
         for key in ("network", "filesystem", "privileges", "cleanup"):

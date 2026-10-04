@@ -555,6 +555,23 @@ The current BusyBox Alpine record is the explicit musl baseline: its policy
 command must name the extracted `/bin/busybox` artifact and runs only inside
 its archive-derived rootfs, never through a host fallback.
 
+The full-corpus runner may use a bounded `REAL_SAMPLE_PARALLELISM` value (default
+`4`, maximum `8`) because each project owns an independent extraction root and
+evidence directory. Parallel execution must not share extracted roots or raw
+inputs; only the content-addressed runtime package/index cache is shared.
+Package cache entries are keyed by the locked digest and archive identity,
+written through a temporary file plus atomic rename, and re-verified for the
+locked digest and size on every reuse. A cache miss, stale entry, or cache
+restore failure must fall back to verified acquisition without changing the
+result classification.
+
+The runner invokes the already-built `src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll`
+for repeated validation and packing; it must not run project restore/build work
+inside the per-sample loop. CI may restore/save only the package and verified
+index cache under `RUNNER_TEMP`; extracted roots, source executables, wrappers,
+package-manager state, and evidence remain temporary and are never cache or
+evidence artifacts.
+
 For future compatibility work, the plan must include a real-sample impact table
 (project IDs, feature, layer, oracle, expected classification, and artifact
 path). An unexpected result blocks completion. Support expansion additionally
@@ -713,4 +730,167 @@ resolve exact user selectors from .symtab/.dynsym
 -> flatten (if requested), then permute (if requested)
 -> write a temporary ELF and reparse/redecode it
 -> publish only after all selected functions and runtime checks pass
+```
+
+
+## Scenario: Hermetic full-corpus runtime evidence and bionic Node.js witness
+
+### 1. Scope / Trigger
+
+This contract applies to `scripts/run-real-sample-matrix.sh`, the bionic
+Node.js runner and lock, real-sample tier policy, evidence aggregation, and
+CI cleanup. It is the cross-layer contract for changes that acquire, execute,
+normalize, or validate public real-sample runtime evidence. Registry-only
+renders are metadata baselines; they are never execution evidence.
+
+### 2. Signatures
+
+```sh
+./scripts/run-real-sample-matrix.sh --tier pr|nightly|release
+python3 scripts/check-real-sample-evidence.py MANIFEST \
+  --runtime-closures RUNTIME_CLOSURES --tier TIER --artifact-root ARTIFACT_ROOT
+python3 scripts/validate-bionic-node-lock.py \
+  fixtures/real-samples/bionic-node-runtime-lock.json \
+  --manifest fixtures/real-samples/manifest.json --expected-sha256 LOCK_SHA256
+```
+
+The bionic witness consumes the already acquired Node.js archive, the reviewed
+metadata-only lock, the pinned Termux image, and a host-owned artifact root. It
+returns a normalized baseline/outer protocol with `targetStatus`,
+`containerStatus`, `dockerStatus`, helper status, lock digest, image identity,
+RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
+
+### 3. Contracts
+
+- A dynamic `accepted-and-runs` result requires an attempted target process and
+  matching target, Docker, and inspected container exit status. Static
+  `validated` never implies process execution. Registry-only dynamic `actual`
+  values are `not-applicable` with `actualSource=registry-baseline` and an
+  explicit metadata-only reason.
+- PR dynamic coverage is limited to the declared BusyBox/musl, GNU coreutils
+  `ls`/glibc, and Termux Node.js/bionic witnesses. Nightly and release require
+  baseline and outer-wrapper attempts for all 100 identities. Missing closure,
+  unsupported profile, or unavailable isolation is an observed
+  `environment-unavailable` failure, not a passing expected policy and not
+  `not-applicable`.
+- The bionic lock is metadata-only (`runtimeEvidence=false`,
+  `compatibilityStatus=not-established`). Its SHA-256, immutable image ref and
+  ID, `/system/bin/linker64`, exact archive URLs/sizes/digests, base inventory,
+  dependency fields, argv, expected status, absolute RUNPATH, outer mode, and
+  resource limits are cross-checked by the runner and evidence gate.
+- The bionic baseline target is launched directly from the locked
+  `execution.argv` inside the prepared Termux root. Baseline argv construction
+  must not prepend `execution.loader`: the kernel must honor the Node
+  executable's `PT_INTERP` naturally. `/system/bin/linker64` remains a required
+  loader identity in the lock/profile and is validated independently; the outer
+  invocation continues to replace only `argv[0]` with the packed wrapper.
+- Bionic package replay uses direct HTTPS archive acquisition with exact
+  size/hash verification. For each package, the locked base Bash runs
+  `dpkg-deb --fsys-tarfile` through a `pipefail`-enabled GNU `tar` into a
+  fresh user-owned `/tmp/urprotect-package.XXXXXX` staging directory with
+  `--no-overwrite-dir --no-same-owner --no-same-permissions --touch`.
+  The host-owned setup script then merges the staged payload into `/` without
+  changing existing directory metadata: existing regular files are replaced
+  by bytes and mode, new directories receive the staged mode, and symlinks
+  are recreated from their archive targets. Absolute, traversal, symlink-
+  parent, conflicting non-regular, and unsupported special payload paths are
+  rejected. The stage is removed after each package; producer, extractor,
+  merge, or stage-cleanup failure retains status 74. It does not run apt,
+  consult a package index, execute maintainer scripts, or use a mutable host
+  library. Base and extracted package inventories use the same canonical
+  `${Package}\t${Version}\t${Architecture}\t${Status}` query.
+- The Node executable must have exactly one absolute `DT_RUNPATH` equal to
+  `/data/data/com.termux/files/usr/lib`, no `DT_RPATH`, no `$ORIGIN`, and no
+  relative/multi-component alternative. The pack dispatch remains
+  `outer-execveat`, while the policy/evidence mode is
+  `outer-path-preserving`; both values are retained and checked.
+- Bionic helper statuses are distinct from target statuses: helper 124/125/126
+  keep `targetStatus` and `containerStatus` null, with any cleanup observation
+  in `cleanupContainerStatus`; a target exit 125 has `helperStatus=null`,
+  `targetStatus=125`, `containerStatus=125`, `outcome=target-exit`, and is a
+  runtime failure.
+- Evidence is host-owned. Target containers have read-only roots and mounts;
+  stdout/stderr are captured by the host under the locked output limit. Every
+  successful evidence root has `evidence-sanitized.txt`; all regular text
+  files are scanned for runner-temp/cache paths and all status/pack markers are
+  owned by a matching execution record. Detached workers, named containers,
+  and transient images must be proven reaped/absent before temporary roots are
+  removed or evidence is accepted.
+- The target runner keeps captured stdout/stderr as separate bounded byte-stream returns and log files; baseline/outer protocol dictionaries and all JSON evidence objects must contain only JSON-serializable scalars, arrays, and objects. A raw byte value in a result record is a producer defect and must fail before evidence publication.
+- Aggregate CI records and histograms are recomputed from retained fingerprints,
+  per-sample results, closures, and policy. Forged record fields, layer counts,
+  feature histograms, first-failure values, missing records, and stale marker
+  files fail the evidence gate.
+- Docker cleanup treats absence as a proof, not a best-effort result: a nonzero `inspect` response is accepted as absent only when it is complete (not timed out or output-limited) and contains Docker's explicit container/image absence marker, including `No such object`. Post-removal inspect responses classified as transient (for example, removal-in-progress or daemon connection races) may be retried within the existing bounded cleanup deadline. Unknown, malformed, live, timed-out, or truncated responses remain cleanup failures, retain the private work root, and prevent transient-image deletion. Diagnostics must distinguish verified absence, transient exhaustion, live resources, and unknown inspection responses.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Registry-only dynamic render | `actual=not-applicable`, `actualSource=registry-baseline`; never `accepted-and-runs` |
+| Missing nightly/release closure or runtime capability | observed `environment-unavailable`; required gate fails |
+| Helper timeout/setup/output limit (124/125/126) | helper outcome with null target/container status; no execution success |
+| Target exits 124/125 or differs from expected status | `runtime-failure`; helper status remains null |
+| Docker attach and inspect statuses differ | environment/protocol failure; no accepted result |
+| Bionic image, loader, lock, archive, hash, inventory, or RUNPATH drift | fail closed before accepted execution |
+| Stale status, pack, raw-path, unsanitized, or unbound aggregate evidence | evidence gate rejects the artifact root |
+| Unreaped worker/container/image or failed sanitizer | cleanup/evidence failure; temporary root is retained when ownership is uncertain |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a native ARM64 runner assembles the reviewed lock, host-captures both
+  bionic target streams, verifies statuses and absolute RUNPATH, reaps all
+  resources, sanitizes evidence, and the gate binds the aggregate to all
+  per-sample records.
+- Base: a metadata-only registry render records the 100 identity baseline and
+  explicit expected policies but makes no runtime claim.
+- Bad: converting a missing closure to expected `environment-unavailable`,
+  trusting a target-written status file, accepting a target exit 125 as helper
+  setup failure, or reporting aggregate policy values as observed execution.
+
+### 6. Tests Required
+
+- Lock tests mutate image ID/ref, archive digest/size, dependency syntax,
+  inventory, argv, expected status, and RUNPATH and require rejection.
+- The focused runner test asserts
+  `build_direct_baseline_argv(execution["argv"]) == execution["argv"]` and
+  that the result is not `[execution["loader"], *execution["argv"]]`; the
+  loader remains metadata/profile validation rather than a baseline argv prefix.
+- Runner tests cover output/timeout/helper sentinels, target status 125,
+  Docker status mismatch, cache symlink traversal, image-removal failure,
+  complete `No such object` absence proof, transient inspect retries, rejection
+  of timeout/output-limited absence claims, package extraction without apt,
+  host-owned streams, cleanup registries, and JSON-safe result dictionaries.
+- Evidence tests cover stale baseline/outer/pack/setup markers, missing or false
+  sanitizer markers, raw temp paths, bionic identity/path drift, closure drift,
+  helper/target status confusion, forged aggregate records/histograms/counts,
+  and arbitrary first-failure claims.
+- Tier tests assert PR witness scope and 100/100 nightly/release applicable
+  baseline+outer policy, with missing runtime closure producing an observed
+  failure rather than a passing policy result.
+- CI runs the focused bionic lock/runner/closure and worker-cleanup suites on
+  every PR, followed by the post-run evidence gate. Native Docker, musl, and
+  managed .NET checks remain required environment gates when their toolchains
+  are declared available.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+if closure_missing:
+    result = {"expected": "environment-unavailable", "actual": "environment-unavailable"}
+if status_file_exists:
+    accept(status_file)
+```
+
+#### Correct
+
+```text
+attempt the required tier oracle
+-> host-capture and inspect target/container status
+-> classify helper status separately from target exit
+-> bind result, closure, fingerprint, and aggregate evidence
+-> sanitize and prove worker/container/image cleanup
+-> publish accepted-and-runs only after the target actually ran
 ```

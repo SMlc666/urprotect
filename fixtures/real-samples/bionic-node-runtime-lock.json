@@ -1,0 +1,694 @@
+{
+  "baseImage": {
+    "architecture": "arm64",
+    "created": "2026-09-13T02:05:29.112982593Z",
+    "id": "sha256:4afeef45d346a5e377724efede889c9ccad1046a71e097037494d16f15467c2e",
+    "os": "linux",
+    "repoDigests": [
+      "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4"
+    ],
+    "requestedRef": "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4"
+  },
+  "basePackageInventory": {
+    "count": 86,
+    "packages": [
+      {
+        "architecture": "aarch64",
+        "name": "aosp-libs",
+        "status": "install ok installed",
+        "version": "9.0.0-r76-4"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "aosp-utils",
+        "status": "install ok installed",
+        "version": "9.0.0-r76-4"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "apt",
+        "status": "install ok installed",
+        "version": "2.8.1-2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "attr",
+        "status": "install ok installed",
+        "version": "2.6.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "bash",
+        "status": "install ok installed",
+        "version": "5.3.15"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "bzip2",
+        "status": "install ok installed",
+        "version": "1.0.8-8"
+      },
+      {
+        "architecture": "all",
+        "name": "ca-certificates",
+        "status": "install ok installed",
+        "version": "1:2026.08.13"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "command-not-found",
+        "status": "install ok installed",
+        "version": "3.5.0-10"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "coreutils",
+        "status": "install ok installed",
+        "version": "9.11-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "curl",
+        "status": "install ok installed",
+        "version": "8.22.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "dash",
+        "status": "install ok installed",
+        "version": "0.5.12-2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "debianutils",
+        "status": "install ok installed",
+        "version": "5.24"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "dialog",
+        "status": "install ok installed",
+        "version": "1.3-20260721-0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "diffutils",
+        "status": "install ok installed",
+        "version": "3.12-2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "dos2unix",
+        "status": "install ok installed",
+        "version": "7.5.7"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "dpkg",
+        "status": "install ok installed",
+        "version": "1.22.6-5"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "ed",
+        "status": "install ok installed",
+        "version": "1.22.6"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "findutils",
+        "status": "install ok installed",
+        "version": "4.10.0-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "gawk",
+        "status": "install ok installed",
+        "version": "5.3.2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "gpgv",
+        "status": "install ok installed",
+        "version": "2.5.17"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "grep",
+        "status": "install ok installed",
+        "version": "3.12-3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "gzip",
+        "status": "install ok installed",
+        "version": "1.14-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "inetutils",
+        "status": "install ok installed",
+        "version": "2.7"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "less",
+        "status": "install ok installed",
+        "version": "704"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libacl",
+        "status": "install ok installed",
+        "version": "2.4.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libandroid-glob",
+        "status": "install ok installed",
+        "version": "0.6-3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libandroid-posix-semaphore",
+        "status": "install ok installed",
+        "version": "0.1-4"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libandroid-selinux",
+        "status": "install ok installed",
+        "version": "14.0.0.11-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libandroid-stub",
+        "status": "install ok installed",
+        "version": "29-3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libandroid-support",
+        "status": "install ok installed",
+        "version": "29-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libassuan",
+        "status": "install ok installed",
+        "version": "3.0.2-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libbz2",
+        "status": "install ok installed",
+        "version": "1.0.8-8"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libc++",
+        "status": "install ok installed",
+        "version": "29"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libcap-ng",
+        "status": "install ok installed",
+        "version": "2:0.9.6"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libcurl",
+        "status": "install ok installed",
+        "version": "8.22.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libevent",
+        "status": "install ok installed",
+        "version": "2.1.13"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libffi",
+        "status": "install ok installed",
+        "version": "3.8.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libgcrypt",
+        "status": "install ok installed",
+        "version": "1.12.3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libgmp",
+        "status": "install ok installed",
+        "version": "6.3.0-2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libgnutls",
+        "status": "install ok installed",
+        "version": "3.8.13-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libgpg-error",
+        "status": "install ok installed",
+        "version": "1.61"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libiconv",
+        "status": "install ok installed",
+        "version": "1.19"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libidn2",
+        "status": "install ok installed",
+        "version": "2.3.8-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "liblz4",
+        "status": "install ok installed",
+        "version": "1.10.0-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "liblzma",
+        "status": "install ok installed",
+        "version": "5.8.4"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libmagic",
+        "status": "install ok installed",
+        "version": "5.48-3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libmd",
+        "status": "install ok installed",
+        "version": "1.2.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libmpfr",
+        "status": "install ok installed",
+        "version": "4.2.1-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libnettle",
+        "status": "install ok installed",
+        "version": "4.0+really3.10.2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libnghttp2",
+        "status": "install ok installed",
+        "version": "1.70.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libnghttp3",
+        "status": "install ok installed",
+        "version": "1.18.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libngtcp2",
+        "status": "install ok installed",
+        "version": "1.25.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libnpth",
+        "status": "install ok installed",
+        "version": "1.6-3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libsmartcols",
+        "status": "install ok installed",
+        "version": "2.42.1-4"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libssh2",
+        "status": "install ok installed",
+        "version": "1.11.1-2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libtasn1",
+        "status": "install ok installed",
+        "version": "4.21.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libtirpc",
+        "status": "install ok installed",
+        "version": "1.3.7-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libunbound",
+        "status": "install ok installed",
+        "version": "1.26.0"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "libunistring",
+        "status": "install ok installed",
+        "version": "1.4.2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "lsof",
+        "status": "install ok installed",
+        "version": "4.99.7"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "nano",
+        "status": "install ok installed",
+        "version": "9.2-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "ncurses",
+        "status": "install ok installed",
+        "version": "6.6.20260307+really6.5.20250830"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "net-tools",
+        "status": "install ok installed",
+        "version": "2.10.0-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "openssl",
+        "status": "install ok installed",
+        "version": "1:3.6.3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "p11-kit",
+        "status": "install ok installed",
+        "version": "0.26.5"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "patch",
+        "status": "install ok installed",
+        "version": "2.8-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "pcre2",
+        "status": "install ok installed",
+        "version": "10.47"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "procps",
+        "status": "install ok installed",
+        "version": "4.0.7"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "psmisc",
+        "status": "install ok installed",
+        "version": "23.7-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "readline",
+        "status": "install ok installed",
+        "version": "8.3.3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "resolv-conf",
+        "status": "install ok installed",
+        "version": "1.3"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "sed",
+        "status": "install ok installed",
+        "version": "4.10"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "tar",
+        "status": "install ok installed",
+        "version": "1.35-3"
+      },
+      {
+        "architecture": "all",
+        "name": "termux-am",
+        "status": "install ok installed",
+        "version": "0.8.0-2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "termux-am-socket",
+        "status": "install ok installed",
+        "version": "1.5.0-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "termux-core",
+        "status": "install ok installed",
+        "version": "0.4.0-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "termux-exec",
+        "status": "install ok installed",
+        "version": "1:2.5.0-1"
+      },
+      {
+        "architecture": "all",
+        "name": "termux-keyring",
+        "status": "install ok installed",
+        "version": "3.14"
+      },
+      {
+        "architecture": "all",
+        "name": "termux-licenses",
+        "status": "install ok installed",
+        "version": "2.2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "termux-tools",
+        "status": "install ok installed",
+        "version": "1.46.0+really1.45.0-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "unzip",
+        "status": "install ok installed",
+        "version": "6.0-10"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "util-linux",
+        "status": "install ok installed",
+        "version": "2.42.1-4"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "xxhash",
+        "status": "install ok installed",
+        "version": "0.8.3-1"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "xz-utils",
+        "status": "install ok installed",
+        "version": "5.8.4"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "zlib",
+        "status": "install ok installed",
+        "version": "1.3.2"
+      },
+      {
+        "architecture": "aarch64",
+        "name": "zstd",
+        "status": "install ok installed",
+        "version": "1.5.7-1"
+      }
+    ],
+    "sha256": "a1023a8f537845b556776b67790c4bc8f8c49a56efbe1d248565b5f970b0327f",
+    "unchangedAfterDownloadOnly": true
+  },
+  "candidateProvenance": {
+    "artifactPath": "nodejs-candidate-lock.json",
+    "artifactSha256": "ccd8022aef3671e4d0f33d9756adfbabd12bb057b1735732246887a155562f53",
+    "capturedAtUtc": "2026-10-03T07:14:28Z",
+    "compatibilityStatus": "not-established",
+    "evidenceClass": "candidate-lock-only",
+    "packageIndex": "live-capture-only",
+    "resolver": "apt-get-update-download-only",
+    "runtimeEvidence": false,
+    "status": "candidate-lock",
+    "trigger": "workflow_dispatch:capture_bionic_node_closure",
+    "workflowRunId": 37105636258
+  },
+  "compatibilityStatus": "not-established",
+  "dependencyResolution": {
+    "extractedPackages": [
+      "c-ares",
+      "libicu",
+      "libsqlite",
+      "nodejs",
+      "npm"
+    ],
+    "fields": [
+      "Pre-Depends",
+      "Depends"
+    ],
+    "providerRule": "Each dependency alternative must resolve to an exact installed base-inventory package or an exact locked archive row; unresolved and unsupported expressions fail closed.",
+    "rootPackages": [
+      "nodejs",
+      "npm"
+    ],
+    "unsupportedSyntax": "reject"
+  },
+  "evidenceClass": "runtime-lock-metadata-only",
+  "execution": {
+    "argv": [
+      "/data/data/com.termux/files/usr/bin/node",
+      "--version"
+    ],
+    "artifactPath": "/data/data/com.termux/files/usr/bin/node",
+    "expectedStatus": 0,
+    "filesystem": "fresh-container-ephemeral-prefix",
+    "ldLibraryPath": "/data/data/com.termux/files/usr/lib",
+    "environment": {
+      "HOME": "/tmp",
+      "LD_LIBRARY_PATH": "/data/data/com.termux/files/usr/lib",
+      "PATH": "/data/data/com.termux/files/usr/bin:/system/bin:/usr/bin"
+    },
+    "loader": "/system/bin/linker64",
+    "memoryBytes": 536870912,
+    "network": "none",
+    "outerMode": "outer-path-preserving",
+    "outputBytes": 1048576,
+    "packageExtraction": "dpkg-deb-extract-only-no-maintainer-scripts",
+    "pathPolicy": "absolute-dt-runpath-preserved",
+    "processLimit": 32,
+    "runpath": "/data/data/com.termux/files/usr/lib",
+    "shell": "/data/data/com.termux/files/usr/bin/sh",
+    "timeoutSeconds": 30
+  },
+  "host": {
+    "architecture": "aarch64",
+    "containerPlatform": "linux/arm64",
+    "dockerServerPlatform": "linux/arm64",
+    "loader": "/system/bin/linker64"
+  },
+  "loader": "/system/bin/linker64",
+  "packageRepository": "https://packages-cf.termux.dev/apt/termux-main",
+  "packages": [
+    {
+      "architecture": "aarch64",
+      "dependencies": {
+        "Breaks": "c-ares-dev",
+        "Depends": "resolv-conf",
+        "Replaces": "c-ares-dev"
+      },
+      "filename": "pool/main/c/c-ares/c-ares_1.34.8_aarch64.deb",
+      "localFilename": "c-ares_1.34.8_aarch64.deb",
+      "name": "c-ares",
+      "sha256": "7681fc23e822d7988ba8b2adf3468f93ae68f724dda365cff1385096a9fa87e6",
+      "sizeBytes": 194924,
+      "url": "https://packages-cf.termux.dev/apt/termux-main/pool/main/c/c-ares/c-ares_1.34.8_aarch64.deb",
+      "version": "1.34.8"
+    },
+    {
+      "architecture": "aarch64",
+      "dependencies": {
+        "Breaks": "libicu-dev",
+        "Depends": "libc++",
+        "Replaces": "libicu-dev"
+      },
+      "filename": "pool/main/libi/libicu/libicu_78.3_aarch64.deb",
+      "localFilename": "libicu_78.3_aarch64.deb",
+      "name": "libicu",
+      "sha256": "f536403f65a08fe0df6e7304184e902d54def77d5c3bd5edfd9109d57601d276",
+      "sizeBytes": 10210396,
+      "url": "https://packages-cf.termux.dev/apt/termux-main/pool/main/libi/libicu/libicu_78.3_aarch64.deb",
+      "version": "78.3"
+    },
+    {
+      "architecture": "aarch64",
+      "dependencies": {
+        "Breaks": "libsqlite-dev",
+        "Depends": "zlib",
+        "Replaces": "libsqlite-dev"
+      },
+      "filename": "pool/main/libs/libsqlite/libsqlite_3.53.4_aarch64.deb",
+      "localFilename": "libsqlite_3.53.4_aarch64.deb",
+      "name": "libsqlite",
+      "sha256": "0e909ce0d50fe123305446cd22e0c5edf535d40344b9b065fbdcdee52f53198d",
+      "sizeBytes": 759764,
+      "url": "https://packages-cf.termux.dev/apt/termux-main/pool/main/libs/libsqlite/libsqlite_3.53.4_aarch64.deb",
+      "version": "3.53.4"
+    },
+    {
+      "architecture": "aarch64",
+      "dependencies": {
+        "Breaks": "nodejs-dev",
+        "Conflicts": "nodejs-lts, nodejs-current",
+        "Depends": "libc++, openssl, c-ares, libicu, libsqlite, zlib, libffi",
+        "Recommends": "npm",
+        "Replaces": "nodejs-current, nodejs-dev",
+        "Suggests": "clang, make, pkg-config, python"
+      },
+      "filename": "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+      "localFilename": "nodejs_26.4.0-1_aarch64.deb",
+      "name": "nodejs",
+      "sha256": "eaf3ed8a6e4b72ebaa8c2cb3bad778c577cdf9ea87ca91761213d8a3940fc090",
+      "sizeBytes": 10349280,
+      "url": "https://packages-cf.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+      "version": "26.4.0-1"
+    },
+    {
+      "architecture": "all",
+      "dependencies": {
+        "Conflicts": "nodejs (<= 25.3.0), nodejs-lts (<= 24.13.0)",
+        "Depends": "nodejs | nodejs-lts"
+      },
+      "filename": "pool/main/n/npm/npm_11.20.0_all.deb",
+      "localFilename": "npm_11.20.0_all.deb",
+      "name": "npm",
+      "sha256": "a2775653a0626749138ccd6e37a7b63239f36a9e3c62a9e6740818ca4b2d088b",
+      "sizeBytes": 2025572,
+      "url": "https://packages-cf.termux.dev/apt/termux-main/pool/main/n/npm/npm_11.20.0_all.deb",
+      "version": "11.20.0"
+    }
+  ],
+  "runtime": "bionic",
+  "runtimeEvidence": false,
+  "schemaVersion": 1,
+  "sourceArchiveLock": {
+    "filename": "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+    "projectId": "nodejs",
+    "sha256": "eaf3ed8a6e4b72ebaa8c2cb3bad778c577cdf9ea87ca91761213d8a3940fc090",
+    "sizeBytes": 10349280,
+    "url": "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+    "version": "26.4.0-1"
+  },
+  "status": "reviewed-runtime-lock"
+}

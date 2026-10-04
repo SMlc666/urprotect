@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "fixtures/real-samples/manifest.json"
 CANDIDATES = ROOT / "fixtures/real-samples/candidates.json"
 VALIDATOR = ROOT / "scripts/validate-real-samples.py"
+RUNTIME_CLOSURES = ROOT / "fixtures/real-samples/runtime-closures.json"
 
 
 class RealSampleManifestTests(unittest.TestCase):
@@ -91,7 +92,24 @@ class RealSampleManifestTests(unittest.TestCase):
         self.assertEqual(selected, {project["projectId"] for project in self.manifest["corpus"]["projects"]})
         self.assertTrue(any(candidate["disposition"] in {"rejected", "deferred"} for candidate in self.candidates["candidates"]))
 
-    def test_dynamic_et_exec_samples_have_parser_only_static_policy(self) -> None:
+    def test_pr_runtime_witness_policies_are_explicit_and_bionic_is_locked(self) -> None:
+        projects = {project["projectId"]: project for project in self.manifest["corpus"]["projects"]}
+        busybox = projects["busybox"]["executionPolicy"]
+        coreutils = projects["gnu-coreutils"]["executionPolicy"]
+        node = projects["nodejs"]["executionPolicy"]
+        for policy in (busybox, coreutils):
+            self.assertTrue(policy["baseline"]["applicable"])
+            self.assertTrue(policy["outerWrapper"]["applicable"])
+            self.assertEqual(policy["baseline"]["expectedResult"], "accepted-and-runs")
+            self.assertEqual(policy["outerWrapper"]["expectedResult"], "accepted-and-runs")
+        self.assertTrue(node["baseline"]["applicable"])
+        self.assertTrue(node["outerWrapper"]["applicable"])
+        self.assertEqual(node["baseline"]["expectedResult"], "accepted-and-runs")
+        self.assertEqual(node["outerWrapper"]["expectedResult"], "accepted-and-runs")
+        self.assertEqual(node["outerWrapper"]["mode"], "outer-path-preserving")
+        self.assertIn("five-archive", node["baseline"]["reason"])
+
+    def test_dynamic_et_exec_samples_retain_explicit_runtime_boundary(self) -> None:
         projects = {project["projectId"]: project for project in self.manifest["corpus"]["projects"]}
         for project_id in ("caddy", "python"):
             project = projects[project_id]
@@ -101,8 +119,72 @@ class RealSampleManifestTests(unittest.TestCase):
                 "/lib/ld-linux-aarch64.so.1",
             )
             self.assertEqual(project["executionPolicy"]["static"]["expectedResult"], "validated")
-            self.assertEqual(project["executionPolicy"]["outerWrapper"]["expectedResult"], "not-applicable")
+            self.assertTrue(project["executionPolicy"]["outerWrapper"]["applicable"])
+            self.assertEqual(project["executionPolicy"]["outerWrapper"]["expectedResult"], "accepted-and-runs")
             self.assertEqual(project["executionPolicy"]["hostContext"]["expectedResult"], "not-applicable")
+
+    def test_nightly_and_release_runtime_policies_cover_all_one_hundred_identities(self) -> None:
+        projects = self.manifest["corpus"]["projects"]
+        self.assertEqual(len(projects), 100)
+        for project in projects:
+            for layer in ("baseline", "outerWrapper"):
+                declaration = project["executionPolicy"][layer]
+                self.assertTrue(declaration["applicable"], f"{project['projectId']}/{layer}")
+                self.assertEqual(declaration["expectedResult"], "accepted-and-runs")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts/validate-runtime-closures.py"),
+                str(RUNTIME_CLOSURES),
+                str(MANIFEST),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        self.assertIn("100 identities", result.stdout)
+        self.assertTrue(
+            all(
+                project["executionPolicy"][layer]["expectedResult"] == "accepted-and-runs"
+                for project in projects
+                for layer in ("baseline", "outerWrapper")
+            )
+        )
+
+    def test_pr_tier_override_is_explicit_and_does_not_weaken_nightly_policy(self) -> None:
+        projects = {project["projectId"]: project for project in self.manifest["corpus"]["projects"]}
+        for project_id in set(projects) - {"busybox", "gnu-coreutils", "nodejs"}:
+            override = projects[project_id]["executionPolicy"]["tierOverrides"]["pr"]
+            self.assertFalse(override["baseline"]["applicable"])
+            self.assertEqual(override["baseline"]["expectedResult"], "not-applicable")
+            self.assertFalse(override["outerWrapper"]["applicable"])
+            self.assertEqual(override["outerWrapper"]["expectedResult"], "not-applicable")
+        self.assertNotIn("tierOverrides", projects["nodejs"]["executionPolicy"])
+
+    def test_tier_override_execution_fields_use_strict_runtime_contracts(self) -> None:
+        mutations = (
+            ("expectedStatus", "0"),
+            ("mode", {"name": "runtime-closure"}),
+            ("command", "/bin/bash"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field):
+                data = copy.deepcopy(self.manifest)
+                project = next(item for item in data["corpus"]["projects"] if item["projectId"] == "gnu-bash")
+                project["executionPolicy"]["tierOverrides"]["pr"]["baseline"][field] = value
+                result = self.validate(data)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(field, result.stderr or result.stdout)
+
+    def test_canonical_dynamic_policy_cannot_predeclare_environment_unavailable(self) -> None:
+        data = copy.deepcopy(self.manifest)
+        project = next(item for item in data["corpus"]["projects"] if item["projectId"] == "gnu-bash")
+        project["executionPolicy"]["baseline"]["expectedResult"] = "environment-unavailable"
+        result = self.validate(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("environment-unavailable is observed evidence", result.stderr or result.stdout)
 
     def test_static_policy_cannot_claim_execution_success(self) -> None:
         data = copy.deepcopy(self.manifest)

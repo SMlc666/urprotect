@@ -12,7 +12,8 @@ public sealed record ElfPackOptions(
     bool AnalyzeInstructions = false,
     PayloadDispatchProfile Profile = PayloadDispatchProfile.OuterExecveat,
     string EntrySymbol = HostContextContract.EntrySymbol,
-    bool RequireThreadLifetime = false)
+    bool RequireThreadLifetime = false,
+    bool AllowPathSensitiveOuter = false)
 {
     public PayloadFrameLimits EffectiveLimits => Limits ?? new PayloadFrameLimits();
 }
@@ -111,6 +112,7 @@ public sealed class ElfPackService
                 sourceBytes,
                 options.Profile,
                 options.EntrySymbol,
+                options.AllowPathSensitiveOuter,
                 diagnostics))
         {
             return Failure(diagnostics, sourceBytes.Length);
@@ -294,6 +296,7 @@ public sealed class ElfPackService
         byte[] source,
         PayloadDispatchProfile profile,
         string entrySymbol,
+        bool allowPathSensitiveOuter,
         DiagnosticBag diagnostics)
     {
         if (profile == PayloadDispatchProfile.HostContextEntry)
@@ -369,7 +372,8 @@ public sealed class ElfPackService
             return false;
         }
 
-        if (file.DynamicMetadata.Rpath is not null || file.DynamicMetadata.RunPath is not null)
+        if (!allowPathSensitiveOuter
+            && (file.DynamicMetadata.Rpath is not null || file.DynamicMetadata.RunPath is not null))
         {
             diagnostics.Error(
                 DiagnosticCode.UnsupportedPackInput,
