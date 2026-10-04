@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -176,6 +177,79 @@ class BionicNodeRunnerTests(unittest.TestCase):
             ["/usr/local/bin/urprotect-packed", *context["argv"][1:]],
         )
         self.assertEqual(RUNNER.substitute_outer_argv(["/node", "--version", "ARG"], "/wrapper"), ["/wrapper", "--version", "ARG"])
+
+    def test_wrapper_staging_skips_same_file_copy_and_preserves_packed_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper_root = Path(directory) / "wrapper"
+            wrapper_root.mkdir()
+            wrapper = wrapper_root / "urprotect-packed"
+            wrapper.write_bytes(b"packed-wrapper")
+            wrapper.chmod(0o555)
+            before_hash = RUNNER.sha256_file(wrapper)
+
+            with patch.object(RUNNER.shutil, "copyfile", side_effect=AssertionError("self-copy")) as copyfile:
+                staged = RUNNER._stage_wrapper(wrapper, wrapper_root / "urprotect-packed")
+
+            copyfile.assert_not_called()
+            self.assertEqual(staged, wrapper)
+            self.assertEqual(RUNNER.sha256_file(staged), before_hash)
+            self.assertEqual(staged.read_bytes(), b"packed-wrapper")
+            self.assertEqual([path.name for path in wrapper_root.iterdir()], ["urprotect-packed"])
+
+    def test_wrapper_staging_reuses_existing_hard_link_without_copying(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper_root = Path(directory)
+            wrapper = wrapper_root / "source-wrapper"
+            destination = wrapper_root / "hard-link-wrapper"
+            wrapper.write_bytes(b"packed-wrapper")
+            try:
+                os.link(wrapper, destination)
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"hard links are unsupported: {error}")
+
+            self.assertTrue(os.path.samefile(wrapper, destination))
+            with patch.object(RUNNER.shutil, "copyfile", side_effect=AssertionError("self-copy")) as copyfile:
+                staged = RUNNER._stage_wrapper(wrapper, destination)
+
+            copyfile.assert_not_called()
+            self.assertEqual(staged, destination)
+            self.assertEqual(staged.read_bytes(), b"packed-wrapper")
+
+    def test_wrapper_staging_copies_to_a_different_regular_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper_root = Path(directory)
+            wrapper = wrapper_root / "source-wrapper"
+            destination = wrapper_root / "destination-wrapper"
+            wrapper.write_bytes(b"packed-wrapper")
+            destination.write_bytes(b"old-wrapper")
+
+            staged = RUNNER._stage_wrapper(wrapper, destination)
+
+            self.assertEqual(staged, destination)
+            self.assertEqual(wrapper.read_bytes(), b"packed-wrapper")
+            self.assertEqual(destination.read_bytes(), b"packed-wrapper")
+
+    def test_wrapper_staging_rejects_symlink_and_non_regular_destinations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper_root = Path(directory)
+            wrapper = wrapper_root / "source-wrapper"
+            wrapper.write_bytes(b"packed-wrapper")
+            directory_destination = wrapper_root / "destination-directory"
+            directory_destination.mkdir()
+            symlink_destination = wrapper_root / "destination-symlink"
+            symlink_destination.symlink_to(wrapper)
+
+            destinations = (
+                (directory_destination, "packed wrapper destination must be a regular file"),
+                (symlink_destination, "packed wrapper destination must not be a symlink"),
+            )
+            with patch.object(RUNNER.shutil, "copyfile", side_effect=AssertionError("copy should not be attempted")) as copyfile:
+                for destination, message in destinations:
+                    with self.subTest(destination=destination.name):
+                        with self.assertRaisesRegex(RUNNER.RunnerError, message):
+                            RUNNER._stage_wrapper(wrapper, destination)
+
+            copyfile.assert_not_called()
 
     def test_runpath_verification_requires_exact_absolute_runpath(self) -> None:
         expected = self.execution["runpath"]

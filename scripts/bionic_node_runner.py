@@ -1018,6 +1018,24 @@ def _run_one_target(
     return result_data, started.stdout, started.stderr
 
 
+def _stage_wrapper(wrapper: Path, destination: Path) -> Path:
+    """Stage a packed wrapper without copying a file onto itself."""
+    if wrapper.is_symlink() or not wrapper.is_file():
+        raise RunnerError("packed wrapper output must be a regular host-owned file")
+    if destination.is_symlink():
+        raise RunnerError("packed wrapper destination must not be a symlink")
+    if destination.exists():
+        if not destination.is_file():
+            raise RunnerError("packed wrapper destination must be a regular file")
+        try:
+            if os.path.samefile(wrapper, destination):
+                return destination
+        except OSError as error:
+            raise RunnerError(f"could not compare packed wrapper staging files: {error}") from error
+    shutil.copyfile(wrapper, destination)
+    return destination
+
+
 def _pack(
     *,
     context: dict[str, Any],
@@ -1498,8 +1516,7 @@ def _run(args: argparse.Namespace) -> int:
             output_limit=execution["outputBytes"],
         )
         if pack_status == 0 and wrapper is not None:
-            wrapper_copy = wrapper_root / "urprotect-packed"
-            shutil.copyfile(wrapper, wrapper_copy)
+            wrapper_copy = _stage_wrapper(wrapper, wrapper_root / "urprotect-packed")
             wrapper_copy.chmod(0o555)
 
         # One host-side deadline covers setup and both target containers. Each Docker
