@@ -779,16 +779,19 @@ RUNPATH, limits, cleanup authority, and host-captured stream byte counts.
   dependency fields, argv, expected status, absolute RUNPATH, outer mode, and
   resource limits are cross-checked by the runner and evidence gate.
 - Bionic package replay uses direct HTTPS archive acquisition with exact
-  size/hash verification and streams each package's data archive through
-  `dpkg-deb --fsys-tarfile` into the locked Termux GNU `tar` with
-  `--no-overwrite-dir --no-same-owner --no-same-permissions --touch`, under the
-  locked base Bash's `pipefail` mode so producer or extractor failures remain
-  fatal. `--no-overwrite-dir` preserves metadata on existing base directories;
-  the remaining flags avoid archive ownership/permission restoration while
-  applying the container umask and preserving executable bits. Extraction
-  failures retain status 74. It does not run
-  apt, consult a package index, execute maintainer scripts, or use a mutable host library.
-  Base and extracted package inventories use the same canonical
+  size/hash verification. For each package, the locked base Bash runs
+  `dpkg-deb --fsys-tarfile` through a `pipefail`-enabled GNU `tar` into a
+  fresh user-owned `/tmp/urprotect-package.XXXXXX` staging directory with
+  `--no-overwrite-dir --no-same-owner --no-same-permissions --touch`.
+  The host-owned setup script then merges the staged payload into `/` without
+  changing existing directory metadata: existing regular files are replaced
+  by bytes and mode, new directories receive the staged mode, and symlinks
+  are recreated from their archive targets. Absolute, traversal, symlink-
+  parent, conflicting non-regular, and unsupported special payload paths are
+  rejected. The stage is removed after each package; producer, extractor,
+  merge, or stage-cleanup failure retains status 74. It does not run apt,
+  consult a package index, execute maintainer scripts, or use a mutable host
+  library. Base and extracted package inventories use the same canonical
   `${Package}\t${Version}\t${Architecture}\t${Status}` query.
 - The Node executable must have exactly one absolute `DT_RUNPATH` equal to
   `/data/data/com.termux/files/usr/lib`, no `DT_RPATH`, no `$ORIGIN`, and no

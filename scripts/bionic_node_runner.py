@@ -720,7 +720,143 @@ def _reap_container(docker: list[str], name: str, *, budget_seconds: float = 5.0
     return hard_errors + status_one_errors, exit_status
 
 
+BIONIC_PACKAGE_MERGE_SCRIPT = """\\
+set -eu
+archive=$1
+root_dir=$2
+case "$root_dir" in
+  /*) ;;
+  *) echo "package merge root must be absolute" >&2; exit 1 ;;
+esac
+root_prefix=${root_dir%/}
+[ -n "$root_prefix" ] || root_prefix=/
+stage_dir="$(mktemp -d /tmp/urprotect-package.XXXXXX)"
+cleanup_stage() {
+  status=$?
+  rm -rf -- "$stage_dir" || status=74
+  exit "$status"
+}
+trap cleanup_stage EXIT
+
+ensure_parent_directory() {
+  local destination=$1
+  local parent=${destination%/*}
+  local current=/ component remainder
+  [ -n "$parent" ] || parent=/
+  [ "$parent" = / ] && return 0
+  remainder=${parent#/}
+  while [ -n "$remainder" ]; do
+    if [[ "$remainder" == */* ]]; then
+      component=${remainder%%/*}
+      remainder=${remainder#*/}
+    else
+      component=$remainder
+      remainder=
+    fi
+    [ -n "$component" ] || continue
+    current="${current}${component}"
+    if [ -L "$current" ]; then
+      echo "package path traverses a symlink: $destination" >&2
+      return 1
+    fi
+    if [ -e "$current" ]; then
+      [ -d "$current" ] || { echo "package path parent is not a directory: $destination" >&2; return 1; }
+    else
+      mkdir -- "$current"
+    fi
+    current="${current}/"
+  done
+}
+
+validate_relative_path() {
+  case "$1" in
+    ""|/*|.|..|./*|*/./*|*/.|../*|*/../*|*/..)
+      echo "unsafe package path: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+merge_directory() {
+  local entry=$1
+  local relative=${entry#"$stage_dir"/}
+  local destination mode
+  validate_relative_path "$relative"
+  destination="$root_prefix/$relative"
+  ensure_parent_directory "$destination"
+  if [ -L "$destination" ]; then
+    rm -f -- "$destination"
+  elif [ -e "$destination" ]; then
+    [ -d "$destination" ] || { echo "package directory conflicts with a file: $destination" >&2; return 1; }
+    return 0
+  fi
+  mode="$(stat -c "%a" -- "$entry")"
+  mkdir -- "$destination"
+  chmod "$mode" -- "$destination"
+}
+
+merge_regular_file() {
+  local entry=$1
+  local relative=${entry#"$stage_dir"/}
+  local destination mode
+  validate_relative_path "$relative"
+  destination="$root_prefix/$relative"
+  ensure_parent_directory "$destination"
+  if [ -L "$destination" ]; then
+    rm -f -- "$destination"
+  elif [ -e "$destination" ]; then
+    [ -f "$destination" ] || { echo "package file conflicts with a non-regular path: $destination" >&2; return 1; }
+    cat -- "$entry" > "$destination"
+  else
+    cp -- "$entry" "$destination"
+  fi
+  mode="$(stat -c "%a" -- "$entry")"
+  chmod "$mode" -- "$destination"
+}
+
+merge_symbolic_link() {
+  local entry=$1
+  local relative=${entry#"$stage_dir"/}
+  local destination target
+  validate_relative_path "$relative"
+  destination="$root_prefix/$relative"
+  ensure_parent_directory "$destination"
+  if [ -L "$destination" ]; then
+    rm -f -- "$destination"
+  elif [ -e "$destination" ]; then
+    [ -d "$destination" ] && { echo "package symlink conflicts with a directory: $destination" >&2; return 1; }
+    rm -f -- "$destination"
+  fi
+  target="$(readlink -- "$entry")"
+  ln -s -- "$target" "$destination"
+}
+
+dpkg-deb --fsys-tarfile "$archive" |
+  tar --extract --file=- --directory="$stage_dir" --no-overwrite-dir --no-same-owner --no-same-permissions --touch
+
+find "$stage_dir" -mindepth 1 -type d -print0 |
+  while IFS= read -r -d "" entry; do
+    merge_directory "$entry"
+  done
+find "$stage_dir" -mindepth 1 ! -type d -print0 |
+  while IFS= read -r -d "" entry; do
+    if [ -L "$entry" ]; then
+      merge_symbolic_link "$entry"
+    elif [ -f "$entry" ]; then
+      merge_regular_file "$entry"
+    else
+      echo "unsupported package payload entry: $entry" >&2
+      exit 1
+    fi
+  done
+"""
+
+
 def _prepare_setup_script(path: Path, execution: dict[str, Any], artifact_sha: str) -> None:
+    # The setup script passes the merge program as a single-quoted `bash -c`
+    # argument. Escape embedded quotes at this boundary so a future diagnostic
+    # or path check cannot change the outer script's command structure.
+    package_merge_script = BIONIC_PACKAGE_MERGE_SCRIPT.rstrip().replace("'", "'\"'\"'")
     path.write_text(
         """#!/data/data/com.termux/files/usr/bin/sh
 set -eu
@@ -741,17 +877,22 @@ while IFS=\"$(printf '\\t')\" read -r package_name package_version package_arch 
   [ \"$(dpkg-deb -f \"$archive\" Package)\" = \"$package_name\" ] || { echo \"package identity mismatch: $package_name\" >&2; exit 68; }
   [ \"$(dpkg-deb -f \"$archive\" Version)\" = \"$package_version\" ] || { echo \"package version mismatch: $package_name\" >&2; exit 69; }
   [ \"$(dpkg-deb -f \"$archive\" Architecture)\" = \"$package_arch\" ] || { echo \"package architecture mismatch: $package_name\" >&2; exit 70; }
-  "$PREFIX/bin/bash" -o pipefail -c '
-    archive=$1
-    dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- --directory=/ --no-overwrite-dir --no-same-owner --no-same-permissions --touch
-  ' -- "$archive" || { echo "package data extraction failed: $package_name" >&2; exit 74; }
+  if "$PREFIX/bin/bash" -o pipefail -c '
+__URP_PACKAGE_MERGE_SCRIPT__
+  ' -- "$archive" /; then
+    :
+  else
+    status=$?
+    echo "package data extraction failed: $package_name" >&2
+    exit 74
+  fi
 done < /metadata/packages.tsv
 dpkg-query -W -f='${Package}\\t${Version}\\t${Architecture}\\t${Status}\\n' | sort | cmp -- /metadata/base.tsv - || { echo 'package extraction changed the package inventory' >&2; exit 71; }
 [ -f \"__URP_ARTIFACT_PATH__\" ] || { echo 'extracted Node.js executable is missing' >&2; exit 72; }
 actual_sha=\"$(sha256sum \"__URP_ARTIFACT_PATH__\" | awk '{print $1}')\"
 [ \"$actual_sha\" = \"__URP_ARTIFACT_SHA__\" ] || { echo 'runtime Node.js executable hash mismatch' >&2; exit 73; }
 printf 'URP_RUNTIME_ARTIFACT_SHA256=%s\\n' \"$actual_sha\"
-""".replace("__URP_ARTIFACT_PATH__", execution["artifactPath"]).replace("__URP_ARTIFACT_SHA__", artifact_sha),
+""".replace("__URP_ARTIFACT_PATH__", execution["artifactPath"]).replace("__URP_ARTIFACT_SHA__", artifact_sha).replace("__URP_PACKAGE_MERGE_SCRIPT__", package_merge_script),
         encoding="utf-8",
     )
     path.chmod(0o444)

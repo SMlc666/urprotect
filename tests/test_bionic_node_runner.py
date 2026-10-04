@@ -7,7 +7,11 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
+import stat
+import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -356,13 +360,93 @@ class BionicNodeRunnerTests(unittest.TestCase):
             self.assertIn("dpkg-query -W -f='${Package}", setup_text)
             self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', setup_text)
             self.assertIn(
-                'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
-                "--directory=/ --no-overwrite-dir --no-same-owner --no-same-permissions --touch",
+                'dpkg-deb --fsys-tarfile "$archive" |\n  tar --extract --file=- --directory="$stage_dir" '
+                "--no-overwrite-dir --no-same-owner --no-same-permissions --touch",
                 setup_text,
             )
+            self.assertIn('stage_dir="$(mktemp -d /tmp/urprotect-package.XXXXXX)"', setup_text)
+            self.assertIn('trap cleanup_stage EXIT', setup_text)
+            self.assertIn('find "$stage_dir" -mindepth 1 -type d -print0', setup_text)
+            self.assertIn('cat -- "$entry" > "$destination"', setup_text)
+            self.assertIn('ln -s -- "$target" "$destination"', setup_text)
+            self.assertNotIn('--directory=/ --no-overwrite-dir', setup_text)
+            syntax = subprocess.run(["bash", "-n", str(setup)], check=False, capture_output=True, text=True)
+            self.assertEqual(syntax.returncode, 0, syntax.stderr)
             self.assertIn('package data extraction failed: $package_name', setup_text)
-            self.assertIn('|| { echo "package data extraction failed: $package_name" >&2; exit 74; }', setup_text)
+            self.assertIn('echo "package data extraction failed: $package_name" >&2', setup_text)
+            self.assertIn('exit 74', setup_text)
             self.assertNotIn("dpkg-deb --extract", setup_text)
+
+    def test_setup_script_escapes_merge_script_quotes_at_shell_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            setup = Path(directory) / "setup.sh"
+            with patch.object(RUNNER, "BIONIC_PACKAGE_MERGE_SCRIPT", 'echo "merge \' quote"'):
+                RUNNER._prepare_setup_script(setup, self.execution, "a" * 64)
+            setup_text = setup.read_text(encoding="utf-8")
+            self.assertIn("'\"'\"'", setup_text)
+            syntax = subprocess.run(["bash", "-n", str(setup)], check=False, capture_output=True, text=True)
+            self.assertEqual(syntax.returncode, 0, syntax.stderr)
+
+    def test_staged_non_root_merge_preserves_existing_directory_modes_and_symlinks(self) -> None:
+        setpriv = shutil.which("setpriv")
+        if setpriv is None:
+            self.skipTest("setpriv is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o755)
+            rootfs = root / "rootfs"
+            rootfs.mkdir()
+            rootfs.chmod(0o755)
+            data = rootfs / "data"
+            data.mkdir(mode=0o773)
+            data.chmod(0o773)
+            nested = data / "data"
+            nested.mkdir(mode=0o773)
+            nested.chmod(0o773)
+            if os.geteuid() == 0:
+                os.chown(data, 0, 0)
+                os.chown(nested, 0, 0)
+
+            payload = root / "payload"
+            payload_nested = payload / "data" / "data"
+            payload_nested.mkdir(parents=True)
+            executable = payload_nested / "node"
+            executable.write_text("#!/bin/sh\\necho node\\n", encoding="utf-8")
+            executable.chmod(0o755)
+            (payload_nested / "node-link").symlink_to("node")
+            archive = root / "package-data.tar"
+            with tarfile.open(archive, "w") as tar:
+                tar.add(payload, arcname=".")
+
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_dpkg = fake_bin / "dpkg-deb"
+            fake_dpkg.write_text(
+                "#!/bin/sh" + chr(10)
+                + '[ "$1" = --fsys-tarfile ] || exit 2' + chr(10)
+                + 'cat "$FAKE_PAYLOAD"' + chr(10),
+                encoding="utf-8",
+            )
+            fake_dpkg.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+            environment["FAKE_PAYLOAD"] = str(archive)
+            command = ["bash", "-o", "pipefail", "-c", RUNNER.BIONIC_PACKAGE_MERGE_SCRIPT, "--", str(archive), str(rootfs)]
+            if os.geteuid() == 0:
+                command = [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", *command]
+
+            result = subprocess.run(command, check=False, capture_output=True, text=True, env=environment)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(stat.S_IMODE(data.stat().st_mode), 0o773)
+            self.assertEqual(stat.S_IMODE(nested.stat().st_mode), 0o773)
+            installed = nested / "node"
+            self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o755)
+            self.assertEqual(installed.read_text(encoding="utf-8"), "#!/bin/sh\\necho node\\n")
+            link = nested / "node-link"
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(os.readlink(link), "node")
 
     def test_container_cleanup_proves_normal_already_exited_container_is_removed(self) -> None:
         calls: list[list[str]] = []

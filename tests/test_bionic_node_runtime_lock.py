@@ -140,8 +140,8 @@ class BionicNodeRuntimeLockTests(unittest.TestCase):
         self.assertIn("--max-filesize", source)
         self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', source)
         self.assertIn(
-            'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
-            "--directory=/ --no-overwrite-dir --no-same-owner --no-same-permissions --touch",
+            'dpkg-deb --fsys-tarfile "$archive" |\n  tar --extract --file=- --directory="$stage_dir" '
+            "--no-overwrite-dir --no-same-owner --no-same-permissions --touch",
             source,
         )
         self.assertNotIn("dpkg-deb --extract", source)

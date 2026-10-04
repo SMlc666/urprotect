@@ -625,10 +625,15 @@ class BionicNodeClosureTests(unittest.TestCase):
         self.assertIn("--outer-mode", source)
         self.assertIn('"$PREFIX/bin/bash" -o pipefail -c', source)
         self.assertIn(
-            'dpkg-deb --fsys-tarfile "$archive" | tar --extract --file=- '
-            "--directory=/ --no-overwrite-dir --no-same-owner --no-same-permissions --touch",
+            'dpkg-deb --fsys-tarfile "$archive" |\n  tar --extract --file=- --directory="$stage_dir" '
+            "--no-overwrite-dir --no-same-owner --no-same-permissions --touch",
             source,
         )
+        self.assertIn('stage_dir="$(mktemp -d /tmp/urprotect-package.XXXXXX)"', source)
+        self.assertIn('find "$stage_dir" -mindepth 1 -type d -print0', source)
+        self.assertIn('cat -- "$entry" > "$destination"', source)
+        self.assertIn('ln -s -- "$target" "$destination"', source)
+        self.assertNotIn('--directory=/ --no-overwrite-dir', source)
         self.assertNotIn("dpkg-deb --extract", source)
         self.assertIn('"--network", "none"', source)
         self.assertNotIn("apt-get", source)
