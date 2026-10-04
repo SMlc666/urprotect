@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -142,6 +143,21 @@ class BionicNodeRunnerTests(unittest.TestCase):
             "baseline": baseline,
             "outer": outer,
         }
+
+    def _run_package_merge(self, root: Path, archive: Path, rootfs: Path) -> subprocess.CompletedProcess[str]:
+        fake_bin = root / "fake-bin"
+        fake_bin.mkdir()
+        dpkg_deb = fake_bin / "dpkg-deb"
+        dpkg_deb.write_text("#!/bin/sh\ncat \"$FAKE_PAYLOAD\"\n", encoding="utf-8")
+        dpkg_deb.chmod(0o755)
+        environment = os.environ.copy()
+        environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+        environment["FAKE_PAYLOAD"] = str(archive)
+        command = ["bash", "-o", "pipefail", "-c", RUNNER.BIONIC_PACKAGE_MERGE_SCRIPT, "--", str(archive), str(rootfs)]
+        setpriv = shutil.which("setpriv")
+        if setpriv is not None and os.geteuid() == 0:
+            command = [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", *command]
+        return subprocess.run(command, check=False, capture_output=True, text=True, env=environment, timeout=5)
 
     def test_named_container_identity_is_written_to_worker_cleanup_registry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -366,9 +382,18 @@ class BionicNodeRunnerTests(unittest.TestCase):
             )
             self.assertIn('stage_dir="$(mktemp -d /tmp/urprotect-package.XXXXXX)"', setup_text)
             self.assertIn('trap cleanup_stage EXIT', setup_text)
-            self.assertIn('find "$stage_dir" -mindepth 1 -type d -print0', setup_text)
-            self.assertIn('cat -- "$entry" > "$destination"', setup_text)
-            self.assertIn('ln -s -- "$target" "$destination"', setup_text)
+            self.assertIn('umask 000', setup_text)
+            self.assertIn('find "$stage_dir" -mindepth 1 -print0 | validate_stage', setup_text)
+            self.assertIn('tar --create --file=- --directory="$stage_dir" . |', setup_text)
+            self.assertIn(
+                'tar --extract --file=- --directory="$root_prefix" --no-overwrite-dir '
+                '--no-same-owner --same-permissions --touch',
+                setup_text,
+            )
+            self.assertIn('validate_destination_parent', setup_text)
+            self.assertNotIn('cat -- "$entry" > "$destination"', setup_text)
+            self.assertNotIn('cp -- "$entry" "$destination"', setup_text)
+            self.assertNotIn('stat -c "%a" -- "$entry"', setup_text)
             self.assertNotIn('--directory=/ --no-overwrite-dir', setup_text)
             syntax = subprocess.run(["bash", "-n", str(setup)], check=False, capture_output=True, text=True)
             self.assertEqual(syntax.returncode, 0, syntax.stderr)
@@ -436,17 +461,83 @@ class BionicNodeRunnerTests(unittest.TestCase):
             if os.geteuid() == 0:
                 command = [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", *command]
 
-            result = subprocess.run(command, check=False, capture_output=True, text=True, env=environment)
+            previous_umask = os.umask(0o077)
+            try:
+                result = subprocess.run(command, check=False, capture_output=True, text=True, env=environment, timeout=5)
+            finally:
+                os.umask(previous_umask)
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(stat.S_IMODE(data.stat().st_mode), 0o773)
             self.assertEqual(stat.S_IMODE(nested.stat().st_mode), 0o773)
+            if os.geteuid() == 0:
+                self.assertEqual(data.stat().st_uid, 0)
+                self.assertEqual(nested.stat().st_uid, 0)
             installed = nested / "node"
             self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o755)
             self.assertEqual(installed.read_text(encoding="utf-8"), "#!/bin/sh\\necho node\\n")
             link = nested / "node-link"
             self.assertTrue(link.is_symlink())
             self.assertEqual(os.readlink(link), "node")
+
+    def test_staged_merge_rejects_unsafe_and_special_payloads(self) -> None:
+        if shutil.which("setpriv") is None:
+            self.skipTest("setpriv is unavailable")
+
+        cases = (
+            ("absolute", "/safe/evil"),
+            ("traversal", "../evil"),
+            ("symlink-parent", "safe/evil"),
+            ("special", None),
+        )
+        for kind, member_name in cases:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                root.chmod(0o755)
+                rootfs = root / "rootfs"
+                rootfs.mkdir()
+                rootfs.chmod(0o755)
+                safe = rootfs / "safe"
+                outside = root / "outside"
+                outside.mkdir()
+                outside.chmod(0o777)
+                if kind == "symlink-parent":
+                    safe.symlink_to(outside)
+                else:
+                    safe.mkdir(mode=0o777)
+                    safe.chmod(0o777)
+
+                archive = root / "package-data.tar"
+                if kind == "special":
+                    payload = root / "payload"
+                    payload.mkdir()
+                    os.mkfifo(payload / "unsafe-fifo")
+                    with tarfile.open(archive, "w") as tar:
+                        tar.add(payload, arcname=".")
+                else:
+                    with tarfile.open(archive, "w") as tar:
+                        info = tarfile.TarInfo(member_name)
+                        info.mode = 0o755
+                        if kind == "symlink-parent":
+                            info.size = 1
+                            tar.addfile(info, io.BytesIO(b"x"))
+                        else:
+                            data = b"x"
+                            info.size = len(data)
+                            tar.addfile(info, io.BytesIO(data))
+
+                result = self._run_package_merge(root, archive, rootfs)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                if kind == "absolute":
+                    self.assertIn("unsafe absolute or traversal package path", result.stderr)
+                    self.assertFalse((safe / "evil").exists())
+                elif kind == "traversal":
+                    self.assertFalse((root / "evil").exists())
+                elif kind == "symlink-parent":
+                    self.assertIn("package path traverses a symlink", result.stderr)
+                    self.assertFalse((outside / "evil").exists())
+                else:
+                    self.assertIn("unsupported package payload entry", result.stderr)
 
     def test_container_cleanup_proves_normal_already_exited_container_is_removed(self) -> None:
         calls: list[list[str]] = []

@@ -731,14 +731,24 @@ esac
 root_prefix=${root_dir%/}
 [ -n "$root_prefix" ] || root_prefix=/
 stage_dir="$(mktemp -d /tmp/urprotect-package.XXXXXX)"
+tar_error_file="${stage_dir}.tar-errors"
 cleanup_stage() {
   status=$?
-  rm -rf -- "$stage_dir" || status=74
+  rm -rf -- "$stage_dir" "$tar_error_file" || status=74
   exit "$status"
 }
 trap cleanup_stage EXIT
 
-ensure_parent_directory() {
+validate_relative_path() {
+  case "$1" in
+    ""|/*|.|..|./*|*/./*|*/.|../*|*/../*|*/..)
+      echo "unsafe package path: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+validate_destination_parent() {
   local destination=$1
   local parent=${destination%/*}
   local current=/ component remainder
@@ -755,100 +765,105 @@ ensure_parent_directory() {
     fi
     [ -n "$component" ] || continue
     current="${current}${component}"
-    if [ -L "$current" ]; then
+    if [[ -L "$current" ]]; then
       echo "package path traverses a symlink: $destination" >&2
       return 1
     fi
-    if [ -e "$current" ]; then
-      [ -d "$current" ] || { echo "package path parent is not a directory: $destination" >&2; return 1; }
+    if [[ -e "$current" ]]; then
+      [[ -d "$current" ]] || { echo "package path parent is not a directory: $destination" >&2; return 1; }
     else
-      mkdir -- "$current"
+      # Everything below a missing component will be created by tar. There
+      # cannot be an existing symlink below it, so the remaining walk is done.
+      return 0
     fi
     current="${current}/"
   done
 }
 
-validate_relative_path() {
-  case "$1" in
-    ""|/*|.|..|./*|*/./*|*/.|../*|*/../*|*/..)
-      echo "unsafe package path: $1" >&2
-      return 1
-      ;;
-  esac
-}
-
-merge_directory() {
+validate_stage_entry() {
   local entry=$1
   local relative=${entry#"$stage_dir"/}
-  local destination mode
-  validate_relative_path "$relative"
+  local destination
+  validate_relative_path "$relative" || return 1
   destination="$root_prefix/$relative"
-  ensure_parent_directory "$destination"
-  if [ -L "$destination" ]; then
-    rm -f -- "$destination"
-  elif [ -e "$destination" ]; then
-    [ -d "$destination" ] || { echo "package directory conflicts with a file: $destination" >&2; return 1; }
+  validate_destination_parent "$destination" || return 1
+
+  if [[ -L "$entry" ]]; then
+    if [[ -L "$destination" ]]; then
+      return 0
+    fi
+    if [[ -e "$destination" ]]; then
+      [[ -d "$destination" ]] || [[ -f "$destination" ]] || {
+        echo "package symlink conflicts with a non-regular path: $destination" >&2
+        return 1
+      }
+      return 0
+    fi
     return 0
   fi
-  mode="$(stat -c "%a" -- "$entry")"
-  mkdir -- "$destination"
-  chmod "$mode" -- "$destination"
-}
 
-merge_regular_file() {
-  local entry=$1
-  local relative=${entry#"$stage_dir"/}
-  local destination mode
-  validate_relative_path "$relative"
-  destination="$root_prefix/$relative"
-  ensure_parent_directory "$destination"
-  if [ -L "$destination" ]; then
-    rm -f -- "$destination"
-  elif [ -e "$destination" ]; then
-    [ -f "$destination" ] || { echo "package file conflicts with a non-regular path: $destination" >&2; return 1; }
-    cat -- "$entry" > "$destination"
-  else
-    cp -- "$entry" "$destination"
-  fi
-  mode="$(stat -c "%a" -- "$entry")"
-  chmod "$mode" -- "$destination"
-}
-
-merge_symbolic_link() {
-  local entry=$1
-  local relative=${entry#"$stage_dir"/}
-  local destination target
-  validate_relative_path "$relative"
-  destination="$root_prefix/$relative"
-  ensure_parent_directory "$destination"
-  if [ -L "$destination" ]; then
-    rm -f -- "$destination"
-  elif [ -e "$destination" ]; then
-    [ -d "$destination" ] && { echo "package symlink conflicts with a directory: $destination" >&2; return 1; }
-    rm -f -- "$destination"
-  fi
-  target="$(readlink -- "$entry")"
-  ln -s -- "$target" "$destination"
-}
-
-dpkg-deb --fsys-tarfile "$archive" |
-  tar --extract --file=- --directory="$stage_dir" --no-overwrite-dir --no-same-owner --no-same-permissions --touch
-
-find "$stage_dir" -mindepth 1 -type d -print0 |
-  while IFS= read -r -d "" entry; do
-    merge_directory "$entry"
-  done
-find "$stage_dir" -mindepth 1 ! -type d -print0 |
-  while IFS= read -r -d "" entry; do
-    if [ -L "$entry" ]; then
-      merge_symbolic_link "$entry"
-    elif [ -f "$entry" ]; then
-      merge_regular_file "$entry"
-    else
-      echo "unsupported package payload entry: $entry" >&2
-      exit 1
+  if [[ -d "$entry" ]]; then
+    if [[ -L "$destination" ]]; then
+      return 0
     fi
+    if [[ -e "$destination" ]]; then
+      [[ -d "$destination" ]] || {
+        echo "package directory conflicts with a file: $destination" >&2
+        return 1
+      }
+    fi
+    return 0
+  fi
+
+  if [[ -f "$entry" ]]; then
+    if [[ -L "$destination" ]]; then
+      return 0
+    fi
+    if [[ -e "$destination" ]]; then
+      [[ -f "$destination" ]] || {
+        echo "package file conflicts with a non-regular path: $destination" >&2
+        return 1
+      }
+    fi
+    return 0
+  fi
+
+  echo "unsupported package payload entry: $entry" >&2
+  return 1
+}
+
+validate_stage() {
+  local entry
+  while IFS= read -r -d "" entry; do
+    validate_stage_entry "$entry" || return 1
   done
+}
+
+# Keep the package's ordinary executable bits in the user-owned stage while
+# still dropping ownership and privileged mode bits. The destination tar pass
+# applies those staged modes only to new files/directories or replaced files;
+# --no-overwrite-dir leaves existing directory metadata alone.
+if (
+  umask 000
+  dpkg-deb --fsys-tarfile "$archive" |
+  tar --extract --file=- --directory="$stage_dir" --no-overwrite-dir --no-same-owner --no-same-permissions --touch 2>"$tar_error_file"
+); then
+  :
+else
+  cat -- "$tar_error_file" >&2
+  exit 1
+fi
+if grep -Fq "Removing leading" "$tar_error_file"; then
+  cat -- "$tar_error_file" >&2
+  echo "unsafe absolute or traversal package path" >&2
+  exit 1
+fi
+rm -f -- "$tar_error_file"
+
+find "$stage_dir" -mindepth 1 -print0 | validate_stage
+
+tar --create --file=- --directory="$stage_dir" . |
+  tar --extract --file=- --directory="$root_prefix" --no-overwrite-dir --no-same-owner --same-permissions --touch
 """
 
 

@@ -630,9 +630,18 @@ class BionicNodeClosureTests(unittest.TestCase):
             source,
         )
         self.assertIn('stage_dir="$(mktemp -d /tmp/urprotect-package.XXXXXX)"', source)
-        self.assertIn('find "$stage_dir" -mindepth 1 -type d -print0', source)
-        self.assertIn('cat -- "$entry" > "$destination"', source)
-        self.assertIn('ln -s -- "$target" "$destination"', source)
+        self.assertIn('umask 000', source)
+        self.assertIn('find "$stage_dir" -mindepth 1 -print0 | validate_stage', source)
+        self.assertIn('tar --create --file=- --directory="$stage_dir" . |', source)
+        self.assertIn(
+            'tar --extract --file=- --directory="$root_prefix" --no-overwrite-dir '
+            '--no-same-owner --same-permissions --touch',
+            source,
+        )
+        self.assertIn('validate_destination_parent', source)
+        self.assertNotIn('cat -- "$entry" > "$destination"', source)
+        self.assertNotIn('cp -- "$entry" "$destination"', source)
+        self.assertNotIn('stat -c "%a" -- "$entry"', source)
         self.assertNotIn('--directory=/ --no-overwrite-dir', source)
         self.assertNotIn("dpkg-deb --extract", source)
         self.assertIn('"--network", "none"', source)

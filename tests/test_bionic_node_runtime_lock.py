@@ -144,6 +144,17 @@ class BionicNodeRuntimeLockTests(unittest.TestCase):
             "--no-overwrite-dir --no-same-owner --no-same-permissions --touch",
             source,
         )
+        self.assertIn('tar --create --file=- --directory="$stage_dir" . |', source)
+        self.assertIn(
+            'tar --extract --file=- --directory="$root_prefix" --no-overwrite-dir '
+            '--no-same-owner --same-permissions --touch',
+            source,
+        )
+        self.assertIn('find "$stage_dir" -mindepth 1 -print0 | validate_stage', source)
+        self.assertIn('validate_destination_parent', source)
+        self.assertNotIn('cat -- "$entry" > "$destination"', source)
+        self.assertNotIn('cp -- "$entry" "$destination"', source)
+        self.assertNotIn('stat -c "%a" -- "$entry"', source)
         self.assertNotIn("dpkg-deb --extract", source)
         self.assertIn('"--network", "none"', source)
         self.assertIn('"--user", "1000:1000"', source)
