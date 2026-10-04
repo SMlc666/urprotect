@@ -27,6 +27,7 @@ runtime_closures="${repo_root}/fixtures/real-samples/runtime-closures.json"
 artifact_root="${REAL_SAMPLE_ARTIFACT_ROOT:-${repo_root}/.artifacts/real-samples/${requested_tier}}"
 mkdir -p "${artifact_root}"
 artifact_root="$(cd "${artifact_root}" && pwd)"
+evidence_sanitization_failed=false
 
 for command in curl sha256sum python3 readelf timeout dotnet musl-gcc setsid ps; do
   command -v "${command}" >/dev/null 2>&1 || { echo "${command} is required" >&2; exit 127; }
@@ -169,8 +170,16 @@ remove_worker_scripts() {
   done
 }
 mark_sanitization_failure() {
+  evidence_sanitization_failed=true
   [[ -d "${artifact_root}" ]] || return 0
   printf 'evidence-sanitized=false\n' > "${artifact_root}/evidence-sanitized.txt" 2>/dev/null || true
+}
+mark_worker_script_failure() {
+  local reason="$1"
+  if [[ -d "${artifact_root}" && ! -L "${artifact_root}" ]]; then
+    printf 'worker-script-validation=failed\nreason=%s\n' "${reason}" > "${artifact_root}/worker-script-validation.txt" 2>/dev/null || true
+  fi
+  mark_sanitization_failure
 }
 sanitize_evidence() {
   if [[ ! -d "${artifact_root}" || -L "${artifact_root}" ]]; then
@@ -215,9 +224,9 @@ for path in paths:
             if value and value in sanitized:
                 print(f"evidence sanitizer left a raw temporary path in {path}", file=sys.stderr)
                 raise SystemExit(1)
-except (OSError, UnicodeError) as error:
-    print(f"evidence sanitizer could not sanitize retained evidence: {error}", file=sys.stderr)
-    raise SystemExit(1)
+    except (OSError, UnicodeError) as error:
+        print(f"evidence sanitizer could not sanitize retained evidence: {error}", file=sys.stderr)
+        raise SystemExit(1)
 PYSANITIZE
   then
     mark_sanitization_failure
@@ -260,6 +269,13 @@ cleanup() {
   fi
   if ! sanitize_evidence; then
     printf 'refusing to declare complete evidence because sanitization failed\n' >&2
+    return 0
+  fi
+  if [[ "${evidence_sanitization_failed}" == true ]]; then
+    # A worker-generation failure is an evidence failure.  The worker scripts
+    # are gone, but retain the temporary root for post-run inspection rather
+    # than publishing a success marker or silently discarding the failure.
+    mark_sanitization_failure
     return 0
   fi
   rm -rf -- "${temp_root}"
@@ -1506,6 +1522,164 @@ PYOUTER
   return "${result_status}"
 }
 
+normalize_worker_script() {
+  local worker_script="$1" worker_registry_dir="$2" worker_registry_index="$3"
+  if ! python3 - "${worker_script}" "${worker_registry_dir}" "${worker_registry_index}" <<'PY_NORMALIZE_WORKER'
+from __future__ import annotations
+
+import os
+import re
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+MAX_WORKER_SCRIPT_BYTES = 4 * 1024 * 1024
+OPENING = re.compile(
+    r"(?<!<)<<-?[ \t]*(?P<quote>['\"]?)(?P<delimiter>PY[A-Za-z0-9_]*)(?P=quote)(?:[ \t]*(?:#.*)?)$"
+)
+STANDALONE_MARKER = re.compile(r"[ \t]*PY[A-Za-z0-9_]*[ \t]*(?:\r?\n)?$")
+
+
+def fail(message: str) -> None:
+    print(f"worker script normalization failed: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+if len(sys.argv) != 4:
+    fail("expected worker path, registry directory, and worker index")
+
+worker_path = Path(sys.argv[1])
+registry_path = Path(sys.argv[2])
+expected_index = sys.argv[3]
+if not worker_path.is_absolute() or not registry_path.is_absolute():
+    fail("worker paths must be absolute")
+if worker_path.parent != registry_path:
+    fail("worker path is outside its private registry directory")
+if not re.fullmatch(r"[1-9][0-9]*", expected_index):
+    fail("worker index is invalid")
+name_match = re.fullmatch(
+    r"worker-([1-9][0-9]*)\.([A-Za-z0-9_-]+)\.sh", worker_path.name
+)
+if name_match is None or name_match.group(1) != expected_index:
+    fail("worker path does not match the expected private worker name")
+
+try:
+    registry_stat = os.lstat(registry_path)
+except OSError as error:
+    fail(f"worker registry inspection failed: {error}")
+if stat.S_ISLNK(registry_stat.st_mode) or not stat.S_ISDIR(registry_stat.st_mode):
+    fail("worker registry is not a private directory")
+if stat.S_IMODE(registry_stat.st_mode) & 0o077:
+    fail("worker registry is not private")
+
+try:
+    worker_fd = os.open(
+        worker_path,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+    )
+except OSError as error:
+    fail(f"worker script open without following a link failed: {error}")
+try:
+    worker_stat = os.fstat(worker_fd)
+    if stat.S_ISLNK(worker_stat.st_mode) or not stat.S_ISREG(worker_stat.st_mode):
+        fail("worker script is not a regular file")
+    if stat.S_IMODE(worker_stat.st_mode) & 0o077:
+        fail("worker script is not private")
+    if worker_stat.st_size > MAX_WORKER_SCRIPT_BYTES:
+        fail("worker script exceeds the size limit")
+    with os.fdopen(worker_fd, "rb") as worker_file:
+        worker_fd = -1
+        source_bytes = worker_file.read(MAX_WORKER_SCRIPT_BYTES + 1)
+finally:
+    if worker_fd >= 0:
+        os.close(worker_fd)
+
+if len(source_bytes) > MAX_WORKER_SCRIPT_BYTES:
+    fail("worker script exceeds the size limit")
+if b"\0" in source_bytes:
+    fail("worker script contains a NUL byte")
+try:
+    source = source_bytes.decode("utf-8")
+except UnicodeDecodeError as error:
+    fail(f"worker script is not UTF-8: {error}")
+if not source.endswith("\n"):
+    fail("worker script has no final newline")
+
+lines = source.splitlines(keepends=True)
+rewritten_lines = list(lines)
+terminator_indexes: set[int] = set()
+heredoc_count = 0
+line_index = 0
+while line_index < len(lines):
+    match = OPENING.search(lines[line_index].rstrip("\r\n"))
+    if match is None:
+        line_index += 1
+        continue
+    heredoc_count += 1
+    delimiter = match.group("delimiter")
+    terminator_index = None
+    for candidate_index in range(line_index + 1, len(lines)):
+        candidate = lines[candidate_index].rstrip("\r\n")
+        if candidate.strip() == delimiter:
+            terminator_index = candidate_index
+            break
+    if terminator_index is None:
+        fail(f"heredoc {delimiter} has no terminator")
+    terminator_line = lines[terminator_index]
+    if terminator_line.endswith("\r\n"):
+        newline = "\r\n"
+    elif terminator_line.endswith("\n"):
+        newline = "\n"
+    else:
+        newline = ""
+    rewritten_lines[terminator_index] = delimiter + newline
+    terminator_indexes.add(terminator_index)
+    line_index = terminator_index + 1
+
+if heredoc_count == 0:
+    fail("worker function graph contains no Python heredocs")
+for index, line in enumerate(rewritten_lines):
+    if index not in terminator_indexes and STANDALONE_MARKER.fullmatch(line):
+        fail(f"unexpected Python heredoc marker on line {index + 1}")
+
+rewritten = "".join(rewritten_lines)
+if rewritten != source:
+    replacement_fd, replacement_name = tempfile.mkstemp(
+        prefix=f".{worker_path.name}.", dir=registry_path
+    )
+    try:
+        os.fchmod(replacement_fd, 0o600)
+        with os.fdopen(replacement_fd, "wb") as replacement:
+            replacement_fd = -1
+            replacement.write(rewritten.encode("utf-8"))
+            replacement.flush()
+            os.fsync(replacement.fileno())
+        os.replace(replacement_name, worker_path)
+        replacement_name = ""
+    finally:
+        if replacement_fd >= 0:
+            os.close(replacement_fd)
+        if replacement_name:
+            try:
+                os.unlink(replacement_name)
+            except FileNotFoundError:
+                pass
+
+try:
+    final_stat = os.lstat(worker_path)
+except OSError as error:
+    fail(f"normalized worker script inspection failed: {error}")
+if stat.S_ISLNK(final_stat.st_mode) or not stat.S_ISREG(final_stat.st_mode):
+    fail("normalized worker script is not a regular file")
+if stat.S_IMODE(final_stat.st_mode) & 0o077:
+    fail("normalized worker script is not private")
+PY_NORMALIZE_WORKER
+  then
+    return 1
+  fi
+}
+
 # Worker scripts inherit only scalar environment variables. Bash
 # function export/import is intentionally avoided because exported functions
 # containing heredocs are not portable across fresh bash sessions.
@@ -1560,6 +1734,16 @@ while IFS= read -r project_json; do
       'dotnet_cli=(dotnet "${cli_dll}")' \
       'process_project "$1"'
   } > "${worker_script}"
+  if ! normalize_worker_script "${worker_script}" "${worker_registry_dir}" "${worker_registry_index}"; then
+    printf 'generated worker script normalization failed; worker launch aborted: %s\n' "${worker_script}" >&2
+    mark_worker_script_failure worker-script-normalization
+    exit 1
+  fi
+  if ! bash -n "${worker_script}"; then
+    printf 'generated worker script failed bash -n; worker launch aborted: %s\n' "${worker_script}" >&2
+    mark_worker_script_failure worker-script-syntax
+    exit 1
+  fi
   chmod 700 "${worker_script}"
   if [[ ! -f "${worker_script}" || -L "${worker_script}" || ! -x "${worker_script}" ]]; then
     printf 'generated worker script is not executable or regular: %s\n' "${worker_script}" >&2

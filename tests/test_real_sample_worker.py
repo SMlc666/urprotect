@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -36,6 +38,9 @@ class RealSampleWorkerTests(unittest.TestCase):
 
         self.assertNotIn("export -f", source)
         self.assertNotIn("bash -c 'set -euo pipefail; dotnet_cli=", source)
+        self.assertIn("normalize_worker_script()", source)
+        self.assertIn('bash -n "${worker_script}"', source)
+        self.assertIn("mark_worker_script_failure", source)
         self.assertIn('worker_script="$(\n', source)
         self.assertIn(
             'mktemp "${worker_registry_dir}/worker-${worker_registry_index}.XXXXXX.sh"',
@@ -73,6 +78,228 @@ class RealSampleWorkerTests(unittest.TestCase):
             exported_names,
             "launcher_path must be inherited by every generated worker",
         )
+
+    def test_embedded_evidence_sanitizer_python_parses(self) -> None:
+        source = MATRIX.read_text(encoding="utf-8")
+        opening = source.index("<<'PYSANITIZE'\n") + len("<<'PYSANITIZE'\n")
+        closing = source.index("\nPYSANITIZE\n", opening)
+        embedded_python = source[opening:closing]
+
+        compile(embedded_python, f"{MATRIX}:PYSANITIZE", "exec")
+
+    @staticmethod
+    def _worker_definition_source() -> str:
+        source = MATRIX.read_text(encoding="utf-8")
+        start = source.index("project_fields() {")
+        end = source.index(
+            "# Worker scripts inherit only scalar environment variables.",
+            start,
+        )
+        return "set -euo pipefail\n" + source[start:end]
+
+    @staticmethod
+    def _declare_worker_functions() -> str:
+        declare_block = "  declare -f \\\n" + "".join(
+            f"    {name} \\\n" for name in WORKER_FUNCTIONS[:-1]
+        )
+        return declare_block + f"    {WORKER_FUNCTIONS[-1]}"
+
+    @staticmethod
+    def _heredoc_markers(script: str) -> tuple[list[str], list[str]]:
+        opening = re.compile(
+            r"(?<!<)<<-?[ \t]*(?:['\"]?)(PY[A-Za-z0-9_]*)(?:['\"]?)[ \t]*$"
+        )
+        terminator = re.compile(r"[ \t]*(PY[A-Za-z0-9_]*)[ \t]*$")
+        openings: list[str] = []
+        terminators: list[str] = []
+        for line in script.splitlines():
+            match = opening.search(line)
+            if match is not None:
+                openings.append(match.group(1))
+            match = terminator.fullmatch(line)
+            if match is not None:
+                terminators.append(match.group(1))
+        return openings, terminators
+
+    def test_actual_worker_function_graph_is_normalized_and_syntax_checked(self) -> None:
+        definitions = self._worker_definition_source()
+        declare_block = self._declare_worker_functions()
+        generator = r'''set -euo pipefail
+source "$1"
+registry="$2"
+worker_script="$3"
+worker_index="$4"
+umask 077
+: > "$worker_script"
+{
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "$#" -ne 2 ]]; then exit 2; fi' \
+    'shift'
+__DECLARE_BLOCK__ | sed -E '/^[[:space:]]*PY[A-Za-z0-9_]*[[:space:]]*$/s/^/    /'
+  printf '%s\n' \
+    'set -euo pipefail' \
+    'dotnet_cli=(dotnet "${cli_dll}")' \
+    'process_project "$1"'
+} > "$worker_script"
+normalize_worker_script "$worker_script" "$registry" "$worker_index"
+bash -n "$worker_script"
+'''.replace("__DECLARE_BLOCK__", declare_block)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            definitions_path = root / "worker-definitions.sh"
+            registry = root / "worker-registry"
+            worker_path = registry / "worker-1.ABC123.sh"
+            registry.mkdir(mode=0o700)
+            definitions_path.write_text(definitions, encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    generator,
+                    "worker-generator",
+                    str(definitions_path),
+                    str(registry),
+                    str(worker_path),
+                    "1",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            generated = worker_path.read_text(encoding="utf-8")
+            self.assertEqual(worker_path.stat().st_mode & 0o777, 0o600)
+            for name in WORKER_FUNCTIONS:
+                self.assertRegex(generated, rf"(?m)^{re.escape(name)} \(\)\s*$")
+
+            openings, terminators = self._heredoc_markers(generated)
+            self.assertTrue(openings)
+            self.assertEqual(Counter(openings), Counter(terminators))
+            for line in generated.splitlines():
+                if re.fullmatch(r"[ \t]*PY[A-Za-z0-9_]*[ \t]*", line):
+                    self.assertEqual(line, line.lstrip(" \t"))
+
+            syntax = subprocess.run(
+                ["bash", "-n", str(worker_path)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(syntax.returncode, 0, syntax.stderr)
+
+            lines = generated.splitlines(keepends=True)
+            tabbed_index = next(
+                index
+                for index, line in enumerate(lines)
+                if re.fullmatch(r"[ \t]*PY[A-Za-z0-9_]*[ \t]*\r?\n", line)
+            )
+            terminator = lines[tabbed_index].lstrip(" \t")
+            lines[tabbed_index] = "\t" + terminator
+            worker_path.write_text("".join(lines), encoding="utf-8")
+            tabbed = worker_path.read_text(encoding="utf-8")
+            self.assertIn("\t" + terminator, tabbed)
+
+            normalizer = r'''set -euo pipefail
+source "$1"
+normalize_worker_script "$2" "$3" "$4"
+'''
+            normalized_result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    normalizer,
+                    "worker-normalizer",
+                    str(definitions_path),
+                    str(worker_path),
+                    str(registry),
+                    "1",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(normalized_result.returncode, 0, normalized_result.stderr)
+            normalized = worker_path.read_text(encoding="utf-8")
+            normalized_openings, normalized_terminators = self._heredoc_markers(
+                normalized
+            )
+            self.assertEqual(
+                Counter(normalized_openings), Counter(normalized_terminators)
+            )
+            for line in normalized.splitlines():
+                if re.fullmatch(r"[ \t]*PY[A-Za-z0-9_]*[ \t]*", line):
+                    self.assertEqual(line, line.lstrip(" \t"))
+
+            normalized_syntax = subprocess.run(
+                ["bash", "-n", str(worker_path)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(normalized_syntax.returncode, 0, normalized_syntax.stderr)
+
+    def test_worker_normalizer_rejects_unexpected_and_symlink_paths(self) -> None:
+        definitions = self._worker_definition_source()
+        normalizer = r'''set -euo pipefail
+source "$1"
+normalize_worker_script "$2" "$3" "$4"
+'''
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            definitions_path = root / "worker-definitions.sh"
+            registry = root / "worker-registry"
+            registry.mkdir(mode=0o700)
+            definitions_path.write_text(definitions, encoding="utf-8")
+
+            unexpected = root / "unexpected.sh"
+            unexpected.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            unexpected_result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    normalizer,
+                    "worker-normalizer",
+                    str(definitions_path),
+                    str(unexpected),
+                    str(registry),
+                    "1",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(unexpected_result.returncode, 0)
+
+            target = root / "worker-target.sh"
+            target.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            symlink = registry / "worker-1.LINK.sh"
+            symlink.symlink_to(target)
+            symlink_result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    normalizer,
+                    "worker-normalizer",
+                    str(definitions_path),
+                    str(symlink),
+                    str(registry),
+                    "1",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(symlink_result.returncode, 0)
 
     def test_heredoc_function_runs_from_a_fresh_generated_bash_script(self) -> None:
         fixture = """#!/usr/bin/env bash
