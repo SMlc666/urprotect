@@ -211,3 +211,28 @@ closure and outer-wrapper execution expansion. The current merged increment
 keeps those existing registry claims explicit instead of relabeling static
 validation as execution; continue that compatibility expansion as a separate
 CI-gated increment.
+
+
+## Session 7: 完成全量运行时闭包与 bionic Node.js PR 收尾
+<!-- trellis-session: v=2 fp=f4b896ef8206f2ca -->
+
+**Date**: 2026-10-05
+**Task**: 完成全量运行时闭包与 bionic Node.js PR 收尾
+**Branch**: `main`
+
+### Summary
+
+完成 PR #21 的 CI 驱动收尾：修复 Docker 容器清理竞态与 No such object 判定、禁止超时/截断结果伪装为缺失、保持 bionic 目标证据 JSON-safe，并让 Node.js baseline 直接按锁定 argv 启动以自然使用 PT_INTERP。通过 230 项 Python 测试、注册表/运行闭包/策略/Trellis 校验；PR pull_request run 37223659213 的 build-and-test、real-sample-matrix、bionic-native-arm64、musl-container-smoke、runtime-matrix-native-arm64 全部通过。PR #21 已 squash merge 为 6732d61，任务已归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6732d61` | feat: execute full real-sample runtime closures |
+| `55d8e58` | fix: verify bionic container cleanup races |
+| `089281a` | fix: keep bionic target evidence JSON-safe |
+| `893fb6a` | fix: launch bionic baseline through node interpreter |
+
+### Status
+
+[OK] **Completed**
