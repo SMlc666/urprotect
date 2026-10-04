@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Review profile/evidence boundaries and prevent unsupported compatibility claims."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review concrete tests, provenance, bounded inputs, CI, and rollback requirements."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/baseline-evaluator-protocol.md","reason":"Verify analysis preserves measured facts and does not fabricate baseline or attack strength."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/compatibility-protocol.md","reason":"Review proposed local gates against the strict six-stage contract."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/ci-evidence-contract.md","reason":"Review CI and analysis-agent handoff requirements."}
+{"file":".artifacts/evaluator/pr/gate.json","reason":"Verify every conclusion and local gate is bound to the normative evaluator result."}
+{"file":".artifacts/evaluator/pr/analysis-input.json","reason":"Verify first-failure and residual-risk analysis against persisted evidence."}

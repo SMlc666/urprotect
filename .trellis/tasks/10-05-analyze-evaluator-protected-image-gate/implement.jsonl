@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Current runtime profile, layer-specific evidence, native handoff, and no silent promotion rules."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Cross-layer implementation, testing, fuzzing, CI, provenance, and failure-boundary rules for the recommended next slice."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/baseline-evaluator-protocol.md","reason":"Measured evaluator gaps and strict baseline-zero/Scheme-A not-calibrated conclusions."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/compatibility-protocol.md","reason":"Six-stage compatibility contract and local gate expectations."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/ci-evidence-contract.md","reason":"Evaluator handoff, CI artifact, benchmark/fuzz, and child local gate rules."}
+{"file":".artifacts/evaluator/pr/gate.json","reason":"Normative current evaluator result for the analysis."}
+{"file":".artifacts/evaluator/pr/analysis-input.json","reason":"Current first-failure layers, Scheme-A statuses, raw evidence and residual blockers."}
