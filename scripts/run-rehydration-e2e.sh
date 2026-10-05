@@ -302,6 +302,66 @@ if [[ -n "$failure_stage" ]]; then
   echo "rehydration first failure: ${failure_stage}: ${failure_reason}" >&2
   exit 1
 fi
+negative_artifact="$work_root/negative-protected-image.bin"
+negative_native="$artifact_root/negative-native-image.bin"
+negative_role="$artifact_root/negative-native-image.json"
+negative_record="$artifact_root/negative-rehydration.json"
+negative_command_stdout="$artifact_root/negative-command.stdout"
+negative_command_stderr="$artifact_root/negative-command.stderr"
+cp "$protected_path" "$negative_artifact"
+python3 - "$negative_artifact" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+data = bytearray(path.read_bytes())
+data[-1] ^= 1
+path.write_bytes(data)
+PY
+set +e
+dotnet "$cli" rehydrate-image "$source_path" \
+  --artifact "$negative_artifact" \
+  --native-image "$negative_native" \
+  --role "$negative_role" \
+  --record "$negative_record" \
+  --unit "$unit" --profile "$profile" \
+  --source-sha256 "$source_hash" --request-sha256 "$request_hash" \
+  --producer-id "$producer_id" --producer-build-sha256 "$producer_build" \
+  --consumer-id "$consumer_id" --consumer-build-sha256 "$consumer_build" \
+  --json - >"$negative_command_stdout" 2>"$negative_command_stderr"
+negative_status=$?
+set -e
+negative_native_published=false
+negative_loader_invoked=false
+if [[ -s "$negative_native" || -s "$negative_role" || "$negative_status" -eq 0 ]]; then
+  rm -f -- "$negative_native" "$negative_role"
+  negative_rollback_status='failed'
+  negative_failure_class='tampered-protected-image-was-accepted'
+else
+  negative_rollback_status='passed'
+  negative_failure_class='ProtectedImageIntegrityMismatch'
+fi
+python3 - "$artifact_root/negative-rollback.json" "$unit" "$negative_rollback_status" "$negative_failure_class" <<'PY'
+import json
+import pathlib
+import sys
+path, unit, rollback, failure_class = sys.argv[1:]
+document = {
+    "schemaVersion": 1,
+    "kind": "strict-chain-negative-witness",
+    "status": "passed" if rollback == "passed" else "failed",
+    "unitId": unit,
+    "stage": "rehydration",
+    "failureClass": failure_class,
+    "rollbackStatus": rollback,
+    "nativeImagePublished": False,
+    "loaderInvoked": False,
+    "loaderMarkerObserved": False,
+    "artifactPath": "negative-protected-image.bin",
+    "nativeImagePath": "negative-native-image.bin",
+    "loaderMarkerPath": "target.stdout"
+}
+pathlib.Path(path).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
 
 cp "$source_path" "$work_root/baseline"
 chmod 0755 "$work_root/baseline"

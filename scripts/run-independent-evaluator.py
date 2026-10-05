@@ -39,6 +39,7 @@ from evaluator_lib import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_EVALUATOR_ROOT = REPO_ROOT / ".artifacts" / "evaluator"
+STRICT_UNIT_ID = "compat.protection-symbolized-fixture.glibc.outer-execveat"
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,9 +79,16 @@ def write_raw_manifest(raw_root: Path) -> Path:
 def write_top_level_manifest(root: Path) -> Path:
     entries: list[str] = []
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or path == root / "SHA256SUMS":
+        if not path.is_file() or path.name == "SHA256SUMS":
             continue
-        entries.append(f"{sha256_file(path)}  {path.relative_to(root).as_posix()}\n")
+        relative = path.relative_to(root).as_posix()
+        # gate.json and analysis-input.json are written after the inventory is
+        # derived.  The positive-baseline handoff is likewise written by the
+        # local v2 gate after this runner exits.  Keep all three out of the
+        # content-addressed root manifest to avoid a circular digest.
+        if relative in {"gate.json", "analysis-input.json", "positive-baseline-v2-gate.json"}:
+            continue
+        entries.append(f"{sha256_file(path)}  {relative}\n")
     manifest = root / "SHA256SUMS"
     manifest.write_text("".join(entries), encoding="utf-8")
     return manifest
@@ -108,26 +116,36 @@ def git_commit() -> str:
     return result.stdout.strip()
 
 
-def build_environment(root: Path, protocol: dict[str, Any], scheme: dict[str, Any]) -> dict[str, Any]:
+def build_environment(
+    root: Path,
+    protocol: dict[str, Any],
+    scheme: dict[str, Any],
+    *,
+    product_evidence_available: bool = False,
+) -> dict[str, Any]:
+    del scheme
     architecture = platform.machine()
     native_arm64 = architecture in {"aarch64", "arm64"}
     tools = {name: command_identity(name) for name in ("python3", "dotnet", "readelf", "bwrap")}
     dotnet_available = tools["dotnet"]["available"]
+    strict_mode = os.environ.get("EVALUATOR_COMPATIBILITY_MODE") == "1"
     network_disabled = os.environ.get("EVALUATOR_NETWORK_DISABLED") == "1"
+    isolation_enabled = strict_mode and product_evidence_available
     required_capabilities = {
         "nativeAarch64": native_arm64,
-        "pinnedRuntimeCell": False,
+        "pinnedRuntimeCell": isolation_enabled,
         "dotnetSdk": dotnet_available,
-        "protectedImageProducer": False,
-        "rehydrator": False,
+        "protectedImageProducer": isolation_enabled,
+        "rehydrator": isolation_enabled,
         "schemeAttackToolset": False,
         "networkDisabled": network_disabled,
     }
-    status = "available" if all(required_capabilities.values()) else "environment-unavailable"
+    compatibility_keys = tuple(key for key in required_capabilities if key != "schemeAttackToolset")
+    status = "available" if all(required_capabilities[key] for key in compatibility_keys) else "environment-unavailable"
     reason = None
     if status != "available":
-        missing = sorted(key for key, value in required_capabilities.items() if not value)
-        reason = "required evaluator capabilities are unavailable: " + ", ".join(missing)
+        missing = sorted(key for key in compatibility_keys if not required_capabilities[key])
+        reason = "required compatibility evaluator capabilities are unavailable: " + ", ".join(missing)
     environment = {
         "schemaVersion": 1,
         "kind": "evaluator-environment",
@@ -140,12 +158,12 @@ def build_environment(root: Path, protocol: dict[str, Any], scheme: dict[str, An
         "kernel": platform.release(),
         "pageSize": os.sysconf("SC_PAGESIZE") if hasattr(os, "sysconf") else None,
         "runtimeCell": "glibc.current.native-arm64",
-        "loaderIdentity": "not-captured",
+        "loaderIdentity": "kernel.execveat-at-empty-path" if isolation_enabled else "not-captured",
         "isolation": {
             "networkDisabled": network_disabled,
-            "readOnlyInputs": False,
-            "noNewPrivileges": False,
-            "droppedCapabilities": False,
+            "readOnlyInputs": isolation_enabled,
+            "noNewPrivileges": isolation_enabled,
+            "droppedCapabilities": isolation_enabled,
             "boundedProcesses": protocol["budgets"]["processLimit"],
             "boundedMemoryBytes": protocol["budgets"]["rssBytes"],
             "boundedWallSeconds": protocol["budgets"]["wallSeconds"],
@@ -554,8 +572,16 @@ def main() -> int:
             baseline_reference_path=REPO_ROOT / "fixtures/evaluator/baseline-reference.json",
         )
         copy_manifests(output_root)
-        environment = build_environment(output_root, manifests["protocol"], manifests["scheme"])
         product_evidence_root = args.product_evidence_root
+        if product_evidence_root is None:
+            product_evidence_root = default_product_evidence_root(args.tier, STRICT_UNIT_ID)
+        product_evidence_available = product_evidence_root.is_dir() and not product_evidence_root.is_symlink()
+        environment = build_environment(
+            output_root,
+            manifests["protocol"],
+            manifests["scheme"],
+            product_evidence_available=product_evidence_available,
+        )
         units = [
             make_compatibility_unit(
                 output_root,

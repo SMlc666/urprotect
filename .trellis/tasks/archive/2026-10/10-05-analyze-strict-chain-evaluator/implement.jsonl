@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/runtime-compatibility.md", "reason": "Frozen evaluator and strict-chain evidence contract"}
+{"file": ".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md", "reason": "Parent gate and baseline semantics"}

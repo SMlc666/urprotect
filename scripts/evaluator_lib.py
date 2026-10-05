@@ -89,6 +89,10 @@ PRODUCT_MAX_STREAM_BYTES = 1_048_576
 PRODUCT_MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 PRODUCT_MAX_SOURCE_IMAGE_BYTES = 128 * 1024 * 1024
 PRODUCT_MAX_NATIVE_IMAGE_BYTES = 128 * 1024 * 1024
+# These self-describing handoff records are emitted after the closed evidence
+# inventory is derived.  Excluding them keeps the manifest digest content-
+# addressed instead of creating a gate/manifest fixed-point cycle.
+EVIDENCE_HANDOFF_FILES = frozenset({"gate.json", "analysis-input.json", "positive-baseline-v2-gate.json"})
 
 
 class EvaluatorError(ValueError):
@@ -1804,7 +1808,7 @@ def inventory_digest(root: Path, *, exclude: Iterable[str] = ()) -> str:
         if not path.is_file() or path.name == "SHA256SUMS":
             continue
         relative = path.relative_to(root).as_posix()
-        if relative in excluded:
+        if relative in excluded or relative in EVIDENCE_HANDOFF_FILES:
             continue
         entries.append(f"{sha256_file(path)}  {relative}\n")
     return sha256_bytes("".join(entries).encode("utf-8"))

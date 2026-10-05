@@ -23,7 +23,9 @@
     "10-05-analyze-evaluator-protected-image-gate",
     "10-05-protected-image-emission-v1",
     "10-05-generic-rehydration-native-handoff-v1",
-    "10-05-evaluator-strict-chain-v1"
+    "10-05-evaluator-strict-chain-v1",
+    "10-05-analyze-strict-chain-evaluator",
+    "10-05-freeze-positive-immutable-baseline-v2"
   ],
   "parent": null,
   "relatedFiles": [],

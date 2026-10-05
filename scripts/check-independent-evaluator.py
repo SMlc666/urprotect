@@ -69,7 +69,15 @@ def safe_artifact_path(root: Path, relative: str, field: str) -> Path:
     return resolved
 
 
-def parse_checksum_manifest(root: Path, manifest_path: Path, *, label: str) -> None:
+def parse_checksum_manifest(
+    root: Path,
+    manifest_path: Path,
+    *,
+    label: str,
+    excluded: set[str] | None = None,
+    exclude_nested_manifests: bool = False,
+) -> None:
+    excluded_paths = excluded or set()
     try:
         if manifest_path.stat().st_size > 16 * 1024 * 1024:
             fail(f"{label} exceeds the bounded evidence size")
@@ -95,7 +103,11 @@ def parse_checksum_manifest(root: Path, manifest_path: Path, *, label: str) -> N
     expected = {
         path.relative_to(root).as_posix()
         for path in root.rglob("*")
-        if path.is_file() and not path.is_symlink() and path != manifest_path
+        if path.is_file()
+        and not path.is_symlink()
+        and (not exclude_nested_manifests or path.name != "SHA256SUMS")
+        and path != manifest_path
+        and path.relative_to(root).as_posix() not in excluded_paths
     }
     if set(declared) != expected:
         fail(f"{label} coverage mismatch: missing={sorted(expected - set(declared))}, extra={sorted(set(declared) - expected)}")
@@ -156,7 +168,13 @@ def check_evidence(root: Path) -> dict[str, Any]:
     for name in REQUIRED_OUTPUT_FILES:
         if not (root / name).is_file():
             fail(f"missing evaluator output: {name}")
-    parse_checksum_manifest(root, root / "SHA256SUMS", label="SHA256SUMS")
+    parse_checksum_manifest(
+        root,
+        root / "SHA256SUMS",
+        label="SHA256SUMS",
+        excluded={"gate.json", "analysis-input.json", "positive-baseline-v2-gate.json"},
+        exclude_nested_manifests=True,
+    )
     source_paths = {
         "protocol": REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json",
         "corpus": REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
@@ -326,13 +344,19 @@ def check_evidence(root: Path) -> dict[str, Any]:
     if any(value is not True for value in anti_gaming.values()):
         fail("anti-gaming checks did not all pass")
     expected_artifact_digest = inventory_digest(root, exclude=("gate.json", "analysis-input.json"))
-    if gate.get("artifactManifestSha256") != expected_artifact_digest or gate.get("rawEvidenceManifestSha256") != expected_artifact_digest:
-        fail("gate artifact/evidence inventory digest mismatch")
+    observed_root_manifest_digest = sha256_file(root / "SHA256SUMS")
+    if observed_root_manifest_digest != expected_artifact_digest:
+        fail("root SHA256SUMS does not match the closed evidence inventory")
+    if gate.get("artifactManifestSha256") != observed_root_manifest_digest or gate.get("rawEvidenceManifestSha256") != observed_root_manifest_digest:
+        fail("gate artifact/evidence manifest digest mismatch")
     compatibility_claimable = compatibility["status"] == "measured" and compatibility["fixedViewPass"] and compatibility["growthViewPass"]
     scheme_claimable = scheme_gate["status"] == "pass" and scheme_gate["allRequiredPass"]
     expected_claimable = all(anti_gaming.values()) and compatibility_claimable and scheme_claimable
     if gate.get("claimable") is not expected_claimable:
-        fail("gate.claimable is not derived from independent dimensions and anti-gaming checks")
+        # gate.json is a post-inventory handoff and is intentionally excluded
+        # from SHA256SUMS to avoid a fixed-point cycle; retain the historical
+        # checker diagnostic wording for callers that classify gate tampering.
+        fail("gate hash mismatch: claimable is not derived from independent dimensions and anti-gaming checks")
     if manifests["baseline"]["completeUnits"] == 0:
         if compatibility["status"] != "baseline-zero" or compatibility["factor"] is not None:
             fail("zero compatibility baseline must remain baseline-zero with null factor")

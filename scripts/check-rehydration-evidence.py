@@ -426,6 +426,29 @@ def check_behavior(
         fail("behavior oracle failure binds a different Native Image")
     return oracle
 
+def check_negative_witness(root: Path, unit: str) -> None:
+    witness = read_json(require_file(root, "negative-rollback.json"))
+    if (
+        witness.get("schemaVersion") != 1
+        or witness.get("kind") != "strict-chain-negative-witness"
+        or witness.get("status") != "passed"
+        or witness.get("unitId") != unit
+        or witness.get("rollbackStatus") != "passed"
+        or witness.get("nativeImagePublished") is not False
+        or witness.get("loaderInvoked") is not False
+        or witness.get("loaderMarkerObserved") is not False
+        or witness.get("stage") not in {"protected-image", "rehydration", "native-image", "target-loader"}
+        or not isinstance(witness.get("failureClass"), str)
+        or not witness.get("failureClass")
+    ):
+        fail("negative rollback witness does not prove blocked/no-publication behavior")
+    for field in ("artifactPath", "nativeImagePath", "loaderMarkerPath"):
+        value = witness.get(field)
+        if value is not None:
+            try:
+                safe_relative(value, f"negative witness {field}")
+            except SystemExit:
+                raise
 
 def check_benchmark(root: Path, first_failure: str | None, native_hash: str | None) -> None:
     record = read_json(require_file(root, "benchmark.json"))
@@ -517,6 +540,8 @@ def main() -> None:
     target_loader = check_target_loader(root, handoff, handoff_hash, native_hash if handoff.get("status") == "passed" else None)
     source_hash = role.get("sourceSha256") if role else rehydration.get("sourceSha256")
     oracle = check_behavior(root, rehydration, target_loader, source_hash, native_hash if target_loader.get("status") == "passed" else None)
+    if producer_stage.get("status") == "passed" and rehydration.get("status") == "passed":
+        check_negative_witness(root, args.unit)
     first_failure = check_first_failure(producer_stage, rehydration, handoff, target_loader, oracle)
     check_benchmark(root, first_failure, native_hash)
 
