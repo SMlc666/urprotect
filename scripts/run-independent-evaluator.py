@@ -38,6 +38,7 @@ from evaluator_lib import (
     evaluator_product_unit_bindings,
     copy_verified_product_evidence,
     resolve_command,
+    _tool_handoff_key,
     inventory_digest,
     load_product_evidence,
     project_product_failure,
@@ -130,19 +131,23 @@ def command_identity(command: str) -> dict[str, Any]:
     executable = resolve_command(command)
     if executable is None:
         return {"available": False, "version": None, "binarySha256": None}
+    captured_version = os.environ.get(_tool_handoff_key(command, "VERSION"), "")
     try:
-        result = subprocess.run(
-            [executable, "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env=os.environ.copy(),
-        )
-        text = (result.stdout or result.stderr).splitlines()
-        if result.returncode != 0 or not text:
-            return {"available": False, "version": None, "binarySha256": None}
-        version = text[0][:240]
+        if captured_version:
+            version = captured_version[:240]
+        else:
+            result = subprocess.run(
+                [executable, "--version"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=os.environ.copy(),
+            )
+            text = (result.stdout or result.stderr).splitlines()
+            if result.returncode != 0 or not text:
+                return {"available": False, "version": None, "binarySha256": None}
+            version = text[0][:240]
         digest = sha256_file(Path(executable))
     except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, EvaluatorError):
         return {"available": False, "version": None, "binarySha256": None}

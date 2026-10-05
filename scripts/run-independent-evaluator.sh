@@ -21,6 +21,31 @@ if [[ ! "$checkout_commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
 fi
 export EVALUATOR_CHECKOUT_COMMIT="${checkout_commit,,}"
 
+# Capture host tool identity before seccomp is installed. Some hosted AArch64
+# kernels reject a child tool's harmless --version probes even though the tool
+# itself is available; the staged evaluator must verify, not guess, these facts.
+capture_tool_identity() {
+  local command_name="$1"
+  local token="${command_name^^}"
+  token="${token//[^A-Z0-9]/_}"
+  local executable
+  executable="$(command -v "$command_name" 2>/dev/null || true)"
+  if [[ ! "$executable" =~ ^/ ]] || [[ ! -x "$executable" ]]; then
+    return 0
+  fi
+  local version
+  version="$(LC_ALL=C "$executable" --version 2>&1 | head -n 1 || true)"
+  if [[ -z "$version" ]]; then
+    return 0
+  fi
+  export "EVALUATOR_TOOL_${token}_PATH=$executable"
+  export "EVALUATOR_TOOL_${token}_VERSION=$version"
+}
+
+for evaluator_tool in python3 dotnet readelf bwrap ldd; do
+  capture_tool_identity "$evaluator_tool"
+done
+
 # CI invokes the control plane in a real read-only-input, networkless sandbox.
 # Local runs deliberately stay unsandboxed and are recorded as
 # environment-unavailable unless an equivalent runner proves every capability.

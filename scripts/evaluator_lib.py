@@ -205,8 +205,16 @@ def command_search_path(command: str) -> str:
     return os.pathsep.join(directories)
 
 
+def _tool_handoff_key(command: str, suffix: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9]", "_", command).upper()
+    return f"EVALUATOR_TOOL_{token}_{suffix}"
+
+
 def resolve_command(command: str) -> str | None:
-    """Resolve a real executable using the same paths used for tool capture."""
+    """Resolve a real executable using the host-captured handoff when present."""
+    handed_off = os.environ.get(_tool_handoff_key(command, "PATH"), "")
+    if handed_off.startswith("/") and os.path.isfile(handed_off) and os.access(handed_off, os.X_OK):
+        return handed_off
     return shutil.which(command, path=command_search_path(command))
 
 
