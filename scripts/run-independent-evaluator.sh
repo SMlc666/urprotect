@@ -63,6 +63,7 @@ PY
   bwrap \
     --die-with-parent \
     --new-session \
+    --disable-userns \
     --seccomp 3 \
     --ro-bind "$repo_root" "$repo_root" \
     --bind "$output_root" "$output_root" \
