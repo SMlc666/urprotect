@@ -746,7 +746,14 @@ def make_scheme_attempt(
     return attempt
 
 
-def copy_manifests(root: Path, baseline_reference_path: Path, baseline_artifact_path: Path, scheme_path: Path) -> None:
+def copy_manifests(
+    root: Path,
+    baseline_reference_path: Path,
+    baseline_artifact_path: Path,
+    scheme_path: Path,
+    scheme_baseline_reference_path: Path | None = None,
+    scheme_baseline_artifact_path: Path | None = None,
+) -> None:
     sources = {
         "protocol.json": REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json",
         "corpus-manifest.json": REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
@@ -755,6 +762,13 @@ def copy_manifests(root: Path, baseline_reference_path: Path, baseline_artifact_
         "baseline-reference.json": baseline_reference_path,
         "baseline-artifact.json": baseline_artifact_path,
     }
+    if scheme_baseline_reference_path is not None and scheme_baseline_artifact_path is not None:
+        sources.update(
+            {
+                "scheme-baseline-reference.json": scheme_baseline_reference_path,
+                "scheme-baseline-artifact.json": scheme_baseline_artifact_path,
+            }
+        )
     for destination, source in sources.items():
         copy_file(source, root / destination)
 
@@ -815,6 +829,16 @@ def build_gate(
             "families": scheme_gate["families"],
             "allRequiredPass": scheme_gate["allRequiredPass"],
             "minimumFactorDiagnostic": scheme_gate["minimumFactorDiagnostic"],
+            "baselineArtifactId": (
+                manifests["schemeBaselineReference"]["baselineArtifactId"]
+                if manifests.get("schemeBaselineReference") is not None
+                else manifests["baselineReference"]["baselineArtifactId"]
+            ),
+            "baselineArtifactSha256": (
+                manifests["schemeBaselineReference"]["baselineArtifactSha256"]
+                if manifests.get("schemeBaselineReference") is not None
+                else manifests["baselineReference"]["baselineArtifactSha256"]
+            ),
         },
         "environment": {
             "status": environment["status"],
@@ -970,7 +994,14 @@ def main() -> int:
             "baselineArtifactPath",
             require_file=True,
         )
-        copy_manifests(output_root, baseline_reference_path, baseline_artifact_path, scheme_manifest_path)
+        copy_manifests(
+            output_root,
+            baseline_reference_path,
+            baseline_artifact_path,
+            scheme_manifest_path,
+            manifests.get("schemeBaselineReferencePath"),
+            manifests.get("schemeBaselineArtifactPath"),
+        )
         product_evidence_root = args.product_evidence_root
         environment_product_root = product_evidence_root or default_product_evidence_root(args.tier, STRICT_UNIT_ID)
         environment_product_root = environment_product_root.resolve()
@@ -1008,7 +1039,11 @@ def main() -> int:
                         product_root=environment_product_root,
                     )
                     attempts[(family["familyId"], role, replica)] = attempt
-        scheme_gate = calculate_scheme_gate(manifests["scheme"], attempts)
+        scheme_gate = calculate_scheme_gate(
+            manifests["scheme"],
+            attempts,
+            baseline_artifact=manifests.get("schemeBaseline"),
+        )
         write_json(
             output_root / "scheme-a-gate.json",
             {
@@ -1016,8 +1051,16 @@ def main() -> int:
                 "kind": "scheme-a-gate",
                 "scheme": "A",
                 "protocolVersion": manifests["scheme"]["protocolVersion"],
-                "baselineArtifactId": manifests["baselineReference"]["baselineArtifactId"],
-                "baselineArtifactSha256": manifests["baselineReference"]["baselineArtifactSha256"],
+                "baselineArtifactId": (
+                    manifests["schemeBaselineReference"]["baselineArtifactId"]
+                    if manifests.get("schemeBaselineReference") is not None
+                    else manifests["baselineReference"]["baselineArtifactId"]
+                ),
+                "baselineArtifactSha256": (
+                    manifests["schemeBaselineReference"]["baselineArtifactSha256"]
+                    if manifests.get("schemeBaselineReference") is not None
+                    else manifests["baselineReference"]["baselineArtifactSha256"]
+                ),
                 "requiredFamilies": scheme_gate["requiredFamilies"],
                 "families": scheme_gate["families"],
                 "familyFactors": scheme_gate["familyFactors"],

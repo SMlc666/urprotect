@@ -19,6 +19,7 @@ from evaluator_lib import (
     inventory_digest,
     load_product_evidence,
     read_json,
+    resolve_repo_path,
     sha256_file,
     validate_all_manifests,
     validate_evaluator_environment,
@@ -38,6 +39,10 @@ REQUIRED_OUTPUT_FILES = (
     "gate.json",
     "analysis-input.json",
     "SHA256SUMS",
+)
+ADDITIVE_SCHEME_OUTPUT_FILES = (
+    "scheme-baseline-reference.json",
+    "scheme-baseline-artifact.json",
 )
 
 
@@ -132,6 +137,13 @@ def check_manifest_copies(root: Path, source_manifests: dict[str, Path]) -> None
         "scheme-a-manifest.json": "scheme",
         "oracles.json": "oracles",
     }
+    if "scheme-baseline-reference" in source_manifests:
+        copies.update(
+            {
+                "scheme-baseline-reference.json": "scheme-baseline-reference",
+                "scheme-baseline-artifact.json": "scheme-baseline-artifact",
+            }
+        )
     for destination, name in copies.items():
         path = root / destination
         if not path.is_file():
@@ -169,7 +181,9 @@ def check_evidence(root: Path, scheme_manifest_path: Path | None = None) -> dict
     except ValueError as error:
         raise EvaluatorError("evaluator artifact root must remain under .artifacts/evaluator") from error
     validate_no_symlinks(root)
-    for name in REQUIRED_OUTPUT_FILES:
+    additive_scheme = scheme_manifest_path != (REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json").resolve()
+    required_outputs = REQUIRED_OUTPUT_FILES + (ADDITIVE_SCHEME_OUTPUT_FILES if additive_scheme else ())
+    for name in required_outputs:
         if not (root / name).is_file():
             fail(f"missing evaluator output: {name}")
     parse_checksum_manifest(
@@ -185,6 +199,27 @@ def check_evidence(root: Path, scheme_manifest_path: Path | None = None) -> dict
         "scheme": scheme_manifest_path,
         "oracles": REPO_ROOT / "fixtures/evaluator/oracles.json",
     }
+    if additive_scheme:
+        scheme_source = read_json(scheme_manifest_path)
+        scheme_reference_source = resolve_repo_path(
+            REPO_ROOT,
+            scheme_source["baselineReferencePath"],
+            "scheme.baselineReferencePath",
+            require_file=True,
+        )
+        scheme_reference = read_json(scheme_reference_source)
+        scheme_artifact_source = resolve_repo_path(
+            REPO_ROOT,
+            scheme_reference["baselineArtifactPath"],
+            "scheme baselineArtifactPath",
+            require_file=True,
+        )
+        source_paths.update(
+            {
+                "scheme-baseline-reference": scheme_reference_source,
+                "scheme-baseline-artifact": scheme_artifact_source,
+            }
+        )
     check_manifest_copies(root, source_paths)
     baseline_reference_path = root / "baseline-reference.json"
     baseline_artifact_path = root / "baseline-artifact.json"
@@ -199,6 +234,8 @@ def check_evidence(root: Path, scheme_manifest_path: Path | None = None) -> dict
         oracle_path=source_paths["oracles"],
         baseline_reference_path=baseline_reference_path,
         baseline_artifact_path=baseline_artifact_path,
+        scheme_baseline_reference_path=(root / "scheme-baseline-reference.json") if additive_scheme else None,
+        scheme_baseline_artifact_path=(root / "scheme-baseline-artifact.json") if additive_scheme else None,
     )
     environment = read_json(root / "environment.json")
     if environment.get("schemaVersion") != 2 or environment.get("kind") != "evaluator-environment":
@@ -313,7 +350,11 @@ def check_evidence(root: Path, scheme_manifest_path: Path | None = None) -> dict
                 attempt = read_json(attempt_path)
                 attempts[(family_id, role, replica)] = attempt
                 check_raw_manifest(root, attempt.get("rawEvidenceManifest"), f"Scheme-A {family_id}/{role}/{replica}")
-    scheme_gate = calculate_scheme_gate(manifests["scheme"], attempts)
+    scheme_gate = calculate_scheme_gate(
+        manifests["scheme"],
+        attempts,
+        baseline_artifact=manifests.get("schemeBaseline"),
+    )
     scheme_result = gate.get("schemeA")
     if not isinstance(scheme_result, dict):
         fail("gate.schemeA must be an object")
@@ -325,10 +366,11 @@ def check_evidence(root: Path, scheme_manifest_path: Path | None = None) -> dict
         fail("scheme-a-gate family factors changed")
     if scheme_gate_document.get("allRequiredPass") != scheme_gate["allRequiredPass"] or scheme_gate_document.get("minimumFactorDiagnostic") != scheme_gate["minimumFactorDiagnostic"]:
         fail("scheme-a-gate aggregate result changed")
-    if scheme_gate_document.get("baselineArtifactId") != manifests["baselineReference"]["baselineArtifactId"]:
-        fail("scheme-a-gate baseline ID does not match baseline reference")
-    if scheme_gate_document.get("baselineArtifactSha256") != manifests["baselineReference"]["baselineArtifactSha256"]:
-        fail("scheme-a-gate baseline digest does not match baseline reference")
+    scheme_baseline_reference = manifests.get("schemeBaselineReference") or manifests["baselineReference"]
+    if scheme_gate_document.get("baselineArtifactId") != scheme_baseline_reference["baselineArtifactId"]:
+        fail("scheme-a-gate baseline ID does not match its Scheme-A baseline reference")
+    if scheme_gate_document.get("baselineArtifactSha256") != scheme_baseline_reference["baselineArtifactSha256"]:
+        fail("scheme-a-gate baseline digest does not match its Scheme-A baseline reference")
     if scheme_gate_document.get("protocolVersion") != manifests["scheme"]["protocolVersion"]:
         fail("scheme-a-gate protocol version mismatch")
     compare_mapping(
@@ -337,6 +379,11 @@ def check_evidence(root: Path, scheme_manifest_path: Path | None = None) -> dict
         ("status", "requiredFamilies", "familyFactors", "families", "allRequiredPass", "minimumFactorDiagnostic"),
         "gate.schemeA",
     )
+    if (
+        scheme_result.get("baselineArtifactId") != scheme_baseline_reference["baselineArtifactId"]
+        or scheme_result.get("baselineArtifactSha256") != scheme_baseline_reference["baselineArtifactSha256"]
+    ):
+        fail("gate.schemeA baseline binding does not match its Scheme-A baseline reference")
 
     anti_gaming = gate.get("antiGaming")
     if not isinstance(anti_gaming, dict) or not anti_gaming:

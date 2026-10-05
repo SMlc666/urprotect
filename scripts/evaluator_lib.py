@@ -1802,6 +1802,104 @@ def validate_positive_baseline_v2(
         fail("positive baseline v2 product-chain manifest link mismatch")
 
 
+def validate_scheme_baseline_reference(
+    reference: Mapping[str, Any],
+    artifact_path: Path,
+    scheme: Mapping[str, Any],
+    scheme_path: Path,
+    repo_root: Path,
+    *,
+    declared_artifact_path: Path | None = None,
+) -> dict[str, Any]:
+    """Validate the immutable additive Scheme-A baseline binding.
+
+    The compatibility baseline reference and the Scheme-A baseline reference are
+    independent denominators.  Keeping this check separate prevents a
+    compatibility baseline ID from being accidentally reused as the strength
+    baseline identity, and makes every explicit v2 evaluator run consume the
+    frozen per-family costs rather than a freshly measured denominator.
+    """
+    _require_root(reference, "scheme-a-baseline-reference")
+    if reference.get("baselineArtifactId") != scheme.get("baselineArtifactId"):
+        fail("Scheme-A baseline reference ID does not match the selected manifest")
+    if reference.get("baselineStatus") != "measured":
+        fail("Scheme-A baseline reference must be measured")
+    if reference.get("protocolVersion") != scheme.get("protocolVersion"):
+        fail("Scheme-A baseline reference protocol version does not match the manifest")
+    if reference.get("baselineVersion") != "scheme-a-1x-v2":
+        fail("Scheme-A baseline reference version is not the frozen v2 version")
+    if reference.get("replicaCount") != scheme.get("replicaCount"):
+        fail("Scheme-A baseline reference replica count does not match the manifest")
+    expected_families = [family["familyId"] for family in scheme.get("requiredFamilies", ())]
+    if reference.get("requiredFamilies") != expected_families:
+        fail("Scheme-A baseline reference family order changed")
+    if reference.get("schemeManifestSha256") != sha256_file(scheme_path):
+        fail("Scheme-A baseline reference is not bound to the selected manifest")
+    if any(reference.get(field) is not True for field in ("immutable", "contentAddressed", "neverOverwrite")):
+        fail("Scheme-A baseline reference must be immutable and content addressed")
+
+    declared_path = resolve_repo_path(
+        repo_root,
+        reference.get("baselineArtifactPath"),
+        "scheme baselineArtifactPath",
+        require_file=True,
+    )
+    if declared_artifact_path is not None:
+        if declared_artifact_path.is_symlink() or not declared_artifact_path.is_file():
+            fail("Scheme-A baseline artifact copy must be a regular non-symlink file")
+        if sha256_file(declared_path) != reference.get("baselineArtifactSha256"):
+            fail("Scheme-A baseline artifact source digest does not match its reference")
+    actual_artifact_path = declared_artifact_path or artifact_path
+    if sha256_file(actual_artifact_path) != reference.get("baselineArtifactSha256"):
+        fail("Scheme-A baseline artifact digest does not match its reference")
+    artifact = read_json(actual_artifact_path)
+    _require_root(artifact, "scheme-a-baseline")
+    if artifact.get("baselineArtifactId") != reference.get("baselineArtifactId"):
+        fail("Scheme-A baseline artifact ID does not match its reference")
+    if artifact.get("baselineVersion") != reference.get("baselineVersion"):
+        fail("Scheme-A baseline artifact version does not match its reference")
+    if artifact.get("status") != "measured" or artifact.get("claimable") is not False:
+        fail("Scheme-A baseline artifact must be measured and non-claimable")
+    if any(artifact.get(field) is not True for field in ("immutable", "contentAddressed", "neverOverwrite")):
+        fail("Scheme-A baseline artifact must be immutable and content addressed")
+    if artifact.get("protocolVersion") != scheme.get("protocolVersion"):
+        fail("Scheme-A baseline artifact protocol version does not match the manifest")
+    if artifact.get("replicaCount") != scheme.get("replicaCount"):
+        fail("Scheme-A baseline artifact replica count does not match the manifest")
+    if artifact.get("requiredFamilies") != expected_families:
+        fail("Scheme-A baseline artifact family order changed")
+    if artifact.get("schemeManifestSha256") != reference.get("schemeManifestSha256"):
+        fail("Scheme-A baseline artifact is not bound to its manifest reference")
+    if artifact.get("fixtureId") != scheme.get("fixtureId") or artifact.get("sourceSha256") != scheme.get("sourceSha256"):
+        fail("Scheme-A baseline artifact fixture/source binding changed")
+    families = artifact.get("families")
+    if not isinstance(families, Mapping):
+        fail("Scheme-A baseline artifact families are missing")
+    for family in scheme.get("requiredFamilies", ()):
+        family_id = family["familyId"]
+        record = families.get(family_id)
+        if not isinstance(record, Mapping):
+            fail(f"Scheme-A baseline artifact is missing family {family_id}")
+        replicas = record.get("baselineReplicas")
+        if not isinstance(replicas, list) or len(replicas) != scheme.get("replicaCount"):
+            fail(f"Scheme-A baseline artifact family {family_id} does not have three replicas")
+        costs: list[int] = []
+        seen_replicas: set[int] = set()
+        for expected_replica, replica in enumerate(replicas, 1):
+            if not isinstance(replica, Mapping) or replica.get("replica") != expected_replica:
+                fail(f"Scheme-A baseline artifact family {family_id} replica order changed")
+            cost = require_int(replica.get("successCpuNs"), f"scheme baseline {family_id} replica {expected_replica} cost", minimum=1)
+            raw_manifest = replica.get("rawEvidenceManifest")
+            safe_relative_path(raw_manifest, f"scheme baseline {family_id} replica {expected_replica} rawEvidenceManifest")
+            costs.append(cost)
+            seen_replicas.add(expected_replica)
+        if seen_replicas != set(range(1, scheme.get("replicaCount") + 1)):
+            fail(f"Scheme-A baseline artifact family {family_id} replicas are incomplete")
+        if record.get("baselineCostCpuNs") != max(costs):
+            fail(f"Scheme-A baseline artifact family {family_id} cost is not the max replica cost")
+    return artifact
+
+
 def validate_all_manifests(
     repo_root: Path,
     *,
@@ -1811,9 +1909,15 @@ def validate_all_manifests(
     oracle_path: Path,
     baseline_reference_path: Path,
     baseline_artifact_path: Path | None = None,
+    scheme_baseline_reference_path: Path | None = None,
+    scheme_baseline_artifact_path: Path | None = None,
 ) -> dict[str, Any]:
     default_scheme_path = (repo_root / "fixtures/evaluator/scheme-a-manifest.json").resolve()
     active_additive_scheme = scheme_path.resolve() != default_scheme_path
+    scheme_baseline_reference: dict[str, Any] | None = None
+    scheme_baseline: dict[str, Any] | None = None
+    resolved_scheme_baseline_reference_path: Path | None = None
+    resolved_scheme_baseline_artifact_path: Path | None = None
     protocol = read_json(protocol_path)
     validate_protocol(protocol)
     oracles = read_json(oracle_path)
@@ -1902,6 +2006,36 @@ def validate_all_manifests(
         scheme_path=scheme_path,
         oracle_path=oracle_path,
     )
+    else:
+        scheme_reference_value = scheme.get("baselineReferencePath")
+        require_string(scheme_reference_value, "scheme.baselineReferencePath")
+        resolved_scheme_baseline_reference_path = (
+            scheme_baseline_reference_path
+            if scheme_baseline_reference_path is not None
+            else resolve_repo_path(repo_root, scheme_reference_value, "scheme.baselineReferencePath", require_file=True)
+        )
+        scheme_baseline_reference = read_json(resolved_scheme_baseline_reference_path)
+        declared_scheme_artifact_path = resolve_repo_path(
+            repo_root,
+            scheme_baseline_reference.get("baselineArtifactPath"),
+            "scheme baselineArtifactPath",
+            require_file=True,
+        )
+        resolved_scheme_baseline_artifact_path = (
+            scheme_baseline_artifact_path or declared_scheme_artifact_path
+        )
+        scheme_baseline = validate_scheme_baseline_reference(
+            scheme_baseline_reference,
+            resolved_scheme_baseline_artifact_path,
+            scheme,
+            scheme_path,
+            repo_root,
+            declared_artifact_path=(
+                declared_scheme_artifact_path
+                if scheme_baseline_artifact_path is not None
+                else None
+            ),
+        )
     return {
         "protocol": protocol,
         "corpus": corpus,
@@ -1912,6 +2046,10 @@ def validate_all_manifests(
         "oracleIds": oracle_ids,
         "baselineReference": reference,
         "baseline": baseline,
+        "schemeBaselineReference": scheme_baseline_reference,
+        "schemeBaseline": scheme_baseline,
+        "schemeBaselineReferencePath": resolved_scheme_baseline_reference_path,
+        "schemeBaselineArtifactPath": resolved_scheme_baseline_artifact_path,
     }
 
 
@@ -2191,8 +2329,16 @@ def validate_attempt_record(attempt: Mapping[str, Any], family: Mapping[str, Any
         fail("non-successful attack classifications must set goalAchieved=false")
 
 
-def calculate_scheme_gate(scheme: Mapping[str, Any], attempts: Mapping[tuple[str, str, int], Mapping[str, Any]]) -> dict[str, Any]:
+def calculate_scheme_gate(
+    scheme: Mapping[str, Any],
+    attempts: Mapping[tuple[str, str, int], Mapping[str, Any]],
+    *,
+    baseline_artifact: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     families_by_id = {family["familyId"]: family for family in scheme["requiredFamilies"]}
+    frozen_families = baseline_artifact.get("families") if isinstance(baseline_artifact, Mapping) else None
+    if baseline_artifact is not None and not isinstance(frozen_families, Mapping):
+        fail("Scheme-A baseline artifact families are missing")
     expected_keys = {
         (family_id, role, replica)
         for family_id in REQUIRED_FAMILIES
@@ -2238,7 +2384,18 @@ def calculate_scheme_gate(scheme: Mapping[str, Any], attempts: Mapping[tuple[str
                 "environmentUnavailable": baseline_env,
             }
             continue
-        baseline_cost = max(attempt["successCpuNs"] for attempt in baseline_successes)
+        measured_baseline_cost = max(attempt["successCpuNs"] for attempt in baseline_successes)
+        if frozen_families is None:
+            baseline_cost = measured_baseline_cost
+        else:
+            frozen_family = frozen_families.get(family_id)
+            if not isinstance(frozen_family, Mapping):
+                fail(f"Scheme-A baseline artifact is missing family {family_id}")
+            baseline_cost = require_int(
+                frozen_family.get("baselineCostCpuNs"),
+                f"Scheme-A frozen baseline cost for {family_id}",
+                minimum=1,
+            )
         if candidate_env:
             family_results[family_id] = {
                 "status": "environment-unavailable",
