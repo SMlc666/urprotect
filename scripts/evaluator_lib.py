@@ -1812,6 +1812,8 @@ def validate_all_manifests(
     baseline_reference_path: Path,
     baseline_artifact_path: Path | None = None,
 ) -> dict[str, Any]:
+    default_scheme_path = (repo_root / "fixtures/evaluator/scheme-a-manifest.json").resolve()
+    active_additive_scheme = scheme_path.resolve() != default_scheme_path
     protocol = read_json(protocol_path)
     validate_protocol(protocol)
     oracles = read_json(oracle_path)
@@ -1834,7 +1836,7 @@ def validate_all_manifests(
         fail("baseline reference Scheme-A version does not match the Scheme-A manifest")
     if reference.get("fixedCorpusRows") != len(corpus.get("fixedRowIds", ())):
         fail("baseline fixed-row count does not match the compatibility corpus")
-    if baseline.get("strengthStatus") != scheme.get("baselineStatus"):
+    if not active_additive_scheme and baseline.get("strengthStatus") != scheme.get("baselineStatus"):
         fail("baseline strength status does not match the Scheme-A manifest")
     # The required default remains bound to the historical zero baseline.  An
     # explicitly selected additive reference is independently content-addressed
@@ -1862,9 +1864,15 @@ def validate_all_manifests(
         "toolchainManifestSha256": repo_root / "global.json",
     }
     for field, path in protocol_digest_bindings.items():
+        if active_additive_scheme and field == "schemeAManifestSha256":
+            if scheme.get("parentManifestSha256") != sha256_file(default_scheme_path):
+                fail("additive Scheme-A manifest is not bound to the frozen v1 manifest")
+            continue
         if protocol["manifestDigests"].get(field) != sha256_file(path):
             fail(f"protocol manifestDigests.{field} does not match {path}")
     for field, path in digest_bindings.items():
+        if active_additive_scheme and field == "schemeManifestSha256":
+            continue
         # Corpus growth is append-only. The immutable baseline retains the
         # historical corpus/protocol snapshots; fixed-row immutability and the
         # current protocol manifest ledger are checked separately.
@@ -1880,7 +1888,8 @@ def validate_all_manifests(
             fail("baseline fixtureManifestSha256 does not match fixtures/manifest.json")
         if baseline.get("runtimeRegistrySha256") != sha256_file(runtime_manifest):
             fail("baseline runtimeRegistrySha256 does not match fixtures/runtime-matrix.json")
-    validate_positive_baseline_v2(
+    if not active_additive_scheme:
+        validate_positive_baseline_v2(
         baseline,
         reference,
         repo_root=repo_root,
@@ -2332,6 +2341,7 @@ def calculate_anti_gaming(
     *,
     raw_evidence_bounded: bool,
     baseline_artifact_path: Path | None = None,
+    scheme_path: Path | None = None,
 ) -> dict[str, bool]:
     """Recompute anti-gaming claims from independently checked records.
 
@@ -2343,7 +2353,7 @@ def calculate_anti_gaming(
     baseline = manifests["baseline"]
     corpus_path = repo_root / "fixtures/evaluator/compatibility-corpus.json"
     oracle_path = repo_root / "fixtures/evaluator/oracles.json"
-    scheme_path = repo_root / "fixtures/evaluator/scheme-a-manifest.json"
+    scheme_path = scheme_path or (repo_root / "fixtures/evaluator/scheme-a-manifest.json")
     baseline_path = baseline_artifact_path or resolve_repo_path(repo_root, reference["baselineArtifactPath"], "baselineArtifactPath", require_file=True)
     baseline_identity = baseline.get("identity") if isinstance(baseline.get("identity"), Mapping) else {}
     unit_list = list(units)
@@ -2373,7 +2383,11 @@ def calculate_anti_gaming(
     return {
         "corpusUnchanged": corpus_unchanged,
         "oracleUnchanged": (baseline.get("oracleManifestSha256") or baseline_identity.get("oracleManifestSha256")) == sha256_file(oracle_path),
-        "attackManifestUnchanged": (baseline.get("schemeManifestSha256") or baseline_identity.get("schemeManifestSha256")) == sha256_file(scheme_path),
+        "attackManifestUnchanged": (
+            ((baseline.get("schemeManifestSha256") or baseline_identity.get("schemeManifestSha256")) == sha256_file(scheme_path))
+            if scheme_path.resolve() == (repo_root / "fixtures/evaluator/scheme-a-manifest.json").resolve()
+            else manifests["scheme"].get("parentManifestSha256") == sha256_file(repo_root / "fixtures/evaluator/scheme-a-manifest.json")
+        ),
         "budgetsEqual": manifests["protocol"]["budgets"] == manifests["scheme"]["budget"],
         "baselineDigestMatches": sha256_file(baseline_path) == reference.get("baselineArtifactSha256"),
         "requiredRowsPresent": set(observed_ids) == required_ids and len(observed_ids) == len(set(observed_ids)),

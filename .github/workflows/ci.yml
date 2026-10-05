@@ -965,9 +965,6 @@ jobs:
           set -euo pipefail
           checkout_root="${GITHUB_WORKSPACE}"
           destination="${checkout_root}/.artifacts/protected-image"
-          if [[ -d "${destination}" ]]; then
-            exit 0
-          fi
           while IFS= read -r -d '' source; do
             [[ "${source}" == "${destination}" ]] && continue
             mkdir -p "${destination}"
@@ -996,18 +993,22 @@ jobs:
         run: |
           python3 scripts/validate-evaluator-manifests.py
           python3 scripts/validate-evaluator-manifests.py \
+            --scheme-a fixtures/evaluator/scheme-a-manifest-v2.json \
             --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+      - name: Check immutable Scheme-A baseline-v2
+        run: python3 scripts/check-scheme-a-baseline-v2.py
       - name: Run independent evaluator against immutable positive baseline-v2
         run: |
           ./scripts/run-independent-evaluator.sh \
             --tier "${EVALUATOR_TIER}" \
+            --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
             --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
       - name: Check independent evaluator evidence
         if: always()
-        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}"
+        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
       - name: Check strict compatibility growth gate
         if: always()
-        run: python3 scripts/check-strict-compatibility-growth.py ".artifacts/evaluator/${EVALUATOR_TIER}"
+        run: python3 scripts/check-strict-compatibility-growth.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
       - name: Preserve existing required evidence gates
         if: always()
         run: |
@@ -1026,7 +1027,7 @@ jobs:
           fi
       - name: Enforce independent evaluator claim gate after positive baseline
         if: always()
-        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --require-claimable-if-baseline-positive
+        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json --require-claimable-if-baseline-positive
       - name: Upload independent evaluator evidence
         if: always()
         uses: actions/upload-artifact@v4

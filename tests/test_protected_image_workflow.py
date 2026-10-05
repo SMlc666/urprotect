@@ -49,6 +49,12 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         self.assertIn('destination="${checkout_root}/.artifacts/protected-image"', block)
         self.assertNotIn("nested_root=", block)
 
+
+    def test_final_evaluator_selects_additive_scheme_a_v2(self) -> None:
+        evaluator = self.workflow.index("independent-evaluator:")
+        block = self.workflow[evaluator:]
+        self.assertIn("scheme-a-manifest-v2.json", block)
+        self.assertIn("check-scheme-a-baseline-v2.py", block)
     def test_staged_evaluator_receives_checkout_commit_and_shared_tool_resolution(self) -> None:
         evaluator_runner = (ROOT / "scripts/run-independent-evaluator.sh").read_text(encoding="utf-8")
         evaluator_impl = (ROOT / "scripts/run-independent-evaluator.py").read_text(encoding="utf-8")

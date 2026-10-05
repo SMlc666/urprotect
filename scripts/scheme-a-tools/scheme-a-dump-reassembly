@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+import os, sys
+sys.path.insert(0, os.path.dirname(__file__))
+from scheme_a_tool_common import main
+raise SystemExit(main("runtime_dump_reassembly"))

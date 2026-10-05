@@ -44,6 +44,7 @@ REQUIRED_OUTPUT_FILES = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact_root", type=Path)
+    parser.add_argument("--scheme-a-manifest", type=Path, default=REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json", help="active Scheme-A manifest")
     parser.add_argument("--require-claimable", action="store_true", help="fail the process unless both independent dimensions are claimable")
     parser.add_argument(
         "--require-claimable-if-baseline-positive",
@@ -146,7 +147,8 @@ def compare_mapping(actual: dict[str, Any], expected: dict[str, Any], fields: tu
             fail(f"{owner}.{field} does not match recomputed value")
 
 
-def check_evidence(root: Path) -> dict[str, Any]:
+def check_evidence(root: Path, scheme_manifest_path: Path | None = None) -> dict[str, Any]:
+    scheme_manifest_path = (scheme_manifest_path or (REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json")).resolve()
     artifacts_root = (REPO_ROOT / ".artifacts" / "evaluator").resolve()
     requested_root = root if root.is_absolute() else REPO_ROOT / root
     if requested_root.is_symlink():
@@ -180,7 +182,7 @@ def check_evidence(root: Path) -> dict[str, Any]:
     source_paths = {
         "protocol": REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json",
         "corpus": REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
-        "scheme": REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json",
+        "scheme": scheme_manifest_path,
         "oracles": REPO_ROOT / "fixtures/evaluator/oracles.json",
     }
     check_manifest_copies(root, source_paths)
@@ -347,6 +349,7 @@ def check_evidence(root: Path) -> dict[str, Any]:
         attempts,
         raw_evidence_bounded=True,
         baseline_artifact_path=baseline_artifact_path,
+        scheme_path=scheme_manifest_path,
     )
     if anti_gaming != expected_anti_gaming:
         fail("gate anti-gaming checks do not match independently recomputed checks")
@@ -395,7 +398,7 @@ def git_commit_for_check() -> str:
 def main() -> int:
     args = parse_args()
     try:
-        gate = check_evidence(args.artifact_root)
+        gate = check_evidence(args.artifact_root, args.scheme_a_manifest.resolve())
     except (EvaluatorError, OSError, json.JSONDecodeError) as error:
         print(f"FAIL independent evaluator evidence: {error}", file=sys.stderr)
         return 1

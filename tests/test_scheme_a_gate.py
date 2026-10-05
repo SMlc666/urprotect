@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -18,6 +22,11 @@ from evaluator_lib import (  # noqa: E402
     read_json,
     validate_scheme_manifest,
 )
+
+SCORER_SPEC = importlib.util.spec_from_file_location("run_scheme_a_fixture", ROOT / "scripts/run-scheme-a-fixture.py")
+assert SCORER_SPEC is not None and SCORER_SPEC.loader is not None
+SCORER = importlib.util.module_from_spec(SCORER_SPEC)
+SCORER_SPEC.loader.exec_module(SCORER)
 
 DIGEST = "b" * 64
 
@@ -133,6 +142,78 @@ class SchemeAGateTests(unittest.TestCase):
         attempts[("patch_repack", "candidate", 1)]["successCpuNs"] = self.scheme["budget"]["cpuSeconds"] * 1_000_000_001
         with self.assertRaises(EvaluatorError):
             calculate_scheme_gate(self.scheme, attempts)
+
+
+class SchemeAFixtureScorerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.scheme = read_json(ROOT / "fixtures/evaluator/scheme-a-manifest.json")
+        validate_scheme_manifest(cls.scheme)
+
+    @staticmethod
+    def _product_fixture(root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "protected-image.bin").write_bytes(b"protected-image-fixture")
+        native = b"native-image-fixture"
+        (root / "native-image.bin").write_bytes(native)
+        native_digest = hashlib.sha256(native).hexdigest()
+        (root / "target-loader.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "stage": "target-loader",
+                    "status": "passed",
+                    "targetStatus": 0,
+                    "nativeImageSha256": native_digest,
+                    "loaderId": "fixture-loader",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "behavioral-oracle.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "stage": "behavioral-oracle",
+                    "status": "passed",
+                    "baselineStatus": 0,
+                    "targetStatus": 0,
+                    "stdoutEqual": True,
+                    "stderrEqual": True,
+                    "nativeImageSha256": native_digest,
+                    "oracleId": "fixture-oracle",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_all_six_families_remain_frozen_and_unavailable_without_tools(self) -> None:
+        _, families = SCORER._load_scheme()
+        self.assertEqual(tuple(families), REQUIRED_FAMILIES)
+        with tempfile.TemporaryDirectory() as directory:
+            product = Path(directory) / "product"
+            self._product_fixture(product)
+            for index, family_id in enumerate(REQUIRED_FAMILIES):
+                with self.subTest(family=family_id):
+                    with self.assertRaises(SCORER.ScorerError) as context:
+                        SCORER.run_fixture(family_id, "baseline", 1, product, Path(directory) / f"out-{index}")
+                    self.assertIn("not calibrated", str(context.exception))
+
+    def test_missing_blue_oracle_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            product = Path(directory) / "product"
+            self._product_fixture(product)
+            (product / "behavioral-oracle.json").unlink()
+            with self.assertRaises(SCORER.ScorerError) as context:
+                SCORER.run_fixture(REQUIRED_FAMILIES[0], "baseline", 1, product, Path(directory) / "out")
+            self.assertIn("behavioral-oracle.json", str(context.exception))
+
+    def test_factor_math_is_exact_for_each_frozen_family(self) -> None:
+        result = calculate_scheme_gate(self.scheme, attempts_for(self.scheme))
+        self.assertEqual(result["requiredFamilies"], list(REQUIRED_FAMILIES))
+        for family_id in REQUIRED_FAMILIES:
+            with self.subTest(family=family_id):
+                self.assertEqual(result["families"][family_id]["factorLowerBound"], 100.0)
 
 
 if __name__ == "__main__":

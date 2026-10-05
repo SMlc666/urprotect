@@ -33,10 +33,11 @@ def read_json(path: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("evaluator_root", type=Path)
+    parser.add_argument("--scheme-a-manifest", type=Path, default=ROOT / "fixtures/evaluator/scheme-a-manifest-v2.json")
     args = parser.parse_args()
     root = args.evaluator_root if args.evaluator_root.is_absolute() else ROOT / args.evaluator_root
     checker = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/check-independent-evaluator.py"), str(root)],
+        [sys.executable, str(ROOT / "scripts/check-independent-evaluator.py"), str(root), "--scheme-a-manifest", str(args.scheme_a_manifest.resolve())],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -80,12 +81,10 @@ def main() -> int:
     if compatibility.get("status") != "measured":
         return fail("compatibility status is not measured")
     scheme = gate.get("schemeA", {})
-    if scheme.get("status") != "baseline-not-calibrated":
-        return fail("Scheme-A status changed during compatibility growth")
-    if any(value is not None for value in scheme.get("familyFactors", {}).values()):
-        return fail("Scheme-A family factor was fabricated during compatibility growth")
-    if gate.get("claimable") is not False:
-        return fail("compatibility growth alone made the overall claimable gate true")
+    if scheme.get("status") != "pass" or scheme.get("allRequiredPass") is not True:
+        return fail("Scheme-A six-family calibration is not independently passing")
+    if any(not isinstance(value, (int, float)) or value < 100.0 for value in scheme.get("familyFactors", {}).values()):
+        return fail("Scheme-A family factor is below the frozen 100x threshold")
 
     unit_root = root / "compatibility"
     unit_paths = sorted(unit_root.glob("*/unit.json"))

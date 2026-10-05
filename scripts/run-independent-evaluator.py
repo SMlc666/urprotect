@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import resource
+import shlex
 import shutil
 import signal
 import socket
@@ -42,6 +43,7 @@ from evaluator_lib import (
     inventory_digest,
     load_product_evidence,
     project_product_failure,
+    read_json,
     sha256_file,
     resolve_repo_path,
     validate_all_manifests,
@@ -52,6 +54,7 @@ from evaluator_lib import (
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_EVALUATOR_ROOT = REPO_ROOT / ".artifacts" / "evaluator"
 DEFAULT_BASELINE_REFERENCE = REPO_ROOT / "fixtures/evaluator/baseline-reference.json"
+DEFAULT_SCHEME_MANIFEST = REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json"
 STRICT_UNIT_ID = "compat.protection-symbolized-fixture.glibc.outer-execveat"
 
 
@@ -69,6 +72,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BASELINE_REFERENCE,
         help="content-addressed baseline reference (default: fixtures/evaluator/baseline-reference.json)",
+    )
+    parser.add_argument(
+        "--scheme-a-manifest",
+        type=Path,
+        default=DEFAULT_SCHEME_MANIFEST,
+        help="content-addressed Scheme-A manifest (default: fixtures/evaluator/scheme-a-manifest.json)",
     )
     parser.add_argument("--keep-existing", action="store_true", help="fail instead of replacing only the evaluator's previous output directory")
     return parser.parse_args()
@@ -552,16 +561,22 @@ def make_compatibility_unit(
     return unit
 
 
-def make_scheme_attempt(
+def _write_unavailable_scheme_attempt(
     root: Path,
     scheme: dict[str, Any],
     family: dict[str, Any],
     role: str,
     replica: int,
+    *,
+    reason: str,
+    command: str,
+    stdout: str = "",
+    stderr: str = "",
 ) -> dict[str, Any]:
     family_id = family["familyId"]
     attempt_root = root / "strength" / family_id / f"replica-{replica}" / role
     raw_root = attempt_root / "raw"
+    raw_root.mkdir(parents=True, exist_ok=True)
     write_json(
         raw_root / "resource.json",
         {
@@ -570,18 +585,15 @@ def make_scheme_attempt(
             "statusOwner": "independent-evaluator",
             "role": role,
             "replica": replica,
-            "requiredCapability": "pinned Scheme-A attack toolset",
+            "requiredCapability": "bounded Scheme-A fixture scorer",
             "available": False,
-            "reason": "No pinned attack runner/tool binary exists in the current checkout; no attack result is inferred.",
+            "reason": reason,
             "budget": scheme["budget"],
         },
     )
-    (raw_root / "command.log").write_text(
-        "attack-not-started: required pinned Scheme-A toolset is unavailable\n",
-        encoding="utf-8",
-    )
-    (raw_root / "stdout.txt").write_text("not-run: environment-unavailable\n", encoding="utf-8")
-    (raw_root / "stderr.txt").write_text("environment-unavailable\n", encoding="utf-8")
+    (raw_root / "command.log").write_text(command + ("\n" if not command.endswith("\n") else ""), encoding="utf-8")
+    (raw_root / "stdout.txt").write_text(stdout or "not-run: environment-unavailable\n", encoding="utf-8")
+    (raw_root / "stderr.txt").write_text(stderr or (reason + "\n"), encoding="utf-8")
     raw_manifest = write_raw_manifest(raw_root)
     attempt = {
         "schemaVersion": 1,
@@ -603,7 +615,7 @@ def make_scheme_attempt(
         "censored": False,
         "blueOracle": {
             "status": "not-captured",
-            "reason": "No strict Native Image was produced for this checkout.",
+            "reason": "No strict blue behavioral oracle was captured: " + reason,
         },
         "recoveredArtifactSha256": None,
         "recoveredArtifactSize": 0,
@@ -618,11 +630,127 @@ def make_scheme_attempt(
     return attempt
 
 
-def copy_manifests(root: Path, baseline_reference_path: Path, baseline_artifact_path: Path) -> None:
+def make_scheme_attempt(
+    root: Path,
+    scheme: dict[str, Any],
+    family: dict[str, Any],
+    role: str,
+    replica: int,
+    *,
+    product_root: Path,
+) -> dict[str, Any]:
+    family_id = family["familyId"]
+    attempt_root = root / "strength" / family_id / f"replica-{replica}" / role
+    raw_root = attempt_root / "raw"
+    raw_root.mkdir(parents=True, exist_ok=True)
+    runner = REPO_ROOT / "scripts/run-scheme-a-fixture.py"
+    command = [
+        sys.executable,
+        str(runner),
+        "--family",
+        family_id,
+        "--role",
+        role,
+        "--replica",
+        str(replica),
+        "--product-root",
+        str(product_root),
+        "--output-root",
+        str(raw_root),
+    ]
+    command_text = shlex.join(command)
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=float(scheme["budget"]["wallSeconds"]),
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        return _write_unavailable_scheme_attempt(
+            root,
+            scheme,
+            family,
+            role,
+            replica,
+            reason=f"Scheme-A fixture scorer could not start: {error}",
+            command=command_text,
+        )
+
+    # The subprocess owns the scorer result and resource/recovered artifacts;
+    # the evaluator owns the captured streams and final raw SHA256SUMS binding.
+    (raw_root / "stdout.txt").write_text(completed.stdout[:16 * 1024 * 1024], encoding="utf-8")
+    (raw_root / "stderr.txt").write_text(completed.stderr[:16 * 1024 * 1024], encoding="utf-8")
+    (raw_root / "command.log").write_text(command_text + "\n", encoding="utf-8")
+    result_path = raw_root / "scorer-result.json"
+    try:
+        result = read_json(result_path)
+    except (EvaluatorError, OSError, ValueError) as error:
+        return _write_unavailable_scheme_attempt(
+            root,
+            scheme,
+            family,
+            role,
+            replica,
+            reason=f"Scheme-A fixture scorer emitted no valid result: {error}",
+            command=command_text,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+    if completed.returncode != 0 or result.get("status") != "passed":
+        reason = result.get("reason") or completed.stderr.strip() or f"fixture scorer exited with status {completed.returncode}"
+        return _write_unavailable_scheme_attempt(
+            root,
+            scheme,
+            family,
+            role,
+            replica,
+            reason=str(reason),
+            command=command_text,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+
+    raw_manifest = write_raw_manifest(raw_root)
+    attempt = {
+        "schemaVersion": 1,
+        "kind": "scheme-a-attempt",
+        "familyId": family_id,
+        "profile": scheme["profile"],
+        "replica": replica,
+        "role": role,
+        "unitId": scheme["fixtureId"],
+        "sourceSha256": scheme["sourceSha256"],
+        "publishedArtifactSha256": scheme.get("publishedArtifactSha256"),
+        "attackRecipeSha256": family["attackRecipeSha256"],
+        "toolchain": family["tool"],
+        "budget": scheme["budget"],
+        "classification": result.get("classification"),
+        "statusOwner": "independent-evaluator",
+        "goalAchieved": result.get("goalAchieved"),
+        "successCpuNs": result.get("successCpuNs"),
+        "censored": result.get("censored"),
+        "blueOracle": result.get("blueOracle"),
+        "recoveredArtifactSha256": result.get("recoveredArtifactSha256"),
+        "recoveredArtifactSize": result.get("recoveredArtifactSize"),
+        "resourceEvidence": str((raw_root / "resource.json").relative_to(root)),
+        "stdout": str((raw_root / "stdout.txt").relative_to(root)),
+        "stderr": str((raw_root / "stderr.txt").relative_to(root)),
+        "commandLog": str((raw_root / "command.log").relative_to(root)),
+        "manualStepsObserved": result.get("manualStepsObserved", 0),
+        "rawEvidenceManifest": str(raw_manifest.relative_to(root)),
+    }
+    write_json(attempt_root / "attempt.json", attempt)
+    return attempt
+
+
+def copy_manifests(root: Path, baseline_reference_path: Path, baseline_artifact_path: Path, scheme_path: Path) -> None:
     sources = {
         "protocol.json": REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json",
         "corpus-manifest.json": REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
-        "scheme-a-manifest.json": REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json",
+        "scheme-a-manifest.json": scheme_path,
         "oracles.json": REPO_ROOT / "fixtures/evaluator/oracles.json",
         "baseline-reference.json": baseline_reference_path,
         "baseline-artifact.json": baseline_artifact_path,
@@ -640,6 +768,7 @@ def build_gate(
     units: list[dict[str, Any]],
     attempts: dict[tuple[str, str, int], dict[str, Any]],
     baseline_artifact_path: Path,
+    scheme_path: Path,
 ) -> dict[str, Any]:
     reference = manifests["baselineReference"]
     anti_gaming = calculate_anti_gaming(
@@ -650,6 +779,7 @@ def build_gate(
         attempts,
         raw_evidence_bounded=True,
         baseline_artifact_path=baseline_artifact_path,
+        scheme_path=scheme_path,
     )
     # An independently measured row is not claimable when the evaluator's
     # declared native/isolation environment is unavailable.  Keep the
@@ -815,13 +945,22 @@ def main() -> int:
         if baseline_reference_path.is_symlink():
             raise EvaluatorError("baseline reference must be a regular non-symlink file")
         baseline_reference_path = baseline_reference_path.resolve(strict=True)
+        scheme_manifest_path = args.scheme_a_manifest
+        if not scheme_manifest_path.is_absolute():
+            scheme_manifest_path = REPO_ROOT / scheme_manifest_path
+        reject_symlink_components(scheme_manifest_path)
+        if scheme_manifest_path.is_symlink():
+            raise EvaluatorError("Scheme-A manifest must be a regular non-symlink file")
+        scheme_manifest_path = scheme_manifest_path.resolve(strict=True)
+        if not scheme_manifest_path.is_file():
+            raise EvaluatorError("Scheme-A manifest must be a regular file")
         if not baseline_reference_path.is_file():
             raise EvaluatorError("baseline reference must be a regular non-symlink file")
         manifests = validate_all_manifests(
             REPO_ROOT,
             protocol_path=REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json",
             corpus_path=REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
-            scheme_path=REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json",
+            scheme_path=scheme_manifest_path,
             oracle_path=REPO_ROOT / "fixtures/evaluator/oracles.json",
             baseline_reference_path=baseline_reference_path,
         )
@@ -831,10 +970,10 @@ def main() -> int:
             "baselineArtifactPath",
             require_file=True,
         )
-        copy_manifests(output_root, baseline_reference_path, baseline_artifact_path)
+        copy_manifests(output_root, baseline_reference_path, baseline_artifact_path, scheme_manifest_path)
         product_evidence_root = args.product_evidence_root
-        if product_evidence_root is None:
-            product_evidence_root = default_product_evidence_root(args.tier, STRICT_UNIT_ID)
+        environment_product_root = product_evidence_root or default_product_evidence_root(args.tier, STRICT_UNIT_ID)
+        environment_product_root = environment_product_root.resolve()
         units = [
             make_compatibility_unit(
                 output_root,
@@ -851,15 +990,23 @@ def main() -> int:
             output_root,
             manifests["protocol"],
             manifests["scheme"],
-            product_evidence_root=product_evidence_root,
+            product_evidence_root=environment_product_root,
             units=units,
         )
+        os.environ["EVALUATOR_SCHEME_A_MANIFEST"] = str(scheme_manifest_path)
         compatibility = calculate_compatibility(manifests["corpus"], manifests["baseline"], units)
         attempts: dict[tuple[str, str, int], dict[str, Any]] = {}
         for family in manifests["families"]:
             for role in ("baseline", "candidate"):
                 for replica in range(1, manifests["scheme"]["replicaCount"] + 1):
-                    attempt = make_scheme_attempt(output_root, manifests["scheme"], family, role, replica)
+                    attempt = make_scheme_attempt(
+                        output_root,
+                        manifests["scheme"],
+                        family,
+                        role,
+                        replica,
+                        product_root=environment_product_root,
+                    )
                     attempts[(family["familyId"], role, replica)] = attempt
         scheme_gate = calculate_scheme_gate(manifests["scheme"], attempts)
         write_json(
@@ -891,6 +1038,7 @@ def main() -> int:
             units,
             attempts,
             output_root / "baseline-artifact.json",
+            scheme_manifest_path,
         )
         write_json(output_root / "gate.json", gate)
         analysis_input = build_analysis_input(output_root, gate, units, attempts)
