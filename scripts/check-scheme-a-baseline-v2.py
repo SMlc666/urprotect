@@ -45,6 +45,8 @@ def main() -> int:
         fail("Scheme-A baseline-v2 reference digest does not match artifact")
     if reference.get("schemeManifestSha256") != digest(args.scheme) or artifact.get("schemeManifestSha256") != digest(args.scheme):
         fail("Scheme-A baseline-v2 is not bound to the selected manifest")
+    if scheme.get("baselineStatus") != "measured":
+        fail("selected Scheme-A manifest is not calibrated")
     if artifact.get("immutable") is not True or artifact.get("contentAddressed") is not True or artifact.get("neverOverwrite") is not True:
         fail("Scheme-A baseline-v2 must be immutable and content-addressed")
     families = artifact.get("families")

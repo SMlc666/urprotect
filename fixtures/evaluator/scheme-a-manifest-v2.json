@@ -2,7 +2,7 @@
   "appendOnly": true,
   "baselineArtifactId": "scheme-a-baseline-v2",
   "baselineReferencePath": "fixtures/evaluator/baselines/scheme-a-1x-v2-reference.json",
-  "baselineStatus": "baseline-not-calibrated",
+  "baselineStatus": "measured",
   "budget": {
     "cpuSeconds": 45,
     "manualSteps": 0,
