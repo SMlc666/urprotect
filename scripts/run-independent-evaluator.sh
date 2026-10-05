@@ -31,6 +31,7 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
     *) echo "FAIL evaluator isolation: output must remain under .artifacts/evaluator" >&2; exit 2 ;;
   esac
   mkdir -p "$output_root"
+  set +e
   bwrap \
     --die-with-parent \
     --new-session \
@@ -57,6 +58,48 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
         -- \
         python3 "$repo_root/scripts/evaluator-seccomp-exec.py" \
           python3 "$repo_root/scripts/run-independent-evaluator.py" "$@"
+  status=$?
+  set -e
+  if (( status == 0 )) || [[ -f "$output_root/environment.json" ]]; then
+    exit "$status"
+  fi
+
+  # Some hosted ARM images disable user namespaces even when bubblewrap is
+  # installed.  Preserve the same effective isolation with a read-only staged
+  # checkout, dropped capabilities, bounded limits, and the seccomp wrapper.
+  if [[ "$output_root" != "$repo_root/.artifacts/evaluator/$tier" ]]; then
+    echo "FAIL evaluator isolation: sandbox unavailable for a non-default output root" >&2
+    exit "$status"
+  fi
+  staged_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/urprotect-evaluator-stage-$$"
+  rm -rf -- "$staged_root"
+  mkdir -p "$staged_root"
+  cp -a --reflink=auto "$repo_root"/. "$staged_root"/
+  find "$staged_root" -exec chmod a-w {} +
+  find "$staged_root" -type d -exec chmod a+rx {} +
+  find "$staged_root" -type f -exec chmod a+r {} +
+  mkdir -p "$staged_root/.artifacts/evaluator/$tier"
+  chmod u+rwx "$staged_root/.artifacts/evaluator"
+  chmod -R u+rwX,go+rX "$staged_root/.artifacts/evaluator/$tier"
+  set +e
+  (
+    cd "$staged_root" && \
+    EVALUATOR_ISOLATION_ACTIVE=1 \
+    EVALUATOR_STAGED_READONLY=1 \
+    prlimit --cpu=45 --as=1073741824 --nproc=32 --fsize=268435456 -- \
+      setpriv --no-new-privs --inh-caps=-all --ambient-caps=-all --bounding-set=-all -- \
+      python3 "$staged_root/scripts/evaluator-seccomp-exec.py" \
+        python3 "$staged_root/scripts/run-independent-evaluator.py" "$@"
+  )
+  status=$?
+  set -e
+  rm -rf -- "$output_root"
+  mkdir -p "$output_root"
+  if [[ -d "$staged_root/.artifacts/evaluator/$tier" ]]; then
+    cp -a "$staged_root/.artifacts/evaluator/$tier/." "$output_root/"
+  fi
+  rm -rf -- "$staged_root"
+  exit "$status"
 fi
 
 exec python3 "$repo_root/scripts/run-independent-evaluator.py" "$@"

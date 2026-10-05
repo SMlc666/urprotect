@@ -130,7 +130,7 @@ def command_identity(command: str) -> dict[str, Any]:
     if executable is None:
         return {"available": False, "version": None, "binarySha256": None}
     try:
-        result = subprocess.run([executable, "--version"], check=False, capture_output=True, text=True, timeout=5)
+        result = subprocess.run([executable, "--version"], check=False, capture_output=True, text=True, timeout=5, env=os.environ.copy())
         text = (result.stdout or result.stderr).splitlines()
         version = text[0][:240] if text else None
         digest = sha256_file(Path(executable))
@@ -198,7 +198,10 @@ def _probe_network_syscalls() -> tuple[bool, int | None]:
 
 def _is_read_only(path: Path) -> bool:
     try:
-        return bool(os.statvfs(path).f_flag & getattr(os, "ST_RDONLY", 1))
+        if bool(os.statvfs(path).f_flag & getattr(os, "ST_RDONLY", 1)):
+            return True
+        mode = path.stat().st_mode
+        return (mode & 0o222) == 0
     except OSError:
         return False
 
