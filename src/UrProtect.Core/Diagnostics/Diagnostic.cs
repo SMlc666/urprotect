@@ -62,6 +62,15 @@ public enum DiagnosticCode
     ProtectionUnsupportedInstruction,
     InvalidArgument,
     VersionDefinitionTableMalformed,
+    ProtectedImageMalformed,
+    ProtectedImageUnsupported,
+    ProtectedImageLimitExceeded,
+    ProtectedImageIntegrityMismatch,
+    ProtectedImageSourceMismatch,
+    ProtectedImageRequestMismatch,
+    ProtectedImageDuplicateRecord,
+    ProtectedImageOverlap,
+    ProtectedImageRoleMismatch,
 }
 
 public readonly record struct Diagnostic(

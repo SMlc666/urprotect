@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Review native-loader/profile boundary and ensure emission does not promote unsupported runtime claims."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review bounded binary reads, diagnostics, malformed tests, atomic publication, fuzz and CI evidence."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Review managed Protect/Pack ownership and test/fixture placement."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review artifact formats and validation ownership across producer, codec, future rehydrator and loader."}
+{"file":".trellis/tasks/archive/2026-10/10-05-analyze-evaluator-protected-image-gate/research/protected-image-gate-analysis.md","reason":"Review implementation against measured first failure and proposed protected-image-emission-v1 gate."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Review parent artifact model, operation boundary, rollback and evidence requirements."}

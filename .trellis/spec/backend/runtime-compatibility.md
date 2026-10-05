@@ -980,3 +980,74 @@ validate frozen manifests and baseline digests
 -> retain environment-unavailable/not-ready evidence
 -> derive claimable only from both independent gates
 ```
+
+## Scenario: Protected Image v1 producer evidence
+
+### 1. Scope / Trigger
+
+This contract applies to the explicit `protect-image` command and its additive CI producer evidence. It is a producer-stage contract only: it does not claim that the artifact has been rehydrated, materialized as a Native Image, handed to a loader, or behaviorally executed.
+
+### 2. Signatures
+
+```text
+urprotect protect-image INPUT --artifact PATH --role PATH --manifest PATH --stage PATH
+  --unit ID --profile outer-execveat|host-context-entry
+  (--function NAME | --function-id symtab:INDEX|dynsym:INDEX
+                    | --function-address 0xADDRESS)+
+  (--pass control-flow-flattening | --pass register-permutation)+
+  [--producer-id ID] [--producer-build-sha256 SHA256]
+  [--rehydrator ID] [--source-sha256 SHA256] [--request-sha256 SHA256]
+  [--json PATH|-]
+```
+
+The producer emits `protected-image.bin`, `protected-image.json`, `stage.json`, and a closed `SHA256SUMS` file. The stage record is schema v1 with `status`, command/environment/producer/source/request/artifact bindings, bounded diagnostics, transformation identity, and `publicationComplete`.
+
+### 3. Contracts
+
+- The command snapshots explicit selectors and passes, uses the managed `ProtectedImageProducer`, and publishes through `ProtectedImagePublisher`; the legacy `protect` command and `ProductReport` schema remain unchanged.
+- A passed stage binds `artifactRole=protected-image`, `abiId=urprotect.protected-image.v1`, `abiVersion=1`, the role artifact digest/size, the declared rehydrator consumer, and a raw manifest path. A failed stage retains diagnostics and streams but publishes neither artifact nor role.
+- The producer artifact is a bounded canonical Protected Image document. It is not a complete source/final ELF and is not counted as a strict compatibility unit until the rehydrator, Native Image, loader, and behavior stages are present.
+- CI runs the producer script after build and uploads `.artifacts/protected-image/` with `if: always()`. The script retains failure evidence and the checker recomputes closed manifest hashes; it never relabels a producer pass as compatibility success.
+- `commandDigest` and `environmentDigest` are evidence provenance, not authorization or compatibility factors. Their inputs are bounded and stable for the invoking process.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Missing/duplicate output path or explicit selector/pass | usage/`InvalidArgument`; no partial publication |
+| Source/request/role/ABI mismatch | stable Protected Image diagnostic; failed stage; no artifact/role |
+| Truncated, oversized, duplicate, overlapping, unknown, or non-canonical ABI record | codec validation failure before publication |
+| Output move, hash, or manifest failure | `OutputIoFailure`; rollback of moved producer outputs; retained failed stage |
+| Closed manifest missing a retained stream/stage/role/artifact | producer evidence checker fails |
+| Passed producer stage without rehydrator/native/loader/behavior evidence | remains additive producer evidence; strict evaluator unit remains incomplete |
+
+### 5. Good / Base / Bad Cases
+
+- Good: one explicit fixture request emits deterministic role/artifact/stage/checksum records, and repeating the same request produces identical artifact bytes.
+- Base: compiler or producer prerequisites are unavailable; the script retains a failed stage, stdout/stderr, and closed checksum manifest without claiming support.
+- Bad: treating a direct protected ELF, complete source ELF, or generic PayloadFrame as a Protected Image; accepting a passed stage from a forged role or open manifest; or counting producer emission as end-to-end compatibility.
+
+### 6. Tests Required
+
+- Managed tests cover codec round trips, malformed/overflow/duplicate/overlap/alias cases, role/stage binding, no-spare-`PT_NULL` planning, and atomic rollback.
+- CLI tests cover selector/pass parsing, output path conflicts, success publication, failed source binding, focused JSON reporting, and legacy command compatibility.
+- The producer script/checker tests cover success/failure retention, closed SHA256SUMS, path traversal, digest continuity, and no partial artifact on failure.
+- The CI workflow contract asserts additive execution after build, `if: always()` evidence checking/upload, and no change to strict evaluator claim semantics.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+protect-image = rename(finalElfBytes)
+producerPassed = true
+compatibilityUnitComplete = true
+```
+
+#### Correct
+
+```text
+explicit request -> layout-neutral plan -> canonical Protected Image
+-> role/stage/checksum publication -> later bounded rehydration
+-> Native Image -> native loader -> behavior oracle
+```

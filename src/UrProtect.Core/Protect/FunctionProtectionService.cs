@@ -79,6 +79,212 @@ public sealed class FunctionProtectionService
         this.decoder = decoder ?? new AsmStoneAdapter();
     }
 
+    /// <summary>
+    /// Builds the layout-neutral protection plan used by the Protected Image
+    /// producer. Unlike <see cref="Protect"/>, this method never searches for a
+    /// PT_NULL slot and never emits final ELF bytes.
+    /// </summary>
+    public FunctionProtectionPlanResult Plan(
+        ReadOnlyMemory<byte> input,
+        FunctionProtectionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var diagnostics = new DiagnosticBag();
+        var functionResults = new List<FunctionProtectionFunctionResult>();
+        if (options.Selectors is null || options.Selectors.Count == 0)
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidArgument,
+                "At least one explicit function selector is required for protection.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (options.Passes is null || options.Passes.Count == 0)
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidArgument,
+                "At least one protection pass is required for protection.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (options.Selectors.Count > ProtectedImageLimits.MaximumSelectorCount)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageLimitExceeded,
+                "The protection request contains too many function selectors.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (options.Passes.Count > 2)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageLimitExceeded,
+                "The protection request contains too many protection passes.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var selectorSnapshot = options.Selectors.ToArray();
+        var passSnapshot = options.Passes.ToArray();
+        if (passSnapshot.Any(pass => pass is not (
+                ProtectionPass.ControlFlowFlattening
+                or ProtectionPass.RegisterPermutation)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidArgument,
+                "The protection request contains an unknown pass.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var sourceSnapshot = input.ToArray();
+        var orderedPasses = ProtectionPassOrdering.Normalize(passSnapshot);
+        var parse = ElfParser.Parse(sourceSnapshot);
+        diagnostics.AddRange(parse.Diagnostics);
+        if (parse.File is null || diagnostics.HasErrors)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var selection = FunctionSelectorResolver.Resolve(parse.File, selectorSnapshot);
+        diagnostics.AddRange(selection.Diagnostics);
+        if (!selection.IsSuccess)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        ValidateSelectedRanges(parse.File, selection.Functions, diagnostics);
+        if (diagnostics.HasErrors)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var analyses = new List<Aarch64FunctionAnalysis>();
+        var hasFlattening = orderedPasses.Contains(ProtectionPass.ControlFlowFlattening);
+        var hasPermutation = orderedPasses.Contains(ProtectionPass.RegisterPermutation);
+        foreach (var function in selection.Functions)
+        {
+            var analysis = new Aarch64FunctionAnalyzer(decoder).Analyze(parse.File, function);
+            analyses.Add(analysis);
+            if (!analysis.IsComplete)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.FunctionAnalysisIncomplete,
+                    $"Function '{function.Name}' cannot be transformed because analysis is incomplete.",
+                    function.Value);
+                functionResults.Add(new FunctionProtectionFunctionResult(
+                    function,
+                    true,
+                    false,
+                    Array.Empty<ProtectionPass>(),
+                    analysis.Diagnostics));
+                continue;
+            }
+
+            var resourcePlan = Aarch64RegisterResourcePlanner.Plan(
+                analysis,
+                decoder,
+                hasFlattening,
+                hasPermutation);
+            if (!resourcePlan.IsSufficient)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.FunctionResourceUnavailable,
+                    resourcePlan.FailureReason ?? "The selected function has insufficient register resources.",
+                    function.Value);
+                functionResults.Add(new FunctionProtectionFunctionResult(
+                    function,
+                    true,
+                    false,
+                    Array.Empty<ProtectionPass>(),
+                    new[]
+                    {
+                        new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.FunctionResourceUnavailable,
+                            resourcePlan.FailureReason
+                                ?? "The selected function has insufficient register resources.",
+                            function.Value),
+                    })
+                {
+                    ResourcePlan = resourcePlan,
+                });
+            }
+        }
+
+        if (diagnostics.HasErrors)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (!TryBuildProtectedCode(
+                parse.File,
+                analyses,
+                orderedPasses,
+                out var protectedCode,
+                out var transformedResults,
+                out var rewriteDiagnostics,
+                codeBaseOverride: 0))
+        {
+            diagnostics.AddRange(rewriteDiagnostics);
+            functionResults.AddRange(transformedResults);
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        functionResults.AddRange(transformedResults);
+        var regions = new List<ProtectedImageEmitRegion>(protectedCode.Patches.Count);
+        var fixups = new List<ProtectedImageEntryBranchFixup>(protectedCode.Patches.Count);
+        for (var index = 0; index < protectedCode.Patches.Count; index++)
+        {
+            var patch = protectedCode.Patches[index];
+            if (patch.TargetAddress > uint.MaxValue
+                || patch.OutputSize > int.MaxValue
+                || patch.TargetAddress > ulong.MaxValue - patch.OutputSize
+                || patch.TargetAddress + patch.OutputSize > (ulong)protectedCode.Bytes.Length)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ProtectedImageLimitExceeded,
+                    "The layout-neutral protected code region exceeds the Protected Image bounds.",
+                    patch.SourceAddress);
+                continue;
+            }
+
+            var regionId = checked((uint)index + 1);
+            var generated = protectedCode.Bytes.AsSpan(
+                checked((int)patch.TargetAddress),
+                checked((int)patch.OutputSize)).ToArray();
+            regions.Add(new ProtectedImageEmitRegion(
+                regionId,
+                new VirtualAddress(patch.SourceAddress),
+                patch.SourceSize,
+                generated));
+            fixups.Add(new ProtectedImageEntryBranchFixup(
+                regionId,
+                regionId,
+                new VirtualAddress(patch.SourceAddress),
+                0,
+                0,
+                ProtectedImageFixupKind.Aarch64Branch26));
+        }
+
+        if (diagnostics.HasErrors || regions.Count != protectedCode.Patches.Count)
+        {
+            if (!diagnostics.HasErrors)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ProtectedImageMalformed,
+                    "The layout-neutral protection plan did not bind every transformed function.");
+            }
+
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var plan = new ProtectionPlan(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(sourceSnapshot)).ToLowerInvariant(),
+            regions,
+            fixups,
+            functionResults);
+        return new FunctionProtectionPlanResult(plan, functionResults, diagnostics.ToArray());
+    }
+
     public FunctionProtectionResult Protect(
         ReadOnlyMemory<byte> input,
         FunctionProtectionOptions options)
@@ -323,7 +529,8 @@ public sealed class FunctionProtectionService
         IReadOnlyList<ProtectionPass> passes,
         out ProtectedCode code,
         out IReadOnlyList<FunctionProtectionFunctionResult> results,
-        out IReadOnlyList<Diagnostic> diagnostics)
+        out IReadOnlyList<Diagnostic> diagnostics,
+        ulong? codeBaseOverride = null)
     {
         var diagnosticBag = new DiagnosticBag();
         var resultList = new List<FunctionProtectionFunctionResult>();
@@ -380,7 +587,7 @@ public sealed class FunctionProtectionService
             return false;
         }
 
-        var codeBase = AlignUp(
+        var codeBase = codeBaseOverride ?? AlignUp(
             file.LoadMap.Segments.Max(segment => checked(segment.VirtualAddress + segment.MemorySize)),
             SegmentAlignment);
 
@@ -461,7 +668,8 @@ public sealed class FunctionProtectionService
             builders.Select(builder => new FunctionPatch(
                 builder.Source.Function.Value,
                 builder.OutputAddress,
-                builder.Source.Function.Size)).ToArray());
+                builder.Source.Function.Size,
+                builder.OutputSize)).ToArray());
         results = resultList;
         diagnostics = diagnosticBag.ToArray();
         return true;
@@ -1092,7 +1300,8 @@ public sealed class FunctionProtectionService
     private readonly record struct FunctionPatch(
         ulong SourceAddress,
         ulong TargetAddress,
-        ulong SourceSize);
+        ulong SourceSize,
+        ulong OutputSize);
 
     private sealed class CodeEmitter
     {

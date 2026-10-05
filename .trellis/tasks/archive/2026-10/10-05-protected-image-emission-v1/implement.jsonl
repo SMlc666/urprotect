@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"AArch64 profile, native-loader ownership, evidence layering, and no silent compatibility promotion."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Bounded codecs, stable diagnostics, testing, fuzzing, provenance, and atomic publication rules."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Managed core/Protect ownership and cross-layer test/fixture placement."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Source -> Protected Image -> future rehydration format and validation boundary checklist."}
+{"file":".trellis/tasks/archive/2026-10/10-05-analyze-evaluator-protected-image-gate/research/protected-image-gate-analysis.md","reason":"Hash-bound analysis and local gate definition from the independent evaluator."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/prd.md","reason":"Parent 100x requirements, evidence preservation, and Protected Image chain contract."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Parent artifact model and Protected Image/rehydration/native-loader boundaries."}

@@ -74,6 +74,27 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
+      - name: Run Protected Image producer evidence (additive, not strict compatibility)
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-protected-image-e2e.sh --tier "${tier}" --runtime glibc
+      - name: Check retained Protected Image producer evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-protected-image-evidence.py \
+            ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
+            --tier "${tier}" --runtime glibc \
+            --unit compat.protection-symbolized-fixture.glibc.outer-execveat
       - name: Run required bionic Node.js Python contracts
         run: |
           python3 tests/test_bionic_node_runner.py
@@ -219,6 +240,7 @@ jobs:
             .artifacts/environment/
             .artifacts/compatibility-matrix.md
             .artifacts/protection/
+            .artifacts/protected-image/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
           if-no-files-found: warn

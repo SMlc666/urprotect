@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "10-05-freeze-1x-independent-evaluator",
-    "10-05-analyze-evaluator-protected-image-gate"
+    "10-05-analyze-evaluator-protected-image-gate",
+    "10-05-protected-image-emission-v1"
   ],
   "parent": null,
   "relatedFiles": [],
