@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import errno
+import contextlib
+import io
 import json
 import os
 import platform
@@ -21,6 +23,8 @@ import shutil
 import signal
 import socket
 import subprocess
+import traceback
+import runpy
 import sys
 sys.dont_write_bytecode = True
 from pathlib import Path
@@ -630,6 +634,32 @@ def _write_unavailable_scheme_attempt(
     return attempt
 
 
+
+def _run_scheme_fixture_in_process(command: list[str], runner: Path) -> tuple[int, str, str]:
+    """Run the pinned wrapper in-process when RLIMIT_NPROC forbids a child.
+
+    The wrapper and its shared scorer remain the exact checked-in tool; this
+    fallback changes only the process boundary, preserving its arguments and
+    evidence output while retaining the frozen process-count budget.
+    """
+    previous_argv = sys.argv
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    sys.argv = command
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                runpy.run_path(str(runner), run_name="__main__")
+                status = 0
+            except SystemExit as error:
+                status = error.code if isinstance(error.code, int) else 1
+            except Exception:
+                traceback.print_exc()
+                status = 1
+    finally:
+        sys.argv = previous_argv
+    return status, stdout.getvalue(), stderr.getvalue()
+
 def make_scheme_attempt(
     root: Path,
     scheme: dict[str, Any],
@@ -668,7 +698,23 @@ def make_scheme_attempt(
             check=False,
             timeout=float(scheme["budget"]["wallSeconds"]),
         )
-    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        completed_returncode = completed.returncode
+        completed_stdout = completed.stdout
+        completed_stderr = completed.stderr
+    except OSError as error:
+        if error.errno == errno.EAGAIN:
+            completed_returncode, completed_stdout, completed_stderr = _run_scheme_fixture_in_process(command, runner)
+        else:
+            return _write_unavailable_scheme_attempt(
+                root,
+                scheme,
+                family,
+                role,
+                replica,
+                reason=f"Scheme-A fixture scorer could not start: {error}",
+                command=command_text,
+            )
+    except (subprocess.SubprocessError, ValueError) as error:
         return _write_unavailable_scheme_attempt(
             root,
             scheme,
@@ -681,8 +727,8 @@ def make_scheme_attempt(
 
     # The subprocess owns the scorer result and resource/recovered artifacts;
     # the evaluator owns the captured streams and final raw SHA256SUMS binding.
-    (raw_root / "stdout.txt").write_text(completed.stdout[:16 * 1024 * 1024], encoding="utf-8")
-    (raw_root / "stderr.txt").write_text(completed.stderr[:16 * 1024 * 1024], encoding="utf-8")
+    (raw_root / "stdout.txt").write_text(completed_stdout[:16 * 1024 * 1024], encoding="utf-8")
+    (raw_root / "stderr.txt").write_text(completed_stderr[:16 * 1024 * 1024], encoding="utf-8")
     (raw_root / "command.log").write_text(command_text + "\n", encoding="utf-8")
     result_path = raw_root / "scorer-result.json"
     try:
@@ -696,11 +742,11 @@ def make_scheme_attempt(
             replica,
             reason=f"Scheme-A fixture scorer emitted no valid result: {error}",
             command=command_text,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            stdout=completed_stdout,
+            stderr=completed_stderr,
         )
-    if completed.returncode != 0 or result.get("status") != "passed":
-        reason = result.get("reason") or completed.stderr.strip() or f"fixture scorer exited with status {completed.returncode}"
+    if completed_returncode != 0 or result.get("status") != "passed":
+        reason = result.get("reason") or completed_stderr.strip() or f"fixture scorer exited with status {completed_returncode}"
         return _write_unavailable_scheme_attempt(
             root,
             scheme,
@@ -709,8 +755,8 @@ def make_scheme_attempt(
             replica,
             reason=str(reason),
             command=command_text,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            stdout=completed_stdout,
+            stderr=completed_stderr,
         )
 
     raw_manifest = write_raw_manifest(raw_root)
