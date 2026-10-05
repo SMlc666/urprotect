@@ -8,6 +8,7 @@ using UrProtect.Core.Elf;
 using UrProtect.Core.Pack;
 using UrProtect.Core.Pipeline;
 using UrProtect.Core.Protect;
+using UrProtect.Core.Rehydrate;
 
 namespace UrProtect.Cli;
 
@@ -93,6 +94,18 @@ public sealed class CliApplication
                 }
 
                 return RunProtectedImage(options, stdout, stderr);
+            }
+
+            if (string.Equals(args[0], "rehydrate-image", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryParseRehydrationOptions(args, out var options, out var usageError))
+                {
+                    stderr.WriteLine(usageError);
+                    PrintUsage(stderr);
+                    return (int)ProductExitCode.Usage;
+                }
+
+                return RunRehydration(options, stdout, stderr);
             }
 
             stderr.WriteLine($"Usage: unknown command '{args[0]}'.");
@@ -323,6 +336,7 @@ public sealed class CliApplication
         writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime] [--path-preserving]");
         writer.WriteLine("  urprotect protect <input> --output <protected> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--json <path|->]");
         writer.WriteLine("  urprotect protect-image <input> --artifact <path> --role <path> --manifest <path> --stage <path> --unit <id> --profile <outer-execveat|host-context-entry> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--producer-id <id>] [--producer-build-sha256 <sha256>] [--rehydrator <id>] [--source-sha256 <sha256>] [--request-sha256 <sha256>] [--json <path|->]");
+        writer.WriteLine("  urprotect rehydrate-image <source> --artifact <path> --native-image <path> --role <path> --record <path> --unit <id> --profile <outer-execveat|host-context-entry> --source-sha256 <sha256> --request-sha256 <sha256> --producer-id <id> --producer-build-sha256 <sha256> --consumer-id <id> --consumer-build-sha256 <sha256> [--json <path|->]");
     }
 
     private static int RunValidation(CliOptions options, TextWriter stdout, TextWriter stderr)
@@ -685,6 +699,183 @@ public sealed class CliApplication
             stdout,
             stderr,
             ProductExitCode.Success);
+    }
+
+    private static int RunRehydration(
+        RehydrationCliOptions options,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        if (HasConflictingRehydrationPaths(options, out var conflictMessage))
+        {
+            stderr.WriteLine(conflictMessage);
+            return (int)ProductExitCode.Usage;
+        }
+
+        byte[] source;
+        byte[] artifact;
+        try
+        {
+            source = File.ReadAllBytes(options.InputPath);
+            artifact = File.ReadAllBytes(options.ArtifactPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            var diagnostic = ProductDiagnosticReport.From(
+                DiagnosticSeverity.Error,
+                DiagnosticCode.InputIoFailure.ToString(),
+                exception.Message);
+            var failedReport = new RehydrationCommandReport(1, ToolVersion, false, null, null, new[] { diagnostic });
+            WriteRehydrationCommandReport(options, failedReport, stdout, stderr);
+            return (int)ProductExitCode.FileSystem;
+        }
+
+        var settings = new RehydrationOptions(
+            options.SourceSha256,
+            options.RequestSha256,
+            options.UnitId,
+            options.Profile,
+            options.ProducerId,
+            options.ProducerBuildSha256,
+            options.ConsumerId,
+            options.ConsumerBuildSha256);
+        var result = GenericRehydrationEngine.Rehydrate(source, artifact, settings);
+        var publication = RehydrationPublisher.Publish(
+            result,
+            options.NativeImagePath,
+            options.NativeImageRolePath,
+            options.RecordPath);
+        var diagnostics = result.Diagnostics.Concat(publication.Diagnostics).ToList();
+        var record = result.Record;
+        if (!publication.Published && result.IsSuccess)
+        {
+            var publicationFailure = diagnostics.Where(diagnostic => diagnostic.IsError)
+                .Select(diagnostic => (Diagnostic?)diagnostic)
+                .LastOrDefault()
+                ?? new Diagnostic(DiagnosticSeverity.Error, DiagnosticCode.OutputIoFailure, "Native Image publication failed.");
+            record = record with
+            {
+                Status = RehydrationRecord.FailedStatus,
+                NativeImageSha256 = null,
+                NativeImageSize = null,
+                MaterializationStatus = "failed",
+                FirstFailureStage = RehydrationRecord.StageName,
+                Diagnostics = record.Diagnostics.Concat(new[] { RehydrationDiagnostic.From(publicationFailure) })
+                    .Take(RehydrationLimits.MaximumDiagnostics)
+                    .ToArray(),
+            };
+            if (!RehydrationPublisher.WriteFailureRecord(record, options.RecordPath, out var writeDiagnostics))
+            {
+                diagnostics.AddRange(writeDiagnostics);
+            }
+        }
+
+        var successfulPublication = publication.Published && result.IsSuccess;
+        var report = new RehydrationCommandReport(
+            1,
+            ToolVersion,
+            successfulPublication,
+            record,
+            successfulPublication ? publication.Descriptor ?? result.NativeImage?.Descriptor : null,
+            diagnostics.Select(ProductDiagnosticReport.From).ToArray());
+        var reportWritten = WriteRehydrationCommandReport(options, report, stdout, stderr);
+        if (!reportWritten)
+        {
+            return (int)ProductExitCode.FileSystem;
+        }
+
+        if (successfulPublication)
+        {
+            return (int)ProductExitCode.Success;
+        }
+
+        if (diagnostics.Any(diagnostic => diagnostic.Code is DiagnosticCode.OutputIoFailure or DiagnosticCode.InputIoFailure))
+        {
+            return (int)ProductExitCode.FileSystem;
+        }
+
+        if (diagnostics.Any(diagnostic => diagnostic.Code is DiagnosticCode.OutputIdentityMismatch or DiagnosticCode.ProtectedImageIntegrityMismatch))
+        {
+            return (int)ProductExitCode.OutputIdentity;
+        }
+
+        return (int)ProductExitCode.Validation;
+    }
+
+    private static bool WriteRehydrationCommandReport(
+        RehydrationCliOptions options,
+        RehydrationCommandReport report,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        var json = RehydrationCommandReport.Serialize(report);
+        if (options.JsonPath == "-")
+        {
+            WriteJson(stdout, json);
+            return true;
+        }
+
+        var success = true;
+
+        foreach (var diagnostic in report.Diagnostics)
+        {
+            (diagnostic.Severity == nameof(DiagnosticSeverity.Error) ? stderr : stdout)
+                .WriteLine($"{diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
+        }
+
+        if (report.Success)
+        {
+            stdout.WriteLine($"Native Image written to {options.NativeImagePath}.");
+        }
+
+        if (options.JsonPath is { Length: > 0 })
+        {
+            try
+            {
+                WriteAtomicJson(options.JsonPath, json);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                stderr.WriteLine($"OutputIoFailure: {exception.Message}");
+                success = false;
+            }
+        }
+
+        return success;
+    }
+
+    private static bool HasConflictingRehydrationPaths(RehydrationCliOptions options, out string message)
+    {
+        message = string.Empty;
+        try
+        {
+            var paths = new List<string>
+            {
+                Path.GetFullPath(options.InputPath),
+                Path.GetFullPath(options.ArtifactPath),
+                Path.GetFullPath(options.NativeImagePath),
+                Path.GetFullPath(options.NativeImageRolePath),
+                Path.GetFullPath(options.RecordPath),
+            };
+            if (options.JsonPath is { Length: > 0 } and not "-")
+            {
+                paths.Add(Path.GetFullPath(options.JsonPath));
+            }
+
+            var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            if (paths.Distinct(comparer).Count() != paths.Count)
+            {
+                message = "Usage: rehydrate-image input and evidence output paths must be distinct.";
+                return true;
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+        {
+            message = $"Usage: invalid rehydration output path: {exception.Message}";
+            return true;
+        }
+
+        return false;
     }
 
     private static ProtectedImageStageRecord CreateProtectedImageStage(
@@ -1079,6 +1270,125 @@ public sealed class CliApplication
 
         options = new PackOptions(args[1], outputPath, jsonPath, launcherPath, profile, entrySymbol, requireThreadLifetime, allowPathSensitiveOuter);
         return true;
+    }
+
+    private static bool TryParseRehydrationOptions(
+        string[] args,
+        out RehydrationCliOptions options,
+        out string error)
+    {
+        options = null!;
+        error = string.Empty;
+        if (args.Length < 2 || args[1].StartsWith('-'))
+        {
+            error = "Usage: the rehydrate-image command requires a source image path.";
+            return false;
+        }
+
+        string? artifactPath = null;
+        string? nativeImagePath = null;
+        string? nativeImageRolePath = null;
+        string? recordPath = null;
+        string? unitId = null;
+        string? sourceSha256 = null;
+        string? requestSha256 = null;
+        string? producerId = null;
+        string? producerBuildSha256 = null;
+        string? consumerId = null;
+        string? consumerBuildSha256 = null;
+        string? jsonPath = null;
+        var profile = default(ProtectedImageProfile);
+        var profileSet = false;
+
+        for (var index = 2; index < args.Length; index++)
+        {
+            var flag = args[index];
+            if (index + 1 >= args.Length
+                || (args[index + 1].StartsWith('-') && !(flag == "--json" && args[index + 1] == "-")))
+            {
+                error = $"Usage: {flag} requires a value.";
+                return false;
+            }
+
+            var value = args[++index];
+            switch (flag)
+            {
+                case "--artifact":
+                    if (!SetOnce(ref artifactPath, value, flag, out error)) return false;
+                    break;
+                case "--native-image":
+                    if (!SetOnce(ref nativeImagePath, value, flag, out error)) return false;
+                    break;
+                case "--role":
+                    if (!SetOnce(ref nativeImageRolePath, value, flag, out error)) return false;
+                    break;
+                case "--record":
+                    if (!SetOnce(ref recordPath, value, flag, out error)) return false;
+                    break;
+                case "--unit":
+                    if (!SetOnce(ref unitId, value, flag, out error)) return false;
+                    break;
+                case "--profile":
+                    if (profileSet || !ProtectedImageProfileExtensions.TryParse(value, out profile))
+                    {
+                        error = "Usage: --profile must be specified once as outer-execveat or host-context-entry.";
+                        return false;
+                    }
+
+                    profileSet = true;
+                    break;
+                case "--source-sha256":
+                    if (!SetOnce(ref sourceSha256, value, flag, out error)) return false;
+                    break;
+                case "--request-sha256":
+                    if (!SetOnce(ref requestSha256, value, flag, out error)) return false;
+                    break;
+                case "--producer-id":
+                    if (!SetOnce(ref producerId, value, flag, out error)) return false;
+                    break;
+                case "--producer-build-sha256":
+                    if (!SetOnce(ref producerBuildSha256, value, flag, out error)) return false;
+                    break;
+                case "--consumer-id":
+                    if (!SetOnce(ref consumerId, value, flag, out error)) return false;
+                    break;
+                case "--consumer-build-sha256":
+                    if (!SetOnce(ref consumerBuildSha256, value, flag, out error)) return false;
+                    break;
+                case "--json":
+                    if (!SetOnce(ref jsonPath, value, flag, out error)) return false;
+                    break;
+                default:
+                    error = $"Usage: unknown rehydrate-image argument '{flag}'.";
+                    return false;
+            }
+        }
+
+        if (new[] { artifactPath, nativeImagePath, nativeImageRolePath, recordPath, unitId,
+                sourceSha256, requestSha256, producerId, producerBuildSha256, consumerId, consumerBuildSha256 }
+            .Any(string.IsNullOrWhiteSpace) || !profileSet)
+        {
+            error = "Usage: rehydrate-image requires artifact, output, record, unit, profile, digest, producer, and consumer bindings.";
+            return false;
+        }
+
+        options = new RehydrationCliOptions(
+            args[1], artifactPath!, nativeImagePath!, nativeImageRolePath!, recordPath!, jsonPath,
+            unitId!, profile, sourceSha256!, requestSha256!, producerId!, producerBuildSha256!, consumerId!, consumerBuildSha256!);
+        return true;
+
+        static bool SetOnce(ref string? target, string value, string flag, out string usageError)
+        {
+            if (target is not null)
+            {
+                usageError = $"Usage: {flag} may be specified only once.";
+                return false;
+            }
+
+            target = value;
+            usageError = string.Empty;
+            return true;
+        }
     }
 
     private static bool TryParseProtectedImageOptions(
@@ -2061,4 +2371,20 @@ public sealed class CliApplication
         IReadOnlyList<FunctionSelector> Functions,
         IReadOnlyList<ProtectionPass> Passes,
         IReadOnlyList<string> CommandArguments);
+
+    private sealed record RehydrationCliOptions(
+        string InputPath,
+        string ArtifactPath,
+        string NativeImagePath,
+        string NativeImageRolePath,
+        string RecordPath,
+        string? JsonPath,
+        string UnitId,
+        ProtectedImageProfile Profile,
+        string SourceSha256,
+        string RequestSha256,
+        string ProducerId,
+        string ProducerBuildSha256,
+        string ConsumerId,
+        string ConsumerBuildSha256);
 }

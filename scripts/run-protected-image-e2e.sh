@@ -44,6 +44,10 @@ case "$runtime" in
   glibc|musl|bionic) ;;
   *) echo "invalid protected-image runtime: $runtime" >&2; exit 2 ;;
 esac
+if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
+  echo "invalid protected-image unit: $unit" >&2
+  exit 2
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 artifact_parent="${PROTECTED_IMAGE_ARTIFACT_ROOT:-${repo_root}/.artifacts/protected-image/${tier}/${runtime}}"
@@ -181,6 +185,9 @@ for index in range(count):
 else:
     raise SystemExit('the frozen fixture has no GNU_RELRO entry to convert to PT_NULL')
 PY
+if [[ -s "$work_root/input" ]]; then
+  cp "$work_root/input" "$artifact_root/source-image.bin"
+fi
 if [[ ! -s "$work_root/input" ]]; then
   cp "$work_root/fixture.stdout" "$stdout_path"
   cp "$work_root/fixture.stderr" "$stderr_path"

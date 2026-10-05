@@ -71,6 +71,12 @@ public enum DiagnosticCode
     ProtectedImageDuplicateRecord,
     ProtectedImageOverlap,
     ProtectedImageRoleMismatch,
+    ProtectedImageConsumerMismatch,
+    ProtectedImageProfileMismatch,
+    RehydrationLayoutUnavailable,
+    RehydrationMalformed,
+    NativeImageMalformed,
+    NativeHandoffFailed,
 }
 
 public readonly record struct Diagnostic(

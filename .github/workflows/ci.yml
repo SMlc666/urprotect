@@ -95,6 +95,27 @@ jobs:
             ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
             --tier "${tier}" --runtime glibc \
             --unit compat.protection-symbolized-fixture.glibc.outer-execveat
+      - name: Run Generic Rehydration and Native Image handoff (additive; evaluator remains incomplete)
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-rehydration-e2e.sh --tier "${tier}" --runtime glibc
+      - name: Check retained Generic Rehydration and Native Image evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-rehydration-evidence.py \
+            ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
+            --tier "${tier}" --runtime glibc \
+            --unit compat.protection-symbolized-fixture.glibc.outer-execveat
       - name: Run required bionic Node.js Python contracts
         run: |
           python3 tests/test_bionic_node_runner.py

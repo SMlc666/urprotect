@@ -19,7 +19,7 @@ def fail(message: str) -> None:
 
 def require_file(root: Path, name: str, allow_empty: bool = False) -> Path:
     path = root / name
-    if not path.is_file() or (not allow_empty and path.stat().st_size == 0):
+    if path.is_symlink() or not path.is_file() or (not allow_empty and path.stat().st_size == 0):
         fail(f"missing or empty protected-image evidence: {name}")
     return path
 
@@ -51,7 +51,10 @@ def check_manifest(root: Path, manifest_path: Path) -> None:
         relative = Path(parts[1])
         if relative.is_absolute() or ".." in relative.parts:
             fail(f"SHA256SUMS entry escapes its directory: {parts[1]}")
-        target = (manifest_path.parent / relative).resolve()
+        target_path = manifest_path.parent / relative
+        if target_path.is_symlink():
+            fail(f"SHA256SUMS entry references a symlink: {parts[1]}")
+        target = target_path.resolve()
         try:
             target.relative_to(root.resolve())
         except ValueError:
@@ -68,11 +71,12 @@ def check_manifest(root: Path, manifest_path: Path) -> None:
     if not entries:
         fail("SHA256SUMS is empty")
 
-    files = {
-        path.resolve()
-        for path in root.rglob("*")
-        if path.is_file() and path.resolve() != manifest_path.resolve()
-    }
+    files = set()
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            fail(f"evidence tree contains a symlink: {path.relative_to(root)}")
+        if path.is_file() and path.resolve() != manifest_path.resolve():
+            files.add(path.resolve())
     if files != set(entries):
         missing = sorted(str(path.relative_to(root)) for path in files - set(entries))
         extra = sorted(str(path.relative_to(root)) for path in set(entries) - files)
@@ -172,6 +176,9 @@ def check_success(root: Path, stage: dict) -> None:
         fail("artifact hash is not continuous across role and stage")
     if role["artifactSize"] != artifact.stat().st_size or stage["artifactSize"] != artifact.stat().st_size:
         fail("artifact size is not continuous across role and stage")
+    source_image = root / "source-image.bin"
+    if source_image.exists() and digest(source_image) != role["sourceSha256"].lower():
+        fail("retained Source Image hash differs from the Protected Image role binding")
     if role["unitId"] != stage["unitId"] or role["profile"] != stage["profile"]:
         fail("role and stage unit/profile bindings differ")
     for field in ("sourceSha256", "requestSha256", "producerBuildSha256", "rehydratorConsumerId"):

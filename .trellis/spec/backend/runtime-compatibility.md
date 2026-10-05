@@ -1051,3 +1051,78 @@ explicit request -> layout-neutral plan -> canonical Protected Image
 -> role/stage/checksum publication -> later bounded rehydration
 -> Native Image -> native loader -> behavior oracle
 ```
+
+## Scenario: Generic rehydration, Native Image, and strict native handoff
+
+### 1. Scope / Trigger
+
+This contract applies when a Protected Image producer result is consumed by the first strict compatibility vertical slice. It covers the managed `rehydrate-image` boundary, deterministic Native Image materialization, the native memfd/`execveat(AT_EMPTY_PATH)` helper, and the retained stage evidence. It does not turn the rehydrator into a dynamic loader.
+
+### 2. Signatures
+
+```text
+urprotect rehydrate-image SOURCE --artifact PROTECTED_IMAGE
+  --native-image NATIVE_IMAGE --role NATIVE_ROLE --record REHYDRATION_RECORD
+  --unit ID --profile outer-execveat|host-context-entry
+  --source-sha256 SHA256 --request-sha256 SHA256
+  --producer-id ID --producer-build-sha256 SHA256
+  --consumer-id ID --consumer-build-sha256 SHA256 [--json PATH|-]
+
+native-image-handoff IMAGE EXPECTED_SHA256 REHYDRATION_SHA256 EVIDENCE_JSON
+  STDOUT_FILE STDERR_FILE OUTPUT_LIMIT -- ARG0 [ARG ...]
+```
+
+The managed result owns `NativeImage` bytes and `RehydrationRecord`. The native helper owns only sealed memfd creation, bounded streams/resource facts, and `execveat` invocation. The record fields `handoffRecordSha256`, `handoffStatus`, and `preHandoffRecordSha256` bind the completed handoff without creating a mutable hash cycle.
+
+### 3. Contracts
+
+- Rehydration authenticates the Protected Image canonical digest and verifies source/request/unit/profile/producer/consumer bindings before materialization. Unknown operations, invalid executable mappings, overflow, unsupported permission/layout transitions, and incomplete operation streams fail closed.
+- A passed Native Image is deterministic, reparses as AArch64 ELF, has a distinct hash from Source and Protected Image, and is atomically published with a native-image role and rehydration record. A failed stage retains diagnostics but no successful Native Image or role.
+- The first layout strategy appends an executable `PT_LOAD` through a validated `PT_NULL` representation and applies operation-specified AArch64 branch fixups. The absence of a representable slot is `RehydrationLayoutUnavailable`, not a direct-protector fallback. Later layout-expansion children own header-table rebuilding and broader lowering.
+- Strict handoff requires `memfd_create`, executable mode, `fsync`, required seals where supported, `execveat(AT_EMPTY_PATH)`, bounded host-captured stdout/stderr, and separate helper/target status. A path-based execution is never a strict pass.
+- The evidence checker requires a closed `SHA256SUMS`, stage-specific source/protected/native/handoff/rehydration hashes, target-loader and behavioral-oracle records, and matching first-failure stage. Producer success alone remains incomplete compatibility evidence.
+- Native loader semantics remain outside the rehydrator: dependencies, dynamic symbols, relocations, TLS, constructors, destructors, and process lifecycle are handled only by the target loader.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Source/protected/consumer/request mismatch | stable binding diagnostic; no Native Image publication |
+| Tampered/truncated/unknown/overlapping operation or address overflow | bounded decode/materialization failure; failed rehydration record |
+| No valid executable mapping or representable output layout | `RehydrationLayoutUnavailable`; no direct protected-ELF fallback |
+| Native Image parse/hash/role mismatch | `NativeImageMalformed`/`OutputIdentityMismatch`; rollback all Native Image outputs |
+| memfd/seal/fsync/execveat/stream capture failure | failed handoff evidence; target-loader and oracle do not pass |
+| Handoff target status/streams differ from frozen oracle | behavioral-oracle failure; strict unit remains incomplete |
+| Missing/unsafe/stale evidence or open checksum manifest | rehydration evidence checker fails closed |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a source plus producer artifact produces distinct Native Image bytes, the sealed memfd handoff runs the target, and retained baseline/target status and streams match.
+- Base: a producer artifact is valid but native prerequisites or layout capability are absent; the run retains an explicit rehydration/handoff failure and the evaluator keeps the unit incomplete.
+- Bad: executing Source or direct protected ELF after rehydration failure, treating a Native Image hash as proof of loader behavior, or accepting helper exit success without sealed memfd/`execveat` evidence.
+
+### 6. Tests Required
+
+- Managed tests cover valid materialization, source/request/consumer mismatch, tamper/overflow/unsupported operation, no-`PT_NULL` layout failure, deterministic Native Image hash, atomic publication, and record binding.
+- Native helper tests cover digest mismatch before memfd, seal verification, bounded output, target status/signal, and exact `execveat` markers.
+- Runner/checker tests cover closed-manifest ownership, source/protected/native/handoff hash continuity, pre-handoff record binding, failed-stage retention, target-loader/oracle continuity, and first-failure classification.
+- CI workflow tests assert additive execution/checking after build, always-retained evidence, and no change to evaluator claimability or frozen corpus policy.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+if rehydrate_failed:
+    execve(source_or_legacy_protected_elf_path)
+if handoff_exited_zero:
+    claim_loader_behavior()
+```
+
+#### Correct
+
+```text
+authenticate Protected Image -> materialize -> parse/hash Native Image
+-> sealed memfd + execveat -> target-loader record
+-> baseline/target behavior oracle -> complete strict unit only then
+```
