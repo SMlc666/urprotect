@@ -13,10 +13,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from evaluator_lib import EvaluatorError, read_json, validate_all_manifests  # noqa: E402
+from evaluator_lib import calculate_claimable, EvaluatorError, read_json, validate_all_manifests  # noqa: E402
 
 
 class EvaluatorSchemaTests(unittest.TestCase):
+    def test_claimability_rejects_unverified_environment(self) -> None:
+        compatibility = {
+            "status": "measured",
+            "fixedViewPass": True,
+            "growthViewPass": True,
+        }
+        scheme_gate = {"status": "pass", "allRequiredPass": True}
+        anti_gaming = {"corpusUnchanged": True}
+        with self.assertRaises(EvaluatorError):
+            calculate_claimable({"status": "available"}, compatibility, scheme_gate, anti_gaming)
+        with self.assertRaises(EvaluatorError):
+            calculate_claimable({"status": "environment-unavailable"}, compatibility, scheme_gate, anti_gaming)
+
     def test_checked_in_manifests_and_immutable_baseline_validate(self) -> None:
         manifests = validate_all_manifests(
             ROOT,

@@ -13,6 +13,7 @@ from typing import Any
 from evaluator_lib import (
     EvaluatorError,
     calculate_anti_gaming,
+    calculate_claimable,
     calculate_compatibility,
     calculate_scheme_gate,
     inventory_digest,
@@ -20,6 +21,7 @@ from evaluator_lib import (
     read_json,
     sha256_file,
     validate_all_manifests,
+    validate_evaluator_environment,
     validate_no_symlinks,
 )
 
@@ -197,7 +199,7 @@ def check_evidence(root: Path) -> dict[str, Any]:
         baseline_artifact_path=baseline_artifact_path,
     )
     environment = read_json(root / "environment.json")
-    if environment.get("schemaVersion") != 1 or environment.get("kind") != "evaluator-environment":
+    if environment.get("schemaVersion") != 2 or environment.get("kind") != "evaluator-environment":
         fail("environment.json schema/kind is invalid")
     if environment.get("commit") != git_commit_for_check():
         fail("environment commit does not match checked-out commit")
@@ -274,6 +276,7 @@ def check_evidence(root: Path) -> dict[str, Any]:
                 fail(f"strict compatibility source-image binding differs from product evidence: {row['unitId']}")
             if product_binding.get("manifestSha256") != recomputed_product.get("productManifestSha256"):
                 fail(f"strict compatibility product manifest binding differs from product evidence: {row['unitId']}")
+    validate_evaluator_environment(environment, units)
     compatibility = calculate_compatibility(manifests["corpus"], manifests["baseline"], units)
     compatibility_gate = gate.get("compatibility")
     if not isinstance(compatibility_gate, dict):
@@ -355,9 +358,10 @@ def check_evidence(root: Path) -> dict[str, Any]:
         fail("root SHA256SUMS does not match the closed evidence inventory")
     if gate.get("artifactManifestSha256") != observed_root_manifest_digest or gate.get("rawEvidenceManifestSha256") != observed_root_manifest_digest:
         fail("gate artifact/evidence manifest digest mismatch")
-    compatibility_claimable = compatibility["status"] == "measured" and compatibility["fixedViewPass"] and compatibility["growthViewPass"]
-    scheme_claimable = scheme_gate["status"] == "pass" and scheme_gate["allRequiredPass"]
-    expected_claimable = all(anti_gaming.values()) and compatibility_claimable and scheme_claimable
+    # Mirror the runner's fail-closed environment requirement.  A complete
+    # stage projection alone does not prove the declared native/isolation cell
+    # was available for this evaluator run.
+    expected_claimable = calculate_claimable(environment, compatibility, scheme_gate, anti_gaming, units)
     if gate.get("claimable") is not expected_claimable:
         # gate.json is a post-inventory handoff and is intentionally excluded
         # from SHA256SUMS to avoid a fixed-point cycle; retain the historical

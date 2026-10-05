@@ -49,7 +49,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Record runner environment
@@ -116,6 +116,15 @@ jobs:
             ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
             --tier "${tier}" --runtime glibc \
             --unit compat.protection-symbolized-fixture.glibc.outer-execveat
+      - name: Run strict compatibility corpus growth evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-strict-compatibility-corpus.sh --tier "${tier}" --runtime glibc
       - name: Run required bionic Node.js Python contracts
         run: |
           python3 tests/test_bionic_node_runner.py
@@ -930,8 +939,14 @@ jobs:
       EVALUATOR_RUNTIME_RESULT: ${{ needs['runtime-matrix-native-arm64'].result }}
       EVALUATOR_BIONIC_RESULT: ${{ needs['bionic-native-arm64'].result }}
       EVALUATOR_MUSL_RESULT: ${{ needs['musl-container-smoke'].result }}
+      EVALUATOR_CI_ISOLATION: "1"
     steps:
       - uses: actions/checkout@v4
+      # The evaluator records the pinned SDK identity in its environment evidence.
+      # Do not rely on an image-global dotnet installation in this independent job.
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
       - name: Download build-and-test Protected Image evidence
         if: always()
         continue-on-error: true
@@ -955,13 +970,22 @@ jobs:
               ;;
             *) echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV" ;;
           esac
-      - name: Validate frozen evaluator manifests
-        run: python3 scripts/validate-evaluator-manifests.py
-      - name: Run independent evaluator
-        run: ./scripts/run-independent-evaluator.sh --tier "${EVALUATOR_TIER}"
+      - name: Validate historical and positive evaluator manifests
+        run: |
+          python3 scripts/validate-evaluator-manifests.py
+          python3 scripts/validate-evaluator-manifests.py \
+            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+      - name: Run independent evaluator against immutable positive baseline-v2
+        run: |
+          ./scripts/run-independent-evaluator.sh \
+            --tier "${EVALUATOR_TIER}" \
+            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
       - name: Check independent evaluator evidence
         if: always()
         run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}"
+      - name: Check strict compatibility growth gate
+        if: always()
+        run: python3 scripts/check-strict-compatibility-growth.py ".artifacts/evaluator/${EVALUATOR_TIER}"
       - name: Preserve existing required evidence gates
         if: always()
         run: |

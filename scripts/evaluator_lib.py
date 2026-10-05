@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import struct
 from pathlib import Path, PureWindowsPath
 from typing import Any, Iterable, Mapping
@@ -93,6 +94,7 @@ PRODUCT_MAX_NATIVE_IMAGE_BYTES = 128 * 1024 * 1024
 # inventory is derived.  Excluding them keeps the manifest digest content-
 # addressed instead of creating a gate/manifest fixed-point cycle.
 EVIDENCE_HANDOFF_FILES = frozenset({"gate.json", "analysis-input.json", "positive-baseline-v2-gate.json"})
+FROZEN_V2_FIXED_ROW_SHA256 = "8f7f1e926c2f0e83a896356193bf8d47723830a81999f8de650f660565936af0"
 
 
 class EvaluatorError(ValueError):
@@ -151,6 +153,263 @@ def project_product_failure(error: ProductEvidenceError) -> tuple[dict[str, dict
 
 def fail(message: str) -> None:
     raise EvaluatorError(message)
+
+
+
+def _environment_budget_and_sdk() -> tuple[dict[str, Any], str]:
+    repo_root = Path(__file__).resolve().parent.parent
+    protocol = json.loads((repo_root / "fixtures/evaluator/evaluator-protocol.json").read_text(encoding="utf-8"))
+    global_config = json.loads((repo_root / "global.json").read_text(encoding="utf-8"))
+    return dict(protocol["budgets"]), str(global_config["sdk"]["version"])
+
+
+def _limit_is_bounded(limits: Mapping[str, Any], key: str, maximum: int) -> bool:
+    item = limits.get(key)
+    if not isinstance(item, Mapping):
+        return False
+    return all(
+        isinstance(item.get(bound), int)
+        and not isinstance(item.get(bound), bool)
+        and 0 < item[bound] <= maximum
+        for bound in ("soft", "hard")
+    )
+
+
+def _current_tool_matches(tools: Mapping[str, Any], name: str, expected_version: str | None = None) -> bool:
+    tool = tools.get(name)
+    executable = shutil.which(name)
+    if not isinstance(tool, Mapping) or executable is None or tool.get("available") is not True:
+        return False
+    if expected_version is not None and tool.get("version") != expected_version:
+        return False
+    digest = tool.get("binarySha256")
+    try:
+        return isinstance(digest, str) and HEX64.fullmatch(digest) is not None and sha256_file(Path(executable)) == digest
+    except (OSError, EvaluatorError):
+        return False
+
+
+def evaluator_product_unit_bindings(units: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """Project strict-unit build/evidence hashes for the environment ledger."""
+    records: list[dict[str, str]] = []
+    for unit in units:
+        if unit.get("complete") is not True or unit.get("strictChainMeasured") is not True:
+            continue
+        stages = unit.get("stages")
+        product_evidence = unit.get("productEvidence")
+        if not isinstance(stages, Mapping) or not isinstance(product_evidence, Mapping):
+            continue
+        if any(
+            not isinstance(stages.get(stage), Mapping) or stages[stage].get("status") != "passed"
+            for stage in COMPATIBILITY_STAGES
+        ):
+            continue
+        protected = stages["protected-image"]
+        rehydration = stages["rehydration"]
+        native = stages["native-image"]
+        loader = stages["target-loader"]
+        oracle = stages["behavioral-oracle"]
+        fields = {
+            "unitId": unit.get("unitId"),
+            "productManifestSha256": product_evidence.get("manifestSha256"),
+            "producerBuildSha256": protected.get("producerBuildSha256"),
+            "rehydratorConsumerBuildSha256": rehydration.get("consumerBuildSha256"),
+            "nativeImageSha256": native.get("sha256"),
+            "loaderId": loader.get("loaderId"),
+            "behaviorComparisonSha256": oracle.get("comparisonSha256"),
+        }
+        if all(isinstance(value, str) and value for value in fields.values()):
+            records.append({key: str(value) for key, value in fields.items()})
+    return sorted(records, key=lambda record: record["unitId"])
+
+
+def derive_evaluator_environment_capabilities(environment: Mapping[str, Any]) -> dict[str, bool]:
+    """Recompute evaluator capabilities from observed host, runner, and sandbox facts.
+
+    Caller-provided EVALUATOR_* declarations are intentionally absent from this
+    projection. Every positive isolation capability is derived from captured
+    namespace, mount, prctl, and resource-limit observations.
+    """
+    try:
+        expected_budget, expected_sdk = _environment_budget_and_sdk()
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
+        return {}
+    runner = environment.get("runner")
+    host = environment.get("host")
+    isolation = environment.get("isolation")
+    mounts = environment.get("mountFacts")
+    namespaces = environment.get("namespaces")
+    security = environment.get("security")
+    limits = environment.get("resourceLimits")
+    tools = environment.get("tools")
+    product = environment.get("productCapabilities")
+    budget = environment.get("budget")
+    if not all(isinstance(item, Mapping) for item in (runner, host, isolation, mounts, namespaces, security, limits, tools, product, budget)):
+        return {}
+    runner = dict(runner)
+    host = dict(host)
+    isolation = dict(isolation)
+    mounts = dict(mounts)
+    namespaces = dict(namespaces)
+    security = dict(security)
+    limits = dict(limits)
+    tools = dict(tools)
+    product = dict(product)
+
+    github_runner = (
+        runner.get("githubActions") is True
+        and runner.get("runnerOS") == "Linux"
+        and runner.get("runnerArch") == "ARM64"
+        and isinstance(runner.get("runnerName"), str)
+        and bool(runner.get("runnerName"))
+        and isinstance(runner.get("runId"), str)
+        and runner.get("runId", "").isdigit()
+    )
+    native_aarch64 = host.get("architecture") in {"aarch64", "arm64"} and github_runner
+    pinned_runtime = (
+        github_runner
+        and host.get("distributionId") == "ubuntu"
+        and host.get("distributionVersion") == "24.04"
+        and host.get("glibcVersion") == "2.39"
+        and host.get("architecture") in {"aarch64", "arm64"}
+    )
+    expected_runtime_cell = "glibc.current.native-arm64" if pinned_runtime else None
+    dotnet = tools.get("dotnet")
+    dotnet_sdk = (
+        _current_tool_matches(tools, "dotnet", expected_sdk)
+        and isinstance(dotnet, Mapping)
+        and dotnet.get("version") == expected_sdk
+    )
+    repository_root = Path(__file__).resolve().parent.parent
+    producer_script = repository_root / "scripts/run-protected-image-e2e.sh"
+    producer_source = repository_root / "src/UrProtect.Core/Protect/ProtectionPlan.cs"
+    rehydrator_source = repository_root / "src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs"
+    try:
+        source_hashes_match = (
+            product.get("producerScriptSha256") == sha256_file(producer_script)
+            and product.get("producerSourceSha256") == sha256_file(producer_source)
+            and product.get("rehydratorSourceSha256") == sha256_file(rehydrator_source)
+        )
+    except (OSError, EvaluatorError):
+        source_hashes_match = False
+    strict_units = product.get("strictUnits")
+    valid_strict_units = (
+        isinstance(strict_units, list)
+        and bool(strict_units)
+        and all(
+            isinstance(item, Mapping)
+            and isinstance(item.get("unitId"), str)
+            and bool(item.get("unitId"))
+            and all(
+                isinstance(item.get(field), str) and HEX64.fullmatch(item[field]) is not None
+                for field in (
+                    "productManifestSha256",
+                    "producerBuildSha256",
+                    "rehydratorConsumerBuildSha256",
+                    "nativeImageSha256",
+                    "behaviorComparisonSha256",
+                )
+            )
+            and item.get("loaderId") == "kernel.execveat-at-empty-path"
+            for item in strict_units
+        )
+    )
+    protected_image_producer = source_hashes_match and valid_strict_units
+    rehydrator = protected_image_producer and valid_strict_units
+    current_net = namespaces.get("currentNetwork")
+    parent_net = namespaces.get("initialNetwork")
+    network_disabled = (
+        isinstance(current_net, str)
+        and isinstance(parent_net, str)
+        and re.fullmatch(r"net:\[\d+\]", current_net) is not None
+        and re.fullmatch(r"net:\[\d+\]", parent_net) is not None
+        and current_net != parent_net
+        and _current_tool_matches(tools, "bwrap")
+    )
+    read_only_inputs = (
+        mounts.get("repositoryReadOnly") is True
+        and mounts.get("fixturesReadOnly") is True
+        and mounts.get("productEvidenceReadOnly") is True
+        and mounts.get("evaluatorOutputWritable") is True
+    )
+    no_new_privileges = security.get("noNewPrivileges") == 1
+    dropped_capabilities = (
+        isinstance(security.get("effectiveCapabilities"), str)
+        and re.fullmatch(r"[0-9a-fA-F]+", security["effectiveCapabilities"]) is not None
+        and int(security["effectiveCapabilities"], 16) == 0
+    )
+    bounded_processes = _limit_is_bounded(limits, "processes", expected_budget.get("processLimit", 0))
+    bounded_memory = _limit_is_bounded(limits, "addressSpaceBytes", expected_budget.get("rssBytes", 0))
+    bounded_cpu = _limit_is_bounded(limits, "cpuSeconds", expected_budget.get("cpuSeconds", 0))
+    bounded_file = _limit_is_bounded(limits, "fileSizeBytes", expected_budget.get("rawArtifactBytes", 0))
+    wall_limit = isolation.get("wallLimit")
+    bounded_wall = (
+        isinstance(wall_limit, Mapping)
+        and wall_limit.get("seconds") == expected_budget.get("wallSeconds")
+        and isinstance(wall_limit.get("alarmRemainingSeconds"), (int, float))
+        and wall_limit.get("alarmRemainingSeconds", 0) > 0
+    )
+    budget_matches = dict(budget) == expected_budget
+    return {
+        "nativeAarch64": native_aarch64,
+        "pinnedRuntimeCell": pinned_runtime and environment.get("runtimeCell") == expected_runtime_cell,
+        "dotnetSdk": dotnet_sdk,
+        "protectedImageProducer": protected_image_producer,
+        "rehydrator": rehydrator,
+        "schemeAttackToolset": False,
+        "networkDisabled": network_disabled,
+        "readOnlyInputs": read_only_inputs,
+        "noNewPrivileges": no_new_privileges,
+        "droppedCapabilities": dropped_capabilities,
+        "boundedProcesses": bounded_processes,
+        "boundedMemory": bounded_memory,
+        "boundedCpu": bounded_cpu,
+        "boundedFileSize": bounded_file,
+        "boundedWall": bounded_wall,
+        "frozenBudget": budget_matches,
+    }
+
+
+def validate_evaluator_environment(
+    environment: Mapping[str, Any],
+    units: Iterable[Mapping[str, Any]] | None = None,
+) -> bool:
+    """Verify a schema-v2 environment projection and return availability."""
+    if environment.get("schemaVersion") != 2 or environment.get("kind") != "evaluator-environment":
+        raise EvaluatorError("evaluator environment schema is invalid")
+    capabilities = derive_evaluator_environment_capabilities(environment)
+    if not capabilities:
+        raise EvaluatorError("evaluator environment capability facts are malformed")
+    if environment.get("requiredCapabilities") != capabilities:
+        raise EvaluatorError("evaluator environment capabilities do not match observed facts")
+    if units is not None:
+        product = environment.get("productCapabilities")
+        if not isinstance(product, Mapping) or product.get("strictUnits") != evaluator_product_unit_bindings(units):
+            raise EvaluatorError("evaluator environment is not bound to the verified strict-unit evidence")
+    unavailable = [name for name, value in capabilities.items() if name != "schemeAttackToolset" and value is not True]
+    expected_status = "available" if not unavailable else "environment-unavailable"
+    if environment.get("status") != expected_status:
+        raise EvaluatorError("evaluator environment status does not match recomputed capabilities")
+    return expected_status == "available"
+
+
+def calculate_claimable(
+    environment: Mapping[str, Any],
+    compatibility: Mapping[str, Any],
+    scheme_gate: Mapping[str, Any],
+    anti_gaming: Mapping[str, bool],
+    units: Iterable[Mapping[str, Any]] | None = None,
+) -> bool:
+    """Derive the final claim only from a verified environment and checked gate inputs."""
+    return (
+        validate_evaluator_environment(environment, units)
+        and compatibility.get("status") == "measured"
+        and compatibility.get("fixedViewPass") is True
+        and compatibility.get("growthViewPass") is True
+        and scheme_gate.get("status") == "pass"
+        and scheme_gate.get("allRequiredPass") is True
+        and all(value is True for value in anti_gaming.values())
+    )
 
 
 def canonical_json(value: Any) -> bytes:
@@ -1416,15 +1675,21 @@ def validate_positive_baseline_v2(
     identity = artifact.get("identity")
     if not isinstance(identity, Mapping):
         fail("positive baseline v2 identity record is missing")
+    frozen_corpus_digest = identity.get("corpusManifestSha256")
+    frozen_protocol_digest = identity.get("protocolSha256")
+    require_digest(frozen_corpus_digest, "baseline.identity.corpusManifestSha256")
+    require_digest(frozen_protocol_digest, "baseline.identity.protocolSha256")
+    if sha256_bytes(canonical_json(dict(row))) != FROZEN_V2_FIXED_ROW_SHA256:
+        fail("positive baseline v2 fixed row metadata changed")
     identity_expected = {
         "completeUnits": 1,
-        "corpusManifestSha256": sha256_file(corpus_path),
+        "corpusManifestSha256": frozen_corpus_digest,
         "corpusVersion": corpus.get("corpusVersion"),
         "fixedCorpusRows": len(fixed_ids),
         "fixtureManifestSha256": sha256_file(repo_root / "fixtures/manifest.json"),
         "identityKey": row.get("identityKey"),
         "oracleManifestSha256": sha256_file(oracle_path),
-        "protocolSha256": sha256_file(protocol_path),
+        "protocolSha256": frozen_protocol_digest,
         "protocolVersion": protocol.get("protocolVersion"),
         "runtimeRegistrySha256": sha256_file(repo_root / "fixtures/runtime-matrix.json"),
         "schemeManifestSha256": sha256_file(scheme_path),
@@ -1560,6 +1825,11 @@ def validate_all_manifests(
         if protocol["manifestDigests"].get(field) != sha256_file(path):
             fail(f"protocol manifestDigests.{field} does not match {path}")
     for field, path in digest_bindings.items():
+        # Corpus growth is append-only. The immutable baseline retains the
+        # historical corpus/protocol snapshots; fixed-row immutability and the
+        # current protocol manifest ledger are checked separately.
+        if field in {"corpusManifestSha256", "protocolSha256"}:
+            continue
         expected = baseline.get(field)
         if expected is not None and expected != sha256_file(path):
             fail(f"baseline snapshot {field} does not match {path}")
@@ -1644,8 +1914,15 @@ def validate_unit_record(unit: Mapping[str, Any], row: Mapping[str, Any]) -> tup
             fail("strict compatibility unit must bind product evidence")
         safe_relative_path(product_binding.get("rawRoot"), "unit.productEvidence.rawRoot")
         require_digest(product_binding.get("manifestSha256"), "unit.productEvidence.manifestSha256")
-    for field in ("corpusVersion", "profile", "runtimeCell", "targetLoader", "oracleId"):
+    for field in ("corpusVersion", "profile", "runtimeCell", "targetLoader", "oracleId", "identityKey", "sourceProvenance"):
         require_string(unit.get(field), f"unit.{field}")
+    require_digest(unit.get("producerRecipeSha256"), "unit.producerRecipeSha256")
+    if (
+        unit.get("identityKey") != row.get("identityKey")
+        or unit.get("sourceProvenance") != row.get("sourceProvenance")
+        or unit.get("producerRecipeSha256") != row.get("producerRecipeSha256")
+    ):
+        fail(f"unit corpus identity binding does not match the registered row for {unit.get('unitId')}")
     if unit.get("targetLoader") != row.get("targetLoader"):
         fail(f"unit.targetLoader does not match the frozen row for {unit.get('unitId')}")
     if unit.get("statusOwner") != STATUS_OWNER:
@@ -2042,8 +2319,19 @@ def calculate_anti_gaming(
         manifests["corpus"]["rows"][[row["unitId"] for row in manifests["corpus"]["rows"]].index(unit_id)]["identityKey"]
         for unit_id in compatibility.get("completeUnitIds", ())
     ]
+    fixed_rows = [
+        row for row in manifests["corpus"]["rows"]
+        if row.get("unitId") in manifests["corpus"].get("fixedRowIds", ())
+    ]
+    frozen_baseline = baseline.get("baselineStatus") in {"baseline-zero", "measured"}
+    corpus_unchanged = (
+        len(fixed_rows) == 1
+        and sha256_bytes(canonical_json(fixed_rows[0])) == FROZEN_V2_FIXED_ROW_SHA256
+    ) if frozen_baseline else (
+        (baseline.get("corpusManifestSha256") or baseline_identity.get("corpusManifestSha256")) == sha256_file(corpus_path)
+    )
     return {
-        "corpusUnchanged": (baseline.get("corpusManifestSha256") or baseline_identity.get("corpusManifestSha256")) == sha256_file(corpus_path),
+        "corpusUnchanged": corpus_unchanged,
         "oracleUnchanged": (baseline.get("oracleManifestSha256") or baseline_identity.get("oracleManifestSha256")) == sha256_file(oracle_path),
         "attackManifestUnchanged": (baseline.get("schemeManifestSha256") or baseline_identity.get("schemeManifestSha256")) == sha256_file(scheme_path),
         "budgetsEqual": manifests["protocol"]["budgets"] == manifests["scheme"]["budget"],

@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify every stage and runtime cell is evidence-backed with no fallback."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify complete suite, fuzz, manifests, and evidence closure."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Audit final fixed/growth and six-family claimability conjunction."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-v2-reference.json","reason":"Verify positive compatibility baseline reference remains unchanged."}
+{"file":"fixtures/evaluator/scheme-a-manifest.json","reason":"Verify all six required Scheme-A families and policies remain unchanged."}

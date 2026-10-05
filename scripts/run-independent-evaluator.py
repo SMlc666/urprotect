@@ -10,9 +10,13 @@ wrapper/protection output to a strict compatibility or strength result.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
+import re
+import resource
 import shutil
+import signal
 import subprocess
 import sys
 sys.dont_write_bytecode = True
@@ -27,6 +31,9 @@ from evaluator_lib import (
     calculate_compatibility,
     calculate_scheme_gate,
     canonical_json,
+    calculate_claimable,
+    derive_evaluator_environment_capabilities,
+    evaluator_product_unit_bindings,
     copy_verified_product_evidence,
     inventory_digest,
     load_product_evidence,
@@ -138,71 +145,223 @@ def git_commit() -> str:
     return result.stdout.strip()
 
 
+def _read_os_release() -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key] = value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return values
+
+
+def _read_proc_status() -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            if ":" in line:
+                key, value = line.split(":", 1)
+                values[key] = value.strip()
+    except OSError:
+        pass
+    return values
+
+
+def _read_limit(resource_id: int | None) -> dict[str, int | None]:
+    if resource_id is None or resource_id < 0:
+        return {"soft": None, "hard": None}
+    try:
+        soft, hard = resource.getrlimit(resource_id)
+    except (OSError, ValueError):
+        return {"soft": None, "hard": None}
+    infinity = resource.RLIM_INFINITY
+    return {
+        "soft": None if soft == infinity else int(soft),
+        "hard": None if hard == infinity else int(hard),
+    }
+
+
+def _is_read_only(path: Path) -> bool:
+    try:
+        return bool(os.statvfs(path).f_flag & getattr(os, "ST_RDONLY", 1))
+    except OSError:
+        return False
+
+
+def _file_digest(path: Path) -> str | None:
+    try:
+        return sha256_file(path) if path.is_file() else None
+    except (OSError, EvaluatorError):
+        return None
+
+
 def build_environment(
     root: Path,
     protocol: dict[str, Any],
     scheme: dict[str, Any],
     *,
-    product_evidence_available: bool = False,
+    product_evidence_root: Path,
+    units: list[dict[str, Any]],
 ) -> dict[str, Any]:
     del scheme
-    architecture = platform.machine()
-    native_arm64 = architecture in {"aarch64", "arm64"}
-    tools = {name: command_identity(name) for name in ("python3", "dotnet", "readelf", "bwrap")}
-    dotnet_available = tools["dotnet"]["available"]
-    strict_mode = os.environ.get("EVALUATOR_COMPATIBILITY_MODE") == "1"
-    network_disabled = os.environ.get("EVALUATOR_NETWORK_DISABLED") == "1"
-    isolation_enabled = strict_mode and product_evidence_available
-    required_capabilities = {
-        "nativeAarch64": native_arm64,
-        "pinnedRuntimeCell": isolation_enabled,
-        "dotnetSdk": dotnet_available,
-        "protectedImageProducer": isolation_enabled,
-        "rehydrator": isolation_enabled,
-        "schemeAttackToolset": False,
-        "networkDisabled": network_disabled,
+    architecture = platform.machine().lower()
+    os_release = _read_os_release()
+    tools = {name: command_identity(name) for name in ("python3", "dotnet", "readelf", "bwrap", "ldd")}
+    ldd_version = tools["ldd"].get("version") or ""
+    glibc_match = re.search(r"\b(\d+\.\d+)\b", ldd_version)
+    glibc_version = glibc_match.group(1) if glibc_match else None
+    runner = {
+        "provider": "github-actions" if os.environ.get("GITHUB_ACTIONS", "").lower() == "true" else "local-or-unknown",
+        "githubActions": os.environ.get("GITHUB_ACTIONS", "").lower() == "true",
+        "runnerOS": os.environ.get("RUNNER_OS"),
+        "runnerArch": os.environ.get("RUNNER_ARCH"),
+        "runnerName": os.environ.get("RUNNER_NAME"),
+        "runId": os.environ.get("GITHUB_RUN_ID"),
+        "imageOS": os.environ.get("ImageOS"),
+        "imageVersion": os.environ.get("ImageVersion"),
     }
-    compatibility_keys = tuple(key for key in required_capabilities if key != "schemeAttackToolset")
-    status = "available" if all(required_capabilities[key] for key in compatibility_keys) else "environment-unavailable"
-    reason = None
-    if status != "available":
-        missing = sorted(key for key in compatibility_keys if not required_capabilities[key])
-        reason = "required compatibility evaluator capabilities are unavailable: " + ", ".join(missing)
-    environment = {
-        "schemaVersion": 1,
-        "kind": "evaluator-environment",
-        "commit": git_commit(),
-        "status": status,
-        "os": platform.system(),
+    host = {
+        "system": platform.system(),
         "architecture": architecture,
-        "nativeAarch64": native_arm64,
-        "emulated": False,
+        "distributionId": os_release.get("ID"),
+        "distributionVersion": os_release.get("VERSION_ID"),
+        "glibcVersion": glibc_version,
         "kernel": platform.release(),
         "pageSize": os.sysconf("SC_PAGESIZE") if hasattr(os, "sysconf") else None,
-        "runtimeCell": "glibc.current.native-arm64",
-        "loaderIdentity": "kernel.execveat-at-empty-path" if isolation_enabled else "not-captured",
-        "isolation": {
-            "networkDisabled": network_disabled,
-            "readOnlyInputs": isolation_enabled,
-            "noNewPrivileges": isolation_enabled,
-            "droppedCapabilities": isolation_enabled,
-            "boundedProcesses": protocol["budgets"]["processLimit"],
-            "boundedMemoryBytes": protocol["budgets"]["rssBytes"],
-            "boundedWallSeconds": protocol["budgets"]["wallSeconds"],
+    }
+    namespaces = {
+        "currentNetwork": _read_namespace("/proc/self/ns/net"),
+        "initialNetwork": _read_namespace("/proc/1/ns/net"),
+    }
+    proc_status = _read_proc_status()
+    security = {
+        "noNewPrivileges": _parse_integer(proc_status.get("NoNewPrivs")),
+        "effectiveCapabilities": proc_status.get("CapEff"),
+    }
+    mounts = {
+        "repositoryReadOnly": _is_read_only(REPO_ROOT),
+        "fixturesReadOnly": _is_read_only(REPO_ROOT / "fixtures"),
+        "productEvidenceReadOnly": _is_read_only(product_evidence_root),
+        "evaluatorOutputWritable": root.is_dir() and not _is_read_only(root) and os.access(root, os.W_OK),
+    }
+    budgets = dict(protocol["budgets"])
+    resource_limits = {
+        "cpuSeconds": _read_limit(getattr(resource, "RLIMIT_CPU", None)),
+        "addressSpaceBytes": _read_limit(getattr(resource, "RLIMIT_AS", None)),
+        "processes": _read_limit(getattr(resource, "RLIMIT_NPROC", None)),
+        "fileSizeBytes": _read_limit(getattr(resource, "RLIMIT_FSIZE", None)),
+    }
+    try:
+        alarm_remaining = float(signal.getitimer(signal.ITIMER_REAL)[0])
+    except (OSError, ValueError):
+        alarm_remaining = 0.0
+    isolation = {
+        "networkDisabled": False,
+        "readOnlyInputs": False,
+        "noNewPrivileges": False,
+        "droppedCapabilities": False,
+        "wallLimit": {
+            "seconds": budgets.get("wallSeconds"),
+            "alarmRemainingSeconds": alarm_remaining,
         },
+    }
+    producer_script = REPO_ROOT / "scripts/run-protected-image-e2e.sh"
+    producer_source = REPO_ROOT / "src/UrProtect.Core/Protect/ProtectionPlan.cs"
+    rehydrator_source = REPO_ROOT / "src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs"
+    product_capabilities = {
+        "producerScriptSha256": _file_digest(producer_script),
+        "producerSourceSha256": _file_digest(producer_source),
+        "rehydratorSourceSha256": _file_digest(rehydrator_source),
+        "strictUnits": evaluator_product_unit_bindings(units),
+    }
+    github_runner = (
+        runner["githubActions"] is True
+        and runner["runnerOS"] == "Linux"
+        and runner["runnerArch"] == "ARM64"
+        and bool(runner["runnerName"])
+        and isinstance(runner["runId"], str)
+        and runner["runId"].isdigit()
+    )
+    pinned_cell = (
+        github_runner
+        and host["distributionId"] == "ubuntu"
+        and host["distributionVersion"] == "24.04"
+        and host["glibcVersion"] == "2.39"
+        and architecture in {"aarch64", "arm64"}
+    )
+    runtime_cell = "glibc.current.native-arm64" if pinned_cell else (
+        f"{host['distributionId'] or 'unknown'}-{host['distributionVersion'] or 'unknown'}."
+        f"glibc-{glibc_version or 'unknown'}.{architecture or 'unknown'}"
+    )
+    loader_identity = "not-captured"
+    for unit in units:
+        target_loader = unit.get("stages", {}).get("target-loader", {})
+        if target_loader.get("status") == "passed" and isinstance(target_loader.get("loaderId"), str):
+            loader_identity = target_loader["loaderId"]
+            break
+    environment = {
+        "schemaVersion": 2,
+        "kind": "evaluator-environment",
+        "commit": git_commit(),
+        "status": "environment-unavailable",
+        "runner": runner,
+        "host": host,
+        "architecture": architecture,
+        "nativeAarch64": architecture in {"aarch64", "arm64"},
+        "emulated": not github_runner or architecture not in {"aarch64", "arm64"},
+        "kernel": host["kernel"],
+        "pageSize": host["pageSize"],
+        "runtimeCell": runtime_cell,
+        "loaderIdentity": loader_identity,
+        "namespaces": namespaces,
+        "mountFacts": mounts,
+        "security": security,
+        "resourceLimits": resource_limits,
+        "isolation": isolation,
         "tools": tools,
-        "requiredCapabilities": required_capabilities,
-        "reason": reason,
+        "productCapabilities": product_capabilities,
+        "requiredCapabilities": {},
+        "budget": budgets,
+        "reason": None,
         "evaluator": {
             "runnerSha256": sha256_file(Path(__file__)),
             "librarySha256": sha256_file(Path(__file__).with_name("evaluator_lib.py")),
+            "launcherSha256": sha256_file(Path(__file__).with_name("run-independent-evaluator.sh")),
             "command": "scripts/run-independent-evaluator.sh --tier <tier>",
         },
-        "budget": protocol["budgets"],
     }
+    capabilities = derive_evaluator_environment_capabilities(environment)
+    environment["requiredCapabilities"] = capabilities
+    for field, capability in (
+        ("networkDisabled", "networkDisabled"),
+        ("readOnlyInputs", "readOnlyInputs"),
+        ("noNewPrivileges", "noNewPrivileges"),
+        ("droppedCapabilities", "droppedCapabilities"),
+    ):
+        isolation[field] = capabilities.get(capability) is True
+    missing = [name for name, available in capabilities.items() if name != "schemeAttackToolset" and available is not True]
+    environment["status"] = "environment-unavailable" if missing else "available"
+    if missing:
+        environment["reason"] = "required compatibility evaluator capabilities are not established: " + ", ".join(missing)
     write_json(root / "environment.json", environment)
     return environment
 
+
+def _read_namespace(path: str) -> str | None:
+    try:
+        return os.readlink(path)
+    except OSError:
+        return None
+
+
+def _parse_integer(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return None
 
 def default_product_evidence_root(tier: str, unit_id: str) -> Path:
     configured = os.environ.get("EVALUATOR_PRODUCT_EVIDENCE_ROOT")
@@ -238,7 +397,14 @@ def make_compatibility_unit(
 ) -> dict[str, Any]:
     unit_root = root / "compatibility" / row["unitId"]
     raw_root = unit_root / "raw"
-    product_root = product_evidence_root or default_product_evidence_root(tier, row["unitId"])
+    if product_evidence_root is None:
+        product_root = default_product_evidence_root(tier, row["unitId"])
+    elif row["unitId"] == STRICT_UNIT_ID:
+        product_root = product_evidence_root
+    else:
+        # An explicit root is a test/fixture projection for the frozen unit;
+        # never let unrelated checkout artifacts leak into that projection.
+        product_root = product_evidence_root.parent / f".absent-{row['unitId']}"
     product: dict[str, Any] | None = None
     product_error: ProductEvidenceError | None = None
     try:
@@ -307,6 +473,9 @@ def make_compatibility_unit(
         "schemaVersion": 1,
         "kind": "compatibility-unit",
         "unitId": row["unitId"],
+        "identityKey": row["identityKey"],
+        "sourceProvenance": row["sourceProvenance"],
+        "producerRecipeSha256": row["producerRecipeSha256"],
         "corpusVersion": corpus["corpusVersion"],
         "sourceSha256": row["sourceSha256"],
         "sourceImageSha256": source_image_sha256,
@@ -434,12 +603,11 @@ def build_gate(
         raw_evidence_bounded=True,
         baseline_artifact_path=baseline_artifact_path,
     )
-    compatibility_claimable = (
-        compatibility["status"] == "measured"
-        and compatibility["fixedViewPass"]
-        and compatibility["growthViewPass"]
-    )
-    scheme_claimable = scheme_gate["status"] == "pass" and scheme_gate["allRequiredPass"]
+    # An independently measured row is not claimable when the evaluator's
+    # declared native/isolation environment is unavailable.  Keep the
+    # environment gate independent from stage projections so a stale or
+    # partially provisioned runner cannot turn a complete-looking evidence
+    # tree into a parent claim.
     residual_risks: list[str] = []
     if compatibility["status"] == "baseline-zero":
         residual_risks.append("strict compatibility is baseline-zero because Protected Image and rehydration stages are not product-declared")
@@ -478,7 +646,7 @@ def build_gate(
         "antiGaming": anti_gaming,
         "rawEvidenceManifestSha256": inventory_digest(root, exclude=("gate.json", "analysis-input.json")),
         "artifactManifestSha256": inventory_digest(root, exclude=("gate.json", "analysis-input.json")),
-        "claimable": all(anti_gaming.values()) and compatibility_claimable and scheme_claimable,
+        "claimable": calculate_claimable(environment, compatibility, scheme_gate, anti_gaming, units),
         "residualRisks": residual_risks,
     }
     return gate
@@ -619,13 +787,6 @@ def main() -> int:
         product_evidence_root = args.product_evidence_root
         if product_evidence_root is None:
             product_evidence_root = default_product_evidence_root(args.tier, STRICT_UNIT_ID)
-        product_evidence_available = product_evidence_root.is_dir() and not product_evidence_root.is_symlink()
-        environment = build_environment(
-            output_root,
-            manifests["protocol"],
-            manifests["scheme"],
-            product_evidence_available=product_evidence_available,
-        )
         units = [
             make_compatibility_unit(
                 output_root,
@@ -637,6 +798,14 @@ def main() -> int:
             for row in manifests["rows"]
             if row.get("required") and row.get("applicable")
         ]
+        signal.setitimer(signal.ITIMER_REAL, float(manifests["protocol"]["budgets"]["wallSeconds"]))
+        environment = build_environment(
+            output_root,
+            manifests["protocol"],
+            manifests["scheme"],
+            product_evidence_root=product_evidence_root,
+            units=units,
+        )
         compatibility = calculate_compatibility(manifests["corpus"], manifests["baseline"], units)
         attempts: dict[tuple[str, str, int], dict[str, Any]] = {}
         for family in manifests["families"]:

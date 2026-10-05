@@ -4,7 +4,7 @@
   "kind": "urprotect-independent-evaluator-protocol",
   "readOnly": true,
   "manifestDigests": {
-    "compatibilityCorpusSha256": "8f48bed4fe66a2fde8ad968972fec2654890956d777a54d6394687d5e503efa4",
+    "compatibilityCorpusSha256": "19c8cf639d33ae4f222f926fb1a6498f596c7153860f1061264121ef526965db",
     "runtimeMatrixSha256": "8d778d22926ba5e2791f46821623700e0baccad3fce26201e10ba6cf0ea0dac5",
     "schemeAManifestSha256": "bece932bd38e8c3e1def844023e19306acd37583862f17c6e3943c4ecf57eacc",
     "oracleRegistrySha256": "91e8a867157808f839edbabaf6c766c00d86e10f10729130debab0ce640175a4",
@@ -55,7 +55,10 @@
       "integrity_handoff"
     ],
     "replicaCount": 3,
-    "roles": ["baseline", "candidate"],
+    "roles": [
+      "baseline",
+      "candidate"
+    ],
     "minimumFactor": 100.0,
     "baselineCostRule": "maximum successCpuNs across all three successful baseline replicas",
     "candidateCostRule": "minimum successCpuNs across all three successful candidate replicas",

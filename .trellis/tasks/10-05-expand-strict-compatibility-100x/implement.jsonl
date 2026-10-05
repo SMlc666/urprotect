@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Six-stage unit rules, runtime identity, native loader/oracle evidence, and CI retention."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Append-only corpus, tests, anti-gaming, bounded evidence and CI quality requirements."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Parent fixed/growth views, exact 100x math, Scheme-A separation and final gate."}
+{"file":"fixtures/evaluator/compatibility-corpus.json","reason":"Frozen v2 unit and identity policy for append-only growth."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-v2-reference.json","reason":"Active explicit positive compatibility denominator of one."}
+{"file":"scripts/evaluator_lib.py","reason":"Authoritative identity uniqueness and six-stage counting rules."}

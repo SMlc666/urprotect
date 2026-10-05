@@ -26,7 +26,10 @@
     "10-05-evaluator-strict-chain-v1",
     "10-05-analyze-strict-chain-evaluator",
     "10-05-freeze-positive-immutable-baseline-v2",
-    "10-05-activate-positive-baseline-v2-evaluator"
+    "10-05-activate-positive-baseline-v2-evaluator",
+    "10-05-expand-strict-compatibility-100x",
+    "10-05-calibrate-scheme-a-attack-families",
+    "10-05-final-100x-integration-review"
   ],
   "parent": null,
   "relatedFiles": [],

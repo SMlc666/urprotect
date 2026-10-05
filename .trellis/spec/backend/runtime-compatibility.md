@@ -1126,3 +1126,78 @@ authenticate Protected Image -> materialize -> parse/hash Native Image
 -> sealed memfd + execveat -> target-loader record
 -> baseline/target behavior oracle -> complete strict unit only then
 ```
+
+## Scenario: Content-addressed positive compatibility baseline-v2 and explicit evaluator selection
+
+### 1. Scope / Trigger
+
+This contract applies when a strictly measured positive compatibility denominator is frozen after the independent evaluator has produced a complete six-stage unit. It keeps historical `compatibility-1x-baseline-zero` immutable and makes baseline selection explicit; it does not upgrade Scheme-A or the overall claim.
+
+### 2. Signatures
+
+```sh
+./scripts/run-independent-evaluator.sh --tier pr|nightly|release \
+  [--baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json]
+python3 scripts/check-positive-immutable-baseline-v2.py \
+  --evaluator-root .artifacts/evaluator/<tier> \
+  --product-root .artifacts/protected-image/<tier>/<runtime>/<unit> \
+  --previous-baseline fixtures/evaluator/baselines/compatibility-1x-baseline-zero.json \
+  [--check-only]
+```
+
+The baseline-v2 payload and external reference are content-addressed and immutable. A denominator of one sets a future integer growth target of 100; it is not itself a 100x result.
+
+### 3. Contracts
+
+- Omitting `--baseline-reference` preserves the historical baseline-zero default. Selecting v2 requires its content hash, immutable flags, corpus/protocol identity, and one complete unit to validate before compatibility scoring.
+- The selected reference and payload are copied into the evaluator evidence tree; the gate and analysis input bind the selected baseline ID/hash. The previous zero baseline and reference remain byte-identical.
+- The append-only corpus may add reviewed growth rows without rewriting the v2 denominator. The current protocol ledger binds the current corpus digest, while the v2 payload retains its historical corpus/protocol snapshot; the frozen fixed row is checked by a content-addressed row digest.
+- The baseline-v2 checker requires exact commit freshness, closed evaluator/unit/product manifests, native compatibility environment, one complete six-stage fixed row, distinct Protected/Native Image hashes, exact loader and behavior-oracle evidence, and a nearest-negative rollback witness. Any unmet condition writes only a blocked local gate and publishes no payload/reference.
+- Evaluator environment schema v2 records runner identity, host/runtime identity, namespace/mount/security facts, resource limits, pinned SDK/tool hashes, product source hashes, and strict-unit bindings. Availability is recomputed from those observations; caller-provided compatibility flags cannot make it available.
+- Scheme-A remains the frozen six-family conjunction. Baseline-v2 records `baseline-not-calibrated`, null family factors, and no Scheme-A claim. Overall claimability remains false until compatibility growth and every Scheme-A family independently pass.
+- `calculate_claimable` is derived from environment availability, measured fixed/growth compatibility, Scheme-A pass, and all anti-gaming checks; a complete-looking stage projection in an unavailable environment cannot make the result claimable.
+- Compatibility and Scheme-A are separate dimensions. The baseline freeze does not mutate the evaluator protocol rules, Scheme-A policy, or 100x math.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Explicit v2 reference does not match payload bytes/identity | evaluator/local gate fails; no claim |
+| Checkout, gate, and environment commits differ | local gate blocks baseline publication |
+| Root manifest digest differs from either gate field | evidence checker/local gate fails closed |
+| Any stage/hash/oracle/negative witness is missing or inconsistent | no baseline-v2 publication; retain blocked evidence |
+| Historical zero-baseline bytes/reference drift | hard failure; no overwrite or repair |
+| One-unit v2 candidate with no further growth | measured factor 1.0, target 100, growthViewPass=false, claimable=false |
+| 100 distinct complete growth units with unavailable declared runtime | retain measured compatibility counts but local/overall claim remains unavailable until the CI runtime evidence is available |
+| Scheme-A remains uncalibrated | six families retained, factors null, claimable=false |
+| Evaluator environment unavailable | claimable=false even if stage records are complete |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a fresh evidence package binds one strict unit to a new immutable v2 payload/reference; explicit evaluator selection reports measured factor 1.0 and preserves non-claimability.
+- Base: no reference is specified; the historical baseline-zero behavior remains unchanged.
+- Bad: silently changing the default reference, overwriting the zero baseline, treating denominator publication as 100x success, or marking Scheme-A pass from compatibility evidence.
+
+### 6. Tests Required
+
+- Evaluator tests cover explicit v2 selection, default zero fallback, stale reference/payload, fixed/growth values, historical baseline immutability, and Scheme-A non-claimability.
+- Local-gate tests cover commit freshness, root/nested manifest closure, all-six-stage hashes, negative rollback witness, environment unavailability, and no publication after any failed precondition.
+- Workflow tests assert the independent evaluator job provisions its pinned SDK, validates both references, explicitly selects v2, retains artifacts, and preserves the positive-baseline claim gate.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+compatibilityComplete = true
+baselineZero = 0
+factor = infinity
+claimable = true
+```
+
+#### Correct
+
+```text
+explicit immutable baseline-v2 -> candidate=1, baseline=1, factor=1.0
+-> future growth target=100 -> Scheme-A still independent -> claimable=false
+```

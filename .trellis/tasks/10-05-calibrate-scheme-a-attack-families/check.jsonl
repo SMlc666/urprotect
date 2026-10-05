@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify no loader/product conflation, six-family policy and claimability conjunction."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify bounded execution/evidence, tool hashes and malformed/tamper test coverage."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Audit exact Scheme-A cost/factor formulas, replicas, budgets and immutable versioning."}
+{"file":"fixtures/evaluator/scheme-a-manifest.json","reason":"Confirm required family IDs/order and v1 frozen manifest digest remain unchanged."}
+{"file":"fixtures/evaluator/evaluator-protocol.json","reason":"Confirm 100x thresholds and overall claimability semantics remain unchanged."}

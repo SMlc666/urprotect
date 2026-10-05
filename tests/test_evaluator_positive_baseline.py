@@ -56,10 +56,7 @@ class EvaluatorPositiveBaselineTests(unittest.TestCase):
         ]
         if baseline_reference is not None:
             command.extend(["--baseline-reference", str(baseline_reference)])
-        environment = dict(os.environ)
-        environment["EVALUATOR_COMPATIBILITY_MODE"] = "1"
-        environment["EVALUATOR_NETWORK_DISABLED"] = "1"
-        return subprocess.run(command, cwd=ROOT, check=False, capture_output=True, text=True, env=environment)
+        return subprocess.run(command, cwd=ROOT, check=False, capture_output=True, text=True, env=dict(os.environ))
 
     def check_evidence(self, output: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

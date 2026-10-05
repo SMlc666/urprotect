@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ WORKFLOW = ROOT / ".github/workflows/ci.yml"
 RUNNER = ROOT / "scripts/run-protected-image-e2e.sh"
 CHECKER = ROOT / "scripts/check-protected-image-evidence.py"
 
+CORPUS_RUNNER = ROOT / "scripts/run-strict-compatibility-corpus.sh"
 
 class ProtectedImageWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -48,6 +50,15 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         self.assertTrue(RUNNER.stat().st_mode & 0o111)
         self.assertTrue(CHECKER.stat().st_mode & 0o111)
         self.assertRegex(RUNNER.read_text(encoding="utf-8"), r"protect-image")
+
+    def test_strict_corpus_growth_runs_before_evidence_upload(self) -> None:
+        corpus = self.workflow.index("Run strict compatibility corpus growth evidence")
+        upload = self.workflow.index("- name: Upload test evidence", corpus)
+        self.assertIn("run-strict-compatibility-corpus.sh", self.workflow[corpus:upload])
+        self.assertIn("if: always()", self.workflow[corpus:upload])
+        self.assertTrue(CORPUS_RUNNER.is_file())
+        self.assertTrue(CORPUS_RUNNER.stat().st_mode & 0o111)
+        self.assertEqual(len(json.loads((ROOT / 'fixtures/evaluator/compatibility-corpus.json').read_text())['rows']), 100)
         self.assertRegex(CHECKER.read_text(encoding="utf-8"), r"SHA256SUMS")
 
 

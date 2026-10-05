@@ -28,6 +28,8 @@ def row(unit_id: str, identity: str) -> dict:
         "unitId": unit_id,
         "identityKey": identity,
         "sourceSha256": DIGEST,
+        "sourceProvenance": f"fixtures/test/{unit_id}.c",
+        "producerRecipeSha256": DIGEST,
         "profile": "test-profile",
         "runtimeCell": "test-runtime",
         "targetLoader": "test-loader",
@@ -55,6 +57,9 @@ def unit(registration: dict, *, passed: bool = True) -> dict:
     complete, first_failure = derive_unit_completion(
         {
             "unitId": registration["unitId"],
+            "identityKey": registration["identityKey"],
+            "sourceProvenance": registration["sourceProvenance"],
+            "producerRecipeSha256": registration["producerRecipeSha256"],
             "sourceSha256": registration["sourceSha256"],
             "profile": registration["profile"],
             "runtimeCell": registration["runtimeCell"],
@@ -69,6 +74,9 @@ def unit(registration: dict, *, passed: bool = True) -> dict:
         "schemaVersion": 1,
         "kind": "compatibility-unit",
         "unitId": registration["unitId"],
+        "identityKey": registration["identityKey"],
+        "sourceProvenance": registration["sourceProvenance"],
+        "producerRecipeSha256": registration["producerRecipeSha256"],
         "corpusVersion": "test-corpus",
         "sourceSha256": registration["sourceSha256"],
         "profile": registration["profile"],

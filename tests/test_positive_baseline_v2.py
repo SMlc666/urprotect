@@ -48,6 +48,10 @@ class PositiveBaselineV2Tests(unittest.TestCase):
         (ROOT / ".artifacts/evaluator").mkdir(parents=True, exist_ok=True)
         (ROOT / ".artifacts/protected-image").mkdir(parents=True, exist_ok=True)
 
+        dotnet_root = Path.home() / ".dotnet"
+        if dotnet_root.is_dir():
+            import os
+            os.environ["PATH"] = str(dotnet_root) + os.pathsep + os.environ.get("PATH", "")
     def make_fixture(self) -> tuple[tempfile.TemporaryDirectory[str], Path, Path, Path, Path, Path]:
         workspace = tempfile.TemporaryDirectory(dir=ROOT / ".artifacts/evaluator")
         workspace_root = Path(workspace.name)
@@ -98,14 +102,51 @@ class PositiveBaselineV2Tests(unittest.TestCase):
     def make_available_environment(self, evaluator_root: Path) -> None:
         environment_path = evaluator_root / "environment.json"
         environment = json.loads(environment_path.read_text(encoding="utf-8"))
+        environment["runner"].update({
+            "githubActions": True,
+            "runnerOS": "Linux",
+            "runnerArch": "ARM64",
+            "runnerName": "test-runner",
+            "runId": "1",
+        })
+        environment["host"].update({
+            "architecture": "aarch64",
+            "distributionId": "ubuntu",
+            "distributionVersion": "24.04",
+            "glibcVersion": "2.39",
+        })
+        environment["architecture"] = "aarch64"
+        environment["nativeAarch64"] = True
+        environment["emulated"] = False
+        environment["runtimeCell"] = "glibc.current.native-arm64"
+        environment["loaderIdentity"] = "kernel.execveat-at-empty-path"
+        environment["namespaces"] = {"currentNetwork": "net:[2]", "initialNetwork": "net:[1]"}
+        environment["mountFacts"] = {
+            "repositoryReadOnly": True,
+            "fixturesReadOnly": True,
+            "productEvidenceReadOnly": True,
+            "evaluatorOutputWritable": True,
+        }
+        environment["security"] = {"noNewPrivileges": 1, "effectiveCapabilities": "0000000000000000"}
+        environment["resourceLimits"] = {
+            "cpuSeconds": {"soft": 45, "hard": 45},
+            "addressSpaceBytes": {"soft": 1073741824, "hard": 1073741824},
+            "processes": {"soft": 32, "hard": 32},
+            "fileSizeBytes": {"soft": 268435456, "hard": 268435456},
+        }
+        environment["isolation"].update({
+            "networkDisabled": True,
+            "readOnlyInputs": True,
+            "noNewPrivileges": True,
+            "droppedCapabilities": True,
+            "wallLimit": {"seconds": 60, "alarmRemainingSeconds": 30.0},
+        })
+        environment["requiredCapabilities"] = {
+            name: True if name != "schemeAttackToolset" else False
+            for name in environment["requiredCapabilities"]
+        }
         environment["status"] = "available"
         environment["reason"] = None
-        environment["loaderIdentity"] = "kernel.execveat-at-empty-path"
-        environment["requiredCapabilities"] = {
-            name: name != "schemeAttackToolset" for name in environment["requiredCapabilities"]
-        }
-        for name in ("networkDisabled", "readOnlyInputs", "noNewPrivileges", "droppedCapabilities"):
-            environment["isolation"][name] = True
         environment_path.write_bytes(canonical(environment))
         close_manifest(evaluator_root, evaluator=True)
         gate_path = evaluator_root / "gate.json"

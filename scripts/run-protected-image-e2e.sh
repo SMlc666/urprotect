@@ -2,12 +2,13 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc|musl|bionic [--unit UNIT]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc|musl|bionic [--unit UNIT] [--source C_SOURCE]\n' "$0" >&2
 }
 
 tier=''
 runtime=''
 unit='compat.protection-symbolized-fixture.glibc.outer-execveat'
+source_file=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier)
@@ -23,6 +24,11 @@ while [[ $# -gt 0 ]]; do
     --unit)
       [[ $# -ge 2 ]] || { usage; exit 2; }
       unit="$2"
+      shift 2
+      ;;
+    --source)
+      [[ $# -ge 2 ]] || { usage; exit 2; }
+      source_file="$2"
       shift 2
       ;;
     -h|--help)
@@ -50,6 +56,17 @@ if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z "$source_file" ]]; then
+  source_file="$repo_root/fixtures/samples/protection/main.c"
+elif [[ "$source_file" != /* ]]; then
+  source_file="$repo_root/$source_file"
+fi
+source_file="$(realpath -e -- "$source_file" 2>/dev/null || true)"
+case "$source_file" in
+  "$repo_root/fixtures/samples/"*.c) ;;
+  *) echo "source must be a regular fixture C file under fixtures/samples" >&2; exit 2 ;;
+esac
+[[ -f "$source_file" && ! -L "$source_file" ]] || { echo "source fixture is not a regular file" >&2; exit 2; }
 artifact_parent="${PROTECTED_IMAGE_ARTIFACT_ROOT:-${repo_root}/.artifacts/protected-image/${tier}/${runtime}}"
 artifact_root="${artifact_parent}/${unit}"
 work_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/urprotect-protected-image-${tier}-${runtime}-$$"
@@ -156,7 +173,7 @@ fi
 
 mkdir -p "$work_root/build"
 if ! "${cc[@]}" -std=c11 -O0 -g0 -fPIE -pie -Wl,--build-id=none \
-    "$repo_root/fixtures/samples/protection/main.c" \
+    "$source_file" \
     "$repo_root/fixtures/samples/protection/target.S" \
     -o "$work_root/build/original" >"$work_root/compile.stdout" 2>"$work_root/compile.stderr"; then
   cp "$work_root/compile.stdout" "$stdout_path"

@@ -36,6 +36,7 @@ from evaluator_lib import (  # noqa: E402
     safe_relative_path,
     sha256_bytes,
     sha256_file,
+    validate_evaluator_environment,
 )
 
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
@@ -344,7 +345,11 @@ def _verify_old_baseline(previous: Path, previous_reference: Path) -> dict[str, 
 def _verify_environment(state: State) -> None:
     gate = state.gate
     environment = state.environment
-    if environment.get("schemaVersion") != 1 or environment.get("kind") != "evaluator-environment":
+    try:
+        validate_evaluator_environment(environment)
+    except EvaluatorError as error:
+        fail(str(error))
+    if environment.get("schemaVersion") != 2 or environment.get("kind") != "evaluator-environment":
         fail("evaluator environment schema is invalid")
     if gate.get("schemaVersion") != 1 or gate.get("kind") != "urprotect-independent-evaluator":
         fail("evaluator gate schema is invalid")
@@ -413,8 +418,8 @@ def _verify_environment(state: State) -> None:
 def _verify_identities(state: State) -> None:
     root = state.evaluator_root
     expected_files = {
-        "protocol.json": EXPECTED["protocolSha256"],
-        "corpus-manifest.json": EXPECTED["corpusManifestSha256"],
+        "protocol.json": sha256_file(REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json"),
+        "corpus-manifest.json": sha256_file(REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json"),
         "scheme-a-manifest.json": EXPECTED["schemeManifestSha256"],
         "oracles.json": EXPECTED["oracleManifestSha256"],
     }
@@ -432,7 +437,7 @@ def _verify_identities(state: State) -> None:
     if not isinstance(digests, dict):
         fail("protocol manifest digest ledger is missing")
     digest_expectations = {
-        "compatibilityCorpusSha256": EXPECTED["corpusManifestSha256"],
+        "compatibilityCorpusSha256": sha256_file(REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json"),
         "runtimeMatrixSha256": EXPECTED["runtimeRegistrySha256"],
         "schemeAManifestSha256": EXPECTED["schemeManifestSha256"],
         "oracleRegistrySha256": EXPECTED["oracleManifestSha256"],
@@ -443,11 +448,12 @@ def _verify_identities(state: State) -> None:
             fail(f"protocol manifest identity changed: {name}")
     rows = corpus.get("rows")
     fixed = corpus.get("fixedRowIds")
-    if not isinstance(rows, list) or not isinstance(fixed, list) or len(rows) != 1 or fixed != [UNIT_ID]:
-        fail("strict positive baseline requires exactly one frozen corpus row")
-    row = rows[0]
+    if not isinstance(rows, list) or not isinstance(fixed, list) or fixed != [UNIT_ID] or len(rows) < 1:
+        fail("strict positive baseline requires exactly one immutable frozen corpus row")
+    row = next((candidate for candidate in rows if candidate.get("unitId") == UNIT_ID), None)
     source_corpus = _read_json(REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json", "source corpus")
-    if row != source_corpus.get("rows", [None])[0]:
+    source_row = next((candidate for candidate in source_corpus.get("rows", []) if candidate.get("unitId") == UNIT_ID), None)
+    if row != source_row or row is None:
         fail("fixed corpus row metadata changed")
     if (
         row.get("unitId") != UNIT_ID
@@ -558,9 +564,10 @@ def _verify_unit(state: State) -> None:
     compatibility_root = _under(root, "compatibility", "compatibility root")
     _assert_regular(compatibility_root, "compatibility root", directory=True)
     unit_paths = sorted(path / "unit.json" for path in compatibility_root.iterdir() if path.is_dir() and not path.is_symlink() and (path / "unit.json").is_file())
-    if len(unit_paths) != 1 or unit_paths[0].parent.name != UNIT_ID:
+    fixed_unit_paths = [path for path in unit_paths if path.parent.name == UNIT_ID]
+    if len(fixed_unit_paths) != 1:
         fail("fixed compatibility view must contain exactly one unit record")
-    unit_path = unit_paths[0]
+    unit_path = fixed_unit_paths[0]
     unit = _read_json(unit_path, "strict unit")
     state.unit = unit
     if (
