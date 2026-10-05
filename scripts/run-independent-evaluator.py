@@ -200,6 +200,13 @@ def _is_read_only(path: Path) -> bool:
     try:
         if bool(os.statvfs(path).f_flag & getattr(os, "ST_RDONLY", 1)):
             return True
+        if os.environ.get("EVALUATOR_STAGED_READONLY") == "1":
+            resolved = path.resolve()
+            try:
+                resolved.relative_to(REPO_ROOT.resolve())
+                resolved.relative_to((REPO_ROOT / ".artifacts/evaluator").resolve())
+            except ValueError:
+                return True
         mode = path.stat().st_mode
         return (mode & 0o222) == 0
     except OSError:

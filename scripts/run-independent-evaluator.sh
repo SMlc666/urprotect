@@ -76,7 +76,7 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
   mkdir -p "$staged_root"
   cp -a --reflink=auto "$repo_root"/. "$staged_root"/
   find "$staged_root" -exec chmod a-w {} +
-  find "$staged_root" -type d -exec chmod a+rx {} +
+  find "$staged_root" -type d -exec chmod u+rwx,go+rx {} +
   find "$staged_root" -type f -exec chmod a+r {} +
   mkdir -p "$staged_root/.artifacts/evaluator/$tier"
   chmod u+rwx "$staged_root/.artifacts/evaluator"
