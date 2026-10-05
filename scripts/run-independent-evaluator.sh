@@ -8,6 +8,19 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONDONTWRITEBYTECODE=1
 
+# Capture the checkout identity before entering the read-only staged fallback.
+# The staged tree is intentionally allowed to omit .git, so the evaluator must
+# receive an exact commit handoff rather than falling back to "unknown".
+checkout_commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
+if [[ ! "$checkout_commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  checkout_commit="${GITHUB_SHA:-}"
+fi
+if [[ ! "$checkout_commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "FAIL evaluator: checkout commit is unavailable" >&2
+  exit 2
+fi
+export EVALUATOR_CHECKOUT_COMMIT="${checkout_commit,,}"
+
 # CI invokes the control plane in a real read-only-input, networkless sandbox.
 # Local runs deliberately stay unsandboxed and are recorded as
 # environment-unavailable unless an equivalent runner proves every capability.
@@ -43,6 +56,7 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
     --tmpfs /tmp \
     --chdir "$repo_root" \
     --setenv EVALUATOR_ISOLATION_ACTIVE 1 \
+    --setenv EVALUATOR_CHECKOUT_COMMIT "$EVALUATOR_CHECKOUT_COMMIT" \
     -- \
     prlimit \
       --cpu=45 \
@@ -85,6 +99,7 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
     cd "$staged_root" && \
     EVALUATOR_ISOLATION_ACTIVE=1 \
     EVALUATOR_STAGED_READONLY=1 \
+    EVALUATOR_CHECKOUT_COMMIT="$EVALUATOR_CHECKOUT_COMMIT" \
     prlimit --cpu=45 --as=1073741824 --nproc=32 --fsize=268435456 -- \
       setpriv --no-new-privs --inh-caps=-all --ambient-caps=-all -- \
       python3 "$staged_root/scripts/evaluator-seccomp-exec.py" \

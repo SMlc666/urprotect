@@ -273,6 +273,7 @@ jobs:
             .artifacts/protected-image/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
+          include-hidden-files: true
           if-no-files-found: warn
 
   # The current approved public real-sample slice is a required full-corpus gate on every PR.
@@ -958,6 +959,23 @@ jobs:
         with:
           name: test-evidence-${{ github.run_id }}
           path: .
+      - name: Normalize downloaded evidence paths
+        if: always()
+        run: |
+          set -euo pipefail
+          checkout_root="${GITHUB_WORKSPACE}"
+          destination="${checkout_root}/.artifacts/protected-image"
+          if [[ -d "${destination}" ]]; then
+            exit 0
+          fi
+          while IFS= read -r -d '' source; do
+            [[ "${source}" == "${destination}" ]] && continue
+            mkdir -p "${destination}"
+            cp -a -- "${source}/." "${destination}/"
+          done < <(find "${checkout_root}" -type d -path '*/.artifacts/protected-image' -print0)
+          if [[ ! -d "${destination}" ]]; then
+            echo "No downloaded Protected Image evidence path found; evaluator will retain unavailable evidence."
+          fi
       - name: Select evaluator tier
         run: |
           case "${GITHUB_EVENT_NAME}" in

@@ -175,9 +175,44 @@ def _limit_is_bounded(limits: Mapping[str, Any], key: str, maximum: int) -> bool
     )
 
 
+def command_search_path(command: str) -> str:
+    """Build the deterministic lookup path shared by capture and verification.
+
+    Restricted staged processes may inherit a reduced PATH. Keep its absolute
+    entries, then include the selected dotnet root for the SDK probe and the
+    platform's default executable directories. Empty and relative entries are
+    omitted so the staged checkout is never searched implicitly as the current
+    directory.
+    """
+    configured_paths = [os.environ.get("PATH", "")]
+    if command == "dotnet":
+        dotnet_root = os.environ.get("DOTNET_ROOT", "")
+        configured_paths.extend((dotnet_root, os.path.join(dotnet_root, "bin") if dotnet_root else ""))
+    configured_paths.append(os.defpath)
+    directories: list[str] = []
+    for configured in configured_paths:
+        for directory in configured.split(os.pathsep):
+            # A relative PATH entry (including ".") resolves against the
+            # evaluator's current working directory.  In the staged fallback
+            # that directory is the copied checkout, so accepting it would
+            # make command identity depend on checkout contents rather than a
+            # stable host/tool path.  Only absolute directories participate.
+            if not directory or not os.path.isabs(directory):
+                continue
+            normalized = os.path.normpath(directory)
+            if normalized not in directories:
+                directories.append(normalized)
+    return os.pathsep.join(directories)
+
+
+def resolve_command(command: str) -> str | None:
+    """Resolve a real executable using the same paths used for tool capture."""
+    return shutil.which(command, path=command_search_path(command))
+
+
 def _current_tool_matches(tools: Mapping[str, Any], name: str, expected_version: str | None = None) -> bool:
     tool = tools.get(name)
-    executable = shutil.which(name)
+    executable = resolve_command(name)
     if not isinstance(tool, Mapping) or executable is None or tool.get("available") is not True:
         return False
     if expected_version is not None and tool.get("version") != expected_version:

@@ -31,7 +31,9 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         self.assertIn("run-protected-image-e2e.sh", self.workflow[producer:checker])
         self.assertIn("check-protected-image-evidence.py", self.workflow[checker:upload])
         self.assertIn("if: always()", self.workflow[checker:upload])
-        self.assertIn(".artifacts/protected-image/", self.workflow[upload : upload + 700])
+        upload_block = self.workflow[upload : upload + 900]
+        self.assertIn(".artifacts/protected-image/", upload_block)
+        self.assertIn("include-hidden-files: true", upload_block)
 
     def test_independent_evaluator_downloads_product_chain_evidence(self) -> None:
         evaluator = self.workflow.index("independent-evaluator:")
@@ -43,6 +45,19 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         self.assertIn("actions/download-artifact@v4", block)
         self.assertIn("test-evidence-${{ github.run_id }}", block)
         self.assertIn("path: .", block)
+        self.assertIn("find \"${checkout_root}\" -type d -path '*/.artifacts/protected-image'", block)
+        self.assertIn('destination="${checkout_root}/.artifacts/protected-image"', block)
+        self.assertNotIn("nested_root=", block)
+
+    def test_staged_evaluator_receives_checkout_commit_and_shared_tool_resolution(self) -> None:
+        evaluator_runner = (ROOT / "scripts/run-independent-evaluator.sh").read_text(encoding="utf-8")
+        evaluator_impl = (ROOT / "scripts/run-independent-evaluator.py").read_text(encoding="utf-8")
+        evaluator_policy = (ROOT / "scripts/evaluator_lib.py").read_text(encoding="utf-8")
+        self.assertIn('export EVALUATOR_CHECKOUT_COMMIT="${checkout_commit,,}"', evaluator_runner)
+        self.assertIn('--setenv EVALUATOR_CHECKOUT_COMMIT "$EVALUATOR_CHECKOUT_COMMIT"', evaluator_runner)
+        self.assertIn('EVALUATOR_CHECKOUT_COMMIT="$EVALUATOR_CHECKOUT_COMMIT"', evaluator_runner)
+        self.assertIn("resolve_command(command)", evaluator_impl)
+        self.assertIn("def resolve_command(command: str)", evaluator_policy)
 
     def test_runner_and_checker_are_checked_in(self) -> None:
         self.assertTrue(RUNNER.is_file())

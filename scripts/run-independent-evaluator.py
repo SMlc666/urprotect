@@ -37,6 +37,7 @@ from evaluator_lib import (
     derive_evaluator_environment_capabilities,
     evaluator_product_unit_bindings,
     copy_verified_product_evidence,
+    resolve_command,
     inventory_digest,
     load_product_evidence,
     project_product_failure,
@@ -126,25 +127,42 @@ def write_top_level_manifest(root: Path) -> Path:
 
 
 def command_identity(command: str) -> dict[str, Any]:
-    executable = shutil.which(command)
+    executable = resolve_command(command)
     if executable is None:
         return {"available": False, "version": None, "binarySha256": None}
     try:
-        result = subprocess.run([executable, "--version"], check=False, capture_output=True, text=True, timeout=5, env=os.environ.copy())
+        result = subprocess.run(
+            [executable, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=os.environ.copy(),
+        )
         text = (result.stdout or result.stderr).splitlines()
-        version = text[0][:240] if text else None
+        if result.returncode != 0 or not text:
+            return {"available": False, "version": None, "binarySha256": None}
+        version = text[0][:240]
         digest = sha256_file(Path(executable))
-    except (OSError, subprocess.SubprocessError, EvaluatorError):
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, EvaluatorError):
         return {"available": False, "version": None, "binarySha256": None}
     return {"available": True, "version": version, "binarySha256": digest}
 
 
 def git_commit() -> str:
+    # The shell wrapper captures this before creating a read-only staged copy.
+    # Keep GITHUB_SHA as a second explicit handoff for staged/direct invocations
+    # where the source checkout has no .git directory.
+    for name in ("EVALUATOR_CHECKOUT_COMMIT", "GITHUB_SHA"):
+        checkout_commit = os.environ.get(name, "")
+        if re.fullmatch(r"[0-9a-fA-F]{40}", checkout_commit):
+            return checkout_commit.lower()
     try:
         result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return "unknown"
-    return result.stdout.strip()
+    commit = result.stdout.strip()
+    return commit.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", commit) else "unknown"
 
 
 def _read_os_release() -> dict[str, str]:

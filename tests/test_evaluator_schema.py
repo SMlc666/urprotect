@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,7 +15,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from evaluator_lib import calculate_claimable, EvaluatorError, read_json, validate_all_manifests  # noqa: E402
+from evaluator_lib import (  # noqa: E402
+    EvaluatorError,
+    calculate_claimable,
+    command_search_path,
+    read_json,
+    validate_all_manifests,
+)
 
 
 class EvaluatorSchemaTests(unittest.TestCase):
@@ -80,6 +88,53 @@ class EvaluatorSchemaTests(unittest.TestCase):
             temporary.flush()
             with self.assertRaises(EvaluatorError):
                 read_json(Path(temporary.name))
+
+    def test_command_search_path_excludes_relative_entries(self) -> None:
+        original_path = os.environ.get("PATH")
+        try:
+            os.environ["PATH"] = ".:relative:/usr/bin"
+            directories = command_search_path("python3").split(os.pathsep)
+            self.assertTrue(all(os.path.isabs(directory) for directory in directories))
+            self.assertNotIn(".", directories)
+            self.assertNotIn("relative", directories)
+            self.assertIn("/usr/bin", directories)
+        finally:
+            if original_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = original_path
+
+    def test_staged_checkout_binds_github_commit_without_git_metadata(self) -> None:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        with tempfile.TemporaryDirectory(prefix="urprotect-staged-") as temporary:
+            staged = Path(temporary) / "checkout"
+            shutil.copytree(
+                ROOT,
+                staged,
+                ignore=shutil.ignore_patterns(".git", ".artifacts", "bin", "obj", "__pycache__"),
+            )
+            environment = dict(os.environ)
+            environment.pop("EVALUATOR_CHECKOUT_COMMIT", None)
+            environment["GITHUB_SHA"] = commit
+            environment["EVALUATOR_CI_ISOLATION"] = "0"
+            run = subprocess.run(
+                ["bash", str(staged / "scripts/run-independent-evaluator.sh"), "--tier", "pr"],
+                cwd=staged,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 0, run.stderr)
+            evaluator_root = staged / ".artifacts/evaluator/pr"
+            self.assertEqual(read_json(evaluator_root / "environment.json")["commit"], commit)
+            self.assertEqual(read_json(evaluator_root / "gate.json")["commit"], commit)
 
     def test_runner_and_post_run_checker_emit_closed_zero_not_ready_gate(self) -> None:
         (ROOT / ".artifacts" / "evaluator").mkdir(parents=True, exist_ok=True)
