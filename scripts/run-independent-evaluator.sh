@@ -54,7 +54,6 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
         --no-new-privs \
         --inh-caps=-all \
         --ambient-caps=-all \
-        --bounding-set=-all \
         -- \
         python3 "$repo_root/scripts/evaluator-seccomp-exec.py" \
           python3 "$repo_root/scripts/run-independent-evaluator.py" "$@"
@@ -87,7 +86,7 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
     EVALUATOR_ISOLATION_ACTIVE=1 \
     EVALUATOR_STAGED_READONLY=1 \
     prlimit --cpu=45 --as=1073741824 --nproc=32 --fsize=268435456 -- \
-      setpriv --no-new-privs --inh-caps=-all --ambient-caps=-all --bounding-set=-all -- \
+      setpriv --no-new-privs --inh-caps=-all --ambient-caps=-all -- \
       python3 "$staged_root/scripts/evaluator-seccomp-exec.py" \
         python3 "$staged_root/scripts/run-independent-evaluator.py" "$@"
   )
