@@ -319,11 +319,8 @@ def derive_evaluator_environment_capabilities(environment: Mapping[str, Any]) ->
     current_net = namespaces.get("currentNetwork")
     parent_net = namespaces.get("initialNetwork")
     network_disabled = (
-        isinstance(current_net, str)
-        and isinstance(parent_net, str)
-        and re.fullmatch(r"net:\[\d+\]", current_net) is not None
-        and re.fullmatch(r"net:\[\d+\]", parent_net) is not None
-        and current_net != parent_net
+        security.get("networkSyscallsDenied") is True
+        and security.get("networkProbeErrno") == 1
         and _current_tool_matches(tools, "bwrap")
     )
     read_only_inputs = (

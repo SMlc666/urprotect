@@ -10,6 +10,7 @@ wrapper/protection output to a strict compatibility or strength result.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import platform
@@ -17,6 +18,7 @@ import re
 import resource
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 sys.dont_write_bytecode = True
@@ -184,6 +186,16 @@ def _read_limit(resource_id: int | None) -> dict[str, int | None]:
     }
 
 
+def _probe_network_syscalls() -> tuple[bool, int | None]:
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except OSError as error:
+        return error.errno == errno.EPERM, error.errno
+    else:
+        probe.close()
+        return False, None
+
+
 def _is_read_only(path: Path) -> bool:
     try:
         return bool(os.statvfs(path).f_flag & getattr(os, "ST_RDONLY", 1))
@@ -237,9 +249,12 @@ def build_environment(
         "initialNetwork": _read_namespace("/proc/1/ns/net"),
     }
     proc_status = _read_proc_status()
+    network_syscalls_denied, network_probe_errno = _probe_network_syscalls()
     security = {
         "noNewPrivileges": _parse_integer(proc_status.get("NoNewPrivs")),
         "effectiveCapabilities": proc_status.get("CapEff"),
+        "networkSyscallsDenied": network_syscalls_denied,
+        "networkProbeErrno": network_probe_errno,
     }
     mounts = {
         "repositoryReadOnly": _is_read_only(REPO_ROOT),
