@@ -645,7 +645,7 @@ def _run_scheme_fixture_in_process(command: list[str], runner: Path) -> tuple[in
     previous_argv = sys.argv
     stdout = io.StringIO()
     stderr = io.StringIO()
-    sys.argv = command
+    sys.argv = [str(runner), *command[2:]]
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             try:
