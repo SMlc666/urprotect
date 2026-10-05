@@ -127,7 +127,12 @@ class PositiveBaselineV2Tests(unittest.TestCase):
             "productEvidenceReadOnly": True,
             "evaluatorOutputWritable": True,
         }
-        environment["security"] = {"noNewPrivileges": 1, "effectiveCapabilities": "0000000000000000"}
+        environment["security"] = {
+            "noNewPrivileges": 1,
+            "effectiveCapabilities": "0000000000000000",
+            "networkSyscallsDenied": True,
+            "networkProbeErrno": 1,
+        }
         environment["resourceLimits"] = {
             "cpuSeconds": {"soft": 45, "hard": 45},
             "addressSpaceBytes": {"soft": 1073741824, "hard": 1073741824},
