@@ -942,6 +942,10 @@ jobs:
       EVALUATOR_CI_ISOLATION: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Install evaluator sandbox runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap util-linux
       # The evaluator records the pinned SDK identity in its environment evidence.
       # Do not rely on an image-global dotnet installation in this independent job.
       - uses: actions/setup-dotnet@v4
