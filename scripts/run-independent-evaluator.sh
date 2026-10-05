@@ -34,6 +34,7 @@ if [[ "${EVALUATOR_CI_ISOLATION:-0}" == "1" && "${EVALUATOR_ISOLATION_ACTIVE:-0}
   bwrap \
     --die-with-parent \
     --new-session \
+    --unshare-user-try \
     --ro-bind "$repo_root" "$repo_root" \
     --bind "$output_root" "$output_root" \
     --proc /proc \
