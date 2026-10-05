@@ -24,7 +24,7 @@
   "requiredFamilies": [
     {
       "applicable": true,
-      "attackRecipeSha256": "6dfba53f079aac848aeca71482742140de88a5efdcfd4d77a848d50eb3774548",
+      "attackRecipeSha256": "a0195dcd41cddc1ebe0f362f0a5978ae728b3330bca70ba4325bbfda58c1128f",
       "familyId": "runtime_dump_reassembly",
       "objective": "A reassembled artifact must be accepted by the target native loader and pass the frozen behavior oracle.",
       "required": true,
@@ -37,7 +37,7 @@
     },
     {
       "applicable": true,
-      "attackRecipeSha256": "ba0b86f65133abf85dd7c85c17138f1705102ae7d24eb2565324282181ae9cf9",
+      "attackRecipeSha256": "c13f348530260b1333c40375468571fa1ad03dc3a904018d7253189a302d90e1",
       "familyId": "patch_repack",
       "objective": "A pre-registered behavior mutation must survive patch/repack, reach the target loader, and be observed by the frozen oracle.",
       "required": true,
@@ -50,7 +50,7 @@
     },
     {
       "applicable": true,
-      "attackRecipeSha256": "ec60eab0ff9a470adaf41f5e97d6f5e814b2572b7919ad98f024b315b5006eef",
+      "attackRecipeSha256": "cada8252d02bd74854c669e44b2ac44b2147c784669c2b2981e8d73153f24f5e",
       "familyId": "function_logic_recovery",
       "objective": "Machine-readable recovered logic must meet frozen semantic and structural thresholds with zero manual steps.",
       "required": true,
@@ -63,7 +63,7 @@
     },
     {
       "applicable": true,
-      "attackRecipeSha256": "be594731a9ed294a9726e5913230e012d8e9d6cd2ba865b49c73ec95ec03436a",
+      "attackRecipeSha256": "ac883a3610223b450aae8af4d6452d48b930011ecee845eb741fd24d057ada24",
       "familyId": "static_decomposition",
       "objective": "Pinned static tools must recover the frozen segment, code/data, function, and CFG inventory thresholds.",
       "required": true,
@@ -76,7 +76,7 @@
     },
     {
       "applicable": true,
-      "attackRecipeSha256": "e91527c09cfe9bbccf1ec53cdb0963e96a3381d3dee15bdc0fd2ec9be608badb",
+      "attackRecipeSha256": "130b66715520344ae355eb753a460318260409711905cd1cb77f7f611a0c3ad1",
       "familyId": "dynamic_instrumentation",
       "objective": "The frozen internal trace/state threshold or a registered unauthorized replacement must be observed on a valid target.",
       "required": true,
@@ -89,7 +89,7 @@
     },
     {
       "applicable": true,
-      "attackRecipeSha256": "0cc17257737e9015ac391e544cd2cfcb05b86af31a1994e73c7f192f8d5390f5",
+      "attackRecipeSha256": "e107e56535a444f1a948e25a0947ec9f095c08a8e8278fa8c38f67d17241fbbf",
       "familyId": "integrity_handoff",
       "objective": "A tampered or replayed artifact must reach forbidden behavior/loader markers or bypass a required pre-handoff rejection.",
       "required": true,
