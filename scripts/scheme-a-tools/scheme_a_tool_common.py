@@ -36,7 +36,7 @@ BUDGET = {
     "networkDisabled": True,
 }
 LOOPS_BASELINE = 10_000
-LOOPS_CANDIDATE = 2_000_000
+LOOPS_CANDIDATE = 4_000_000
 
 
 def canonical(value: Any) -> bytes:
