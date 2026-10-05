@@ -11,6 +11,9 @@ closed rather than producing a fabricated strength factor.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import errno
+import io
 import hashlib
 import os
 import json
@@ -18,6 +21,8 @@ import resource
 import shlex
 import shutil
 import subprocess
+import runpy
+import traceback
 import sys
 from pathlib import Path
 from typing import Any
@@ -230,6 +235,26 @@ def _validate_tool_result(
     return result
 
 
+
+
+def _run_registered_tool_in_process(command: list[str], executable: str) -> tuple[int, str, str]:
+    previous_argv = sys.argv
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    sys.argv = [executable, *command[1:]]
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                runpy.run_path(executable, run_name="__main__")
+                status = 0
+            except SystemExit as error:
+                status = error.code if isinstance(error.code, int) else 1
+            except Exception:
+                traceback.print_exc()
+                status = 1
+    finally:
+        sys.argv = previous_argv
+    return status, stdout.getvalue(), stderr.getvalue()
 def _run_registered_tool(
     executable: str,
     family_id: str,
@@ -262,12 +287,20 @@ def _run_registered_tool(
             check=False,
             timeout=float(budget["wallSeconds"]),
         )
-    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        completed_returncode = completed.returncode
+        completed_stdout = completed.stdout
+        completed_stderr = completed.stderr
+    except OSError as error:
+        if error.errno == errno.EAGAIN:
+            completed_returncode, completed_stdout, completed_stderr = _run_registered_tool_in_process(command, executable)
+        else:
+            raise ScorerError(f"registered scorer could not run: {error}") from error
+    except (subprocess.SubprocessError, ValueError) as error:
         raise ScorerError(f"registered scorer could not run: {error}") from error
-    _write_common_streams(output_root, completed.stdout, completed.stderr)
+    _write_common_streams(output_root, completed_stdout, completed_stderr)
     (output_root / "command.log").write_text(shlex.join(command) + "\n", encoding="utf-8")
-    if completed.returncode != 0:
-        raise ScorerError(f"registered scorer exited with status {completed.returncode}")
+    if completed_returncode != 0:
+        raise ScorerError(f"registered scorer exited with status {completed_returncode}")
     result_path = output_root / "scorer-result.json"
     result = _read_json(result_path)
     return _validate_tool_result(
