@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_SCHEME_MANIFEST = ROOT / "fixtures/evaluator/scheme-a-manifest.json"
+V2_SCHEME_MANIFEST = ROOT / "fixtures/evaluator/scheme-a-manifest-v2.json"
 STAGES = (
     "protector",
     "protected-image",
@@ -33,8 +35,9 @@ def read_json(path: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("evaluator_root", type=Path)
-    parser.add_argument("--scheme-a-manifest", type=Path, default=ROOT / "fixtures/evaluator/scheme-a-manifest-v2.json")
+    parser.add_argument("--scheme-a-manifest", type=Path, default=DEFAULT_SCHEME_MANIFEST)
     args = parser.parse_args()
+    additive_scheme = args.scheme_a_manifest.resolve() != DEFAULT_SCHEME_MANIFEST.resolve()
     root = args.evaluator_root if args.evaluator_root.is_absolute() else ROOT / args.evaluator_root
     checker = subprocess.run(
         [sys.executable, str(ROOT / "scripts/check-independent-evaluator.py"), str(root), "--scheme-a-manifest", str(args.scheme_a_manifest.resolve())],
@@ -62,9 +65,17 @@ def main() -> int:
         return fail("corpus row registration status is outside the reviewed vocabulary")
 
     gate = read_json(root / "gate.json")
+    if not additive_scheme:
+        scheme = gate.get("schemeA", {})
+        if scheme.get("status") != "baseline-not-calibrated" or any(value is not None for value in scheme.get("familyFactors", {}).values()):
+            return fail("historical Scheme-A default must remain baseline-not-calibrated")
+        if gate.get("claimable") is not False:
+            return fail("historical Scheme-A default cannot make the overall claimable gate true")
+        print("PASS strict compatibility growth: historical Scheme-A remains independent")
+        return 0
     compatibility = gate.get("compatibility", {})
     environment = gate.get("environment", {})
-    if environment.get("status") != "available" or environment.get("runtimeCell") != "glibc.current.native-arm64":
+    if additive_scheme and (environment.get("status") != "available" or environment.get("runtimeCell") != "glibc.current.native-arm64"):
         return fail("declared native glibc evaluator environment is unavailable")
     expected = {
         "baselineCompleteUnits": 1,
