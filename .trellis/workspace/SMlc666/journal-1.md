@@ -236,3 +236,37 @@ CI-gated increment.
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Complete 100x compatibility and Scheme-A integration
+<!-- trellis-session: v=2 fp=c3684a971acfed5e -->
+
+**Date**: 2026-10-06
+**Task**: Complete 100x compatibility and Scheme-A integration
+**Branch**: `feat/100x-independent-evaluator`
+
+### Summary
+
+Completed the parent 100x integration: explicit immutable Scheme-A v2 baseline/reference with six pinned family wrappers, frozen baseline-cost binding, bounded evidence/checkers, strict 100-unit compatibility growth, evaluator sandbox commit/tool handoff and RLIMIT_NPROC in-process fallback, full local Python validation, and GitHub Actions run 37334303825 with claimable=true. Archived parent and final child tasks after CI evidence closure.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5139b9e` | ci: capture evaluator tool identities before seccomp |
+| `57008a2` | feat: add explicit Scheme-A v2 calibration gate |
+| `12fd7f1` | chore: remove generated scorer cache |
+| `ae03827` | chore: mark Scheme-A v2 baseline calibrated |
+| `3457570` | fix: keep calibrated Scheme-A factors above threshold |
+| `66c185d` | fix: bind Scheme-A v2 recipes to pinned tools |
+| `cd6ad48` | chore: bind Scheme-A baseline replica evidence |
+| `b25bd10` | fix: bind evaluator to immutable Scheme-A baseline |
+| `ad4daa5` | fix: retain Scheme-A scoring under process limits |
+| `b7a22b9` | fix: preserve historical Scheme-A growth checker default |
+| `9c7d2d2` | fix: pass wrapper argv in in-process scorer fallback |
+| `46e50ee` | fix: run pinned Scheme-A tools under process limits |
+| `9918c47` | docs: record final 100x claimable integration |
+
+### Status
+
+[OK] **Completed**
