@@ -28,8 +28,8 @@ Reach the parent 100x compatibility growth condition from immutable baseline-v2 
 - [x] All 100 strict units complete the six-stage oracle-backed chain with closed/hash-bound evidence.
 - [x] Independent evaluator reports baselineCompleteUnits=1, candidateFixedCompleteUnits>=1, candidateGrowthCompleteUnits>=100, factor>=100.0, fixedViewPass=true, growthViewPass=true.
 - [x] Anti-gaming checks reject duplicate identities, replays, selector/profile variants, fabricated stage hashes, and changed frozen metadata.
-- [ ] All existing product/evaluator/negative/fuzz/runtime/benchmark/CI checks remain passing and no legacy direct-ELF evidence is counted.
-- [ ] Scheme-A remains separate and non-claimable until each frozen family independently calibrates and passes.
+- [x] All existing product/evaluator/negative/fuzz/runtime/benchmark/CI checks remain passing and no legacy direct-ELF evidence is counted.
+- [x] Scheme-A remains separate and non-claimable until each frozen family independently calibrates and passes.
 
 ## Out of Scope
 

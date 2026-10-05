@@ -1,71 +1,76 @@
 # Final 100x integration audit
 
 Date: 2026-10-05
-Commit under test: `1a660a0ddf932cd1247739e060be7e6a219fcf6c`
 
-## Normative evaluator result
+## Normative CI evaluator result
 
-The explicit positive-baseline run was executed after the product, native, and managed checks:
+The authoritative final PR evaluator run is GitHub Actions run `37334303825` (`independent-evaluator` job), with the complete producer/test/runtime/sample evidence graph retained. The evaluator artifact is commit-bound to checkout merge commit `63d6ef75d2dc595ebdd4e45eb94d53d932ba4396` and passed the independent evidence checker, strict compatibility growth gate, and positive-baseline claim gate.
+
+The selected inputs were:
 
 ```text
-EVALUATOR_COMPATIBILITY_MODE=1 EVALUATOR_NETWORK_DISABLED=1 \
-  ./scripts/run-independent-evaluator.sh --tier pr \
+./scripts/run-independent-evaluator.sh \
+  --tier pr \
+  --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
   --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
-python3 scripts/check-independent-evaluator.py .artifacts/evaluator/pr
+python3 scripts/check-independent-evaluator.py \
+  .artifacts/evaluator/pr \
+  --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
+  --require-claimable-if-baseline-positive
+python3 scripts/check-strict-compatibility-growth.py \
+  .artifacts/evaluator/pr \
+  --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
 ```
 
-Both commands passed their evidence checks. The recomputed gate is deliberately non-claimable:
+Recomputed `gate.json` values:
 
-- baseline: `compatibility-1x-v2`, immutable denominator `1`;
+- compatibility baseline complete units: `1`;
 - candidate fixed complete units: `1`, fixed-view pass: `true`;
-- candidate growth complete units: `1`, required growth: `100`, growth-view pass: `false`;
-- compatibility factor: `1.0`;
-- Scheme-A status: `baseline-not-calibrated`;
-- all six family factors: `null` (no pinned attack toolset or finite baseline replicas);
-- anti-gaming checks: all `true`;
-- `claimable`: `false`.
+- candidate growth complete units: `100`, growth target: `100`, growth-view pass: `true`;
+- exact compatibility factor: `100.0`;
+- first-failure counts: `{}`;
+- Scheme-A status: `pass`;
+- Scheme-A all-required pass: `true`;
+- family lower-bound factors:
+  - `runtime_dump_reassembly`: `379.48496421478177`;
+  - `patch_repack`: `229.17218116099104`;
+  - `function_logic_recovery`: `450.3232947574726`;
+  - `static_decomposition`: `444.21828107401967`;
+  - `dynamic_instrumentation`: `449.4210220298976`;
+  - `integrity_handoff`: `300.7807568926059`;
+- evaluator environment: `available`, `glibc.current.native-arm64`;
+- anti-gaming fields: all `true`;
+- `claimable`: `true`.
 
-The checked-in corpus still contains one required identity and the Scheme-A manifest still contains the six frozen required families. No identity or attack result was added by this review.
+The retained evaluator tree contains 100 complete strict units, six stages per unit, six Scheme-A families with three baseline and three candidate replicas, copied Scheme-A v2 baseline reference/artifact, closed raw manifests, and a closed top-level `SHA256SUMS`. The Scheme-A gate binds `scheme-a-baseline-v2`; it does not reuse the compatibility baseline ID.
 
-## Integration polish applied
+## Immutable policy and identity audit
 
-- `.github/workflows/ci.yml` now installs the pinned SDK in the independent evaluator job, validates both historical and positive baseline references, and passes the immutable positive baseline-v2 reference explicitly. This prevents the CI job from silently falling back to the historical zero denominator.
-- Claim derivation is shared by the runner and checker and now requires the evaluator environment status to be `available` in addition to the existing compatibility, Scheme-A, and anti-gaming conjunction. An unavailable declared native/isolation cell cannot produce a claimable gate.
-- Added a focused schema test for the environment fail-closed rule.
+- Historical `compatibility-1x-baseline-zero`, its reference, and default evaluator behavior remain unchanged.
+- Compatibility `compatibility-1x-v2` remains the one-unit immutable denominator and its reference remains content-addressed.
+- Historical `scheme-a-manifest.json` remains the default `scheme-a-v1` policy with six required families and `baseline-not-calibrated` status.
+- Additive `scheme-a-manifest-v2.json` is parent-bound to the frozen v1 manifest, content-addressed, and selected explicitly by CI.
+- Additive Scheme-A baseline reference/artifact is immutable, never overwritten, and stores the maximum finite baseline replica cost for every family. Candidate factors are recomputed against those frozen costs.
+- No duplicate identity, rerun, selector/profile variant, auxiliary direct-ELF result, compatibility stage projection, or hand-edited marker contributes to the claim.
 
-Frozen baseline, corpus, protocol, Scheme-A policy, budgets, and thresholds were not edited.
+## Product and CI evidence
 
-## Validation outcomes
+The PR graph passed `build-and-test`, `real-sample-matrix`, `runtime-matrix-native-arm64`, `bionic-native-arm64`, `musl-container-smoke`, and `independent-evaluator`; optional jobs that were not applicable to the PR event remained explicitly skipped. The evaluator job preserved always-upload evidence and required all existing evidence-job results before the final claim gate.
 
-Passed:
+The evaluator sandbox fallback is covered by a staged read-only checkout, exact checkout commit handoff, host-captured tool identity handoff before seccomp, network-deny seccomp, bounded resources, and an in-process wrapper fallback only for `EAGAIN` child creation under the frozen process limit. Other missing tools, invalid evidence, or scorer failures remain explicit unavailable results.
 
-- `dotnet restore UrProtect.sln --locked-mode`.
-- `dotnet build UrProtect.sln --configuration Release --no-restore` (0 warnings, 0 errors).
-- `dotnet test UrProtect.sln --configuration Release --no-build` (175 passed).
-- `python3 -m unittest discover -s tests -p 'test_*.py'` (282 passed).
-- Historical and explicit-v2 evaluator manifest validation.
-- Evaluator schema, anti-gaming, positive-baseline, strict-chain, compatibility-unit, and Scheme-A gate tests.
-- Explicit v2 evaluator plus post-run checker.
-- Protected Image producer E2E and evidence checker.
-- Generic rehydration/Native Image/native handoff E2E and evidence checker (all six stages passed for the frozen unit).
-- Protection E2E (`glibc`, PR tier).
-- Fixture matrix and fixture evidence gate (7 PR cases).
-- Regression stress (6 tests) and coverage-guided fuzz smoke.
-- Native runtime `contract-check` and `make test` (HostContext, TLS, PLT, version, dependency graph, and memfd handoff tests).
-- Managed HostContext handoff smoke.
-- Benchmark executable (all benchmark sections completed).
-- Real-sample registry plus manifest/fingerprint/aggregate/evidence/security tests.
-- Coverage floor check and prior feature evidence gates.
+Local verification also passed:
 
-Environment-limited or blocked (retained as residuals, not converted to passes):
+- `python3 -m unittest discover -s tests -p 'test_*.py'` — `290` tests;
+- focused evaluator, strict-chain, positive-baseline, workflow, anti-gaming, and Scheme-A tests — all passed;
+- historical and additive evaluator manifest validation;
+- additive Scheme-A baseline checker with three finite baseline replicas per family;
+- explicit additive evaluator plus independent evidence checker;
+- evaluator under `RLIMIT_NPROC=1`, exercising the in-process scorer fallback;
+- `git diff --check`, Python syntax compilation, and shell syntax checks.
 
-- Packed fixture matrix and musl container smoke: `musl-gcc` is absent.
-- Bionic fixture: Docker is absent.
-- Full runtime matrix: local host reports Ubuntu `26.04`, while the declared current cell requires Ubuntu `24.04`; no local runtime claim was made.
-- Runtime evidence checker rejects the retained stale artifact because its recorded CLI build hash differs from the current checkout build.
-- Real-sample acquisition/runner: correctly refuses outside GitHub Actions CI before network access.
-- Positive-baseline-v2 publication checker `--check-only` was not used as a final-gate command; when pointed at the already-active v2 evaluator it correctly blocks because that publication-time checker requires the historical baseline-zero input. The immutable v2 reference itself validates and the explicit v2 evaluator/checker pass.
+The CI build-and-test job also retained the existing .NET, fixture, native runtime, handoff, benchmark, fuzz, stress, real-sample, and matrix evidence gates. The final claim is based on the CI artifact, not local environment substitution.
 
-## Residual parent goals
+## Rollback
 
-The parent remains open and non-claimable. The existing expansion child must produce 99 additional distinct complete strict units (with closed six-stage evidence) before the integer growth target can pass. The existing Scheme-A calibration child must provide three finite immutable baseline successes for each frozen family and then candidate measurements; no family currently has a factor. Native CI must rerun the declared runtime, musl, bionic, packed, and real-sample cells before those evidence gates can be considered green.
+Rollback preserves all immutable v1/v2 baseline objects, manifests, raw evidence, and negative witnesses. Disable only the additive Scheme-A v2 selection and evaluator job if a later run regresses; restore the historical default manifest/reference selection without changing compatibility or Scheme-A thresholds.

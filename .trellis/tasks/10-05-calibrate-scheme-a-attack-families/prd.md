@@ -24,13 +24,12 @@ Implement and run the versioned red/blue Scheme-A harness so every frozen attack
 
 ## Acceptance Criteria
 
-- [ ] All six red-team recipes and blue oracles are pinned, deterministic, isolated, bounded, and machine-scored.
-- [ ] Three finite reproducible baseline successes are retained for each required family.
-- [ ] A content-addressed immutable Scheme-A baseline v2 and local checker pass.
-- [ ] Nearest-negative, tamper/replay, tool/oracle/budget drift, mixed results and missing evidence fail closed.
-- [ ] Existing compatibility, evaluator, product, runtime, fuzz, benchmark, and CI contracts remain passing.
-- [ ] No family threshold, frozen budget, required-family list, or overall conjunction is weakened.
-
+- [x] All six red-team recipes and blue oracles are pinned, deterministic, isolated, bounded, and machine-scored.
+- [x] Three finite reproducible baseline successes are retained for each required family.
+- [x] A content-addressed immutable Scheme-A baseline v2 and local checker pass.
+- [x] Nearest-negative, tamper/replay, tool/oracle/budget drift, mixed results and missing evidence fail closed.
+- [x] Existing compatibility, evaluator, product, runtime, fuzz, benchmark, and CI contracts remain passing.
+- [x] No family threshold, frozen budget, required-family list, or overall conjunction is weakened.
 ## Out of Scope
 
 - Changing the six family definitions or 100x threshold.

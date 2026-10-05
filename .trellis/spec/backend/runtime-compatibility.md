@@ -929,6 +929,62 @@ The Scheme-A vector is the conjunction of six required families: `runtime_dump_r
 
 The evaluator evidence tree contains `environment.json`, copied protocol/corpus/oracle/scheme/baseline manifests, compatibility unit records, raw `SHA256SUMS`, Scheme-A attempts, `scheme-a-gate.json`, `gate.json`, `analysis-input.json`, and a closed top-level `SHA256SUMS`. `gate.json` is normative; `analysis-input.json` is the analysis-agent handoff. Baselines are content-addressed, immutable, and never overwritten. Stage records require stage-specific hashes and metadata; a generic shared hash cannot satisfy a passed stage.
 
+### Additive Scheme-A v2 calibration and restricted-runner fallback
+
+#### 1. Scope / Trigger
+
+This contract applies when CI explicitly selects `fixtures/evaluator/scheme-a-manifest-v2.json`. The historical `scheme-a-manifest.json` remains the default and remains `baseline-not-calibrated`; the additive selection must not mutate the v1 manifest or the compatibility baseline references.
+
+#### 2. Signatures
+
+```sh
+python3 scripts/validate-evaluator-manifests.py \
+  --scheme-a fixtures/evaluator/scheme-a-manifest-v2.json \
+  --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+./scripts/run-independent-evaluator.sh --tier pr \
+  --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
+  --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+python3 scripts/check-scheme-a-baseline-v2.py
+```
+
+#### 3. Contracts
+
+- v2 binds `scheme-a-baseline-v2` through a separate immutable reference/artifact pair. The reference records the selected manifest digest, six family IDs in frozen order, three finite baseline replicas per family, and never-overwrite/content-addressed markers.
+- `scheme-a-gate.json` binds the Scheme-A baseline ID/digest, not the compatibility baseline ID. Candidate factors use the frozen maximum baseline replica cost from the Scheme-A baseline artifact; they never use a newly measured candidate-run baseline as the denominator.
+- Each family wrapper validates the retained Protected Image, Native Image, target-loader, behavioral-oracle, and integrity negative-witness records before emitting a scorer result. It records its recipe/tool identity, CPU cost, recovered artifact, blue-oracle binding, resource record, command log, and raw checksum manifest.
+- A process-limited evaluator may run the same checked-in wrapper in-process only after a child start returns `EAGAIN`; arguments, wrapper identity, output, and bounded budget remain unchanged. Missing evidence, tool drift, malformed output, or other startup failures remain `environment-unavailable`.
+- `EVALUATOR_TOOL_<NAME>_PATH/VERSION` is captured before seccomp/staged fallback and used only as an exact executable/version handoff; it cannot create a missing capability or override digest validation.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| v2 Scheme-A reference/artifact digest, family order, or parent v1 digest mismatch | manifest/evidence gate fails closed |
+| Missing baseline family or fewer than three finite replicas | `baseline-not-calibrated`; no factor |
+| Candidate family below 100x or mixed replica result | Scheme-A not pass; overall claim remains false |
+| Missing strict product/blue oracle/negative integrity witness | scorer fails closed; no attack success |
+| `EAGAIN` child start under the frozen process limit | exact checked-in wrapper runs in-process; evidence remains bounded and hash-bound |
+| Any other wrapper start failure | `environment-unavailable`; no fabricated ratio |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: explicit v2 selection validates the immutable six-family baseline, runs three baseline and candidate replicas, recomputes all factors from raw records, and exposes `schemeA.status=pass` only when every family is at least 100x.
+- Base: default v1 selection retains `baseline-not-calibrated` and does not require v2 baseline files.
+- Bad: using compatibility baseline-v2 as the Scheme-A denominator, assigning nominal cost without a measured scorer record, or turning an unavailable child process into an attack pass.
+
+#### 6. Tests Required
+
+- Validate both default v1 and explicit v2 manifest paths; assert copied Scheme-A reference/artifact closure and distinct baseline IDs.
+- Run all six family wrappers with missing product/blue evidence and tool drift; assert fail-closed results.
+- Run the evaluator under a deliberately low `RLIMIT_NPROC`; assert the in-process wrapper fallback still emits six complete replica sets and factors from the frozen baseline.
+- Run the full Python suite, manifest/evidence checkers, native CI evaluator, strict compatibility growth gate, and all pre-existing product/runtime/sample/fuzz/benchmark jobs.
+
+#### 7. Wrong vs Correct
+
+**Wrong:** calculate a 100x factor from the current evaluator's own baseline replicas, or mark all six families successful after a subprocess `EAGAIN`.
+
+**Correct:** validate the immutable Scheme-A v2 reference first, use its frozen per-family maximum costs, then score each checked-in recipe against the retained blue oracle and preserve explicit unavailable evidence on any other failure.
+
 ### 4. Validation & Error Matrix
 
 | Condition | Required result |

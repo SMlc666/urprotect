@@ -16,10 +16,10 @@ Prove the full parent objective end-to-end: compatibility growth reaches at leas
 
 ## Acceptance Criteria
 
-- [ ] Evaluator reports >=100 distinct complete strict growth units with fixed view passing and compatibility factor >=100.
-- [ ] All six Scheme-A family factors are >=100 under the frozen immutable policy.
-- [ ] Anti-gaming and all CI/product evidence checks pass; evidence trees are closed and commit-bound.
-- [ ] Final evaluator gate has `claimable=true` derived from verified evidence, not hand-edited markers.
+- [x] Evaluator reports >=100 distinct complete strict growth units with fixed view passing and compatibility factor >=100.
+- [x] All six Scheme-A family factors are >=100 under the frozen immutable policy.
+- [x] Anti-gaming and all CI/product evidence checks pass; evidence trees are closed and commit-bound.
+- [x] Final evaluator gate has `claimable=true` derived from verified evidence, not hand-edited markers.
 
 ## Out of Scope
 
