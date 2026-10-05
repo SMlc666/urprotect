@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import struct
 from pathlib import Path, PureWindowsPath
 from typing import Any, Iterable, Mapping
 
@@ -81,10 +82,67 @@ SCHEME_STATUSES = {
 }
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PRODUCT_MAX_FILES = 1_000
+PRODUCT_MAX_TREE_BYTES = 536_870_912
+PRODUCT_MAX_RECORD_BYTES = 1_048_576
+PRODUCT_MAX_STREAM_BYTES = 1_048_576
+PRODUCT_MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
+PRODUCT_MAX_SOURCE_IMAGE_BYTES = 128 * 1024 * 1024
+PRODUCT_MAX_NATIVE_IMAGE_BYTES = 128 * 1024 * 1024
 
 
 class EvaluatorError(ValueError):
     """A malformed manifest or evidence record."""
+
+
+class ProductEvidenceError(EvaluatorError):
+    """A product evidence tree is absent, incomplete, or not hash-bound."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str = "protector",
+        partial_stages: Mapping[str, Mapping[str, Any]] | None = None,
+        source_root: Path | None = None,
+        manifest_entries: Mapping[str, str] | None = None,
+        source_image_sha256: str | None = None,
+        product_manifest_sha256: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage if stage in COMPATIBILITY_STAGES else "protector"
+        self.partial_stages = dict(partial_stages or {})
+        self.source_root = source_root
+        self.manifest_entries = dict(manifest_entries or {})
+        self.source_image_sha256 = source_image_sha256
+        self.product_manifest_sha256 = product_manifest_sha256
+
+
+def project_product_failure(error: ProductEvidenceError) -> tuple[dict[str, dict[str, Any]], str]:
+    """Project a verified prefix plus the first failed strict-chain stage.
+
+    The runner and post-run checker must use the same projection for malformed
+    or partial product evidence.  Keeping it in the shared policy module avoids
+    a checker gap where an invalid product tree could be relabeled as ordinary
+    baseline-zero evidence.
+    """
+    reason = f"strict Protected Image product evidence is invalid: {error}"
+    partial = {name: dict(record) for name, record in error.partial_stages.items()}
+    failure_index = COMPATIBILITY_STAGES.index(error.stage)
+    stages: dict[str, dict[str, Any]] = {}
+    for index, stage in enumerate(COMPATIBILITY_STAGES):
+        if stage in partial:
+            stages[stage] = partial[stage]
+        elif index == failure_index:
+            stages[stage] = {"status": "failed", "reason": reason}
+        elif index > failure_index:
+            stages[stage] = {
+                "status": "not-applicable",
+                "reason": f"not evaluated after strict-chain failure at {error.stage}",
+            }
+        else:
+            stages[stage] = {"status": "failed", "reason": reason}
+    return stages, reason
 
 
 def fail(message: str) -> None:
@@ -188,6 +246,804 @@ def safe_relative_path(value: Any, field: str) -> str:
     if "\\" in result or ":" in result or any(part in {"", ".", ".."} for part in path.parts) or any(part in {"", ".", ".."} for part in windows.parts):
         fail(f"{field} contains an unsafe path component")
     return result
+
+
+def _product_failure(message: str, stage: str) -> None:
+    raise ProductEvidenceError(message, stage=stage)
+
+
+def _product_file(
+    root: Path,
+    name: str,
+    stage: str,
+    *,
+    allow_empty: bool = False,
+    max_bytes: int | None = None,
+) -> Path:
+    try:
+        relative = safe_relative_path(name, f"product.{stage}.path")
+    except EvaluatorError as error:
+        _product_failure(str(error), stage)
+    path = root / relative
+    try:
+        if path.is_symlink() or not path.is_file():
+            _product_failure(f"missing or non-regular product evidence file: {name}", stage)
+        size = path.stat().st_size
+    except OSError as error:
+        _product_failure(f"cannot inspect product evidence file {name}: {error}", stage)
+    if not allow_empty and size == 0:
+        _product_failure(f"product evidence file is empty: {name}", stage)
+    if max_bytes is not None and size > max_bytes:
+        _product_failure(f"product evidence file exceeds its bound: {name}", stage)
+    return path
+
+
+def _product_json(root: Path, name: str, stage: str) -> dict[str, Any]:
+    path = _product_file(root, name, stage, max_bytes=PRODUCT_MAX_RECORD_BYTES)
+    try:
+        return read_json(path, max_bytes=PRODUCT_MAX_RECORD_BYTES)
+    except EvaluatorError as error:
+        _product_failure(str(error), stage)
+    raise AssertionError("unreachable")
+
+
+def _product_digest(value: Any, field: str, stage: str, *, nullable: bool = False) -> str | None:
+    try:
+        return require_digest(value, field, nullable=nullable)
+    except EvaluatorError as error:
+        _product_failure(str(error), stage)
+    raise AssertionError("unreachable")
+
+
+def _product_string(value: Any, field: str, stage: str) -> str:
+    try:
+        return require_string(value, field)
+    except EvaluatorError as error:
+        _product_failure(str(error), stage)
+    raise AssertionError("unreachable")
+
+
+def _product_id(value: Any, field: str, stage: str) -> str:
+    try:
+        return require_id(value, field)
+    except EvaluatorError as error:
+        _product_failure(str(error), stage)
+    raise AssertionError("unreachable")
+
+
+def _product_path_reference(value: Any, field: str, expected_name: str, stage: str) -> None:
+    """Validate a product record path without trusting it for file access.
+
+    Product jobs may emit an absolute workspace path.  That path is retained as
+    provenance when an artifact is downloaded into a fresh evaluator workspace;
+    all reads below use the fixed evidence filename instead.  Relative paths must
+    identify the expected file and absolute paths may not contain traversal,
+    control characters, or a different basename.
+    """
+    try:
+        reference = require_string(value, field)
+        if "\x00" in reference or any(ord(character) < 0x20 for character in reference) or "\\" in reference:
+            raise EvaluatorError(f"{field} contains an unsafe path")
+        path = Path(reference)
+        windows = PureWindowsPath(reference)
+        if path.is_absolute() or windows.drive or windows.is_absolute():
+            if any(part in {"", ".", ".."} for part in path.parts) or path.name != expected_name:
+                raise EvaluatorError(f"{field} does not identify {expected_name}")
+        else:
+            relative = safe_relative_path(reference, field)
+            if relative != expected_name:
+                raise EvaluatorError(f"{field} does not identify {expected_name}")
+    except EvaluatorError as error:
+        _product_failure(str(error), stage)
+
+
+def _product_reject_symlink_components(path: Path) -> None:
+    """Reject symlink traversal before resolving an evidence root."""
+    candidate = path if path.is_absolute() else Path.cwd() / path
+    current = Path(candidate.anchor)
+    for component in candidate.parts[1:] if candidate.anchor else candidate.parts:
+        current /= component
+        try:
+            if current.is_symlink():
+                _product_failure(f"product evidence path traverses a symlink: {current}", "protector")
+        except OSError as error:
+            _product_failure(f"cannot inspect product evidence path {current}: {error}", "protector")
+
+
+def _product_manifest(root: Path) -> tuple[dict[str, str], str]:
+    """Validate a bounded, closed product SHA256SUMS tree."""
+    try:
+        if root.is_symlink() or not root.is_dir():
+            _product_failure(f"product evidence root is not a real directory: {root}", "protector")
+        files: list[Path] = []
+        total = 0
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                _product_failure(f"product evidence contains a symlink: {path}", "protector")
+            if path.is_file():
+                files.append(path)
+                size = path.stat().st_size
+                total += size
+                if len(files) > PRODUCT_MAX_FILES:
+                    _product_failure("product evidence file count exceeds its bound", "protector")
+                if total > PRODUCT_MAX_TREE_BYTES:
+                    _product_failure("product evidence tree exceeds its byte bound", "protector")
+                relative_path = path.relative_to(root).as_posix()
+                if relative_path.endswith(".tmp") or ".tmp." in relative_path:
+                    _product_failure(f"product evidence retains a temporary file: {relative_path}", "protector")
+                if len(relative_path) > MAX_RELATIVE_PATH_LENGTH:
+                    _product_failure("product evidence path exceeds its bound", "protector")
+            elif not path.is_dir():
+                _product_failure(f"product evidence contains a non-regular path: {path}", "protector")
+    except OSError as error:
+        _product_failure(f"cannot inspect product evidence root: {error}", "protector")
+
+    manifest = root / "SHA256SUMS"
+    if manifest.is_symlink() or not manifest.is_file():
+        _product_failure("product evidence is missing SHA256SUMS", "protector")
+    try:
+        manifest_bytes = manifest.read_bytes()
+    except OSError as error:
+        _product_failure(f"cannot read product SHA256SUMS: {error}", "protector")
+    if len(manifest_bytes) > 16 * 1024 * 1024:
+        _product_failure("product SHA256SUMS exceeds its bound", "protector")
+    try:
+        text = manifest_bytes.decode("utf-8")
+    except UnicodeDecodeError as error:
+        _product_failure(f"product SHA256SUMS is not UTF-8: {error}", "protector")
+    declared: dict[str, str] = {}
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        parts = line.split("  ", 1)
+        if len(parts) != 2 or HEX64.fullmatch(parts[0]) is None:
+            _product_failure(f"product SHA256SUMS:{line_number} is not a normalized SHA-256 line", "protector")
+        digest, relative_value = parts
+        try:
+            relative = safe_relative_path(relative_value, f"product SHA256SUMS:{line_number}")
+        except EvaluatorError as error:
+            _product_failure(str(error), "protector")
+        relative_name = relative
+        if relative_name == "SHA256SUMS" or relative_name in declared:
+            _product_failure(f"product SHA256SUMS contains a duplicate or self path: {relative_name}", "protector")
+        path = root / relative
+        if path.is_symlink() or not path.is_file():
+            _product_failure(f"product SHA256SUMS references a missing/non-regular path: {relative_name}", "protector")
+        size = path.stat().st_size
+        if size > PRODUCT_MAX_ARTIFACT_BYTES:
+            _product_failure(f"product evidence file exceeds its bound: {relative_name}", "protector")
+        if sha256_file(path) != digest:
+            _product_failure(f"product SHA256SUMS hash mismatch: {relative_name}", "protector")
+        declared[relative_name] = digest
+    expected = {
+        path.relative_to(root).as_posix()
+        for path in files
+        if path != manifest
+    }
+    if set(declared) != expected:
+        _product_failure(
+            f"product SHA256SUMS is not closed (missing={sorted(expected - set(declared))}, extra={sorted(set(declared) - expected)})",
+            "protector",
+        )
+    return declared, sha256_bytes(manifest_bytes)
+
+
+def _product_equal(actual: Any, expected: Any, field: str, stage: str) -> None:
+    if actual != expected:
+        _product_failure(f"product {field} binding mismatch", stage)
+
+
+def _product_status(record: Mapping[str, Any], stage_name: str, stage: str) -> None:
+    if record.get("schemaVersion") != 1 or record.get("stage") != stage_name:
+        _product_failure(f"product {stage} record schema or identity is unsupported", stage)
+    if record.get("status") != "passed":
+        _product_failure(f"product {stage} record is not passed", stage)
+
+
+def _product_canonical_protected_image(
+    data: bytes,
+    *,
+    source_sha256: str,
+    request_sha256: str,
+    unit_id: str,
+    profile: str,
+    producer_id: str,
+    producer_build_sha256: str,
+    consumer_id: str,
+    stage: str,
+) -> dict[str, Any]:
+    """Decode the bounded Protected Image v1 metadata and operation stream.
+
+    A self-hash and a role record are not sufficient evidence: both can be
+    rewritten together.  This projection mirrors the product codec's bounded
+    header, identity, request, and operation invariants so producer/role fields
+    remain tied to the retained bytes.
+    """
+    if len(data) < 52 or len(data) > 16 * 1024 * 1024 or data[:4] != b"UPPI":
+        _product_failure("Protected Image is not bounded canonical Protected Image v1 data", stage)
+    if sha256_bytes(data[:-32]) != data[-32:].hex():
+        _product_failure("Protected Image canonical integrity digest does not match its bytes", stage)
+
+    def read_u16(cursor: int) -> tuple[int, int]:
+        if cursor < 0 or cursor + 2 > len(data):
+            _product_failure("Protected Image metadata is truncated", stage)
+        return struct.unpack_from("<H", data, cursor)[0], cursor + 2
+
+    def read_u32(cursor: int) -> tuple[int, int]:
+        if cursor < 0 or cursor + 4 > len(data):
+            _product_failure("Protected Image metadata is truncated", stage)
+        return struct.unpack_from("<I", data, cursor)[0], cursor + 4
+
+    def read_u64(cursor: int) -> tuple[int, int]:
+        if cursor < 0 or cursor + 8 > len(data):
+            _product_failure("Protected Image metadata is truncated", stage)
+        return struct.unpack_from("<Q", data, cursor)[0], cursor + 8
+
+    def read_bytes(cursor: int, count: int) -> tuple[bytes, int]:
+        if count < 0 or cursor < 0 or cursor + count > len(data):
+            _product_failure("Protected Image metadata is truncated", stage)
+        return data[cursor : cursor + count], cursor + count
+
+    def read_string(cursor: int, maximum: int, label: str) -> tuple[str, int]:
+        count, cursor = read_u16(cursor)
+        if count == 0 or count > maximum:
+            _product_failure(f"Protected Image {label} string length is outside its bound", stage)
+        encoded, cursor = read_bytes(cursor, count)
+        try:
+            value = encoded.decode("utf-8")
+        except UnicodeDecodeError as error:
+            _product_failure(f"Protected Image {label} is not valid UTF-8: {error}", stage)
+        return value, cursor
+
+    version, _ = read_u16(4)
+    architecture, _ = read_u16(6)
+    profile_value = data[8]
+    reserved = data[9:12]
+    declared_length, _ = read_u32(12)
+    operation_count, _ = read_u32(16)
+    if version != 1 or architecture != 183:
+        _product_failure("Protected Image ABI version or architecture is unsupported", stage)
+    if profile_value not in {1, 2}:
+        _product_failure("Protected Image profile is unsupported", stage)
+    if reserved != bytes(3) or declared_length != len(data) or operation_count > 1024:
+        _product_failure("Protected Image header bounds or reserved bytes are invalid", stage)
+    expected_profile_value = {"outer-execveat": 1, "host-context-entry": 2}.get(profile)
+    if expected_profile_value != profile_value:
+        _product_failure("Protected Image profile does not match the frozen unit", stage)
+
+    embedded_source = data[20:52].hex()
+    embedded_producer_build = data[52:84].hex()
+    embedded_request = data[84:116].hex()
+    if len(data) < 116:
+        _product_failure("Protected Image identity metadata is truncated", stage)
+    cursor = 116
+    embedded_unit, cursor = read_string(cursor, 128, "unit")
+    embedded_producer, cursor = read_string(cursor, 128, "producer")
+    embedded_consumer, cursor = read_string(cursor, 128, "rehydrator consumer")
+    selector_count, cursor = read_u16(cursor)
+    if selector_count == 0 or selector_count > 64:
+        _product_failure("Protected Image selector count is outside its bound", stage)
+    selectors: list[str] = []
+    for _ in range(selector_count):
+        selector, cursor = read_string(cursor, 256, "selector")
+        selectors.append(selector)
+    if cursor >= len(data) - 32:
+        _product_failure("Protected Image pass metadata is truncated", stage)
+    pass_count = data[cursor]
+    cursor += 1
+    if pass_count == 0 or pass_count > 2:
+        _product_failure("Protected Image pass count is outside its bound", stage)
+    pass_values, cursor = read_bytes(cursor, pass_count)
+    if any(value not in {0, 1} for value in pass_values) or list(pass_values) != sorted(set(pass_values)):
+        _product_failure("Protected Image passes are unsupported or not canonical", stage)
+    pass_names = ["control-flow-flattening" if value == 0 else "register-permutation" for value in pass_values]
+
+    if embedded_source != source_sha256:
+        _product_failure("Protected Image embedded Source Image hash does not match the retained source", stage)
+    if embedded_producer_build != producer_build_sha256:
+        _product_failure("Protected Image embedded producer build hash does not match the producer record", stage)
+    if embedded_request != request_sha256:
+        _product_failure("Protected Image embedded request hash does not match the producer record", stage)
+    if (embedded_unit, embedded_producer, embedded_consumer) != (unit_id, producer_id, consumer_id):
+        _product_failure("Protected Image embedded role identity does not match the producer record", stage)
+    if sha256_bytes(
+        b"URP-PROTECTION-REQUEST-V1" + bytes([0])
+        + struct.pack("<H", len(selectors))
+        + b"".join(struct.pack("<H", len(selector.encode("utf-8"))) + selector.encode("utf-8") for selector in selectors)
+        + bytes([len(pass_values)])
+        + pass_values
+    ) != embedded_request:
+        _product_failure("Protected Image request metadata is not canonically bound", stage)
+
+    operation_end = len(data) - 32
+    if operation_count < 2 or operation_count % 2 != 0:
+        _product_failure("Protected Image operation count is outside its bound", stage)
+    operations: list[tuple[int, int, dict[str, Any]]] = []
+    regions: dict[int, dict[str, Any]] = {}
+    source_ranges: list[tuple[int, int]] = []
+    fixups: list[dict[str, Any]] = []
+    for _ in range(operation_count):
+        if cursor + 8 > operation_end:
+            _product_failure("Protected Image operation header is truncated", stage)
+        code = data[cursor]
+        if data[cursor + 1 : cursor + 4] != bytes(3):
+            _product_failure("Protected Image operation reserved bytes are nonzero", stage)
+        record_size = struct.unpack_from("<I", data, cursor + 4)[0]
+        if record_size < 8 or cursor + record_size > operation_end:
+            _product_failure("Protected Image operation record length is invalid", stage)
+        body = cursor + 8
+        record_end = cursor + record_size
+        if code == 1:
+            if record_size < 32 or body + 24 > record_end:
+                _product_failure("Protected Image emitted-region operation is truncated", stage)
+            region_id = struct.unpack_from("<I", data, body)[0]
+            source_address = struct.unpack_from("<Q", data, body + 4)[0]
+            source_size = struct.unpack_from("<Q", data, body + 12)[0]
+            code_length = struct.unpack_from("<I", data, body + 20)[0]
+            if (
+                region_id == 0
+                or region_id in regions
+                or source_address & 3
+                or source_size < 4
+                or source_size & 3
+                or code_length < 4
+                or code_length > 4 * 1024 * 1024
+                or code_length & 3
+                or body + 24 + code_length != record_end
+                or source_address + source_size > (1 << 64) - 1
+            ):
+                _product_failure("Protected Image emitted-region bounds or identity are invalid", stage)
+            source_end = source_address + source_size
+            if any(source_address < end and start < source_end for start, end in source_ranges):
+                _product_failure("Protected Image source regions overlap", stage)
+            source_ranges.append((source_address, source_end))
+            region = {"regionId": region_id, "sourceAddress": source_address, "sourceSize": source_size, "codeLength": code_length}
+            regions[region_id] = region
+            operations.append((region_id, code, region))
+        elif code == 2:
+            if record_size != 36 or body + 28 != record_end:
+                _product_failure("Protected Image entry-fixup operation is truncated", stage)
+            source_region_id = struct.unpack_from("<I", data, body)[0]
+            target_region_id = struct.unpack_from("<I", data, body + 4)[0]
+            source_address = struct.unpack_from("<Q", data, body + 8)[0]
+            source_offset = struct.unpack_from("<I", data, body + 16)[0]
+            target_offset = struct.unpack_from("<I", data, body + 20)[0]
+            fixup_kind = data[body + 24]
+            if fixup_kind != 1 or data[body + 25 : body + 28] != bytes(3):
+                _product_failure("Protected Image entry-fixup kind or reserved bytes are invalid", stage)
+            fixup = {
+                "sourceRegionId": source_region_id,
+                "targetRegionId": target_region_id,
+                "sourceAddress": source_address,
+                "sourceOffset": source_offset,
+                "targetOffset": target_offset,
+            }
+            fixups.append(fixup)
+            operations.append((source_region_id, code, fixup))
+        else:
+            _product_failure("Protected Image operation code is unsupported", stage)
+        cursor = record_end
+    if cursor != operation_end or len(regions) == 0 or len(regions) != len(fixups):
+        _product_failure("Protected Image operation stream is incomplete", stage)
+    fixed_sources: set[int] = set()
+    fixup_sites: set[tuple[int, int]] = set()
+    for fixup in fixups:
+        source_region = regions.get(fixup["sourceRegionId"])
+        target_region = regions.get(fixup["targetRegionId"])
+        if source_region is None or target_region is None:
+            _product_failure("Protected Image entry-fixup references an unknown region", stage)
+        source_offset = fixup["sourceOffset"]
+        if (
+            fixup["sourceRegionId"] in fixed_sources
+            or (fixup["sourceRegionId"], source_offset) in fixup_sites
+            or fixup["sourceAddress"] != source_region["sourceAddress"]
+            or source_offset > source_region["sourceSize"]
+            or source_region["sourceSize"] - source_offset < 4
+            or source_offset & 3
+            or fixup["targetOffset"] >= target_region["codeLength"]
+            or fixup["targetOffset"] & 3
+        ):
+            _product_failure("Protected Image entry-fixup binding is invalid", stage)
+        fixed_sources.add(fixup["sourceRegionId"])
+        fixup_sites.add((fixup["sourceRegionId"], source_offset))
+    if fixed_sources != set(regions):
+        _product_failure("Protected Image contains an unbound code region", stage)
+    if [(region_id, code) for region_id, code, _ in operations] != sorted((region_id, code) for region_id, code, _ in operations):
+        _product_failure("Protected Image operations are not in canonical order", stage)
+    if sha256_bytes(data) == source_sha256:
+        _product_failure("Protected Image aliases the Source Image", stage)
+    return {"selectors": selectors, "passes": pass_names, "profileValue": profile_value}
+
+
+def _product_native_image(data: bytes, source_sha256: str, protected_sha256: str, stage: str) -> None:
+    if len(data) < 64 or data[:6] != b"\x7fELF\x02\x01":
+        _product_failure("Native Image is not bounded ELF64 little-endian data", stage)
+    if int.from_bytes(data[16:18], "little") not in {2, 3} or int.from_bytes(data[18:20], "little") != 183:
+        _product_failure("Native Image is not an AArch64 ET_EXEC/ET_DYN image", stage)
+    native_sha256 = sha256_bytes(data)
+    if native_sha256 in {source_sha256, protected_sha256}:
+        _product_failure("Native Image aliases an earlier chain artifact", stage)
+
+
+def _product_stream(root: Path, name: str, stage: str) -> tuple[Path, str]:
+    path = _product_file(root, name, stage, allow_empty=True, max_bytes=PRODUCT_MAX_STREAM_BYTES)
+    return path, sha256_file(path)
+
+
+def load_product_evidence(
+    evidence_root: Path,
+    row: Mapping[str, Any],
+    *,
+    tier: str = "pr",
+    runtime: str = "glibc",
+    require_unit_root_name: bool = True,
+) -> dict[str, Any]:
+    """Read and recompute one retained product Protected Image chain.
+
+    The function performs no writes and never executes a product target.  It
+    returns only digest-bound projections; all source files remain owned by the
+    product evidence job.  A ``ProductEvidenceError`` carries any earlier,
+    independently verified stage projections so the evaluator can retain an
+    explicit first-failure record without treating later stages as passed.
+    """
+    root = Path(evidence_root)
+    try:
+        if any(part in {"", ".", ".."} for part in root.parts) or "\\" in str(root) or any(ord(character) < 0x20 for character in str(root)):
+            raise ProductEvidenceError(f"product evidence root has an unsafe path: {root}")
+        _product_reject_symlink_components(root)
+        if root.is_symlink() or not root.is_dir():
+            raise ProductEvidenceError(f"product evidence root is absent or not a real directory: {root}")
+    except OSError as error:
+        raise ProductEvidenceError(f"cannot inspect product evidence root {root}: {error}") from error
+    root = root.resolve()
+    unit_id = _product_id(row.get("unitId"), "row.unitId", "protector")
+    profile = _product_string(row.get("profile"), "row.profile", "protector")
+    oracle_id = _product_id(row.get("oracleId"), "row.oracleId", "protector")
+    if require_unit_root_name and root.name != unit_id:
+        raise ProductEvidenceError(f"product evidence root does not end in unit {unit_id}")
+    if runtime not in {"glibc", "musl", "bionic"}:
+        raise ProductEvidenceError(f"unsupported product evidence runtime: {runtime}")
+    if tier not in {"pr", "nightly", "release"}:
+        raise ProductEvidenceError(f"unsupported product evidence tier: {tier}")
+
+    entries, product_manifest_sha256 = _product_manifest(root)
+    partial: dict[str, Mapping[str, Any]] = {}
+    source_root = root
+    source_image_sha256: str | None = None
+
+    def fail_with_context(error: ProductEvidenceError) -> None:
+        raise ProductEvidenceError(
+            str(error),
+            stage=error.stage,
+            partial_stages=partial,
+            source_root=source_root,
+            manifest_entries=entries,
+            source_image_sha256=source_image_sha256,
+            product_manifest_sha256=product_manifest_sha256,
+        )
+
+    try:
+        environment = _product_json(root, "environment.json", "protector")
+        if environment.get("schemaVersion") != 1 or environment.get("kind") != "rehydration-environment":
+            _product_failure("product environment record schema is unsupported", "protector")
+        if environment.get("tier") != tier:
+            _product_failure("product environment tier does not match the evaluator tier", "protector")
+        _product_equal(environment.get("runtime"), runtime, "environment.runtime", "protector")
+        _product_equal(environment.get("unitId"), unit_id, "environment.unitId", "protector")
+        if environment.get("architecture") not in {"aarch64", "arm64", "AArch64"}:
+            _product_failure("product environment is not AArch64", "protector")
+        if environment.get("strictLoader") != row.get("targetLoader"):
+            _product_failure("product environment loader does not match the corpus target loader", "protector")
+
+        source_path = _product_file(root, "source-image.bin", "protector", max_bytes=PRODUCT_MAX_SOURCE_IMAGE_BYTES)
+        source_image_sha256 = sha256_file(source_path)
+        producer_stage = _product_json(root, "stage.json", "protector")
+        producer_role = _product_json(root, "protected-image.json", "protector")
+        _product_status(producer_stage, "protected-image-producer", "protector")
+        if producer_role.get("schemaVersion") != 1 or producer_role.get("artifactRole") != "protected-image":
+            _product_failure("producer role is not a Protected Image role", "protector")
+        if producer_role.get("architecture") != "AArch64":
+            _product_failure("producer Protected Image architecture is unsupported", "protector")
+        for field in ("commandDigest", "environmentDigest"):
+            _product_digest(producer_stage.get(field), f"producer stage.{field}", "protector")
+        for record, label in ((producer_stage, "producer stage"), (producer_role, "producer role")):
+            _product_equal(record.get("unitId"), unit_id, f"{label}.unitId", "protector")
+            _product_equal(record.get("profile"), profile, f"{label}.profile", "protector")
+            _product_equal(record.get("sourceSha256"), source_image_sha256, f"{label}.sourceSha256", "protector")
+            _product_digest(record.get("requestSha256"), f"{label}.requestSha256", "protector")
+            _product_digest(record.get("producerBuildSha256"), f"{label}.producerBuildSha256", "protector")
+        _product_equal(producer_stage.get("producerId"), producer_role.get("producerId"), "producerId", "protector")
+        _product_equal(producer_stage.get("rehydratorConsumerId"), producer_role.get("rehydratorConsumerId"), "rehydratorConsumerId", "protector")
+        _product_equal(producer_stage.get("requestSha256"), producer_role.get("requestSha256"), "requestSha256", "protector")
+        _product_path_reference(producer_stage.get("artifactPath"), "stage.artifactPath", "protected-image.bin", "protector")
+        _product_path_reference(producer_stage.get("rolePath"), "stage.rolePath", "protected-image.json", "protector")
+        _product_path_reference(producer_stage.get("rawEvidenceManifestPath"), "stage.rawEvidenceManifestPath", "SHA256SUMS", "protector")
+        _product_path_reference(producer_role.get("rawArtifactPath"), "role.rawArtifactPath", "protected-image.bin", "protector")
+        if producer_role.get("rawArtifactRetained") is not True or producer_stage.get("publicationComplete") is not True:
+            _product_failure("producer publication is not complete and retained", "protector")
+        if producer_role.get("abiId") != "urprotect.protected-image.v1" or producer_role.get("abiVersion") != 1:
+            _product_failure("producer Protected Image ABI identity is unsupported", "protector")
+        if producer_stage.get("artifactRole") != "protected-image" or producer_stage.get("abiId") != "urprotect.protected-image.v1" or producer_stage.get("abiVersion") != 1:
+            _product_failure("producer stage does not bind Protected Image v1", "protector")
+        artifact_path = _product_file(root, "protected-image.bin", "protector", max_bytes=PRODUCT_MAX_ARTIFACT_BYTES)
+        artifact_sha256 = sha256_file(artifact_path)
+        artifact_size = artifact_path.stat().st_size
+        for record, label in ((producer_stage, "producer stage"), (producer_role, "producer role")):
+            _product_equal(record.get("artifactSha256"), artifact_sha256, f"{label}.artifactSha256", "protector")
+            _product_equal(record.get("artifactSize"), artifact_size, f"{label}.artifactSize", "protector")
+        image_metadata = _product_canonical_protected_image(
+            artifact_path.read_bytes(),
+            source_sha256=source_image_sha256,
+            request_sha256=producer_stage["requestSha256"],
+            unit_id=unit_id,
+            profile=profile,
+            producer_id=producer_stage["producerId"],
+            producer_build_sha256=producer_stage["producerBuildSha256"],
+            consumer_id=producer_stage["rehydratorConsumerId"],
+            stage="protector",
+        )
+        if producer_stage.get("transformationStatus") != "passed":
+            _product_failure("producer transformation status is not passed", "protector")
+        for record, label in ((producer_stage, "producer stage"), (producer_role, "producer role")):
+            selectors = record.get("selectors")
+            passes = record.get("passes")
+            if not isinstance(selectors, list) or any(not isinstance(item, str) for item in selectors):
+                _product_failure(f"{label} selectors are malformed", "protector")
+            if not isinstance(passes, list) or any(not isinstance(item, str) for item in passes):
+                _product_failure(f"{label} passes are malformed", "protector")
+            _product_equal(selectors, image_metadata["selectors"], f"{label}.selectors", "protector")
+            _product_equal(passes, image_metadata["passes"], f"{label}.passes", "protector")
+        partial["protector"] = {
+            "status": "passed",
+            "unitId": unit_id,
+            "profile": profile,
+            "sourceImageSha256": source_image_sha256,
+            "outputSha256": artifact_sha256,
+            "producerId": producer_role.get("producerId"),
+            "producerBuildSha256": producer_role.get("producerBuildSha256"),
+            "requestSha256": producer_role.get("requestSha256"),
+        }
+
+        partial["protected-image"] = {
+            "status": "passed",
+            "unitId": unit_id,
+            "profile": profile,
+            "sourceImageSha256": source_image_sha256,
+            "artifactSha256": artifact_sha256,
+            "abiId": producer_role.get("abiId"),
+            "abiVersion": str(producer_role.get("abiVersion")),
+            "producerId": producer_role.get("producerId"),
+            "producerBuildSha256": producer_role.get("producerBuildSha256"),
+            "requestSha256": producer_role.get("requestSha256"),
+        }
+
+        rehydration = _product_json(root, "rehydration.json", "rehydration")
+        _product_status(rehydration, "rehydration", "rehydration")
+        _product_digest(rehydration.get("consumerBuildSha256"), "rehydration.consumerBuildSha256", "rehydration")
+        for field, expected in (
+            ("unitId", unit_id),
+            ("profile", profile),
+            ("sourceSha256", source_image_sha256),
+            ("requestSha256", producer_role.get("requestSha256")),
+            ("protectedImageSha256", artifact_sha256),
+            ("protectedImageSize", artifact_size),
+            ("producerId", producer_role.get("producerId")),
+            ("producerBuildSha256", producer_role.get("producerBuildSha256")),
+            ("consumerId", producer_role.get("rehydratorConsumerId")),
+        ):
+            _product_equal(rehydration.get(field), expected, f"rehydration.{field}", "rehydration")
+        if rehydration.get("abiId") != "urprotect.protected-image.v1" or rehydration.get("abiVersion") != 1 or rehydration.get("architecture") != "AArch64":
+            _product_failure("rehydration ABI or architecture binding is unsupported", "rehydration")
+        if rehydration.get("layoutStrategy") != "append-executable-pt-load-v1" or rehydration.get("materializationStatus") != "passed":
+            _product_failure("rehydration materialization strategy/status is unsupported", "rehydration")
+        native_image_sha256 = _product_digest(rehydration.get("nativeImageSha256"), "rehydration.nativeImageSha256", "rehydration")
+        if rehydration.get("nativeImageSize") is None or not isinstance(rehydration.get("nativeImageSize"), int) or rehydration["nativeImageSize"] <= 0:
+            _product_failure("rehydration Native Image size is invalid", "rehydration")
+        _product_path_reference(rehydration.get("handoffRecordPath"), "rehydration.handoffRecordPath", "handoff.json", "rehydration")
+        _product_path_reference(rehydration.get("rawEvidenceManifestPath"), "rehydration.rawEvidenceManifestPath", "SHA256SUMS", "rehydration")
+        partial["rehydration"] = {
+            "status": "passed",
+            "unitId": unit_id,
+            "profile": profile,
+            "sourceImageSha256": source_image_sha256,
+            "protectedImageSha256": artifact_sha256,
+            "nativeImageSha256": native_image_sha256,
+            "consumerId": rehydration.get("consumerId"),
+            "producerId": rehydration.get("producerId"),
+            "producerBuildSha256": rehydration.get("producerBuildSha256"),
+            "consumerBuildSha256": rehydration.get("consumerBuildSha256"),
+            "requestSha256": rehydration.get("requestSha256"),
+        }
+        _product_digest(rehydration.get("handoffRecordSha256"), "rehydration.handoffRecordSha256", "rehydration")
+        _product_digest(rehydration.get("preHandoffRecordSha256"), "rehydration.preHandoffRecordSha256", "rehydration")
+        native_path = _product_file(root, "native-image.bin", "native-image", max_bytes=PRODUCT_MAX_NATIVE_IMAGE_BYTES)
+        native_bytes = native_path.read_bytes()
+        _product_equal(sha256_bytes(native_bytes), native_image_sha256, "rehydration.nativeImageSha256", "native-image")
+        _product_equal(len(native_bytes), rehydration.get("nativeImageSize"), "rehydration.nativeImageSize", "native-image")
+
+        native_role = _product_json(root, "native-image.json", "native-image")
+        if native_role.get("schemaVersion") != 1 or native_role.get("artifactRole") != "native-image":
+            _product_failure("Native Image role identity is unsupported", "native-image")
+        if native_role.get("abiId") != "urprotect.native-image.v1" or native_role.get("abiVersion") != 1 or native_role.get("architecture") != "AArch64":
+            _product_failure("Native Image role ABI or architecture is unsupported", "native-image")
+        for field, expected in (
+            ("unitId", unit_id),
+            ("profile", profile),
+            ("sourceSha256", source_image_sha256),
+            ("protectedImageSha256", artifact_sha256),
+            ("producerId", producer_role.get("producerId")),
+            ("producerBuildSha256", producer_role.get("producerBuildSha256")),
+            ("consumerId", rehydration.get("consumerId")),
+            ("consumerBuildSha256", rehydration.get("consumerBuildSha256")),
+            ("nativeImageSha256", native_image_sha256),
+            ("nativeImageSize", len(native_bytes)),
+            ("rehydrationRecordSha256", sha256_file(root / "rehydration.json")),
+        ):
+            _product_equal(native_role.get(field), expected, f"native-image.{field}", "native-image")
+        _product_native_image(native_bytes, source_image_sha256, artifact_sha256, "native-image")
+        partial["native-image"] = {
+            "status": "passed",
+            "unitId": unit_id,
+            "profile": profile,
+            "sourceImageSha256": source_image_sha256,
+            "sha256": native_image_sha256,
+            "nativeImageSha256": native_image_sha256,
+            "nativeImageSize": len(native_bytes),
+            "consumerId": native_role.get("consumerId"),
+            "consumerBuildSha256": native_role.get("consumerBuildSha256"),
+        }
+
+        handoff_path = _product_file(root, "handoff.json", "target-loader", max_bytes=PRODUCT_MAX_RECORD_BYTES)
+        handoff = _product_json(root, "handoff.json", "target-loader")
+        handoff_sha256 = sha256_file(handoff_path)
+        _product_equal(rehydration.get("handoffRecordSha256"), handoff_sha256, "rehydration.handoffRecordSha256", "target-loader")
+        _product_equal(rehydration.get("handoffStatus"), handoff.get("status"), "rehydration.handoffStatus", "target-loader")
+        _product_status(handoff, "native-handoff", "target-loader")
+        if handoff.get("loaderId") != row.get("targetLoader"):
+            _product_failure("native handoff loader identity differs from the corpus target", "target-loader")
+        _product_equal(handoff.get("nativeImageSha256"), native_image_sha256, "handoff.nativeImageSha256", "target-loader")
+        _product_equal(handoff.get("rehydrationRecordSha256"), rehydration.get("preHandoffRecordSha256"), "handoff.rehydrationRecordSha256", "target-loader")
+        for field in ("helperStatus", "fchmodStatus", "fsyncStatus", "execveatStatus"):
+            if handoff.get(field) != "passed":
+                _product_failure(f"native handoff {field} did not pass", "target-loader")
+        for field in ("memfdCreated", "sealsSupported", "sealsApplied", "execveatInvoked"):
+            if handoff.get(field) is not True:
+                _product_failure(f"native handoff {field} was not proven", "target-loader")
+        target_status = handoff.get("targetStatus")
+        if (
+            handoff.get("helperExitCode") != 0
+            or isinstance(target_status, bool)
+            or not isinstance(target_status, int)
+            or not 0 <= target_status <= 255
+            or handoff.get("targetSignal") is not None
+        ):
+            _product_failure("native handoff target result is malformed", "target-loader")
+        stdout_path, stdout_sha256 = _product_stream(root, "target.stdout", "target-loader")
+        stderr_path, stderr_sha256 = _product_stream(root, "target.stderr", "target-loader")
+        if (
+            handoff.get("stdoutBytes") != stdout_path.stat().st_size
+            or handoff.get("stderrBytes") != stderr_path.stat().st_size
+            or handoff.get("stdoutTruncated") is not False
+            or handoff.get("stderrTruncated") is not False
+        ):
+            _product_failure("native handoff retained stream metadata is malformed", "target-loader")
+        target_loader = _product_json(root, "target-loader.json", "target-loader")
+        _product_status(target_loader, "target-loader", "target-loader")
+        if target_loader.get("loaderId") != row.get("targetLoader"):
+            _product_failure("target-loader identity differs from the corpus target", "target-loader")
+        _product_equal(target_loader.get("nativeImageSha256"), native_image_sha256, "target-loader.nativeImageSha256", "target-loader")
+        _product_equal(target_loader.get("evidenceSha256"), handoff_sha256, "target-loader.evidenceSha256", "target-loader")
+        target_loader_status = target_loader.get("targetStatus")
+        if isinstance(target_loader_status, bool) or not isinstance(target_loader_status, int) or not 0 <= target_loader_status <= 255:
+            _product_failure("target-loader target status is malformed", "target-loader")
+        _product_equal(target_loader_status, handoff.get("targetStatus"), "target-loader.targetStatus", "target-loader")
+        _product_equal(target_loader.get("targetSignal"), handoff.get("targetSignal"), "target-loader.targetSignal", "target-loader")
+        _product_equal(target_loader.get("stdoutSha256"), stdout_sha256, "target-loader.stdoutSha256", "target-loader")
+        _product_equal(target_loader.get("stderrSha256"), stderr_sha256, "target-loader.stderrSha256", "target-loader")
+        _product_equal(target_loader.get("stdoutBytes"), stdout_path.stat().st_size, "target-loader.stdoutBytes", "target-loader")
+        _product_equal(target_loader.get("stderrBytes"), stderr_path.stat().st_size, "target-loader.stderrBytes", "target-loader")
+        if target_loader.get("firstFailureStage") is not None:
+            _product_failure("passed target-loader record contains a failure stage", "target-loader")
+        partial["target-loader"] = {
+            "status": "passed",
+            "unitId": unit_id,
+            "profile": profile,
+            "sourceImageSha256": source_image_sha256,
+            "nativeImageSha256": native_image_sha256,
+            "evidenceSha256": handoff_sha256,
+            "loaderId": target_loader.get("loaderId"),
+            "targetStatus": target_loader.get("targetStatus"),
+            "targetSignal": target_loader.get("targetSignal"),
+        }
+
+        oracle = _product_json(root, "behavioral-oracle.json", "behavioral-oracle")
+        _product_status(oracle, "behavioral-oracle", "behavioral-oracle")
+        if oracle.get("oracleId") != oracle_id:
+            _product_failure("behavioral oracle identity differs from the corpus oracle", "behavioral-oracle")
+        _product_equal(oracle.get("sourceSha256"), source_image_sha256, "behavioral-oracle.sourceSha256", "behavioral-oracle")
+        _product_equal(oracle.get("nativeImageSha256"), native_image_sha256, "behavioral-oracle.nativeImageSha256", "behavioral-oracle")
+        _product_equal(oracle.get("baselineStatus"), 0, "behavioral-oracle.baselineStatus", "behavioral-oracle")
+        _product_equal(oracle.get("targetStatus"), 0, "behavioral-oracle.targetStatus", "behavioral-oracle")
+        for field in ("stdoutEqual", "stderrEqual"):
+            if oracle.get(field) is not True:
+                _product_failure(f"behavioral oracle {field} did not pass", "behavioral-oracle")
+        comparison_path = _product_file(root, "behavior-comparison.json", "behavioral-oracle", max_bytes=PRODUCT_MAX_RECORD_BYTES)
+        comparison_sha256 = sha256_file(comparison_path)
+        _product_equal(oracle.get("comparisonSha256"), comparison_sha256, "behavioral-oracle.comparisonSha256", "behavioral-oracle")
+        comparison = _product_json(root, "behavior-comparison.json", "behavioral-oracle")
+        for field, expected in (("unitId", unit_id), ("oracleId", oracle_id), ("sourceSha256", source_image_sha256), ("nativeImageSha256", native_image_sha256)):
+            _product_equal(comparison.get(field), expected, f"behavior-comparison.{field}", "behavioral-oracle")
+        for field in ("statusEqual", "stdoutEqual", "stderrEqual"):
+            if comparison.get(field) is not True:
+                _product_failure(f"behavior comparison {field} did not pass", "behavioral-oracle")
+        for baseline_name, target_name, baseline_field, target_field in (
+            ("baseline.stdout", "target.stdout", "baselineStdoutSha256", "targetStdoutSha256"),
+            ("baseline.stderr", "target.stderr", "baselineStderrSha256", "targetStderrSha256"),
+        ):
+            baseline_path, baseline_sha256 = _product_stream(root, baseline_name, "behavioral-oracle")
+            target_path, target_sha256 = _product_stream(root, target_name, "behavioral-oracle")
+            if baseline_path.read_bytes() != target_path.read_bytes():
+                _product_failure("behavioral oracle retained streams differ", "behavioral-oracle")
+            _product_equal(comparison.get(baseline_field), baseline_sha256, f"behavior-comparison.{baseline_field}", "behavioral-oracle")
+            _product_equal(comparison.get(target_field), target_sha256, f"behavior-comparison.{target_field}", "behavioral-oracle")
+        partial["behavioral-oracle"] = {
+            "status": "passed",
+            "unitId": unit_id,
+            "profile": profile,
+            "sourceImageSha256": source_image_sha256,
+            "comparisonSha256": comparison_sha256,
+            "oracleId": oracle_id,
+            "nativeImageSha256": native_image_sha256,
+            "statusEqual": True,
+            "stdoutEqual": True,
+            "stderrEqual": True,
+        }
+    except ProductEvidenceError as error:
+        fail_with_context(error)
+    except (EvaluatorError, OSError, ValueError) as error:
+        fail_with_context(ProductEvidenceError(str(error), stage="protector"))
+
+    return {
+        "root": root,
+        "manifestEntries": entries,
+        "productManifestSha256": product_manifest_sha256,
+        "sourceImageSha256": source_image_sha256,
+        "sourceSha256": row.get("sourceSha256"),
+        "unitId": unit_id,
+        "profile": profile,
+        "runtime": runtime,
+        "oracleId": oracle_id,
+        "stages": partial,
+    }
+
+
+def copy_verified_product_evidence(source_root: Path, manifest_entries: Mapping[str, str], destination: Path) -> None:
+    """Copy only files already covered by a verified product manifest."""
+    source_root = Path(source_root)
+    destination.mkdir(parents=True, exist_ok=True)
+    for relative_name, expected_digest in sorted(manifest_entries.items()):
+        relative = safe_relative_path(relative_name, "product evidence manifest path")
+        source = source_root / relative
+        if source.is_symlink() or not source.is_file():
+            fail(f"product evidence changed after verification: {relative_name}")
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() or target.is_symlink():
+            fail(f"evaluator product evidence destination already exists: {relative_name}")
+        with source.open("rb") as input_stream, target.open("xb") as output_stream:
+            for chunk in iter(lambda: input_stream.read(1024 * 1024), b""):
+                output_stream.write(chunk)
+        if sha256_file(target) != expected_digest:
+            fail(f"product evidence changed while copying: {relative_name}")
+    source_manifest = source_root / "SHA256SUMS"
+    if source_manifest.is_symlink() or not source_manifest.is_file():
+        fail("product evidence manifest disappeared while copying")
+    target_manifest = destination / "SHA256SUMS"
+    if target_manifest.exists() or target_manifest.is_symlink():
+        fail("evaluator product evidence destination already contains SHA256SUMS")
+    with source_manifest.open("rb") as input_stream, target_manifest.open("xb") as output_stream:
+        for chunk in iter(lambda: input_stream.read(1024 * 1024), b""):
+            output_stream.write(chunk)
+    if sha256_file(target_manifest) != sha256_file(source_manifest):
+        fail("product evidence manifest changed while copying")
 
 
 def _reject_symlink_path(path: Path, root: Path, field: str) -> None:
@@ -603,6 +1459,14 @@ def validate_unit_record(unit: Mapping[str, Any], row: Mapping[str, Any]) -> tup
     _require_root(unit, "compatibility-unit")
     require_id(unit.get("unitId"), "unit.unitId")
     require_digest(unit.get("sourceSha256"), "unit.sourceSha256")
+    strict_chain_measured = unit.get("strictChainMeasured") is True
+    if strict_chain_measured:
+        require_digest(unit.get("sourceImageSha256"), "unit.sourceImageSha256")
+        product_binding = unit.get("productEvidence")
+        if not isinstance(product_binding, dict):
+            fail("strict compatibility unit must bind product evidence")
+        safe_relative_path(product_binding.get("rawRoot"), "unit.productEvidence.rawRoot")
+        require_digest(product_binding.get("manifestSha256"), "unit.productEvidence.manifestSha256")
     for field in ("corpusVersion", "profile", "runtimeCell", "targetLoader", "oracleId"):
         require_string(unit.get(field), f"unit.{field}")
     if unit.get("targetLoader") != row.get("targetLoader"):
@@ -625,6 +1489,11 @@ def validate_unit_record(unit: Mapping[str, Any], row: Mapping[str, Any]) -> tup
             fail(f"unit.stages.{stage_name}.reason is required for non-passed status")
         if stage.get("status") == "passed":
             validate_stage_record(stage_name, stage)
+            if strict_chain_measured:
+                if stage.get("unitId") != unit.get("unitId") or stage.get("profile") != unit.get("profile"):
+                    fail(f"strict stage {stage_name} does not bind the compatibility unit")
+                if stage.get("sourceImageSha256") != unit.get("sourceImageSha256"):
+                    fail(f"strict stage {stage_name} does not bind the Source Image")
     complete, first_failure = derive_unit_completion(unit, row)
     if unit.get("complete") is not complete:
         fail(f"unit.complete is not the derived value for {unit.get('unitId')}")

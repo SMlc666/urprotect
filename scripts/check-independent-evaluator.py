@@ -16,6 +16,7 @@ from evaluator_lib import (
     calculate_compatibility,
     calculate_scheme_gate,
     inventory_digest,
+    load_product_evidence,
     read_json,
     sha256_file,
     validate_all_manifests,
@@ -216,6 +217,40 @@ def check_evidence(root: Path) -> dict[str, Any]:
         unit = read_json(unit_path)
         units.append(unit)
         check_raw_manifest(root, unit.get("rawEvidenceManifest"), f"compatibility {row['unitId']}")
+        if unit.get("strictChainMeasured") is True:
+            product_binding = unit.get("productEvidence")
+            if not isinstance(product_binding, dict):
+                fail(f"strict compatibility unit is missing product evidence binding: {row['unitId']}")
+            product_root = safe_artifact_path(
+                unit_path.parent,
+                product_binding.get("rawRoot"),
+                f"compatibility {row['unitId']}.productEvidence.rawRoot",
+            )
+            runtime = "glibc"
+            if ".musl." in row["unitId"]:
+                runtime = "musl"
+            elif ".bionic." in row["unitId"]:
+                runtime = "bionic"
+            product_environment = read_json(product_root / "environment.json")
+            product_tier = product_environment.get("tier")
+            if root.name in {"pr", "nightly", "release"} and product_tier != root.name:
+                fail(f"strict product evidence tier does not match evaluator tier: {row['unitId']}")
+            try:
+                recomputed_product = load_product_evidence(
+                    product_root,
+                    row,
+                    tier=product_tier,
+                    runtime=runtime,
+                    require_unit_root_name=False,
+                )
+            except EvaluatorError as error:
+                fail(f"strict product evidence could not be recomputed: {error}")
+            if recomputed_product["stages"] != unit.get("stages"):
+                fail(f"strict compatibility stages differ from recomputed product evidence: {row['unitId']}")
+            if unit.get("sourceImageSha256") != recomputed_product.get("sourceImageSha256"):
+                fail(f"strict compatibility source-image binding differs from product evidence: {row['unitId']}")
+            if product_binding.get("manifestSha256") != recomputed_product.get("productManifestSha256"):
+                fail(f"strict compatibility product manifest binding differs from product evidence: {row['unitId']}")
     compatibility = calculate_compatibility(manifests["corpus"], manifests["baseline"], units)
     compatibility_gate = gate.get("compatibility")
     if not isinstance(compatibility_gate, dict):

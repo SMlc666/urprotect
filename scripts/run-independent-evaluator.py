@@ -22,11 +22,15 @@ from typing import Any
 from evaluator_lib import (
     COMPATIBILITY_STAGES,
     EvaluatorError,
+    ProductEvidenceError,
     calculate_anti_gaming,
     calculate_compatibility,
     calculate_scheme_gate,
     canonical_json,
+    copy_verified_product_evidence,
     inventory_digest,
+    load_product_evidence,
+    project_product_failure,
     sha256_file,
     validate_all_manifests,
     validate_no_symlinks,
@@ -41,6 +45,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tier", choices=("pr", "nightly", "release"), default="pr")
     parser.add_argument("--output-root", type=Path, help="evaluator evidence directory (default: .artifacts/evaluator/<tier>)")
+    parser.add_argument(
+        "--product-evidence-root",
+        type=Path,
+        help="read-only Protected Image evidence unit (default: EVALUATOR_PRODUCT_EVIDENCE_ROOT or .artifacts/protected-image/<tier>/glibc/<unit>)",
+    )
     parser.add_argument("--keep-existing", action="store_true", help="fail instead of replacing only the evaluator's previous output directory")
     return parser.parse_args()
 
@@ -58,7 +67,7 @@ def copy_file(source: Path, destination: Path) -> None:
 def write_raw_manifest(raw_root: Path) -> Path:
     entries: list[str] = []
     for path in sorted(raw_root.rglob("*")):
-        if not path.is_file() or path.name == "SHA256SUMS":
+        if not path.is_file() or path == raw_root / "SHA256SUMS":
             continue
         entries.append(f"{sha256_file(path)}  {path.relative_to(raw_root).as_posix()}\n")
     manifest = raw_root / "SHA256SUMS"
@@ -155,45 +164,129 @@ def build_environment(root: Path, protocol: dict[str, Any], scheme: dict[str, An
     return environment
 
 
-def make_compatibility_unit(root: Path, row: dict[str, Any], corpus: dict[str, Any]) -> dict[str, Any]:
+def default_product_evidence_root(tier: str, unit_id: str) -> Path:
+    configured = os.environ.get("EVALUATOR_PRODUCT_EVIDENCE_ROOT")
+    if configured:
+        return Path(configured)
+    return REPO_ROOT / ".artifacts" / "protected-image" / tier / "glibc" / unit_id
+
+
+def _compatibility_fallback_stages(
+    row: dict[str, Any],
+    error: ProductEvidenceError | None,
+) -> tuple[dict[str, dict[str, Any]], str]:
+    del row
+    absent_reason = "strict Protected Image product evidence is absent; auxiliary direct ELF/wrapper evidence is not a strict-chain result"
+    if error is None:
+        return (
+            {
+                stage: {"status": "not-applicable", "reason": absent_reason}
+                for stage in COMPATIBILITY_STAGES
+            },
+            absent_reason,
+        )
+    return project_product_failure(error)
+
+
+def make_compatibility_unit(
+    root: Path,
+    row: dict[str, Any],
+    corpus: dict[str, Any],
+    *,
+    tier: str = "pr",
+    product_evidence_root: Path | None = None,
+) -> dict[str, Any]:
     unit_root = root / "compatibility" / row["unitId"]
     raw_root = unit_root / "raw"
+    product_root = product_evidence_root or default_product_evidence_root(tier, row["unitId"])
+    product: dict[str, Any] | None = None
+    product_error: ProductEvidenceError | None = None
+    try:
+        product = load_product_evidence(product_root, row, tier=tier, runtime="glibc")
+    except ProductEvidenceError as error:
+        # Absence retains the historical baseline-zero/not-applicable projection;
+        # a present but malformed tree is retained as an explicit failure row.
+        if not product_root.exists() and not product_root.is_symlink():
+            product_error = None
+        else:
+            product_error = error
+
+    raw_root.mkdir(parents=True, exist_ok=True)
+    copied_product = False
+    product_manifest_sha256: str | None = None
+    source_image_sha256: str | None = None
+    if product is not None:
+        copy_verified_product_evidence(product["root"], product["manifestEntries"], raw_root / "product-chain")
+        copied_product = True
+        product_manifest_sha256 = product["productManifestSha256"]
+        source_image_sha256 = product["sourceImageSha256"]
+    elif product_error is not None and product_error.source_root is not None and product_error.manifest_entries:
+        copy_verified_product_evidence(product_error.source_root, product_error.manifest_entries, raw_root / "product-chain")
+        copied_product = True
+        product_manifest_sha256 = product_error.product_manifest_sha256
+        source_image_sha256 = product_error.source_image_sha256
+
+    if product is not None:
+        stages = {stage: dict(record) for stage, record in product["stages"].items()}
+        reason = "all retained product Protected Image, rehydration, Native Image, loader, and behavioral-oracle records passed"
+        strict_status = "measured"
+        strict_chain_measured = True
+        first_failure = None
+        complete = True
+    else:
+        stages, reason = _compatibility_fallback_stages(row, product_error)
+        strict_status = "baseline-zero" if product_error is None else "product-evidence-invalid"
+        strict_chain_measured = False
+        first_failure = None
+        complete = False
+        for stage in COMPATIBILITY_STAGES:
+            if stages[stage]["status"] != "passed":
+                first_failure = stage
+                break
+        if first_failure is None:
+            first_failure = "protector"
+
     write_json(
         raw_root / "strict-chain-status.json",
         {
             "schemaVersion": 1,
-                "status": "baseline-zero",
+            "status": strict_status,
             "statusOwner": "independent-evaluator",
-            "strictChainMeasured": False,
-            "reason": "The current product declares no Protected Image ABI or rehydration consumer; auxiliary direct ELF/wrapper evidence is not a strict-chain result.",
+            "strictChainMeasured": strict_chain_measured,
+            "reason": reason,
             "auxiliaryEvidence": row.get("auxiliaryEvidence", []),
-            "nativeResultsCaptured": False,
+            "nativeResultsCaptured": "native-image" in stages and stages["native-image"].get("status") == "passed",
+            "sourceSha256": row.get("sourceSha256"),
+            "sourceImageSha256": source_image_sha256,
+            "productEvidenceManifestSha256": product_manifest_sha256,
+            "firstFailureLayer": first_failure,
         },
     )
     raw_manifest = write_raw_manifest(raw_root)
-    stages = {
-        stage: {
-            "status": "not-applicable",
-            "reason": "strict Protected Image chain is not declared by the current product",
-        }
-        for stage in COMPATIBILITY_STAGES
-    }
     unit = {
         "schemaVersion": 1,
         "kind": "compatibility-unit",
         "unitId": row["unitId"],
         "corpusVersion": corpus["corpusVersion"],
         "sourceSha256": row["sourceSha256"],
+        "sourceImageSha256": source_image_sha256,
         "profile": row["profile"],
         "runtimeCell": row["runtimeCell"],
         "targetLoader": row["targetLoader"],
         "oracleId": row["oracleId"],
         "statusOwner": "independent-evaluator",
         "stages": stages,
-        "complete": False,
-        "firstFailureLayer": "protector",
+        "complete": complete,
+        "firstFailureLayer": None if complete else first_failure,
         "rawEvidenceManifest": str(raw_manifest.relative_to(root)),
-        "evidenceStatus": "baseline-zero",
+        "evidenceStatus": strict_status,
+        "strictChainMeasured": strict_chain_measured,
+        "productEvidence": {
+            "rawRoot": "raw/product-chain",
+            "manifestSha256": product_manifest_sha256,
+        }
+        if copied_product
+        else None,
         "auxiliaryEvidence": row.get("auxiliaryEvidence", []),
     }
     write_json(unit_root / "unit.json", unit)
@@ -462,7 +555,18 @@ def main() -> int:
         )
         copy_manifests(output_root)
         environment = build_environment(output_root, manifests["protocol"], manifests["scheme"])
-        units = [make_compatibility_unit(output_root, row, manifests["corpus"]) for row in manifests["rows"] if row.get("required") and row.get("applicable")]
+        product_evidence_root = args.product_evidence_root
+        units = [
+            make_compatibility_unit(
+                output_root,
+                row,
+                manifests["corpus"],
+                tier=args.tier,
+                product_evidence_root=product_evidence_root,
+            )
+            for row in manifests["rows"]
+            if row.get("required") and row.get("applicable")
+        ]
         compatibility = calculate_compatibility(manifests["corpus"], manifests["baseline"], units)
         attempts: dict[tuple[str, str, int], dict[str, Any]] = {}
         for family in manifests["families"]:

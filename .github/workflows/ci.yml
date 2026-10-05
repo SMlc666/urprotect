@@ -932,6 +932,13 @@ jobs:
       EVALUATOR_MUSL_RESULT: ${{ needs['musl-container-smoke'].result }}
     steps:
       - uses: actions/checkout@v4
+      - name: Download build-and-test Protected Image evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: test-evidence-${{ github.run_id }}
+          path: .
       - name: Select evaluator tier
         run: |
           case "${GITHUB_EVENT_NAME}" in

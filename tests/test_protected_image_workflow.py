@@ -31,6 +31,17 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         self.assertIn("if: always()", self.workflow[checker:upload])
         self.assertIn(".artifacts/protected-image/", self.workflow[upload : upload + 700])
 
+    def test_independent_evaluator_downloads_product_chain_evidence(self) -> None:
+        evaluator = self.workflow.index("independent-evaluator:")
+        download = self.workflow.index("Download build-and-test Protected Image evidence", evaluator)
+        select = self.workflow.index("Select evaluator tier", download)
+        block = self.workflow[download:select]
+        self.assertIn("if: always()", block)
+        self.assertIn("continue-on-error: true", block)
+        self.assertIn("actions/download-artifact@v4", block)
+        self.assertIn("test-evidence-${{ github.run_id }}", block)
+        self.assertIn("path: .", block)
+
     def test_runner_and_checker_are_checked_in(self) -> None:
         self.assertTrue(RUNNER.is_file())
         self.assertTrue(CHECKER.is_file())
