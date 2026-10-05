@@ -25,7 +25,8 @@
     "10-05-generic-rehydration-native-handoff-v1",
     "10-05-evaluator-strict-chain-v1",
     "10-05-analyze-strict-chain-evaluator",
-    "10-05-freeze-positive-immutable-baseline-v2"
+    "10-05-freeze-positive-immutable-baseline-v2",
+    "10-05-activate-positive-baseline-v2-evaluator"
   ],
   "parent": null,
   "relatedFiles": [],

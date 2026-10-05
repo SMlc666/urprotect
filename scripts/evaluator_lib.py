@@ -1316,10 +1316,28 @@ def validate_scheme_manifest(scheme: Mapping[str, Any]) -> tuple[dict[str, Any],
     return tuple(normalized)
 
 
-def validate_baseline_reference(reference: Mapping[str, Any], repo_root: Path) -> dict[str, Any]:
+def validate_baseline_reference(
+    reference: Mapping[str, Any],
+    repo_root: Path,
+    *,
+    artifact_path_override: Path | None = None,
+) -> dict[str, Any]:
     _require_root(reference, "evaluator-baseline-reference")
-    artifact_path = resolve_repo_path(repo_root, reference.get("baselineArtifactPath"), "baselineArtifactPath", require_file=True)
     expected = require_digest(reference.get("baselineArtifactSha256"), "baselineArtifactSha256")
+    declared_artifact_path = resolve_repo_path(
+        repo_root,
+        reference.get("baselineArtifactPath"),
+        "baselineArtifactPath",
+        require_file=True,
+    )
+    if artifact_path_override is None:
+        artifact_path = declared_artifact_path
+    else:
+        artifact_path = artifact_path_override
+        if artifact_path.is_symlink() or not artifact_path.is_file():
+            fail("baseline artifact copy must be a regular non-symlink file")
+        if sha256_file(declared_artifact_path) != expected:
+            fail("baseline artifact source digest does not match baseline reference")
     actual = sha256_file(artifact_path)
     if actual != expected:
         fail("baseline artifact digest does not match baseline-reference.json")
@@ -1329,18 +1347,23 @@ def validate_baseline_reference(reference: Mapping[str, Any], repo_root: Path) -
         fail("baseline artifact is not immutable or has an invalid status")
     if artifact.get("commit") != reference.get("baselineCommit"):
         fail("baseline commit mismatch")
-    if artifact.get("immutableArtifactId") != reference.get("baselineArtifactId"):
+    artifact_id = artifact.get("baselineArtifactId", artifact.get("immutableArtifactId"))
+    if artifact_id != reference.get("baselineArtifactId"):
         fail("baseline immutable artifact ID mismatch")
-    if artifact.get("completeUnits") != reference.get("completeUnits"):
+    artifact_complete_units = require_int(artifact.get("completeUnits"), "baseline.completeUnits", minimum=0)
+    reference_complete_units = require_int(reference.get("completeUnits"), "baseline-reference.completeUnits", minimum=0)
+    artifact_fixed_rows = require_int(artifact.get("fixedCorpusRows"), "baseline.fixedCorpusRows", minimum=0)
+    reference_fixed_rows = require_int(reference.get("fixedCorpusRows"), "baseline-reference.fixedCorpusRows", minimum=0)
+    if artifact_complete_units != reference_complete_units:
         fail("baseline complete-unit count mismatch")
-    if artifact.get("fixedCorpusRows") != reference.get("fixedCorpusRows"):
+    if artifact_fixed_rows != reference_fixed_rows:
         fail("baseline fixed-row count mismatch")
     complete_ids = artifact.get("completeUnitIds")
     if not isinstance(complete_ids, list) or any(not isinstance(item, str) for item in complete_ids):
         fail("baseline completeUnitIds must be a string list")
     for index, item in enumerate(complete_ids):
         require_id(item, f"baseline.completeUnitIds[{index}]")
-    if len(complete_ids) != len(set(complete_ids)) or len(complete_ids) != artifact.get("completeUnits"):
+    if len(complete_ids) != len(set(complete_ids)) or len(complete_ids) != artifact_complete_units:
         fail("baseline completeUnitIds do not match completeUnits")
     if reference.get("baselineStatus") != artifact.get("baselineStatus"):
         fail("baseline status mismatch")
@@ -1348,12 +1371,142 @@ def validate_baseline_reference(reference: Mapping[str, Any], repo_root: Path) -
         fail("baseline strength status mismatch")
     require_string(reference.get("baselineArtifactId"), "baselineArtifactId")
     require_string(reference.get("schemeProtocolVersion"), "schemeProtocolVersion")
-    if not reference.get("contentAddressed") or not reference.get("neverOverwrite"):
+    if reference.get("immutable") is not True or reference.get("contentAddressed") is not True or reference.get("neverOverwrite") is not True:
         fail("baseline reference must be immutable and content addressed")
+    if artifact_complete_units > 0:
+        if artifact.get("immutable") is not True or artifact.get("contentAddressed") is not True or artifact.get("neverOverwrite") is not True:
+            fail("positive baseline payload must be immutable, content addressed, and never overwritten")
     return artifact
 
 
-def validate_all_manifests(repo_root: Path, *, protocol_path: Path, corpus_path: Path, scheme_path: Path, oracle_path: Path, baseline_reference_path: Path) -> dict[str, Any]:
+def validate_positive_baseline_v2(
+    artifact: Mapping[str, Any],
+    reference: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    corpus: Mapping[str, Any],
+    protocol: Mapping[str, Any],
+    scheme: Mapping[str, Any],
+    rows: Iterable[Mapping[str, Any]],
+    corpus_path: Path,
+    protocol_path: Path,
+    scheme_path: Path,
+    oracle_path: Path,
+) -> None:
+    """Validate the frozen v2 denominator's identity and six-stage summary."""
+    if reference.get("baselineArtifactId") != "compatibility-1x-v2":
+        return
+    fixed_ids = corpus.get("fixedRowIds")
+    if not isinstance(fixed_ids, list) or len(fixed_ids) != 1:
+        fail("positive baseline v2 requires exactly one frozen fixed compatibility unit")
+    unit_id = fixed_ids[0]
+    row_by_id = {row.get("unitId"): row for row in rows}
+    row = row_by_id.get(unit_id)
+    if not isinstance(row, Mapping):
+        fail("positive baseline v2 fixed unit is absent from the validated corpus")
+    if artifact.get("baselineVersion") != "compatibility-1x-v2" or artifact.get("baselineArtifactId") != reference.get("baselineArtifactId"):
+        fail("positive baseline v2 payload identity mismatch")
+    if artifact.get("baselineStatus") != "measured" or artifact.get("completeUnits") != 1:
+        fail("positive baseline v2 must record exactly one measured complete unit")
+    if artifact.get("completeUnitIds") != [unit_id] or reference.get("completeUnits") != 1:
+        fail("positive baseline v2 complete unit does not match the frozen fixed row")
+    if artifact.get("claimable") is not False or artifact.get("rawEvidenceStatus") != "captured":
+        fail("positive baseline v2 must remain non-claimable with captured raw evidence")
+
+    identity = artifact.get("identity")
+    if not isinstance(identity, Mapping):
+        fail("positive baseline v2 identity record is missing")
+    identity_expected = {
+        "completeUnits": 1,
+        "corpusManifestSha256": sha256_file(corpus_path),
+        "corpusVersion": corpus.get("corpusVersion"),
+        "fixedCorpusRows": len(fixed_ids),
+        "fixtureManifestSha256": sha256_file(repo_root / "fixtures/manifest.json"),
+        "identityKey": row.get("identityKey"),
+        "oracleManifestSha256": sha256_file(oracle_path),
+        "protocolSha256": sha256_file(protocol_path),
+        "protocolVersion": protocol.get("protocolVersion"),
+        "runtimeRegistrySha256": sha256_file(repo_root / "fixtures/runtime-matrix.json"),
+        "schemeManifestSha256": sha256_file(scheme_path),
+        "toolchainManifestSha256": sha256_file(repo_root / "global.json"),
+        "unitId": unit_id,
+    }
+    for field, expected_value in identity_expected.items():
+        if identity.get(field) != expected_value:
+            fail(f"positive baseline v2 identity.{field} does not match the frozen evaluator inputs")
+    if artifact.get("strengthStatus") != scheme.get("baselineStatus"):
+        fail("positive baseline v2 Scheme-A status does not match the frozen manifest")
+
+    chain = artifact.get("strictChain")
+    if not isinstance(chain, Mapping):
+        fail("positive baseline v2 strict-chain record is missing")
+    if chain.get("allSixStagesPassed") is not True or chain.get("behaviorEqual") is not True:
+        fail("positive baseline v2 requires all six linked strict-chain stages and oracle comparison")
+    for field in (
+        "behaviorComparisonSha256",
+        "handoffSha256",
+        "nativeImageSha256",
+        "producerBuildSha256",
+        "protectedImageSha256",
+        "rehydrationRecordSha256",
+        "rehydratorConsumerBuildSha256",
+        "requestSha256",
+        "sourceImageSha256",
+    ):
+        require_digest(chain.get(field), f"baseline.strictChain.{field}")
+    if chain.get("protectedImageSha256") == chain.get("nativeImageSha256"):
+        fail("positive baseline v2 Protected Image and Native Image hashes must remain distinct")
+    if chain.get("producerId") != row.get("producerId") or chain.get("loaderId") != row.get("targetLoader") or chain.get("oracleId") != row.get("oracleId"):
+        fail("positive baseline v2 producer, loader, or oracle link differs from the frozen row")
+    require_string(chain.get("rehydratorConsumerId"), "baseline.strictChain.rehydratorConsumerId")
+    require_int(chain.get("protectedImageSize"), "baseline.strictChain.protectedImageSize", minimum=1)
+    require_int(chain.get("nativeImageSize"), "baseline.strictChain.nativeImageSize", minimum=1)
+    require_int(chain.get("targetStatus"), "baseline.strictChain.targetStatus")
+    if chain.get("targetSignal") is not None:
+        require_string(chain.get("targetSignal"), "baseline.strictChain.targetSignal")
+
+    scheme_record = artifact.get("schemeA")
+    if not isinstance(scheme_record, Mapping):
+        fail("positive baseline v2 Scheme-A record is missing")
+    if (
+        scheme_record.get("status") != "baseline-not-calibrated"
+        or scheme_record.get("schemeAClaimable") is not False
+        or scheme_record.get("protocolVersion") != scheme.get("protocolVersion")
+        or scheme_record.get("requiredFamilies") != [family["familyId"] for family in scheme.get("requiredFamilies", [])]
+        or scheme_record.get("familyFactors") != {family_id: None for family_id in REQUIRED_FAMILIES}
+    ):
+        fail("positive baseline v2 must preserve Scheme-A baseline-not-calibrated with null family factors")
+    if scheme_record.get("manifestSha256") != sha256_file(scheme_path):
+        fail("positive baseline v2 Scheme-A manifest digest mismatch")
+    source = artifact.get("source")
+    if not isinstance(source, Mapping):
+        fail("positive baseline v2 source digest links are missing")
+    for field in (
+        "analysisInputSha256",
+        "artifactManifestSha256",
+        "environmentSha256",
+        "evaluatorGateSha256",
+        "negativeWitnessSha256",
+        "productChainManifestSha256",
+        "productEvidenceManifestSha256",
+        "unitJsonSha256",
+        "unitRawManifestSha256",
+    ):
+        require_digest(source.get(field), f"baseline.source.{field}")
+    if source.get("productChainManifestSha256") != source.get("productEvidenceManifestSha256"):
+        fail("positive baseline v2 product-chain manifest link mismatch")
+
+
+def validate_all_manifests(
+    repo_root: Path,
+    *,
+    protocol_path: Path,
+    corpus_path: Path,
+    scheme_path: Path,
+    oracle_path: Path,
+    baseline_reference_path: Path,
+    baseline_artifact_path: Path | None = None,
+) -> dict[str, Any]:
     protocol = read_json(protocol_path)
     validate_protocol(protocol)
     oracles = read_json(oracle_path)
@@ -1363,7 +1516,7 @@ def validate_all_manifests(repo_root: Path, *, protocol_path: Path, corpus_path:
     scheme = read_json(scheme_path)
     families = validate_scheme_manifest(scheme)
     reference = read_json(baseline_reference_path)
-    baseline = validate_baseline_reference(reference, repo_root)
+    baseline = validate_baseline_reference(reference, repo_root, artifact_path_override=baseline_artifact_path)
     if protocol["budgets"] != scheme["budget"]:
         fail("compatibility and Scheme-A protocol budgets must be equal")
     if protocol["schemeA"].get("protocolVersion") != scheme.get("protocolVersion"):
@@ -1378,7 +1531,13 @@ def validate_all_manifests(repo_root: Path, *, protocol_path: Path, corpus_path:
         fail("baseline fixed-row count does not match the compatibility corpus")
     if baseline.get("strengthStatus") != scheme.get("baselineStatus"):
         fail("baseline strength status does not match the Scheme-A manifest")
-    if protocol["baselineRules"].get("currentCommit") != baseline.get("commit"):
+    # The required default remains bound to the historical zero baseline.  An
+    # explicitly selected additive reference is independently content-addressed
+    # and may retain the commit at which that frozen positive artifact was made.
+    if (
+        reference.get("baselineArtifactId") == "compatibility-1x-baseline-zero"
+        and protocol["baselineRules"].get("currentCommit") != baseline.get("commit")
+    ):
         fail("protocol baseline commit does not match the immutable baseline")
     complete_ids = baseline.get("completeUnitIds")
     fixed_ids = set(corpus.get("fixedRowIds", ()))
@@ -1406,10 +1565,24 @@ def validate_all_manifests(repo_root: Path, *, protocol_path: Path, corpus_path:
             fail(f"baseline snapshot {field} does not match {path}")
     fixture_manifest = repo_root / "fixtures" / "manifest.json"
     runtime_manifest = repo_root / "fixtures" / "runtime-matrix.json"
-    if baseline.get("fixtureManifestSha256") != sha256_file(fixture_manifest):
-        fail("baseline fixtureManifestSha256 does not match fixtures/manifest.json")
-    if baseline.get("runtimeRegistrySha256") != sha256_file(runtime_manifest):
-        fail("baseline runtimeRegistrySha256 does not match fixtures/runtime-matrix.json")
+    if reference.get("baselineArtifactId") == "compatibility-1x-baseline-zero":
+        if baseline.get("fixtureManifestSha256") != sha256_file(fixture_manifest):
+            fail("baseline fixtureManifestSha256 does not match fixtures/manifest.json")
+        if baseline.get("runtimeRegistrySha256") != sha256_file(runtime_manifest):
+            fail("baseline runtimeRegistrySha256 does not match fixtures/runtime-matrix.json")
+    validate_positive_baseline_v2(
+        baseline,
+        reference,
+        repo_root=repo_root,
+        corpus=corpus,
+        protocol=protocol,
+        scheme=scheme,
+        rows=rows,
+        corpus_path=corpus_path,
+        protocol_path=protocol_path,
+        scheme_path=scheme_path,
+        oracle_path=oracle_path,
+    )
     return {
         "protocol": protocol,
         "corpus": corpus,
@@ -1841,6 +2014,7 @@ def calculate_anti_gaming(
     attempts: Mapping[tuple[str, str, int], Mapping[str, Any]],
     *,
     raw_evidence_bounded: bool,
+    baseline_artifact_path: Path | None = None,
 ) -> dict[str, bool]:
     """Recompute anti-gaming claims from independently checked records.
 
@@ -1853,7 +2027,8 @@ def calculate_anti_gaming(
     corpus_path = repo_root / "fixtures/evaluator/compatibility-corpus.json"
     oracle_path = repo_root / "fixtures/evaluator/oracles.json"
     scheme_path = repo_root / "fixtures/evaluator/scheme-a-manifest.json"
-    baseline_path = resolve_repo_path(repo_root, reference["baselineArtifactPath"], "baselineArtifactPath", require_file=True)
+    baseline_path = baseline_artifact_path or resolve_repo_path(repo_root, reference["baselineArtifactPath"], "baselineArtifactPath", require_file=True)
+    baseline_identity = baseline.get("identity") if isinstance(baseline.get("identity"), Mapping) else {}
     unit_list = list(units)
     required_ids = {
         row["unitId"]
@@ -1868,9 +2043,9 @@ def calculate_anti_gaming(
         for unit_id in compatibility.get("completeUnitIds", ())
     ]
     return {
-        "corpusUnchanged": baseline.get("corpusManifestSha256") == sha256_file(corpus_path),
-        "oracleUnchanged": baseline.get("oracleManifestSha256") == sha256_file(oracle_path),
-        "attackManifestUnchanged": baseline.get("schemeManifestSha256") == sha256_file(scheme_path),
+        "corpusUnchanged": (baseline.get("corpusManifestSha256") or baseline_identity.get("corpusManifestSha256")) == sha256_file(corpus_path),
+        "oracleUnchanged": (baseline.get("oracleManifestSha256") or baseline_identity.get("oracleManifestSha256")) == sha256_file(oracle_path),
+        "attackManifestUnchanged": (baseline.get("schemeManifestSha256") or baseline_identity.get("schemeManifestSha256")) == sha256_file(scheme_path),
         "budgetsEqual": manifests["protocol"]["budgets"] == manifests["scheme"]["budget"],
         "baselineDigestMatches": sha256_file(baseline_path) == reference.get("baselineArtifactSha256"),
         "requiredRowsPresent": set(observed_ids) == required_ids and len(observed_ids) == len(set(observed_ids)),

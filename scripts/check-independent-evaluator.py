@@ -31,6 +31,7 @@ REQUIRED_OUTPUT_FILES = (
     "scheme-a-manifest.json",
     "oracles.json",
     "baseline-reference.json",
+    "baseline-artifact.json",
     "scheme-a-gate.json",
     "gate.json",
     "analysis-input.json",
@@ -127,7 +128,6 @@ def check_manifest_copies(root: Path, source_manifests: dict[str, Path]) -> None
         "corpus-manifest.json": "corpus",
         "scheme-a-manifest.json": "scheme",
         "oracles.json": "oracles",
-        "baseline-reference.json": "baseline-reference",
     }
     for destination, name in copies.items():
         path = root / destination
@@ -180,16 +180,21 @@ def check_evidence(root: Path) -> dict[str, Any]:
         "corpus": REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
         "scheme": REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json",
         "oracles": REPO_ROOT / "fixtures/evaluator/oracles.json",
-        "baseline-reference": REPO_ROOT / "fixtures/evaluator/baseline-reference.json",
     }
     check_manifest_copies(root, source_paths)
+    baseline_reference_path = root / "baseline-reference.json"
+    baseline_artifact_path = root / "baseline-artifact.json"
+    baseline_reference = read_json(baseline_reference_path)
+    if sha256_file(baseline_artifact_path) != baseline_reference.get("baselineArtifactSha256"):
+        fail("copied baseline artifact digest does not match copied baseline reference")
     manifests = validate_all_manifests(
         REPO_ROOT,
         protocol_path=source_paths["protocol"],
         corpus_path=source_paths["corpus"],
         scheme_path=source_paths["scheme"],
         oracle_path=source_paths["oracles"],
-        baseline_reference_path=source_paths["baseline-reference"],
+        baseline_reference_path=baseline_reference_path,
+        baseline_artifact_path=baseline_artifact_path,
     )
     environment = read_json(root / "environment.json")
     if environment.get("schemaVersion") != 1 or environment.get("kind") != "evaluator-environment":
@@ -338,6 +343,7 @@ def check_evidence(root: Path) -> dict[str, Any]:
         units,
         attempts,
         raw_evidence_bounded=True,
+        baseline_artifact_path=baseline_artifact_path,
     )
     if anti_gaming != expected_anti_gaming:
         fail("gate anti-gaming checks do not match independently recomputed checks")

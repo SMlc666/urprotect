@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify v2 activation preserves six-stage and claimability policy."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify read-only content-addressed reference validation."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Verify 1x denominator and exact future 100x target."}
+{"file":"fixtures/evaluator/baseline-reference.json","reason":"Verify default historical baseline fallback."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-v2-reference.json","reason":"Verify additive v2 reference binding."}

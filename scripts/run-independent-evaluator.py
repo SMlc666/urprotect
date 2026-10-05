@@ -32,6 +32,7 @@ from evaluator_lib import (
     load_product_evidence,
     project_product_failure,
     sha256_file,
+    resolve_repo_path,
     validate_all_manifests,
     validate_no_symlinks,
     validate_unit_record,
@@ -39,6 +40,7 @@ from evaluator_lib import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_EVALUATOR_ROOT = REPO_ROOT / ".artifacts" / "evaluator"
+DEFAULT_BASELINE_REFERENCE = REPO_ROOT / "fixtures/evaluator/baseline-reference.json"
 STRICT_UNIT_ID = "compat.protection-symbolized-fixture.glibc.outer-execveat"
 
 
@@ -50,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         "--product-evidence-root",
         type=Path,
         help="read-only Protected Image evidence unit (default: EVALUATOR_PRODUCT_EVIDENCE_ROOT or .artifacts/protected-image/<tier>/glibc/<unit>)",
+    )
+    parser.add_argument(
+        "--baseline-reference",
+        type=Path,
+        default=DEFAULT_BASELINE_REFERENCE,
+        help="content-addressed baseline reference (default: fixtures/evaluator/baseline-reference.json)",
     )
     parser.add_argument("--keep-existing", action="store_true", help="fail instead of replacing only the evaluator's previous output directory")
     return parser.parse_args()
@@ -63,6 +71,20 @@ def write_json(path: Path, value: Any) -> None:
 def copy_file(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
+
+
+def reject_symlink_components(path: Path) -> None:
+    current = Path(path.anchor) if path.anchor else Path.cwd()
+    components = path.parts[1:] if path.anchor else path.parts
+    for component in components:
+        if component in {"", "."}:
+            continue
+        if component == "..":
+            current = current.parent
+            continue
+        current /= component
+        if current.is_symlink():
+            raise EvaluatorError(f"baseline reference may not traverse a symlink: {current}")
 
 
 def write_raw_manifest(raw_root: Path) -> Path:
@@ -379,13 +401,14 @@ def make_scheme_attempt(
     return attempt
 
 
-def copy_manifests(root: Path) -> None:
+def copy_manifests(root: Path, baseline_reference_path: Path, baseline_artifact_path: Path) -> None:
     sources = {
         "protocol.json": REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json",
         "corpus-manifest.json": REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
         "scheme-a-manifest.json": REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json",
         "oracles.json": REPO_ROOT / "fixtures/evaluator/oracles.json",
-        "baseline-reference.json": REPO_ROOT / "fixtures/evaluator/baseline-reference.json",
+        "baseline-reference.json": baseline_reference_path,
+        "baseline-artifact.json": baseline_artifact_path,
     }
     for destination, source in sources.items():
         copy_file(source, root / destination)
@@ -399,9 +422,9 @@ def build_gate(
     scheme_gate: dict[str, Any],
     units: list[dict[str, Any]],
     attempts: dict[tuple[str, str, int], dict[str, Any]],
+    baseline_artifact_path: Path,
 ) -> dict[str, Any]:
     reference = manifests["baselineReference"]
-    baseline = manifests["baseline"]
     anti_gaming = calculate_anti_gaming(
         REPO_ROOT,
         manifests,
@@ -409,6 +432,7 @@ def build_gate(
         units,
         attempts,
         raw_evidence_bounded=True,
+        baseline_artifact_path=baseline_artifact_path,
     )
     compatibility_claimable = (
         compatibility["status"] == "measured"
@@ -416,6 +440,15 @@ def build_gate(
         and compatibility["growthViewPass"]
     )
     scheme_claimable = scheme_gate["status"] == "pass" and scheme_gate["allRequiredPass"]
+    residual_risks: list[str] = []
+    if compatibility["status"] == "baseline-zero":
+        residual_risks.append("strict compatibility is baseline-zero because Protected Image and rehydration stages are not product-declared")
+    elif not compatibility["growthViewPass"]:
+        residual_risks.append("strict compatibility fixed evidence is measured, but the exact growth target is not met")
+    if scheme_gate["status"] == "baseline-not-calibrated":
+        residual_risks.append("Scheme-A is baseline-not-calibrated because no required family has three finite reproducible baseline successes")
+    if environment["status"] != "available":
+        residual_risks.append("required evaluator environment capabilities are unavailable and are not fabricated")
     gate = {
         "schemaVersion": 1,
         "kind": "urprotect-independent-evaluator",
@@ -446,11 +479,7 @@ def build_gate(
         "rawEvidenceManifestSha256": inventory_digest(root, exclude=("gate.json", "analysis-input.json")),
         "artifactManifestSha256": inventory_digest(root, exclude=("gate.json", "analysis-input.json")),
         "claimable": all(anti_gaming.values()) and compatibility_claimable and scheme_claimable,
-        "residualRisks": [
-            "strict compatibility is baseline-zero because Protected Image and rehydration stages are not product-declared",
-            "Scheme-A is baseline-not-calibrated because no required family has three finite reproducible baseline successes",
-            "native product and attack results are environment-unavailable and are not fabricated",
-        ],
+        "residualRisks": residual_risks,
     }
     return gate
 
@@ -563,15 +592,30 @@ def main() -> int:
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True)
     try:
+        baseline_reference_path = args.baseline_reference
+        if not baseline_reference_path.is_absolute():
+            baseline_reference_path = REPO_ROOT / baseline_reference_path
+        reject_symlink_components(baseline_reference_path)
+        if baseline_reference_path.is_symlink():
+            raise EvaluatorError("baseline reference must be a regular non-symlink file")
+        baseline_reference_path = baseline_reference_path.resolve(strict=True)
+        if not baseline_reference_path.is_file():
+            raise EvaluatorError("baseline reference must be a regular non-symlink file")
         manifests = validate_all_manifests(
             REPO_ROOT,
             protocol_path=REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json",
             corpus_path=REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json",
             scheme_path=REPO_ROOT / "fixtures/evaluator/scheme-a-manifest.json",
             oracle_path=REPO_ROOT / "fixtures/evaluator/oracles.json",
-            baseline_reference_path=REPO_ROOT / "fixtures/evaluator/baseline-reference.json",
+            baseline_reference_path=baseline_reference_path,
         )
-        copy_manifests(output_root)
+        baseline_artifact_path = resolve_repo_path(
+            REPO_ROOT,
+            manifests["baselineReference"]["baselineArtifactPath"],
+            "baselineArtifactPath",
+            require_file=True,
+        )
+        copy_manifests(output_root, baseline_reference_path, baseline_artifact_path)
         product_evidence_root = args.product_evidence_root
         if product_evidence_root is None:
             product_evidence_root = default_product_evidence_root(args.tier, STRICT_UNIT_ID)
@@ -621,7 +665,16 @@ def main() -> int:
         # Close the generated tree's structural boundary before deriving any
         # anti-gaming marker or gate digest.
         validate_no_symlinks(output_root)
-        gate = build_gate(output_root, environment, manifests, compatibility, scheme_gate, units, attempts)
+        gate = build_gate(
+            output_root,
+            environment,
+            manifests,
+            compatibility,
+            scheme_gate,
+            units,
+            attempts,
+            output_root / "baseline-artifact.json",
+        )
         write_json(output_root / "gate.json", gate)
         analysis_input = build_analysis_input(output_root, gate, units, attempts)
         write_json(output_root / "analysis-input.json", analysis_input)
