@@ -22,13 +22,13 @@ Freeze the first positive immutable strict-chain compatibility denominator from 
 
 ## Acceptance Criteria
 
-- [ ] Fresh evaluator/environment/gate commit identity matches the checkout.
-- [ ] Historical zero baseline bytes/reference remain unchanged and content-addressed.
-- [ ] Fresh evaluator root and nested manifests are closed and digest-consistent.
-- [ ] Exactly one complete strict unit passes all six stages with distinct Protected/Native Image hashes and matching loader/oracle evidence.
-- [ ] v2 baseline payload/reference and local gate are deterministic, immutable, and externally hash-bound.
-- [ ] Scheme-A remains six-family `baseline-not-calibrated` with null factors and no claim.
-- [ ] Failed preconditions publish no v2 baseline/reference and retain rollback evidence.
+- [x] Fresh evaluator/environment/gate commit identity matches the checkout.
+- [x] Historical zero baseline bytes/reference remain unchanged and content-addressed.
+- [x] Fresh evaluator root and nested manifests are closed and digest-consistent.
+- [x] Exactly one complete strict unit passes all six stages with distinct Protected/Native Image hashes and matching loader/oracle evidence.
+- [x] v2 baseline payload/reference and local gate are deterministic, immutable, and externally hash-bound.
+- [x] Scheme-A remains six-family `baseline-not-calibrated` with null factors and no claim.
+- [x] Failed preconditions publish no v2 baseline/reference and retain rollback evidence.
 
 ## Out of Scope
 
