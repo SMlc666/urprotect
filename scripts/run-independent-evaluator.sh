@@ -63,9 +63,6 @@ PY
   bwrap \
     --die-with-parent \
     --new-session \
-    --unshare-user \
-    --uid 0 \
-    --gid 0 \
     --seccomp 3 \
     --ro-bind "$repo_root" "$repo_root" \
     --bind "$output_root" "$output_root" \
