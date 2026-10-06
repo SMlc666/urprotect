@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"ELF layout planning must use bounded arithmetic, program headers as runtime authority, typed address domains, stable diagnostics, and malformed-input tests."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Planner/materializer failures must be structured, fail closed, and produce no output bytes or partial publication."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Layout evidence and native behavior claims remain layer-specific; loader/runtime observations cannot be inferred from parser success."}
+{"file":"tests/ContractInventory.md","reason":"The layout-plan and evidence contract must have one owner and avoid duplicated ELF/table literals."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/current-protection-pipeline.md","reason":"The current PT_NULL-only rehydration writer and its migration boundary are the implementation baseline."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/semantic-boundaries.md","reason":"The layout child consumes the shared semantic plan and owns physical placement rather than adding another raw-byte model."}
+{"file":"src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs","reason":"The production PT_NULL append path must be replaced by the shared layout planner/materializer."}
+{"file":"tests/UrProtect.Core.Tests/GenericRehydrationTests.cs","reason":"Existing rehydration tests define the PT_NULL positive path, no-slot negative, reparsing, determinism, and no-partial-output expectations."}

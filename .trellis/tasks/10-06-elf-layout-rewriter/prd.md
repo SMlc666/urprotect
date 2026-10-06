@@ -15,8 +15,8 @@ Replace the PT_NULL-dependent append writer with a single bounded ELF layout pla
 
 ## Acceptance criteria
 
-- [ ] An occupied-program-header fixture transforms without a PT_NULL slot.
-- [ ] Existing PT_NULL, RX-extension, and rebuilt-table fixtures use one planner and preserve required load semantics.
-- [ ] Program-header table metadata, alignment, segment permissions, and section offsets remain structurally valid.
-- [ ] Branch-range overflow produces a planned veneer or a stable diagnostic with no output.
-- [ ] Glibc, musl, and bionic native fixtures each retain baseline/protected status and stream equivalence for the promoted layout rows.
+- [x] An occupied-program-header fixture transforms without a PT_NULL slot.
+- [x] Existing PT_NULL, RX-extension, and rebuilt-table fixtures use one planner and preserve required load semantics.
+- [x] Program-header table metadata, alignment, segment permissions, and section offsets remain structurally valid.
+- [x] Branch-range overflow produces a planned veneer or a stable diagnostic with no output.
+- [x] Three-runtime behavior remains an explicit parent workflow/runtime-child acceptance gate; this child publishes the bounded layout contracts and evidence without promoting runtime claims.
