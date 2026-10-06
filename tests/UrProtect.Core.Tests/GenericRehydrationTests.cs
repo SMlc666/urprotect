@@ -47,18 +47,22 @@ public sealed class GenericRehydrationTests
 
     [Fact]
     [Trait("Category", "Rehydration")]
-    public void LayoutWithoutProgramHeaderSlotFailsWithStableDiagnosticAndNoNativeImage()
+    public void OccupiedProgramHeaderTableUsesRelocatedTableWithoutNativeImageFallback()
     {
         var source = File.ReadAllBytes(FixturePath);
         var emitted = Emit(source);
         var result = GenericRehydrationEngine.Rehydrate(source, emitted.ArtifactBytes!, Options(source, emitted.Role!.RequestSha256));
 
-        Assert.False(result.IsSuccess);
-        Assert.Null(result.NativeImage);
-        Assert.Equal(RehydrationRecord.FailedStatus, result.Record.Status);
-        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.RehydrationLayoutUnavailable);
-        Assert.Equal("rehydration", result.Record.FirstFailureStage);
-        Assert.Null(result.Record.NativeImageSha256);
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.NativeImage);
+        Assert.NotNull(result.NativeImage!.LayoutEvidence);
+        Assert.Equal(ElfLayoutStrategy.RelocatedProgramHeaderTable, result.NativeImage.LayoutEvidence!.Strategy);
+        Assert.Equal("relocated-program-header-table", result.Record.LayoutStrategy);
+        Assert.Equal(ElfConstants.PtLoad, result.NativeImage.ParsedImage.ProgramHeaders[^1].Type);
+        Assert.True(result.NativeImage.ParsedImage.Header.ProgramHeaderOffset >= (ulong)source.Length);
+        Assert.Equal(
+            (ushort)(ElfParser.Parse(source).File!.Header.ProgramHeaderCount + 1),
+            result.NativeImage.ParsedImage.Header.ProgramHeaderCount);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using UrProtect.Core.Diagnostics;
+using UrProtect.Core.Elf;
 using UrProtect.Core.Protect;
 
 namespace UrProtect.Core.Rehydrate;
@@ -232,6 +233,35 @@ public static class RehydrationPublisher
             Invalid("Rehydration record diagnostics exceed their configured bounds.");
         }
 
+        if (record.LayoutEvidence is not null)
+        {
+            var evidence = record.LayoutEvidence;
+            if (evidence.SchemaVersion != ElfLayoutEvidence.CurrentSchemaVersion
+                || !Enum.IsDefined(evidence.Strategy)
+                || !IsDigest(evidence.SourceSha256)
+                || !IsDigest(evidence.OutputSha256)
+                || !IsDigest(evidence.PreservedMetadataSha256)
+                || evidence.OutputLength is 0 or > RehydrationLimits.MaximumNativeImageBytes
+                || evidence.Placements is null
+                || evidence.Placements.Count > ElfLayoutLimits.DefaultMaximumEditCount
+                || evidence.AddressMap is null
+                || evidence.AddressMap.Count > ElfLayoutLimits.DefaultMaximumEditCount
+                || evidence.BranchDecisions is null
+                || evidence.BranchDecisions.Count > ElfLayoutLimits.DefaultMaximumEditCount
+                || !string.Equals(evidence.SourceSha256, record.SourceSha256, StringComparison.Ordinal)
+                || !string.Equals(evidence.OutputSha256, record.NativeImageSha256, StringComparison.Ordinal)
+                || record.NativeImageSize != (long)evidence.OutputLength
+                || !string.Equals(record.LayoutStrategy, evidence.StrategyValue, StringComparison.Ordinal)
+                || !ValidateLayoutEvidence(evidence, diagnostics))
+            {
+                Invalid("Rehydration layout evidence is malformed or not bound to the Native Image record.");
+            }
+        }
+        else if (record.IsPassed)
+        {
+            Invalid("A passed rehydration record must retain bounded layout evidence.");
+        }
+
         if (record.HandoffRecordSha256 is not null && !IsDigest(record.HandoffRecordSha256))
         {
             Invalid("Rehydration handoff record binding is malformed.");
@@ -269,6 +299,111 @@ public static class RehydrationPublisher
 
         return valid && !diagnostics.HasErrors;
     }
+
+    private static bool ValidateLayoutEvidence(ElfLayoutEvidence evidence, DiagnosticBag diagnostics)
+    {
+        var valid = true;
+        void Invalid(string message)
+        {
+            diagnostics.Error(DiagnosticCode.RehydrationMalformed, message);
+            valid = false;
+        }
+
+        if (evidence.OutputLength == 0
+            || !evidence.OldProgramHeaderTable.TryGetFileEnd(out _)
+            || (evidence.OldProgramHeaderTable.HasVirtualAddress && !evidence.OldProgramHeaderTable.TryGetVirtualEnd(out _))
+            || !evidence.NewProgramHeaderTable.TryGetFileEnd(out var newTableEnd)
+            || (evidence.NewProgramHeaderTable.HasVirtualAddress && !evidence.NewProgramHeaderTable.TryGetVirtualEnd(out _))
+            || newTableEnd.Value > evidence.OutputLength
+            || evidence.OldProgramHeaderTable.Size == 0
+            || evidence.NewProgramHeaderTable.Size == 0
+            || evidence.Placements.Count == 0
+            || !IsCanonicalIdentities(evidence.Placements.Select(placement => placement.Identity), Invalid)
+            || !IsCanonicalIdentities(evidence.AddressMap.Select(entry => entry.Identity), Invalid)
+            || !IsCanonicalIdentities(evidence.BranchDecisions.Select(decision => decision.Identity), Invalid))
+        {
+            Invalid("Rehydration layout evidence contains an invalid range or canonical identity projection.");
+        }
+
+        var placementByIdentity = new Dictionary<string, ElfLayoutPlacement>(StringComparer.Ordinal);
+        foreach (var placement in evidence.Placements)
+        {
+            if (!IsLayoutIdentity(placement.Identity)
+                || !IsLayoutIdentity(placement.SourceIdentity)
+                || placement.Size == 0
+                || placement.Permissions != (ElfConstants.PfR | ElfConstants.PfX)
+                || !IsLayoutAlignment(placement.Alignment)
+                || !placement.Range.TryGetFileEnd(out var fileEnd)
+                || !placement.Range.TryGetVirtualEnd(out _)
+                || fileEnd.Value > evidence.OutputLength
+                || !placementByIdentity.TryAdd(placement.Identity, placement))
+            {
+                Invalid("Rehydration layout evidence contains an invalid placement.");
+            }
+        }
+
+        foreach (var entry in evidence.AddressMap)
+        {
+            if (!IsLayoutIdentity(entry.Identity)
+                || !IsLayoutIdentity(entry.SourceIdentity)
+                || !placementByIdentity.TryGetValue(entry.Identity, out var placement)
+                || entry.OutputRange != placement.Range
+                || (entry.SourceRange is { } sourceRange
+                    && (!sourceRange.TryGetFileEnd(out _)
+                        || (sourceRange.HasVirtualAddress && !sourceRange.TryGetVirtualEnd(out _)))))
+            {
+                Invalid("Rehydration layout evidence contains an invalid address-map entry.");
+            }
+        }
+
+        foreach (var decision in evidence.BranchDecisions)
+        {
+            if (!IsLayoutIdentity(decision.Identity)
+                || !IsLayoutIdentity(decision.SourceIdentity)
+                || !IsLayoutIdentity(decision.TargetIdentity)
+                || !Enum.IsDefined(decision.Decision)
+                || decision.SourceRange.Size != sizeof(uint)
+                || !decision.SourceRange.TryGetFileEnd(out var sourceEnd)
+                || sourceEnd.Value > evidence.OutputLength
+                || decision.TargetRange.Size == 0
+                || !decision.TargetRange.TryGetFileEnd(out var targetEnd)
+                || targetEnd.Value > evidence.OutputLength
+                || (decision.TargetRange.HasVirtualAddress && !decision.TargetRange.TryGetVirtualEnd(out _))
+                || decision.Decision is (ElfLayoutBranchDecision.Direct or ElfLayoutBranchDecision.NearVeneer)
+                    && (decision.Displacement is not long displacement
+                        || displacement < ElfLayoutLimits.Branch26MinimumDisplacement
+                        || displacement >= ElfLayoutLimits.Branch26MaximumDisplacementExclusive
+                        || (displacement & 3) != 0)
+                || decision.Decision == ElfLayoutBranchDecision.LongAddress && decision.Displacement is not null
+                || decision.VeneerIdentity is not null && !IsLayoutIdentity(decision.VeneerIdentity))
+            {
+                Invalid("Rehydration layout evidence contains an invalid branch decision.");
+            }
+        }
+
+        return valid;
+    }
+
+    private static bool IsCanonicalIdentities(IEnumerable<string> identities, Action<string> invalid)
+    {
+        var values = identities.ToArray();
+        if (values.Length > ElfLayoutLimits.DefaultMaximumEditCount
+            || values.Distinct(StringComparer.Ordinal).Count() != values.Length
+            || !values.SequenceEqual(values.OrderBy(value => value, StringComparer.Ordinal)))
+        {
+            invalid("Rehydration layout evidence identities are not bounded and canonical.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsLayoutIdentity(string? value) =>
+        value is { Length: > 0 and <= ElfLayoutLimits.MaximumIdentityBytes }
+        && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_' or '/' or ':');
+
+    private static bool IsLayoutAlignment(ulong alignment) =>
+        alignment is 0 or 1 || alignment <= ElfLayoutLimits.DefaultMaximumAlignment && (alignment & (alignment - 1)) == 0;
 
     private static byte[] Serialize<T>(T value) => Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOptions) + "\n");
 

@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using UrProtect.Core.Diagnostics;
@@ -47,7 +46,10 @@ public sealed record NativeImageDescriptor(
 public sealed record NativeImage(
     byte[] Bytes,
     NativeImageDescriptor Descriptor,
-    ElfFile ParsedImage);
+    ElfFile ParsedImage)
+{
+    public ElfLayoutEvidence? LayoutEvidence { get; init; }
+}
 
 public sealed record RehydrationRecord(
     int SchemaVersion,
@@ -79,13 +81,14 @@ public sealed record RehydrationRecord(
     IReadOnlyList<RehydrationDiagnostic> Diagnostics,
     string? HandoffRecordSha256 = null,
     string? HandoffStatus = null,
-    string? PreHandoffRecordSha256 = null)
+    string? PreHandoffRecordSha256 = null,
+    ElfLayoutEvidence? LayoutEvidence = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const string StageName = "rehydration";
     public const string PassedStatus = "passed";
     public const string FailedStatus = "failed";
-    public const string CurrentLayoutStrategy = "append-executable-pt-load-v1";
+    public const string CurrentLayoutStrategy = "generic-elf-layout-v1";
 
     public bool IsPassed => string.Equals(Status, PassedStatus, StringComparison.Ordinal);
 }
@@ -133,6 +136,8 @@ public static class GenericRehydrationEngine
         ProtectedImageDocument? document = null;
         byte[]? output = null;
         ElfFile? outputFile = null;
+        ElfLayoutEvidence? layoutEvidence = null;
+        ElfLayoutStrategy? layoutStrategy = null;
 
         ValidateOptions(options, diagnostics);
         if (source.Length is 0 or > RehydrationLimits.MaximumSourceBytes)
@@ -182,24 +187,17 @@ public static class GenericRehydrationEngine
 
         if (document is not null && sourceFile is not null && !diagnostics.HasErrors)
         {
-            output = Materialize(sourceBytes, sourceFile, document, diagnostics);
-            if (output is not null && !diagnostics.HasErrors)
+            var layoutResult = Materialize(sourceBytes, sourceFile, document, diagnostics);
+            layoutEvidence = layoutResult?.Evidence;
+            layoutStrategy = layoutResult?.Plan?.Strategy;
+            if (layoutResult?.Bytes is not null
+                && layoutResult.ParsedOutput is not null
+                && layoutResult.Plan is not null
+                && !diagnostics.HasErrors
+                && ValidateNativeImage(sourceFile, layoutResult.ParsedOutput, layoutResult.Bytes, layoutResult.Plan, diagnostics))
             {
-                var parsedOutput = ElfParser.Parse(output);
-                diagnostics.AddRange(parsedOutput.Diagnostics);
-                if (parsedOutput.File is null || parsedOutput.Diagnostics.Any(diagnostic => diagnostic.IsError))
-                {
-                    diagnostics.Error(DiagnosticCode.NativeImageMalformed, "Materialized Native Image did not pass bounded AArch64 ELF parsing.");
-                    output = null;
-                }
-                else if (!ValidateNativeImage(sourceFile, parsedOutput.File, output, diagnostics))
-                {
-                    output = null;
-                }
-                else
-                {
-                    outputFile = parsedOutput.File;
-                }
+                output = layoutResult.Bytes;
+                outputFile = layoutResult.ParsedOutput;
             }
         }
 
@@ -218,7 +216,9 @@ public static class GenericRehydrationEngine
             stopwatch.ElapsedMilliseconds,
             cpuMilliseconds,
             workingSetBytes,
-            diagnostics);
+            diagnostics,
+            layoutStrategy,
+            layoutEvidence);
         if (!success)
         {
             return new RehydrationResult(null, record, diagnostics.ToArray());
@@ -243,7 +243,10 @@ public static class GenericRehydrationEngine
             NormalizeSha256(options.ConsumerBuildSha256),
             string.Empty);
         return new RehydrationResult(
-            new NativeImage(output, descriptor, outputFile!),
+            new NativeImage(output, descriptor, outputFile!)
+            {
+                LayoutEvidence = layoutEvidence,
+            },
             record,
             diagnostics.ToArray());
     }
@@ -295,7 +298,7 @@ public static class GenericRehydrationEngine
         }
     }
 
-    private static byte[]? Materialize(
+    private static ElfLayoutResult? Materialize(
         byte[] source,
         ElfFile sourceFile,
         ProtectedImageDocument image,
@@ -322,183 +325,78 @@ public static class GenericRehydrationEngine
             return null;
         }
 
-        var regionById = regions.ToDictionary(region => region.RegionId);
-        foreach (var region in regions)
-        {
-            var executableMappings = sourceFile.LoadMap.Segments
-                .Where(segment => segment.IsExecutable
-                    && segment.ContainsVirtualAddress(region.SourceAddress.Value, region.SourceSize))
-                .ToArray();
-            if (executableMappings.Length != 1
-                || !sourceFile.LoadMap.TryVirtualAddressToFileOffset(region.SourceAddress, region.SourceSize, out var fileOffset)
-                || fileOffset.Value > (ulong)source.Length
-                || region.SourceSize > (ulong)source.Length - fileOffset.Value)
-            {
-                diagnostics.Error(
-                    DiagnosticCode.RehydrationLayoutUnavailable,
-                    "An emitted region source range is not uniquely file-backed by an executable PT_LOAD.",
-                    region.SourceAddress.Value);
-            }
-        }
-
-        foreach (var fixup in fixups)
-        {
-            if (!regionById.TryGetValue(fixup.SourceRegionId, out var sourceRegion)
-                || !regionById.TryGetValue(fixup.TargetRegionId, out var targetRegion)
-                || fixup.SourceAddress != sourceRegion.SourceAddress
-                || fixup.FixupKind != ProtectedImageFixupKind.Aarch64Branch26
-                || !TryAdd(fixup.SourceAddress.Value, fixup.SourceOffset, out var branchAddress)
-                || !sourceFile.LoadMap.TryVirtualAddressToFileOffset(new VirtualAddress(branchAddress), sizeof(uint), out var branchFileOffset)
-                || !sourceFile.LoadMap.Segments.Any(segment => segment.IsExecutable
-                    && segment.ContainsVirtualAddress(branchAddress, sizeof(uint)))
-                || branchFileOffset.Value > (ulong)source.Length - sizeof(uint))
-            {
-                diagnostics.Error(DiagnosticCode.RehydrationMalformed, "An entry fixup does not map to a bounded executable source instruction.", fixup.SourceAddress.Value);
-            }
-        }
-
-        if (diagnostics.HasErrors)
-        {
-            return null;
-        }
-
-        var nullHeaderIndices = sourceFile.ProgramHeaders
-            .Select((header, index) => (header, index))
-            .Where(item => item.header.Type == ElfConstants.PtNull)
-            .Select(item => item.index)
+        var regionRequests = regions
+            .Select(region => new ElfLayoutRegionRequest(
+                RegionIdentity(region.RegionId),
+                RegionIdentity(region.RegionId),
+                region.SourceAddress,
+                region.SourceSize,
+                region.CodeBytes))
             .ToArray();
-        if (nullHeaderIndices.Length == 0)
+        var branchRequests = fixups
+            .Select(fixup => new ElfLayoutBranchRequest(
+                $"entry:{fixup.SourceRegionId}:{fixup.SourceOffset}",
+                RegionIdentity(fixup.SourceRegionId),
+                RegionIdentity(fixup.TargetRegionId),
+                fixup.SourceAddress,
+                fixup.SourceOffset,
+                fixup.TargetOffset))
+            .ToArray();
+
+        var options = new ElfLayoutOptions(
+            MaximumOutputBytes: RehydrationLimits.MaximumNativeImageBytes,
+            MaximumProgramHeaderCount: ElfLayoutLimits.DefaultMaximumProgramHeaderCount,
+            MaximumGeneratedCodeBytes: ProtectedImageLimits.MaximumAggregateCodeBytes,
+            MaximumVeneerCount: ElfLayoutLimits.DefaultMaximumVeneerCount,
+            MaximumEditCount: ElfLayoutLimits.DefaultMaximumEditCount,
+            MaximumPaddingBytes: RehydrationLimits.MaximumNativeImageBytes,
+            SegmentAlignment: RehydrationLimits.PageAlignment,
+            CodeAlignment: ElfLayoutLimits.DefaultCodeAlignment,
+            MaximumAlignment: ElfLayoutLimits.DefaultMaximumAlignment);
+        var planning = ElfLayoutPlanner.Plan(source, sourceFile, regionRequests, branchRequests, options);
+        diagnostics.AddRange(planning.Diagnostics);
+        if (planning.Plan is null || planning.Diagnostics.Any(diagnostic => diagnostic.IsError))
         {
-            diagnostics.Error(
-                DiagnosticCode.RehydrationLayoutUnavailable,
-                "The source ELF has no PT_NULL program-header slot for a bounded appended executable region.");
             return null;
         }
 
-        try
-        {
-            ulong codeSize = 0;
-            foreach (var region in regions)
-            {
-                codeSize = checked(codeSize + (ulong)region.CodeBytes.Length);
-            }
-
-            if (codeSize == 0 || codeSize > ProtectedImageLimits.MaximumAggregateCodeBytes)
-            {
-                diagnostics.Error(DiagnosticCode.RehydrationMalformed, "Protected Image emitted code is empty or exceeds the aggregate materialization bound.");
-                return null;
-            }
-
-            var fileOffset = AlignUp(checked((ulong)source.Length), RehydrationLimits.PageAlignment);
-            var highestVirtualEnd = sourceFile.ProgramHeaders
-                .Where(header => header.Type == ElfConstants.PtLoad)
-                .Select(header => checked(header.VirtualAddress + header.MemorySize))
-                .DefaultIfEmpty(0UL)
-                .Max();
-            var virtualAddress = AlignUp(highestVirtualEnd, RehydrationLimits.PageAlignment);
-            var outputLength = checked(fileOffset + codeSize);
-            if (outputLength > RehydrationLimits.MaximumNativeImageBytes || outputLength > int.MaxValue)
-            {
-                diagnostics.Error(DiagnosticCode.RehydrationLayoutUnavailable, "The deterministic appended Native Image exceeds its configured output bound.");
-                return null;
-            }
-
-            var output = new byte[checked((int)outputLength)];
-            source.CopyTo(output, 0);
-            var regionAddresses = new Dictionary<uint, ulong>();
-            var cursor = fileOffset;
-            foreach (var region in regions)
-            {
-                regionAddresses.Add(region.RegionId, checked(virtualAddress + cursor - fileOffset));
-                region.CodeBytes.CopyTo(output, checked((int)cursor));
-                cursor = checked(cursor + (ulong)region.CodeBytes.Length);
-            }
-
-            foreach (var fixup in fixups)
-            {
-                var targetAddress = checked(regionAddresses[fixup.TargetRegionId] + fixup.TargetOffset);
-                var branchAddress = checked(fixup.SourceAddress.Value + fixup.SourceOffset);
-                if (!TryEncodeBranch26(branchAddress, targetAddress, out var branch))
-                {
-                    diagnostics.Error(
-                        DiagnosticCode.RehydrationLayoutUnavailable,
-                        "An AArch64 entry branch cannot reach its deterministic appended code region.",
-                        branchAddress);
-                    return null;
-                }
-
-                if (!sourceFile.LoadMap.TryVirtualAddressToFileOffset(new VirtualAddress(branchAddress), sizeof(uint), out var branchFileOffset)
-                    || branchFileOffset.Value > int.MaxValue
-                    || !TryAdd(branchFileOffset.Value, sizeof(uint), out var branchFileEnd)
-                    || branchFileEnd > (ulong)output.Length)
-                {
-                    diagnostics.Error(DiagnosticCode.RehydrationMalformed, "An entry branch patch exceeds the Native Image bounds.", branchAddress);
-                    return null;
-                }
-
-                BinaryPrimitives.WriteUInt32LittleEndian(output.AsSpan(checked((int)branchFileOffset.Value), sizeof(uint)), branch);
-            }
-
-            var programHeaderOffset = checked(sourceFile.Header.ProgramHeaderOffset
-                + checked((ulong)nullHeaderIndices[0] * sourceFile.Header.ProgramHeaderEntrySize));
-            if (programHeaderOffset > int.MaxValue
-                || !TryAdd(programHeaderOffset, ElfConstants.ProgramHeaderSize64, out var programHeaderEnd)
-                || programHeaderEnd > (ulong)source.Length
-                || fileOffset % RehydrationLimits.PageAlignment != virtualAddress % RehydrationLimits.PageAlignment)
-            {
-                diagnostics.Error(DiagnosticCode.RehydrationLayoutUnavailable, "The selected program-header slot or appended segment layout is not representable.");
-                return null;
-            }
-
-            var programHeader = output.AsSpan(checked((int)programHeaderOffset), ElfConstants.ProgramHeaderSize64);
-            programHeader.Clear();
-            BinaryPrimitives.WriteUInt32LittleEndian(programHeader, ElfConstants.PtLoad);
-            BinaryPrimitives.WriteUInt32LittleEndian(programHeader[4..], ElfConstants.PfR | ElfConstants.PfX);
-            BinaryPrimitives.WriteUInt64LittleEndian(programHeader[8..], fileOffset);
-            BinaryPrimitives.WriteUInt64LittleEndian(programHeader[16..], virtualAddress);
-            BinaryPrimitives.WriteUInt64LittleEndian(programHeader[24..], virtualAddress);
-            BinaryPrimitives.WriteUInt64LittleEndian(programHeader[32..], codeSize);
-            BinaryPrimitives.WriteUInt64LittleEndian(programHeader[40..], codeSize);
-            BinaryPrimitives.WriteUInt64LittleEndian(programHeader[48..], RehydrationLimits.PageAlignment);
-            return output;
-        }
-        catch (OverflowException)
-        {
-            diagnostics.Error(DiagnosticCode.AddressOverflow, "Native Image layout arithmetic overflowed.");
-            return null;
-        }
+        var materialized = ElfLayoutMaterializer.Materialize(source, sourceFile, planning.Plan);
+        diagnostics.AddRange(materialized.Diagnostics);
+        return materialized;
     }
 
     private static bool ValidateNativeImage(
         ElfFile source,
         ElfFile native,
         byte[] output,
+        ElfLayoutPlan plan,
         DiagnosticBag diagnostics)
     {
         if (!native.Header.IsAarch64
-            || native.Header.Type is not (ElfConstants.TypeDyn or ElfConstants.TypeExec)
+            || native.Header.Type != source.Header.Type
             || output.Length is < ElfConstants.HeaderSize64 or > RehydrationLimits.MaximumNativeImageBytes
+            || output.Length != (long)plan.OutputLength
             || output.AsSpan().SequenceEqual(source.Bytes.Span))
         {
             diagnostics.Error(DiagnosticCode.NativeImageMalformed, "Native Image identity, architecture, type, size, or distinctness validation failed.");
             return false;
         }
 
-        var appended = native.ProgramHeaders.Where(header =>
-            header.Type == ElfConstants.PtLoad
-            && header.Flags == (ElfConstants.PfR | ElfConstants.PfX)
-            && header.Alignment == RehydrationLimits.PageAlignment
-            && header.FileSize > 0
-            && header.FileSize == header.MemorySize
-            && header.Offset >= (ulong)source.Bytes.Length).ToArray();
-        if (appended.Length != 1)
+        if (native.ProgramHeaders.Count != plan.NewProgramHeaderCount
+            || plan.Placements.Count == 0
+            || plan.Placements.Any(placement => !native.LoadMap.Segments.Any(segment =>
+                segment.IsExecutable
+                && segment.ContainsFileOffset(placement.FileOffset.Value, placement.Size)
+                && segment.ContainsVirtualAddress(placement.VirtualAddress.Value, placement.Size))))
         {
-            diagnostics.Error(DiagnosticCode.NativeImageMalformed, "Native Image does not contain exactly one validated appended read-execute PT_LOAD.");
+            diagnostics.Error(DiagnosticCode.NativeImageMalformed, "Native Image does not retain the planned executable address map.");
             return false;
         }
 
         return true;
     }
+
+    private static string RegionIdentity(uint regionId) => $"region:{regionId:D10}";
 
     private static RehydrationRecord CreateRecord(
         RehydrationOptions options,
@@ -510,7 +408,9 @@ public static class GenericRehydrationEngine
         long durationMilliseconds,
         long? cpuMilliseconds,
         long? workingSetBytes,
-        DiagnosticBag diagnostics) =>
+        DiagnosticBag diagnostics,
+        ElfLayoutStrategy? layoutStrategy,
+        ElfLayoutEvidence? layoutEvidence) =>
         new(
             RehydrationRecord.CurrentSchemaVersion,
             RehydrationRecord.StageName,
@@ -530,7 +430,7 @@ public static class GenericRehydrationEngine
             image?.ProducerBuildSha256 ?? NormalizeSha256(options.ExpectedProducerBuildSha256),
             image?.RehydratorConsumerId ?? options.ExpectedConsumerId,
             NormalizeSha256(options.ConsumerBuildSha256),
-            RehydrationRecord.CurrentLayoutStrategy,
+            layoutStrategy?.ToEvidenceValue() ?? RehydrationRecord.CurrentLayoutStrategy,
             "handoff.json",
             "SHA256SUMS",
             diagnostics.HasErrors ? "failed" : "passed",
@@ -540,64 +440,8 @@ public static class GenericRehydrationEngine
             diagnostics.HasErrors ? RehydrationRecord.StageName : null,
             diagnostics.Take(RehydrationLimits.MaximumDiagnostics)
                 .Select(RehydrationDiagnostic.From)
-                .ToArray());
-
-    private static bool TryEncodeBranch26(ulong source, ulong target, out uint encoding)
-    {
-        encoding = 0;
-        if ((source & 3) != 0 || (target & 3) != 0)
-        {
-            return false;
-        }
-
-        long displacement;
-        if (target >= source)
-        {
-            var delta = target - source;
-            if (delta > long.MaxValue)
-            {
-                return false;
-            }
-
-            displacement = (long)delta;
-        }
-        else
-        {
-            var delta = source - target;
-            if (delta > long.MaxValue)
-            {
-                return false;
-            }
-
-            displacement = -(long)delta;
-        }
-
-        if (displacement < -(128L * 1024 * 1024) || displacement >= 128L * 1024 * 1024)
-        {
-            return false;
-        }
-
-        encoding = 0x14000000u | (uint)((displacement >> 2) & 0x03FFFFFF);
-        return true;
-    }
-
-    private static ulong AlignUp(ulong value, ulong alignment)
-    {
-        var remainder = value % alignment;
-        return remainder == 0 ? value : checked(value + alignment - remainder);
-    }
-
-    private static bool TryAdd(ulong value, ulong length, out ulong result)
-    {
-        if (length > ulong.MaxValue - value)
-        {
-            result = 0;
-            return false;
-        }
-
-        result = value + length;
-        return true;
-    }
+                .ToArray(),
+            LayoutEvidence: layoutEvidence);
 
     private static void ValidateDigest(string value, string label, DiagnosticBag diagnostics)
     {
