@@ -294,3 +294,26 @@ Implemented and verified the generic AArch64 ELF layout planner/materializer. Re
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Correct structural validation boundary
+<!-- trellis-session: v=2 fp=afe4582d66eeab93 -->
+
+**Date**: 2026-10-06
+**Task**: Correct structural validation boundary
+**Branch**: `main`
+
+### Summary
+
+Separated generic ELF structural validation from whole-image instruction observation. Structural validation is decoder-independent by default; --observe-analysis and NoOpAnalysisMode.ObservationOnly are explicit observation paths, while selected-function protection remains the code-analysis boundary. Updated CLI/report/spec/contract/test coverage and planning artifacts. Verified Release build, 268 Core tests, 290 Python tests, 13 fixtures, 19 regression-matrix cases, static boundary checks, and git diff --check.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4bb9227` | refactor: make generic ELF validation structural by default |
+| `7c50b63` | chore(task): record indirect-control analysis boundary |
+
+### Status
+
+[OK] **Completed**
