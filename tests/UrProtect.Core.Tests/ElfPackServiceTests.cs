@@ -28,14 +28,14 @@ public sealed class ElfPackServiceTests
         var wrapper = File.ReadAllBytes(outputPath);
         Assert.NotEqual(source, wrapper);
         Assert.Equal(LauncherContract.AbiVersion, result.LauncherAbiVersion);
-        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, result.FrameVersion);
+        Assert.Equal(PayloadFrameCodec.FormatVersion, result.FrameVersion);
         Assert.Equal(PayloadDispatchProfile.OuterExecveat, result.Profile);
         Assert.NotNull(result.LauncherSha256);
         var payload = PayloadFrameCodec.ReadWrapper(wrapper, new PayloadFrameLimits());
         Assert.True(payload.IsSuccess, string.Join(Environment.NewLine, payload.Diagnostics));
         Assert.Equal(source, payload.SourceBytes);
         Assert.NotNull(payload.Frame);
-        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, payload.Frame!.FrameVersion);
+        Assert.Equal(PayloadFrameCodec.FormatVersion, payload.Frame!.FrameVersion);
         Assert.Equal(PayloadDispatchProfile.OuterExecveat, payload.Frame.Profile);
         Assert.Null(payload.Frame.HostContextMetadata);
     }

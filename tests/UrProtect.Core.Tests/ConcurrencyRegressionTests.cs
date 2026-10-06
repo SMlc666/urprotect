@@ -42,7 +42,7 @@ public sealed class ConcurrencyRegressionTests
     public async Task FrameEncodingIsDeterministicAcrossConcurrentCalls()
     {
         var source = ElfFixture.MinimalPie();
-        var expected = Encode(source, frameOffset: 0x4000);
+        var expected = Encode(source);
         var workers = ReadPositiveInt("URPROTECT_STRESS_WORKERS", 4, 32);
         var iterations = ReadPositiveInt("URPROTECT_STRESS_ITERATIONS", 8, 256);
         var failures = new ConcurrentQueue<string>();
@@ -52,7 +52,7 @@ public sealed class ConcurrencyRegressionTests
             {
                 for (var iteration = 0; iteration < iterations; iteration++)
                 {
-                    var actual = Encode(source, frameOffset: 0x4000);
+                    var actual = Encode(source);
                     if (!expected.SequenceEqual(actual))
                     {
                         failures.Enqueue($"worker={worker} iteration={iteration}");
@@ -88,14 +88,15 @@ public sealed class ConcurrencyRegressionTests
         Assert.Empty(failures);
     }
 
-    private static byte[] Encode(byte[] source, ulong frameOffset)
+    private static byte[] Encode(byte[] source)
     {
         var encoded = PayloadFrameCodec.TryEncode(
             source,
-            frameOffset,
             PayloadCompression.Deflate,
             new PayloadFrameLimits(),
             "fixture",
+            PayloadDispatchProfile.OuterExecveat,
+            null,
             out var frame,
             out var diagnostics);
         TestAssertions.Success(encoded, diagnostics, "concurrent frame encoding");

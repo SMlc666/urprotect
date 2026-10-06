@@ -1,11 +1,11 @@
 # HostContext runtime core
 
-This directory defines the versioned, host-neutral `HostContext` entry
-contract and a bounded frame-dispatch runtime. The current production frame is
-v3 with an explicit `host-context-entry` profile. `urp_runtime_execute_frame`
-verifies the selected frame and both payload digests, asks the host for an
-immutable image, resolves the declared entry symbol, invokes it, and releases
-the image before returning. v1/v2 remain isolated migration-test layouts.
+This directory defines the current host-neutral `HostContext` entry
+contract and a bounded v3 frame-dispatch runtime. The current production frame
+has an explicit dispatch profile. `urp_runtime_execute_frame` verifies the
+selected frame and both payload digests, asks the host for an immutable image,
+resolves the declared entry symbol, invokes it, and releases the image before
+returning.
 
 The native implementation has two deliberate ownership boundaries:
 `host_image_validation.c` owns bounded in-memory AArch64 ELF preflight (program
@@ -102,9 +102,9 @@ nonzero constructor metadata before `urp_entry` and destructor metadata during
 `release_image`; the dependency fixture observes both sides. Zero-valued
 lifecycle mutations remain rejected before loader handoff. The optional
 `URP_HOST_CAP_THREAD_LIFETIME` extension appends managed create/join callbacks;
-the current HostContext table is 72 bytes while preserving the 56-byte legacy
-minimum. Launch args carry the opaque active image handle in the appended
-40-byte view while preserving the 32-byte legacy minimum. Adapter release
+the current HostContext table is 72 bytes with a 56-byte minimum. Launch args
+carry the opaque active image handle in the current 40-byte view with a 32-byte
+minimum. Adapter release
 joins registered workers before `dlclose`, so worker TLS teardown completes
 before image destructors. This extension's runtime claim remains evidence-gated
 to native AArch64 glibc.
@@ -166,23 +166,17 @@ symbol name. The no-dependency self-test mutates each version tag individually
 and requires a zero handle for unsupported forms; the versioned libc fixture
 separately verifies complete import requirements and nearest malformed cases.
 
-The runtime retains legacy frame v1 and HostContext frame v2 only for migration
-tests. The current v3 header is 144 bytes and appends, in order, the HostContext
-ABI version, a reserved zero field, required capability bits, the UTF-8
-entry-symbol byte length, a dispatch profile, and a second reserved zero field.
-Its variable data is `source_name`, optional `entry_name`, then compressed
-payload. The outer profile carries no HostContext metadata and is handled by
-the separate static launcher. The runtime validates the fields before decoding
-and copies the bounded entry name into a terminated local buffer before symbol
-lookup.
-
-Legacy v1 keeps its wrapper-absolute encoded offset for migration evidence.
-HostContext v2 uses a frame-relative encoded offset in its migration self-test.
-Current v3 uses a frame-relative offset for both explicit profiles. The current
-managed `pack` path selects v3 and validates the profile-specific launcher
-marker before publication. `host-context-launcher` discovers the appended
-frame, invokes `urp_runtime_execute_wrapper`, and returns the declared entry
-status.
+The current v3 header is 144 bytes and appends, in order, the HostContext ABI
+version, a reserved zero field, required capability bits, the UTF-8 entry-symbol
+byte length, a dispatch profile, and a second reserved zero field. Its variable
+data is `source_name`, optional `entry_name`, then compressed payload. The outer
+profile carries no HostContext metadata and is handled by the separate static
+launcher. The runtime validates the fields before decoding and copies the
+bounded entry name into a terminated local buffer before symbol lookup. The
+encoded offset is frame-relative for both profiles. The managed `pack` path
+selects v3 and validates the profile-specific launcher marker before
+publication. `host-context-launcher` discovers the appended frame, invokes
+`urp_runtime_execute_wrapper`, and returns the declared entry status.
 
 Run the native contract self-test on a native AArch64 host:
 

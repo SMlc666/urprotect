@@ -51,7 +51,7 @@ public sealed record ProductSummaryReport(
 {
     /// <summary>
     /// Reports whether validation remained structural or explicitly ran the
-    /// legacy whole-image observation pass.
+    /// explicit whole-image observation pass.
     /// </summary>
     public string AnalysisMode { get; init; } = "structural";
 }

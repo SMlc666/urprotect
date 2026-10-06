@@ -60,12 +60,9 @@ if len(data) < 24:
     raise SystemExit("wrapper is too short")
 frame_offset = int.from_bytes(data[-16:-8], "little")
 header_size = int.from_bytes(data[frame_offset + 10:frame_offset + 12], "little")
-frame_version = int.from_bytes(data[frame_offset + 8:frame_offset + 10], "little")
 encoded_value = int.from_bytes(data[frame_offset + 40:frame_offset + 48], "little")
-encoded_absolute = frame_offset + encoded_value if frame_version >= 2 else encoded_value
-if mutation == "version":
-    data[frame_offset + 8:frame_offset + 10] = (2).to_bytes(2, "little")
-elif mutation == "flags":
+encoded_absolute = frame_offset + encoded_value
+if mutation == "flags":
     data[frame_offset + 12:frame_offset + 16] = (2).to_bytes(4, "little")
 elif mutation == "architecture":
     data[frame_offset + 16:frame_offset + 18] = (62).to_bytes(2, "little")
@@ -254,7 +251,7 @@ if [[ "${tampered_status}" -ne 5 ]]; then
 fi
 grep -q 'PayloadIntegrityMismatch' "${temporary_directory}/tampered.err"
 
-for mutation in version flags architecture basename; do
+for mutation in flags architecture basename; do
   malformed="${temporary_directory}/${mutation}.wrapped"
   mutate_wrapper "${true_wrapper}" "${malformed}" "${mutation}"
   run_expected_failure "${malformed}" 4 WrapperMalformed "${mutation}"

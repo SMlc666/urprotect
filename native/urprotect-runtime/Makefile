@@ -55,7 +55,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl -pthread
 
-.PHONY: all test test-adapter runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
+.PHONY: all test runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -119,9 +119,6 @@ test: check-host $(SELF_TEST) $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(T
 	./test_native_image_handoff.sh "$(NATIVE_IMAGE_HANDOFF)"
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_REVERSED_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
-
-test-adapter: check-host $(SELF_TEST)
-	"$(SELF_TEST)" "$(ENTRY_FIXTURE)" --adapter-v2
 
 contract-probe: $(BUILD_DIR)/contract-probe
 

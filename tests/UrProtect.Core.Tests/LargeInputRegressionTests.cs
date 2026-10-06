@@ -34,15 +34,16 @@ public sealed class LargeInputRegressionTests
             MaximumWrapperBytes: 8 * 1024 * 1024);
         var encoded = PayloadFrameCodec.TryEncode(
             source,
-            frameOffset: 0,
             PayloadCompression.Deflate,
             limits,
             "large-input",
+            PayloadDispatchProfile.OuterExecveat,
+            null,
             out var frame,
             out var diagnostics);
 
         TestAssertions.Success(encoded, diagnostics, "large frame encoding at exact limit");
-        var decoded = PayloadFrameCodec.Decode(frame!.FrameBytes, frameOffset: 0, limits);
+        var decoded = PayloadFrameCodec.Decode(frame!.FrameBytes, limits);
         TestAssertions.FrameSuccess(decoded, "large frame decoding at exact limit");
         TestAssertions.ByteIdentity(source, decoded.SourceBytes!, "large frame round trip");
     }
@@ -56,10 +57,11 @@ public sealed class LargeInputRegressionTests
         var limits = new PayloadFrameLimits(MaximumSourceBytes: (ulong)sourceSize);
         var encoded = PayloadFrameCodec.TryEncode(
             source,
-            frameOffset: 0,
             PayloadCompression.Deflate,
             limits,
             "large-input",
+            PayloadDispatchProfile.OuterExecveat,
+            null,
             out var frame,
             out var diagnostics);
 

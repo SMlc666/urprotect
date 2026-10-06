@@ -52,7 +52,7 @@ internal static class Program
             MaximumWrapperBytes: 16 * 1024 * 1024,
             MaximumSourceNameBytes: 4096,
             MaximumEntryNameBytes: HostContextContract.MaximumEntryNameBytes);
-        _ = PayloadFrameCodec.Decode(data, frameOffset: 0, limits);
+        _ = PayloadFrameCodec.Decode(data, limits);
         _ = PayloadFrameCodec.ReadWrapper(data, limits);
     }
 
@@ -101,10 +101,11 @@ internal static class Program
         var source = BuildMinimalElfSeed();
         if (!PayloadFrameCodec.TryEncode(
                 source,
-                frameOffset: 0,
                 PayloadCompression.Deflate,
                 new PayloadFrameLimits(),
                 "seed",
+                PayloadDispatchProfile.OuterExecveat,
+                null,
                 out var encoded,
                 out var diagnostics))
         {

@@ -106,7 +106,7 @@ def check_bionic_evidence(
         "execution": "native-arm64-bionic-container",
         "packageProvenance": "version-and-sha256-locked-package-set",
         "directLinkerMode": "identity",
-        "handoffStatus": "validated-host-context-v2-adapter-self-test",
+        "handoffStatus": "validated-host-context-v3-adapter-self-test",
     }
     for key, expected in expected_fields.items():
         if document.get(key) != expected:
@@ -142,7 +142,7 @@ def check_bionic_evidence(
         not isinstance(oracle, dict)
         or oracle.get("status") != "validated"
         or oracle.get("abi") != "HostContext-v1"
-        or oracle.get("frame") != "HostContext-v2"
+        or oracle.get("frame") != "HostContext-v3"
         or oracle.get("sealedImage") is not True
         or oracle.get("entryDispatch") != "urp_entry"
         or oracle.get("executableTemporaryPath") is not False
@@ -663,7 +663,7 @@ def check_native_fixture(
         fail(f"{fixture_id} UrProtect validation did not pass")
     if result.get("directStatus") != 0 or result.get("copyStatus") != 0:
         fail(f"{fixture_id} direct or copied image did not return zero")
-    if result.get("application") != "UrProtect CLI validate --no-analysis --copy":
+    if result.get("application") != "UrProtect CLI validate --copy":
         fail(f"{fixture_id} does not record the expected UrProtect validation oracle")
     digest = result.get("applicationBuildSha256")
     if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:

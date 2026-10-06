@@ -26,7 +26,7 @@ public sealed record ElfPackResult(
     string? WrapperSha256,
     IReadOnlyList<Diagnostic> Diagnostics,
     string? LauncherSha256 = null,
-    ushort FrameVersion = PayloadFrameCodec.CurrentFormatVersion,
+    ushort FrameVersion = PayloadFrameCodec.FormatVersion,
     ushort LauncherAbiVersion = LauncherContract.AbiVersion,
     PayloadDispatchProfile Profile = PayloadDispatchProfile.OuterExecveat)
 {
@@ -164,7 +164,7 @@ public sealed class ElfPackService
                     | (options.RequireThreadLifetime ? HostContextCapability.ThreadLifetime : HostContextCapability.None),
                 options.EntrySymbol)
             : null;
-        if (!PayloadFrameCodec.TryEncodeCurrent(
+        if (!PayloadFrameCodec.TryEncode(
                 sourceBytes,
                 options.Compression,
                 options.EffectiveLimits,

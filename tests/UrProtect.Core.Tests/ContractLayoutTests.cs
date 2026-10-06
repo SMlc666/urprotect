@@ -42,14 +42,11 @@ public sealed class ContractLayoutTests
             HostContextContract.AbiVersion,
             root.GetProperty("hostAbiVersion").GetUInt32());
         Assert.Equal(
+            PayloadFrameCodec.FormatVersion,
+            root.GetProperty("frameVersion").GetUInt16());
+        Assert.Equal(
             PayloadFrameCodec.HeaderSize,
-            root.GetProperty("frameV1HeaderSize").GetUInt16());
-        Assert.Equal(
-            PayloadFrameCodec.HostContextHeaderSize,
-            root.GetProperty("frameV2HeaderSize").GetUInt16());
-        Assert.Equal(
-            PayloadFrameCodec.CurrentHeaderSize,
-            root.GetProperty("frameV3HeaderSize").GetUInt16());
+            root.GetProperty("frameHeaderSize").GetUInt16());
         Assert.Equal(
             PayloadFrameCodec.TrailerSize,
             root.GetProperty("frameTrailerSize").GetUInt16());
@@ -58,19 +55,19 @@ public sealed class ContractLayoutTests
             root.GetProperty("frameSha256Size").GetUInt16());
         Assert.Equal(
             PayloadFrameCodec.HostContextAbiVersionOffset,
-            root.GetProperty("v2AbiOffset").GetUInt16());
+            root.GetProperty("hostAbiOffset").GetUInt16());
         Assert.Equal(
             PayloadFrameCodec.HostContextRequiredCapabilitiesOffset,
-            root.GetProperty("v2CapabilitiesOffset").GetUInt16());
+            root.GetProperty("requiredCapabilitiesOffset").GetUInt16());
         Assert.Equal(
             PayloadFrameCodec.HostContextEntryNameSizeOffset,
-            root.GetProperty("v2EntryNameSizeOffset").GetUInt16());
+            root.GetProperty("entryNameSizeOffset").GetUInt16());
         Assert.Equal(
-            PayloadFrameCodec.CurrentProfileOffset,
-            root.GetProperty("v3ProfileOffset").GetUInt16());
+            PayloadFrameCodec.ProfileOffset,
+            root.GetProperty("profileOffset").GetUInt16());
         Assert.Equal(
-            PayloadFrameCodec.CurrentReservedOffset,
-            root.GetProperty("v3ReservedOffset").GetUInt16());
+            PayloadFrameCodec.ReservedOffset,
+            root.GetProperty("reservedOffset").GetUInt16());
 
         Assert.Equal(56U, root.GetProperty("threadCreateOffset").GetUInt32());
         Assert.Equal(64U, root.GetProperty("threadJoinOffset").GetUInt32());

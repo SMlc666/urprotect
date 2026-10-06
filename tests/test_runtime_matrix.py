@@ -336,7 +336,7 @@ Dynamic section at offset 0xf00 contains 1 entry:
                         "validatorStatus": 0,
                         "copyStatus": 0,
                         "streamsMatch": True,
-                        "application": "UrProtect CLI validate --no-analysis --copy",
+                        "application": "UrProtect CLI validate --copy",
                         "applicationBuildSha256": "sha256:" + hashlib.sha256(
                             (ROOT / "src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll").read_bytes()
                         ).hexdigest(),
@@ -455,11 +455,11 @@ Dynamic section at offset 0xf00 contains 1 entry:
             "baselineStatus": 0,
             "directLinkerStatus": 0,
             "directLinkerMode": "identity",
-            "handoffStatus": "validated-host-context-v2-adapter-self-test",
+            "handoffStatus": "validated-host-context-v3-adapter-self-test",
             "hostContextAdapterOracle": {
                 "status": "validated",
                 "abi": "HostContext-v1",
-                "frame": "HostContext-v2",
+                "frame": "HostContext-v3",
                 "sealedImage": True,
                 "entryDispatch": "urp_entry",
                 "executableTemporaryPath": False,

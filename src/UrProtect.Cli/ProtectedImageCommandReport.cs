@@ -5,7 +5,7 @@ using UrProtect.Core.Protect;
 namespace UrProtect.Cli;
 
 /// <summary>
-/// Focused CLI projection for the opt-in Protected Image producer. The legacy
+/// Focused CLI projection for the opt-in Protected Image producer. The current
 /// ProductReport schema intentionally remains unchanged.
 /// </summary>
 public sealed record ProtectedImageCommandReport(

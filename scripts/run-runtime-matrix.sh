@@ -79,7 +79,7 @@ validate_and_run() {
   check_load_alignment "$cell/readelf.txt" "$expected_align" > "$cell/pt-load-alignment.txt"
   set +e
   timeout 20 "$binary" > "$cell/stdout" 2> "$cell/stderr"; local direct=$?
-  timeout 120 "${cli[@]}" validate "$binary" --no-analysis --copy "$cell/parser-copy" > "$cell/validator.stdout" 2> "$cell/validator.stderr"; local validate=$?
+  timeout 120 "${cli[@]}" validate "$binary" --copy "$cell/parser-copy" > "$cell/validator.stdout" 2> "$cell/validator.stderr"; local validate=$?
   local copy_status=125
   if [[ "$validate" == 0 && -s "$cell/parser-copy" ]]; then
     timeout 20 "$cell/parser-copy" > "$cell/copy.stdout" 2> "$cell/copy.stderr"; copy_status=$?
@@ -99,7 +99,7 @@ validate_and_run() {
   local assembly="$root/src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll"
   [[ -s "$assembly" ]] || { echo "UrProtect CLI assembly missing: $assembly" >&2; return 1; }
   local app_hash; app_hash="$(sha256sum "$assembly" | awk '{print $1}')"
-  printf '{"status":"validated","directStatus":%s,"validatorStatus":%s,"copyStatus":%s,"streamsMatch":true,"application":"UrProtect CLI validate --no-analysis --copy","applicationBuildSha256":"sha256:%s","sdkVersion":"%s"}\n' "$direct" "$validate" "$copy_status" "$app_hash" "$(dotnet --version)" > "$cell/result.json"
+  printf '{"status":"validated","directStatus":%s,"validatorStatus":%s,"copyStatus":%s,"streamsMatch":true,"application":"UrProtect CLI validate --copy","applicationBuildSha256":"sha256:%s","sdkVersion":"%s"}\n' "$direct" "$validate" "$copy_status" "$app_hash" "$(dotnet --version)" > "$cell/result.json"
 }
 
 gcc -O2 -fPIE -pie -Wl,--build-id=none -Wl,-z,max-page-size=4096 "$out/fixtures/probe.c" -o "$out/fixtures/glibc-4k"

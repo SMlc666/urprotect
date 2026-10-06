@@ -254,7 +254,7 @@ run_shell -c '
   make -C /workspace/native/urprotect-runtime \
     SHELL="${PREFIX}/bin/sh" \
     BUILD_DIR=/artifacts/host-context/build \
-    CC=clang test-adapter > /artifacts/host-context/build-and-test.log 2>&1
+    CC=clang self-test > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
 ' -- "${compiler_package_specs[@]}"
@@ -477,14 +477,14 @@ sha256sum "${host_context_fixture}" > "${case_root}/host-context/entry-fixture.s
 printf '%s\n' \
   "status=validated" \
   "abi=HostContext-v1" \
-  "frame=HostContext-v2" \
+  "frame=HostContext-v3" \
   "handoff=sealed-memfd-with-verified-required-seals" \
   "loader=Termux-bionic-dlopen-through-proc-self-fd" \
   "entry=urp_entry" \
   "executable_temporary_path=false" \
   "oracle=host-context/build-and-test.log" \
   > "${case_root}/host-context/result.txt"
-sed -i 's/^handoff_status=.*/handoff_status=validated-host-context-v2-adapter-self-test/' \
+sed -i 's/^handoff_status=.*/handoff_status=validated-host-context-v3-adapter-self-test/' \
   "${case_root}/provenance.txt"
 
 python3 - "${case_root}/result.json" "${image}" "${termux_source_commit}" \
@@ -539,11 +539,11 @@ document = {
     "baselineStatus": int(baseline),
     "directLinkerStatus": int(linker),
     "directLinkerMode": "identity",
-    "handoffStatus": "validated-host-context-v2-adapter-self-test",
+    "handoffStatus": "validated-host-context-v3-adapter-self-test",
     "hostContextAdapterOracle": {
         "status": "validated",
         "abi": "HostContext-v1",
-        "frame": "HostContext-v2",
+        "frame": "HostContext-v3",
         "fixture": "host-context/build/host-context-entry-fixture.so",
         "fixtureSha256": hashlib.sha256(
             pathlib.Path(host_context_fixture).read_bytes()

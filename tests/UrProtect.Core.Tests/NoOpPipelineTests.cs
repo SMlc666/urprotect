@@ -25,7 +25,7 @@ public sealed class NoOpPipelineTests
         var decoder = new AsmStoneAdapter((encoding, address) =>
             Aarch64DecodeResult.BackendUnavailable(encoding, address));
 
-        var result = new NoOpPipeline(decoder).Validate(ElfFixture.MinimalPie());
+        var result = new NoOpPipeline(decoder).ValidateStructurally(ElfFixture.MinimalPie());
 
         TestAssertions.Success(result.IsSuccess, result.Diagnostics, "structural validation");
         Assert.Equal(NoOpAnalysisMode.StructuralOnly, result.AnalysisMode);
@@ -42,7 +42,7 @@ public sealed class NoOpPipelineTests
         var decoder = new AsmStoneAdapter((encoding, address) =>
             Aarch64DecodeResult.BackendUnavailable(encoding, address));
 
-        var result = new NoOpPipeline(decoder).Validate(input);
+        var result = new NoOpPipeline(decoder).ValidateStructurally(input);
 
         TestAssertions.Success(result.IsSuccess, result.Diagnostics, "unknown executable bytes");
         Assert.Null(result.Analysis);
@@ -106,7 +106,7 @@ public sealed class NoOpPipelineTests
             var decoder = new AsmStoneAdapter((encoding, address) =>
                 Aarch64DecodeResult.BackendUnavailable(encoding, address));
 
-            var result = new NoOpPipeline(decoder).ValidateAndCopy(inputPath, outputPath);
+            var result = new NoOpPipeline(decoder).ValidateAndCopyStructurally(inputPath, outputPath);
 
             TestAssertions.Success(result.IsSuccess, result.Diagnostics, "mode-preserving copy");
             Assert.Equal(mode, File.GetUnixFileMode(outputPath));

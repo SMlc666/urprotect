@@ -333,7 +333,7 @@ public sealed class CliApplication
         writer.WriteLine();
         writer.WriteLine("Usage:");
         writer.WriteLine("  urprotect validate <input> [--copy <output>] [--json <path|->] [--observe-analysis]");
-        writer.WriteLine("    Structural validation is the default; --no-analysis is retained as a legacy alias.");
+        writer.WriteLine("    Structural validation is the default; use --observe-analysis for explicit whole-image observation.");
         writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime] [--path-preserving]");
         writer.WriteLine("  urprotect protect <input> --output <protected> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--json <path|->]");
         writer.WriteLine("  urprotect protect-image <input> --artifact <path> --role <path> --manifest <path> --stage <path> --unit <id> --profile <outer-execveat|host-context-entry> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--producer-id <id>] [--producer-build-sha256 <sha256>] [--rehydrator <id>] [--source-sha256 <sha256>] [--request-sha256 <sha256>] [--json <path|->]");
@@ -1133,23 +1133,13 @@ public sealed class CliApplication
                     jsonPath = args[++index];
                     break;
                 case "--observe-analysis":
-                    if (analysisOption && analysisMode != NoOpAnalysisMode.ObservationOnly)
+                    if (analysisOption)
                     {
-                        error = "Usage: --observe-analysis conflicts with --no-analysis.";
+                        error = "Usage: --observe-analysis may be specified only once.";
                         return false;
                     }
 
                     analysisMode = NoOpAnalysisMode.ObservationOnly;
-                    analysisOption = true;
-                    break;
-                case "--no-analysis":
-                    if (analysisOption && analysisMode != NoOpAnalysisMode.StructuralOnly)
-                    {
-                        error = "Usage: --no-analysis conflicts with --observe-analysis.";
-                        return false;
-                    }
-
-                    analysisMode = NoOpAnalysisMode.StructuralOnly;
                     analysisOption = true;
                     break;
                 case "-h":
@@ -1449,9 +1439,6 @@ public sealed class CliApplication
             switch (args[index])
             {
                 case "--artifact":
-                case "--artifact-path":
-                case "--artifact-output":
-                case "--output" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || artifactPath is not null)
                     {
                         error = "Usage: protect-image requires one --artifact <path>.";
@@ -1461,8 +1448,6 @@ public sealed class CliApplication
                     artifactPath = args[++index];
                     break;
                 case "--role":
-                case "--role-path":
-                case "--role-output" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || rolePath is not null)
                     {
                         error = "Usage: --role requires one output path and may be specified only once.";
@@ -1472,8 +1457,6 @@ public sealed class CliApplication
                     rolePath = args[++index];
                     break;
                 case "--manifest":
-                case "--manifest-path":
-                case "--manifest-output" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || manifestPath is not null)
                     {
                         error = "Usage: --manifest requires one output path and may be specified only once.";
@@ -1483,8 +1466,6 @@ public sealed class CliApplication
                     manifestPath = args[++index];
                     break;
                 case "--stage":
-                case "--stage-path":
-                case "--stage-output" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || stagePath is not null)
                     {
                         error = "Usage: --stage requires one output path and may be specified only once.";
@@ -1522,7 +1503,6 @@ public sealed class CliApplication
                     producerId = args[++index];
                     break;
                 case "--producer-build-sha256":
-                case "--producer-build" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || producerBuildSha256 is not null)
                     {
                         error = "Usage: --producer-build-sha256 requires one SHA-256 value.";
@@ -1538,7 +1518,6 @@ public sealed class CliApplication
 
                     break;
                 case "--rehydrator":
-                case "--rehydrator-consumer" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || rehydratorConsumerId is not null)
                     {
                         error = "Usage: --rehydrator requires one consumer ID.";
@@ -1548,7 +1527,6 @@ public sealed class CliApplication
                     rehydratorConsumerId = args[++index];
                     break;
                 case "--source-sha256":
-                case "--expected-source-sha256" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || expectedSourceSha256 is not null)
                     {
                         error = "Usage: --source-sha256 requires one SHA-256 value.";
@@ -1564,7 +1542,6 @@ public sealed class CliApplication
 
                     break;
                 case "--request-sha256":
-                case "--expected-request-sha256" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || expectedRequestSha256 is not null)
                     {
                         error = "Usage: --request-sha256 requires one SHA-256 value.";

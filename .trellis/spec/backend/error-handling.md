@@ -33,15 +33,15 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 
 - `ElfParser.Parse(ReadOnlyMemory<byte>)` returns `ElfParseResult`; malformed
   input becomes diagnostics and a missing `File`, not an exception.
-- `NoOpPipeline.Validate` preserves the parsed file when safe. It appends
-  instruction-analysis diagnostics only when the explicitly selected
-  observation-only mode is requested, and creates output bytes only after all
-  errors are absent and byte identity is proven.
-- `NoOpPipeline.ValidateAndCopy` defaults to structural validation and accepts an
-  optional `inputOverride` snapshot so report hashes and copied bytes describe
-  the same source. Observation-only copying is explicitly selected through its
-  named API. It writes a flushed temporary sibling and removes it on every
-  failure path.
+- `NoOpPipeline.ValidateStructurally` preserves the parsed file when safe.
+  `ValidateObservationOnly` appends instruction-analysis diagnostics only when
+  the explicitly selected observation-only mode is requested, and creates
+  output bytes only after all errors are absent and byte identity is proven.
+- `NoOpPipeline.ValidateAndCopyStructurally` accepts an optional `inputOverride`
+  snapshot so report hashes and copied bytes describe the same source.
+  Observation-only copying is explicitly selected through
+  `ValidateAndCopyObservationOnly`. Both APIs write a flushed temporary sibling
+  and remove it on every failure path.
 - `PayloadFrameCodec` validates version, flags, architecture, names, bounds,
   encoded digest, exact decompressed size, and source digest before returning
   source bytes.
@@ -51,9 +51,10 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
   creation, rejects foreign/repeated/self-join handles, and never reuses opaque
   thread handles. Release closes creation and joins registered workers; a join
   failure preserves the image mapping and descriptor so live code is not
-  unloaded. Non-threaded frames receive a legacy-size HostContext projection
-  with the optional callbacks/capability cleared and a 32-byte launch-args view
-  with image handle zero.
+  unloaded. The runtime passes the current HostContext table directly. Ordinary
+  frames receive the 32-byte minimum launch-args view with image handle zero;
+  frames requiring thread lifetime receive the current 40-byte view with the
+  active image handle.
 - `ElfPackService` validates source and launcher independently, validates the
   assembled wrapper and recovered payload, and publishes only after a final
   byte comparison.

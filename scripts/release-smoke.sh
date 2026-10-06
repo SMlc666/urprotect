@@ -147,12 +147,12 @@ PY
       -v "$(realpath "${extracted}"):/smoke" \
       -v "${input}:/input.elf:ro" \
       "${musl_container_image}" "${musl_container_binary}" \
-      validate /input.elf --copy "/smoke/copy.elf" --json "/smoke/report.json" --no-analysis
+      validate /input.elf --copy "/smoke/copy.elf" --json "/smoke/report.json"
   elif [[ -n "${launcher}" ]]; then
     env "LD_LIBRARY_PATH=${library_path}" "${launcher}" "${binary}" \
-      validate "${input}" --copy "${copy}" --json "${report}" --no-analysis
+      validate "${input}" --copy "${copy}" --json "${report}"
   else
-    "${binary}" validate "${input}" --copy "${copy}" --json "${report}" --no-analysis
+    "${binary}" validate "${input}" --copy "${copy}" --json "${report}"
   fi
   cmp -- "${input}" "${copy}"
   python3 - "${report}" <<'PY'

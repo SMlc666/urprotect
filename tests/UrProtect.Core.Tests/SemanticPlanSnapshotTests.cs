@@ -13,7 +13,7 @@ public sealed class SemanticPlanSnapshotTests
         var second = CreatePlan(reverseOrder: true);
 
         var firstSnapshot = SemanticPlanSnapshotCodec.Create(first);
-        var secondSnapshot = SemanticPlanSnapshotProjector.Project(second);
+        var secondSnapshot = SemanticPlanSnapshotCodec.Create(second);
 
         Assert.True(firstSnapshot.IsSuccess, Describe(firstSnapshot.Diagnostics));
         Assert.True(secondSnapshot.IsSuccess, Describe(secondSnapshot.Diagnostics));

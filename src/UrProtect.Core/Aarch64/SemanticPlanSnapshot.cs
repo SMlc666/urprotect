@@ -120,11 +120,6 @@ public sealed class SemanticPlanSnapshot
 
     public string PlanSha256 { get; }
 
-    public static SemanticPlanSnapshotResult Create(SemanticRewritePlan plan) =>
-        SemanticPlanSnapshotCodec.Create(plan);
-
-    public static SemanticPlanSnapshotResult Project(SemanticRewritePlan plan) =>
-        SemanticPlanSnapshotCodec.Create(plan);
 }
 
 /// <summary>
@@ -150,19 +145,6 @@ public sealed class SemanticPlanSnapshotResult
     public string? PlanSha256 => Snapshot?.PlanSha256;
 
     public byte[]? CanonicalBytes => Snapshot?.CanonicalBytes;
-}
-
-/// <summary>
-/// Projects a semantic rewrite plan into the canonical handoff snapshot. The
-/// codec remains the single owner of bytes and digest computation.
-/// </summary>
-public static class SemanticPlanSnapshotProjector
-{
-    public static SemanticPlanSnapshotResult Project(SemanticRewritePlan plan) =>
-        SemanticPlanSnapshotCodec.Create(plan);
-
-    public static SemanticPlanSnapshotResult Create(SemanticRewritePlan plan) =>
-        SemanticPlanSnapshotCodec.Create(plan);
 }
 
 /// <summary>
@@ -195,19 +177,6 @@ public static class SemanticPlanSnapshotCodec
     {
         ArgumentNullException.ThrowIfNull(plan);
         return CreateCore(plan);
-    }
-
-    /// <summary>
-    /// Alias for callers that use projection terminology at the handoff.
-    /// </summary>
-    public static SemanticPlanSnapshotResult Project(SemanticRewritePlan plan) => Create(plan);
-
-    public static SemanticPlanSnapshotResult Encode(SemanticRewritePlan plan) => Create(plan);
-
-    public static byte[] Serialize(SemanticPlanSnapshot snapshot)
-    {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        return snapshot.CanonicalBytes;
     }
 
     /// <summary>
@@ -414,29 +383,11 @@ public static class SemanticPlanSnapshotCodec
         return new SemanticPlanSnapshotResult(result.Snapshot, diagnostics.ToArray());
     }
 
-    public static SemanticPlanSnapshotResult Deserialize(ReadOnlyMemory<byte> canonicalBytes) =>
-        Decode(canonicalBytes);
-
-    public static SemanticPlanSnapshotResult Validate(ReadOnlyMemory<byte> canonicalBytes) =>
-        Decode(canonicalBytes);
-
     /// <summary>
     /// Computes the one plan digest used by later artifact binders.
     /// </summary>
     public static string ComputeSha256(ReadOnlySpan<byte> canonicalBytes) =>
         Convert.ToHexString(SHA256.HashData(canonicalBytes)).ToLowerInvariant();
-
-    public static string ComputePlanSha256(ReadOnlySpan<byte> canonicalBytes) =>
-        ComputeSha256(canonicalBytes);
-
-    public static bool VerifyDigest(
-        ReadOnlyMemory<byte> canonicalBytes,
-        out IReadOnlyList<Diagnostic> diagnostics)
-    {
-        var result = Decode(canonicalBytes);
-        diagnostics = result.Diagnostics;
-        return result.IsSuccess;
-    }
 
     private static SemanticPlanSnapshotResult CreateCore(SemanticRewritePlan plan)
     {

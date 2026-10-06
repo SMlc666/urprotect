@@ -38,10 +38,10 @@ profile includes the existing ET_DYN PIE/static-PIE slices and the separately
 validated dynamic ET_EXEC slice. These profiles have different image lifetime
 and launch semantics, so a profile-specific launcher or adapter is explicitly
 selected and validated rather than inferred from loader behavior.
-During migration, an older path may remain as explicitly named historical
-evidence, but new packaging must not select it silently and the compatibility
-matrix must not count it as current support. A stale version or profile/
-launcher mismatch must produce a clear version or unsupported result.
+The current Payload Frame and CLI/API contract is breaking and
+single-version: retired frame/API/CLI paths are deleted rather than retained as
+selectable or evidence-producing compatibility routes. A stale version or
+profile/launcher mismatch must produce a clear version or unsupported result.
 
 Compatibility work is layered and must be reported at the layer actually
 proved:
@@ -83,17 +83,15 @@ int32_t urp_entry(
     const urp_launch_args_v1 *args);
 ```
 
-`urp_host_context_v1` is version `1`, requires a declared size of at least
-`56` bytes, and requires `load_image`, `lookup_symbol`, and
-`release_image` capabilities. `urp_launch_args_v1` is version `1` with a
-minimum declared size of `32` bytes. The legacy payload frame is v1; the
-HostContext frame is v2 and adds the ABI version, required capability bits,
-and a bounded UTF-8 entry-symbol name to the common 112-byte header. The v2
-header is 136 bytes and uses a frame-relative encoded offset because the
-standalone runtime receives the frame slice directly. Legacy v1 retains its
-wrapper-absolute encoded offset for the existing launcher.
+`urp_host_context_v1` is the current ABI version `1`, requires a declared size
+of at least `56` bytes, and requires `load_image`, `lookup_symbol`, and
+`release_image` capabilities. `urp_launch_args_v1` is the current ABI version
+`1` with a minimum declared size of `32` bytes. The current payload frame is v3
+with an explicit profile and a 144-byte header containing the HostContext ABI,
+required capability bits, bounded UTF-8 entry metadata, and profile fields.
+Both profiles use a frame-relative encoded offset.
 
-The legacy managed/native standalone handoff retains its v1 sequence:
+The managed/native standalone handoff uses this sequence:
 
 ```text
 memfd_create(name, MFD_CLOEXEC)
@@ -160,18 +158,17 @@ executable pathname.
   positive HostContext dispatch is not evidence of immutability unless that
   invariant passes.
 - `lookup_symbol` resolves the exact declared entry symbol for the loaded
-  image; legacy v1 defaults to `urp_entry` and HostContext v2 carries the
-  bounded symbol name explicitly.
+  image; the current outer profile uses `urp_entry` and the current
+  HostContext profile carries a bounded symbol name explicitly.
 - `urp_entry` is called at most once per successful frame execution.
 - The runtime releases the image after entry dispatch, including a nonzero
   entry status. Host callbacks must not be invoked after release returns.
 - The optional thread-lifetime capability appends `create_image_thread` and
   `join_image_thread` at offsets 56 and 64 (72-byte current table); the 56-byte
-  legacy minimum remains valid. The capability requires both appended fields
-  and callbacks. Launch args retain their 32-byte legacy minimum and append
-  the opaque image handle at offset 32 (40-byte current view). Runtime
-  projection copies only caller-declared legacy bytes and supplies the active
-  image handle to entry.
+  minimum remains valid. The capability requires both appended fields and
+  callbacks. Launch args retain their 32-byte minimum and append the opaque
+  image handle at offset 32 (40-byte current view). Runtime passes the current
+  HostContext table directly and supplies the active image handle to entry.
 - A frame requiring thread lifetime is preflighted against the capability,
   table size, and callbacks before image loading. Registered workers may be
   created only by the dispatch thread through HostContext. Release closes the
@@ -370,13 +367,12 @@ executable pathname.
   product.
 - The current production managed pack path emits frame v3 with explicit
   `outer-execveat` and `host-context-entry` profiles. Profile-matched launcher
-  markers are validated before frame encoding and stale v1/v2 behavior remains
-  migration evidence only. `runtime.host-context.production-pack` is validated
+  markers are validated before frame encoding and unsupported frame versions or
+  profile/launcher mismatches fail closed. `runtime.host-context.production-pack` is validated
   by the retained managed HostContext pack/dispatch oracle on the native
   AArch64 glibc lane.
-- `runtime.wrapper-v1-baseline` keeps Wrapper 0.2 framing and launcher tests as
-  migration evidence only; the Android `android.jni.native-bridge` row is an
-  unwrapped JNI baseline. Neither row upgrades HostContext runtime support.
+- The Android `android.jni.native-bridge` row is an unwrapped JNI baseline and
+  does not upgrade HostContext runtime support.
 
 #### Environment keys
 
@@ -444,8 +440,8 @@ oracle's retained output, not only source files that describe the oracle.
 - Good: a valid AArch64 `ET_DYN` frame reaches an immutable host image,
   resolves its declared entry symbol, invokes it once, releases the image,
   and preserves its status and declared output.
-- Base: a standalone PIE passes parser and legacy wrapper checks but lacks the
-  HostContext entry contract; report it as parser/legacy evidence, not as an
+- Base: a standalone PIE passes parser and outer-profile checks but lacks the
+  HostContext entry contract; report it as parser/outer evidence, not as an
   in-process runtime claim.
 - Bad: a loader error, unknown relocation, missing bionic linker, or missing
   Docker capability is hidden by a compatibility/fallback branch or labeled as
@@ -764,7 +760,7 @@ Aarch64SemanticPlanFactory.Create(
     IEnumerable<ISemanticPlanExtension>? extensions = null)
     -> SemanticRewritePlanResult
 
-SemanticPlanSnapshotProjector.Project(
+SemanticPlanSnapshotCodec.Create(
     SemanticRewritePlan plan)
     -> SemanticPlanSnapshotResult
 
@@ -1245,7 +1241,7 @@ The producer emits `protected-image.bin`, `protected-image.json`, `stage.json`, 
 
 ### 3. Contracts
 
-- The command snapshots explicit selectors and passes, uses the managed `ProtectedImageProducer`, and publishes through `ProtectedImagePublisher`; the legacy `protect` command and `ProductReport` schema remain unchanged.
+- The command snapshots explicit selectors and passes, uses the managed `ProtectedImageProducer`, and publishes through `ProtectedImagePublisher`; the current `protect` command and `ProductReport` schema remain unchanged.
 - A passed stage binds `artifactRole=protected-image`, `abiId=urprotect.protected-image.v1`, `abiVersion=1`, the role artifact digest/size, the declared rehydrator consumer, and a raw manifest path. A failed stage retains diagnostics and streams but publishes neither artifact nor role.
 - The producer artifact is a bounded canonical Protected Image document. It is not a complete source/final ELF and is not counted as a strict compatibility unit until the rehydrator, Native Image, loader, and behavior stages are present.
 - CI runs the producer script after build and uploads `.artifacts/protected-image/` with `if: always()`. The script retains failure evidence and the checker recomputes closed manifest hashes; it never relabels a producer pass as compatibility success.
@@ -1271,7 +1267,7 @@ The producer emits `protected-image.bin`, `protected-image.json`, `stage.json`, 
 ### 6. Tests Required
 
 - Managed tests cover codec round trips, malformed/overflow/duplicate/overlap/alias cases, role/stage binding, the shared PT_NULL/RX-extension/relocated-table layout planner, and atomic rollback.
-- CLI tests cover selector/pass parsing, output path conflicts, success publication, failed source binding, focused JSON reporting, and legacy command compatibility.
+- CLI tests cover selector/pass parsing, output path conflicts, success publication, failed source binding, focused JSON reporting, and the current command grammar.
 - The producer script/checker tests cover success/failure retention, closed SHA256SUMS, path traversal, digest continuity, and no partial artifact on failure.
 - The CI workflow contract asserts additive execution after build, `if: always()` evidence checking/upload, and no change to strict evaluator claim semantics.
 
@@ -1355,7 +1351,7 @@ The managed result owns `NativeImage` bytes and `RehydrationRecord`. The native 
 
 ```text
 if rehydrate_failed:
-    execve(source_or_legacy_protected_elf_path)
+    execve(source_or_unverified_protected_elf_path)
 if handoff_exited_zero:
     claim_loader_behavior()
 ```

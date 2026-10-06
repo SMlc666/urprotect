@@ -96,7 +96,7 @@ public sealed class CliApplicationTests
         using var jsonStderr = new StringWriter();
 
         var jsonExitCode = CliApplication.Run(
-            new[] { "validate", inputPath, "--json", "-", "--no-analysis" },
+            new[] { "validate", inputPath, "--json", "-" },
             jsonStdout,
             jsonStderr);
 
@@ -110,7 +110,7 @@ public sealed class CliApplicationTests
         using var humanStdout = new StringWriter();
         using var humanStderr = new StringWriter();
         var humanExitCode = CliApplication.Run(
-            new[] { "validate", inputPath, "--no-analysis" },
+            new[] { "validate", inputPath },
             humanStdout,
             humanStderr);
 
@@ -135,7 +135,7 @@ public sealed class CliApplicationTests
         var exitCode = CliApplication.Run(
             new[]
             {
-                "validate", inputPath, "--copy", copyPath, "--json", reportPath, "--no-analysis",
+                "validate", inputPath, "--copy", copyPath, "--json", reportPath,
             },
             stdout,
             stderr);
@@ -347,7 +347,7 @@ public sealed class CliApplicationTests
         using var stderr = new StringWriter();
 
         var exitCode = CliApplication.Run(
-            new[] { "validate", inputPath, "--json", "--no-analysis" },
+            new[] { "validate", inputPath, "--json" },
             stdout,
             stderr);
 
@@ -365,7 +365,7 @@ public sealed class CliApplicationTests
         using var stderr = new StringWriter();
 
         var exitCode = CliApplication.Run(
-            new[] { "validate", inputPath, "--no-analysis" },
+            new[] { "validate", inputPath },
             new ThrowingWriter(),
             stderr);
 
@@ -403,7 +403,7 @@ public sealed class CliApplicationTests
         Assert.Equal("deflate", document.RootElement.GetProperty("payload").GetProperty("compression").GetString());
         Assert.True(document.RootElement.GetProperty("output").GetProperty("published").GetBoolean());
         Assert.Equal(LauncherContract.AbiVersion, document.RootElement.GetProperty("payload").GetProperty("launcherAbiVersion").GetInt32());
-        Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, document.RootElement.GetProperty("payload").GetProperty("frameVersion").GetInt32());
+        Assert.Equal(PayloadFrameCodec.FormatVersion, document.RootElement.GetProperty("payload").GetProperty("frameVersion").GetInt32());
         Assert.Equal("outer-execveat", document.RootElement.GetProperty("payload").GetProperty("profile").GetString());
         Assert.Equal(LauncherContract.Marker, document.RootElement.GetProperty("payload").GetProperty("launcherMarker").GetString());
         Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("payload").GetProperty("launcherSha256").GetString()));
@@ -494,7 +494,7 @@ public sealed class CliApplicationTests
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
         var exitCode = CliApplication.Run(
-            new[] { "validate", inputPath, "--json", "-", "--no-analysis" },
+            new[] { "validate", inputPath, "--json", "-" },
             stdout,
             stderr);
 

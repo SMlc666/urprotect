@@ -17,7 +17,7 @@ public sealed record Aarch64AnalysisReport(
 /// <summary>
 /// Performs bounded whole-image AArch64 instruction observation.
 ///
-/// This legacy observer is intentionally outside the structural ELF and
+/// This observer is intentionally outside the structural ELF and
 /// selected-function protection paths. Callers must opt into it explicitly;
 /// each discovered start is limited to a bounded instruction region, and its
 /// findings are observations that are never a publication prerequisite.
@@ -183,22 +183,4 @@ public sealed class Aarch64ObservationAnalyzer
         result = left * right;
         return true;
     }
-}
-
-/// <summary>
-/// Compatibility name for the legacy whole-image observation analyzer.
-/// Structural validation, packing, protection, layout, and rehydration must
-/// not instantiate this type.
-/// </summary>
-[Obsolete("Aarch64Analyzer is observation-only; use Aarch64ObservationAnalyzer explicitly.")]
-public sealed class Aarch64Analyzer
-{
-    private readonly Aarch64ObservationAnalyzer observer;
-
-    public Aarch64Analyzer(IAarch64Decoder decoder)
-    {
-        observer = new Aarch64ObservationAnalyzer(decoder);
-    }
-
-    public Aarch64AnalysisReport Analyze(ElfFile file) => observer.Analyze(file);
 }

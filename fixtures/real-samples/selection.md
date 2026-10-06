@@ -154,7 +154,7 @@ registry observation hash above remains the historical selection evidence.
 ## Review and isolation boundaries
 
 - Every selected entry locks an immutable archive URL, version, archive-relative path, archive SHA-256, package license/source, declared executable path, AArch64 target/runtime/loader facts, expected static result, selection rationale, and all four layer policies.
-- The 80-identity increment was locally downloaded to temporary storage, hash-verified, bounded-extracted, checked for an in-root declared AArch64 ELF, inspected with bounded `readelf`, and passed `dotnet validate --no-analysis`. Raw archives, ELF files, extracted roots, and command output remain outside the repository.
+- The 80-identity increment was locally downloaded to temporary storage, hash-verified, bounded-extracted, checked for an in-root declared AArch64 ELF, inspected with bounded `readelf`, and passed structural `dotnet validate`. Raw archives, ELF files, extracted roots, and command output remain outside the repository.
 - Each pull request, nightly run, and release run executes the same complete 100-project registry. Static evidence is required for every identity. Baseline, outer-wrapper, and HostContext layers remain explicit `not-applicable` unless their reviewed runtime closure/oracle exists.
 - The checked-in aggregate is registry metadata only. Native AArch64 CI generates authoritative feature fingerprints, UrProtect reports, result classifications, cleanup markers, and sanitized evidence. Feature frequency does not promote product support.
 - BusyBox remains the existing complete Alpine minirootfs baseline witness. The new APK entries provide musl/AArch64 static ecology facts; they do not widen the runtime compatibility contract.

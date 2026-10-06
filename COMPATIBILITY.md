@@ -54,12 +54,9 @@ deterministic implementation evidence, `rejected` for deliberate fail-closed
 boundaries, and `unknown` when an obligation is not complete. `unknown` never
 counts as support.
 
-The matrix feature `runtime.wrapper-v1-baseline` preserves the current Wrapper
-0.2 v1 frame, managed pack, and native launcher as migration regression
-evidence. It is deliberately separate from HostContext v2 and is not an
-in-process compatibility claim. The existing Android row
-`android.jni.native-bridge` is likewise a JNI/native-bridge baseline: it does
-not execute packed output or prove a native ARM64 Android device/runtime.
+The existing Android row `android.jni.native-bridge` is a JNI/native-bridge
+baseline: it does not execute packed output or prove a native ARM64 Android
+device/runtime.
 
 The HostContext self-test contains both a deterministic fake-host contract
 oracle and a real AArch64 `ET_DYN` entry fixture. The fd-backed adapter loads
@@ -243,8 +240,8 @@ The lane checks the downloaded package set and hashes before installation,
 fails on additional or changed packages, and retains the lock, hash-verification
 output, and before/after inventories. The image digest pins the base userspace,
 so the compiler inputs are reproducible despite the live index. The lane also
-builds and runs `native/urprotect-runtime` inside Termux. Its HostContext v2
-frame is passed to the real fd-backed adapter, the self-test verifies all
+builds and runs `native/urprotect-runtime` inside Termux. Its current v3
+HostContext frame is passed to the real fd-backed adapter, the self-test verifies all
 required memfd seals on the image, dispatches `urp_entry` through bionic's
 `dlopen`/`dlsym` path, checks status and release, and retains the build log,
 ELF report, and fixture hash. This validates the narrow bionic adapter
@@ -274,13 +271,13 @@ native AArch64 glibc outer-profile claim only; the packer's recognized musl
 interpreter path does not independently validate a musl runtime. HostContext
 semantics remain unchanged.
 
-The production managed pack path now uses current frame v3 with explicit
+The production managed pack path uses the current v3 frame with explicit
 `outer-execveat` and `host-context-entry` profiles. The outer profile retains
 the static launcher and `execveat(AT_EMPTY_PATH)` behavior. The HostContext
 profile uses the profile-matched HostContext launcher, sealed memfd loading,
 exact entry lookup, exactly-once dispatch, release, and status preservation.
-Legacy v1/v2 behavior remains migration evidence only; current launchers reject
-stale versions and profile/launcher mismatches.
+Current launchers reject unsupported frame versions and profile/launcher
+mismatches.
 
 The claim therefore applies to every correctly implemented host satisfying the
 contract, not to an unqualified statistical majority of phone vendors.
