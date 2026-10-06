@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review semantic IR for bounded reads, typed address domains, no third-party model leakage, and malformed-input coverage."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Review relocation promotion and runtime evidence against the conditional compatibility contract."}
+{"file":"COMPATIBILITY.md","reason":"Review that semantic observations are not promoted across parser, loader, and runtime layers."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/current-protection-pipeline.md","reason":"Review migration coverage against the current direct writer and Protected Image v1 boundaries."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/semantic-boundaries.md","reason":"Review coverage of PC-relative, call, literal, relocation, and extension contracts."}

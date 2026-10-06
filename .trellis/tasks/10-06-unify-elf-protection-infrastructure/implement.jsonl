@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Implementation must preserve bounded arithmetic, program-header authority, atomic outputs, malformed tests, and native evidence gates."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Implementation spans ELF profiles, relocation/TLS/lifecycle semantics, loader handoff, and independent glibc/musl/bionic evidence."}
+{"file":"COMPATIBILITY.md","reason":"Implementation must update the conditional claim and layer-specific evidence without promoting observations across runtimes."}
+{"file":"tests/ContractInventory.md","reason":"Cross-language ABI, frame, protection, and publication ownership must remain centralized and documented."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/current-protection-pipeline.md","reason":"Current protect/protect-image/rehydrate-image ownership and migration boundaries."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/runtime-and-evidence-baseline.md","reason":"Existing glibc/musl/bionic runtime matrix and evidence obligations."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/semantic-boundaries.md","reason":"Requested semantic domains and the shared plan boundary."}
