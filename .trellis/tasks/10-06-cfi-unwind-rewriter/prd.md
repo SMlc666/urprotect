@@ -19,3 +19,8 @@ Make `.eh_frame` and `.eh_frame_hdr` first-class inputs and outputs so transform
 - [ ] Recoverable malformed CFI is canonicalized; unrecoverable cases produce stable diagnostics and no partial artifact.
 - [ ] Glibc, musl, and bionic evidence covers the promoted CFI rows separately.
 - [ ] `.eh_frame`, `.eh_frame_hdr`, source/native hashes, and stage records agree after publication.
+
+
+## Prerequisite and current-contract rule
+
+Implementation is blocked until `10-06-architecture-boundary-refactor` Gates G0-G2 pass. CFI work must consume the established selected-function semantic plan, address map, physical layout, artifact, and publication owners. It must not add a second model, compatibility alias, migration frame path, direct writer, or fallback. Applicability and runtime evidence must be explicit before promotion.

@@ -19,3 +19,8 @@ Add first-class PT_TLS and AArch64 TLS relocation semantics to the rewrite/mater
 - [ ] Worker lifecycle and TLS teardown are verified where the feature row claims them.
 - [ ] Glibc, musl, and bionic each have native execution evidence or an explicit feature-specific environment result; no cross-runtime promotion occurs.
 - [ ] TLS relocation and lifecycle diagnostics are stable and publication remains transactional.
+
+
+## Prerequisite and current-contract rule
+
+Implementation is blocked until `10-06-architecture-boundary-refactor` Gates G0-G2 pass. TLS work must consume the established semantic/layout/artifact workflow and current HostContext materialization owner. It must not add a second model, compatibility alias, migration frame path, direct writer, or fallback. Runtime unavailability is never promoted as support.

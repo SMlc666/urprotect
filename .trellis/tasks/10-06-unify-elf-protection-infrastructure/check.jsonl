@@ -1,5 +1,5 @@
 {"file":"src/UrProtect.Core/Pipeline/NoOpPipeline.cs","reason":"Check that generic validation is structural by default and does not scan unrelated executable code."}
-{"file":"src/UrProtect.Core/Aarch64/Aarch64Analyzer.cs","reason":"Check the legacy whole-image scanner is not a production prerequisite and does not leak into wrapper/layout paths."}
+{"file":"src/UrProtect.Core/Aarch64/Aarch64ObservationAnalyzer.cs","reason":"Check the explicit whole-image observer is not a structural validation prerequisite and does not leak into wrapper/layout paths."}
 {"file":"src/UrProtect.Cli/CliApplication.cs","reason":"Check validate command analysis defaults and explicit scope behavior."}
 {"file":"tests/UrProtect.Core.Tests/NoOpPipelineTests.cs","reason":"Check decoder-independent structural validation and selected-function analysis regressions."}
 {"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/analysis-boundary-audit.md","reason":"Check the architecture correction against the concrete current-path evidence and non-goals."}

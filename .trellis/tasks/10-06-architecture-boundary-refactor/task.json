@@ -1,0 +1,30 @@
+{
+  "id": "architecture-boundary-refactor",
+  "name": "architecture-boundary-refactor",
+  "title": "Refactor architecture boundaries and purge migration paths",
+  "description": "Establish clear responsibility and dependency boundaries for the ELF protection architecture, unify the current production workflow, and remove all historical migration paths, compatibility aliases, and parallel legacy implementations from production contracts.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P0",
+  "creator": "SMlc666",
+  "assignee": "SMlc666",
+  "createdAt": "2026-10-06",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-06-purge-historical-contract",
+    "10-06-responsibility-boundaries",
+    "10-06-unified-protection-workflow"
+  ],
+  "parent": "10-06-unify-elf-protection-infrastructure",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

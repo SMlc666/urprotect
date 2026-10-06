@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Dependency direction, code reuse, bounded binary, and testing requirements for boundary refactoring."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cross-layer ownership and dependency review checklist."}
+{"file":".trellis/tasks/10-06-architecture-boundary-refactor/prd.md","reason":"G1 requirements, hard no-history rule, and namespace-first decision."}
+{"file":".trellis/tasks/10-06-architecture-boundary-refactor/design.md","reason":"Target ownership tree, dependency direction, extraction seams, and rollback."}
+{"file":".trellis/tasks/10-06-architecture-boundary-refactor/research/architecture-audit.md","reason":"Evidence for god objects, accidental layers, and stable existing seams."}

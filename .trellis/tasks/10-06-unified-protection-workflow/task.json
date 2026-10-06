@@ -19,7 +19,7 @@
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": "10-06-unify-elf-protection-infrastructure",
+  "parent": "10-06-architecture-boundary-refactor",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

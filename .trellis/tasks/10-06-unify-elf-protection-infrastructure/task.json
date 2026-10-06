@@ -24,7 +24,7 @@
     "10-06-indirect-control-jump-tables",
     "10-06-tls-relocation-runtime-matrix",
     "10-06-cfi-unwind-rewriter",
-    "10-06-unified-protection-workflow"
+    "10-06-architecture-boundary-refactor"
   ],
   "parent": null,
   "relatedFiles": [],

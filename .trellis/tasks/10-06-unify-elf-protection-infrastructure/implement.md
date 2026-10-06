@@ -1,36 +1,38 @@
 # Implementation plan
 
-## Phase 0: Freeze the migration contract
+## Phase 0: Freeze the current contract and purge history
 0. Audit and correct the structural-versus-code-analysis boundary: make generic validation/wrapper paths structural by default, remove whole-image instruction scanning as a production prerequisite, and add selected-function/demand-driven analysis regressions.
 
-1. Record current `protect`, `protect-image`, and `rehydrate-image` outputs as migration fixtures and behavior oracles.
-2. Add occupied-program-header, long-distance branch, PC-relative, call, literal, indirect, jump-table, TLS, CFI, malformed-CFI, and three-runtime fixture inventory entries before implementation.
-3. Define new diagnostic codes, feature-row IDs, artifact ABI versioning, layout-strategy vocabulary, and report fields.
-4. Preserve Protected Image v1 as historical migration evidence; define the new versioned operation contract.
+1. Complete child task `10-06-architecture-boundary-refactor` Gates G0-G2: purge all historical production paths and migration-format data, establish namespace-first ownership, unify the current workflow, and complete HostContext materialization.
+2. Add occupied-program-header, long-distance branch, PC-relative, call, literal, indirect, jump-table, TLS, CFI, malformed-CFI, and three-runtime fixture inventory entries for current behavior only.
+3. Define current diagnostic codes, feature-row IDs, artifact ABI versioning, layout-strategy vocabulary, and report fields.
+4. Use one current Protected Image operation contract; do not retain historical ABI fixtures, decoders, encoders, or migration oracles.
 
-## Phase 1: Build shared semantic and layout plans
+## Phase 1: Establish shared semantic, layout, and workflow seams
 
-1. Add project-owned AArch64 semantic IR over `AsmStoneAdapter`.
-2. Add old/new address maps, target-resolution modes, semantic fixups, relocation bindings, TLS bindings, and unwind effects.
-3. Add `ElfLayoutPlan`, program-header allocation, segment placement, PHDR-table relocation/expansion, alignment checks, and atomic byte emission.
-4. Add veneer/long-branch planning and make Branch26 only one fixup form.
-5. Add plan-level validation before any output bytes are published.
+1. Consume the architecture-boundary-refactor G0-G2 outputs: one current contract, namespace-first ownership, no historical test/evidence data, one current workflow, and complete HostContext materialization.
+2. Add project-owned AArch64 semantic IR over `AsmStoneAdapter`.
+3. Add old/new address maps, target-resolution states, semantic fixups, relocation bindings, TLS bindings, and unwind effects required by downstream domains.
+4. Add `ElfLayoutPlan`, program-header allocation, segment placement, PHDR-table relocation/expansion, alignment checks, and atomic byte emission.
+5. Add veneer/long-branch planning and make Branch26 one fixup form rather than the writer contract.
+6. Implement one Core producer/layout/materializer workflow and route `protect`, `protect-image`, and `rehydrate-image` through it.
+7. Validate the complete HostContext materialization path and profile-specific native handoff before feature expansion.
+8. Add plan-level validation before any output bytes are published.
 
-## Phase 2: Implement semantic domains
+## Phase 2: Implement semantic domains against the current workflow
 
 1. Relocate PC-relative branches, calls, ADR/ADRP pairs, literal pools, and the agreed AArch64 relocation families.
 2. Resolve bounded indirect branches/calls and jump tables; implement the declared runtime target strategy for opaque targets.
 3. Add PT_TLS and local/initial-exec/dynamic/TLSDESC relocation models, then exercise them on glibc, musl, and bionic.
 4. Add CIE/FDE and `.eh_frame_hdr` parse, remap, regeneration, and recoverable malformed-CFI canonicalization.
-5. Require each domain to add positive, nearest-negative, malformed, structural, and runtime evidence before promotion.
+5. Require each domain to add positive, nearest-negative, malformed, structural, and runtime evidence using only the current contract before promotion.
 
-## Phase 3: Converge the workflow
+## Phase 3: Converge reports, evidence, and publication
 
-1. Implement one Core producer/layout/materializer workflow.
-2. Route `protect` through that workflow as a high-level facade.
-3. Keep `protect-image` and `rehydrate-image` as explicit stage commands over the same contracts.
-4. Remove the direct writer from production behavior; retain only migration tests until final integration review.
-5. Align role/stage/native-image/rehydration reports, SHA256SUMS, and failure rollback.
+1. Align role/stage/native-image/rehydration reports, SHA256SUMS, and failure rollback.
+2. Remove any remaining direct-writer or duplicate workflow call sites and enforce one owner per command.
+3. Update current fixtures, runtime matrix, regression matrix, compatibility report, evidence checkers, and real-sample impact table.
+4. Verify no historical migration path or test/evidence data has re-entered the current contract.
 
 ## Phase 4: Three-runtime integration
 
@@ -68,7 +70,7 @@ The musl and bionic rehydration commands are expected to be added or made profil
 - `src/UrProtect.Cli/CliApplication.cs` and report records: public command/report contract.
 - `fixtures/manifest.json`, runtime matrix, native fixtures, and CI workflows: three-runtime evidence contract.
 
-Rollback remains artifact-safe: each stage writes only temporary output, failure removes staged files, and the migration branch can compare against frozen pre-migration fixtures without enabling an alternate production writer.
+Rollback remains artifact-safe: each stage writes only temporary output, failure removes staged files, and a failed slice is reverted at its commit boundary without reintroducing an alternate production writer or historical test data.
 
 ## Review gates before task start
 

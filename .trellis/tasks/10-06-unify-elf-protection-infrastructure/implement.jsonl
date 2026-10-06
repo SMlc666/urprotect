@@ -1,5 +1,5 @@
 {"file":"src/UrProtect.Core/Pipeline/NoOpPipeline.cs","reason":"Audit and correct the generic validation path so structural ELF validation does not invoke whole-image AArch64 instruction scanning by default."}
-{"file":"src/UrProtect.Core/Aarch64/Aarch64Analyzer.cs","reason":"Classify the legacy whole-image instruction observer as non-production or redesign its scope; it must not gate wrapper/protection publication."}
+{"file":"src/UrProtect.Core/Aarch64/Aarch64ObservationAnalyzer.cs","reason":"Keep the explicit whole-image instruction observer outside production prerequisites; it must not gate wrapper/protection publication."}
 {"file":"src/UrProtect.Cli/CliApplication.cs","reason":"Align validate command defaults and analysis flags with the structural-vs-selected-function boundary."}
 {"file":"tests/UrProtect.Core.Tests/NoOpPipelineTests.cs","reason":"Add regressions proving structural validation is decoder-independent and selected-function analysis remains explicit."}
 {"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/analysis-boundary-audit.md","reason":"Implementation and tests must follow the confirmed structural-wrapper versus selected-function analysis audit before semantic-domain work proceeds."}

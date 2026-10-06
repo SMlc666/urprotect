@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review current-only API/CLI contract, bounded parsing, and absence of compatibility paths."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review deterministic malformed-input handling and no partial publication."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Review managed/native v3/profile and runtime evidence consistency."}
+{"file":".trellis/tasks/10-06-purge-historical-contract/design.md","reason":"Review canonical contracts, purge scope, current-only tests, and rollback."}
+{"file":".trellis/tasks/10-06-purge-historical-contract/implement.md","reason":"Review G0 sequencing and absence/validation gates."}
+{"file":".trellis/tasks/10-06-architecture-boundary-refactor/research/architecture-audit.md","reason":"Cross-check every deleted path against audit evidence."}
