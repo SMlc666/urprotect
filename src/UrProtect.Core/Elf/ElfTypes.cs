@@ -93,16 +93,20 @@ public static class ElfConstants
     public const uint RArm64Abs32 = 258;
     public const uint RArm64Prel64 = 260;
     public const uint RArm64Prel32 = 261;
+    public const uint RArm64LdPrelLo19 = 273;
     public const uint RArm64AdrPrelLo21 = 274;
     public const uint RArm64AdrPrelPgHi21 = 275;
+    public const uint RArm64AdrPrelPgHi21Nc = 276;
     public const uint RArm64AddAbsLo12Nc = 277;
     public const uint RArm64Ldst8AbsLo12Nc = 278;
+    public const uint RArm64Tstbr14 = 279;
     public const uint RArm64CondBr19 = 280;
     public const uint RArm64Jump26 = 282;
     public const uint RArm64Call26 = 283;
     public const uint RArm64Ldst16AbsLo12Nc = 284;
     public const uint RArm64Ldst32AbsLo12Nc = 285;
     public const uint RArm64Ldst64AbsLo12Nc = 286;
+    public const uint RArm64Ldst128AbsLo12Nc = 299;
     public const uint RArm64Copy = 1024;
     public const uint RArm64GlobDat = 1025;
     public const uint RArm64JumpSlot = 1026;
@@ -375,6 +379,8 @@ public enum Aarch64RelocationKind
     ConditionalBranch19,
     AdrPrelLo21,
     AdrPrelPgHi21,
+    TestBranch14,
+    Literal19,
     AddAbsLo12,
     LoadStore,
     ThreadLocal,
@@ -392,7 +398,9 @@ public readonly record struct RelaRelocation(
 
     public uint SymbolIndex => unchecked((uint)(Info >> 32));
 
-    public Aarch64RelocationKind Kind => Type switch
+    public Aarch64RelocationKind Kind => Classify(Type);
+
+    public static Aarch64RelocationKind Classify(uint type) => type switch
     {
         ElfConstants.RArm64None => Aarch64RelocationKind.None,
         ElfConstants.RArm64Abs64 => Aarch64RelocationKind.Absolute64,
@@ -407,12 +415,16 @@ public readonly record struct RelaRelocation(
         ElfConstants.RArm64Jump26 => Aarch64RelocationKind.Jump26,
         ElfConstants.RArm64CondBr19 => Aarch64RelocationKind.ConditionalBranch19,
         ElfConstants.RArm64AdrPrelLo21 => Aarch64RelocationKind.AdrPrelLo21,
-        ElfConstants.RArm64AdrPrelPgHi21 => Aarch64RelocationKind.AdrPrelPgHi21,
+        ElfConstants.RArm64AdrPrelPgHi21
+            or ElfConstants.RArm64AdrPrelPgHi21Nc => Aarch64RelocationKind.AdrPrelPgHi21,
+        ElfConstants.RArm64Tstbr14 => Aarch64RelocationKind.TestBranch14,
+        ElfConstants.RArm64LdPrelLo19 => Aarch64RelocationKind.Literal19,
         ElfConstants.RArm64AddAbsLo12Nc => Aarch64RelocationKind.AddAbsLo12,
         ElfConstants.RArm64Ldst8AbsLo12Nc
             or ElfConstants.RArm64Ldst16AbsLo12Nc
             or ElfConstants.RArm64Ldst32AbsLo12Nc
-            or ElfConstants.RArm64Ldst64AbsLo12Nc => Aarch64RelocationKind.LoadStore,
+            or ElfConstants.RArm64Ldst64AbsLo12Nc
+            or ElfConstants.RArm64Ldst128AbsLo12Nc => Aarch64RelocationKind.LoadStore,
         ElfConstants.RArm64TlsDtpMod64
             or ElfConstants.RArm64TlsDtpRel64
             or ElfConstants.RArm64TlsTprel64

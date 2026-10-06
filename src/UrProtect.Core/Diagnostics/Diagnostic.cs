@@ -77,6 +77,22 @@ public enum DiagnosticCode
     RehydrationMalformed,
     NativeImageMalformed,
     NativeHandoffFailed,
+    SemanticInstructionMalformed,
+    SemanticPlanMalformed,
+    SemanticFixupMalformed,
+    SemanticTargetUnresolved,
+    SemanticTargetDeferred,
+    SemanticAddressMapMalformed,
+    SemanticAddressMapDuplicate,
+    SemanticAddressMapOverflow,
+    SemanticAddressMapMissing,
+    SemanticFixupOutOfRange,
+    SemanticFixupUnsupported,
+    SemanticFixupDeferred,
+    SemanticPlanSnapshotMalformed,
+    SemanticPlanSnapshotUnsupported,
+    SemanticPlanSnapshotLimitExceeded,
+    SemanticPlanSnapshotIntegrityMismatch,
 }
 
 public readonly record struct Diagnostic(

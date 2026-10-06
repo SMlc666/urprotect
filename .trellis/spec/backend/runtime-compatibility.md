@@ -732,6 +732,191 @@ resolve exact user selectors from .symtab/.dynsym
 -> publish only after all selected functions and runtime checks pass
 ```
 
+## Scenario: canonical AArch64 semantic-plan handoff
+
+### 1. Scope / Trigger
+
+This contract applies when the AArch64 protection path needs to hand semantic
+instruction, address-map, relocation, target-resolution, or post-encode
+validation data from the project-owned decoder/rewrite layer to an ELF layout,
+Protected Image, or workflow consumer. It is a planning/handoff contract, not
+a physical ELF writer and not a replacement for the versioned Protected Image
+artifact codec.
+
+The semantic layer must remain independent of final file placement. A later
+layout consumer supplies output addresses, veneers, and runtime bindings; it
+must not reconstruct semantic meaning by re-reading raw bytes or by importing
+AsmStone model types.
+
+### 2. Signatures
+
+```text
+Aarch64SemanticInstructionProjector.Project(
+    Aarch64FunctionInstruction instruction,
+    IEnumerable<RelaRelocation>? relocations = null)
+    -> SemanticInstructionProjectionResult
+
+Aarch64SemanticPlanFactory.Create(
+    Aarch64FunctionAnalysis analysis,
+    LoadMap? loadMap = null,
+    IEnumerable<RelaRelocation>? relocations = null,
+    AddressMap? placement = null,
+    IEnumerable<ISemanticPlanExtension>? extensions = null)
+    -> SemanticRewritePlanResult
+
+SemanticPlanSnapshotProjector.Project(
+    SemanticRewritePlan plan)
+    -> SemanticPlanSnapshotResult
+
+SemanticPlanSnapshotCodec.Decode(
+    ReadOnlyMemory<byte> canonicalBytes)
+    -> SemanticPlanSnapshotResult
+
+Aarch64SemanticPlanValidator.Validate(
+    SemanticRewritePlan plan,
+    SemanticPlanResolutionResult resolutions,
+    IAarch64Decoder decoder)
+    -> SemanticPlanValidationResult
+```
+
+The canonical handoff representation is version `1`, architecture `EM_AARCH64`
+(`183`), magic `URP-SPS1`, and includes a trailing SHA-256 digest. Its digest
+is computed over the canonical bytes owned by `SemanticPlanSnapshotCodec`.
+Protected Image producers may bind this digest; they must not duplicate the
+semantic serializer.
+
+### 3. Contracts
+
+- `SemanticInstruction` is project-owned and retains typed source
+  `FileOffset`/`VirtualAddress` ranges, raw encoding, project-owned operands,
+  register/flag effects, control-flow classification, PC-relative expression,
+  literal reference, relocation bindings, and sibling extension records.
+- `SemanticTarget` has exactly one explicit resolution mode: `Exact`,
+  `BoundedSet`, `RuntimeResolved`, or `Unresolved`. A bounded set is never
+  reduced to one target merely because one address currently maps; selection
+  belongs to layout or runtime resolution.
+- `AddressMap` is immutable after construction. It maps typed source/output
+  ranges for functions, basic blocks, instructions, literals, veneers, tables,
+  relocation targets, and relocation sites. Same-kind duplicate or overlapping
+  source/output ranges fail closed; nested ranges resolve to the smallest unique
+  typed entity where the API permits it.
+- `Aarch64SemanticInstructionProjector` is the only decoder-to-IR projection
+  owner. It supports the declared `B`, `BL`, conditional/test branch,
+  `ADR`/`ADRP`, literal-load, and matching relocation families. `BLR`,
+  authenticated indirect calls, and other opaque targets remain explicit
+  indirect/runtime/unresolved states; the projector never guesses a destination.
+- `RelocationBinding` preserves relocation kind, raw relocation type, raw
+  `r_info`, addend, symbol index/name, PLT identity, relocation virtual
+  address, and relocation-table address. A nonzero symbol index remains an
+  external binding even when stale instruction bits contain a plausible target.
+- `SemanticFixup` contains a symbolic target and optional PC-relative or
+  relocation expression. The encoder may return `Resolved`, `Deferred`, or
+  `Unresolved`; veneer/long-address, bounded-target, and runtime-target cases
+  are deferred until their owning resolver supplies the missing decision.
+- `SemanticPlanSnapshotCodec` deterministically orders nested entities,
+  instructions, fixups, extensions, diagnostics, operands, references, target
+  candidates, relocation metadata, and relaxation options. It applies bounded
+  limits before allocation and validates strict UTF-8, enum values, identities,
+  ranges, and digest before accepting decoded records.
+- Current snapshot limits are: canonical bytes `16 MiB`, metadata `2 MiB`,
+  strings `4096` UTF-8 bytes, address-map entries/instructions/fixups `131072`
+  each, extensions `32768`, diagnostics `16384`, target candidates `4096`,
+  operands per instruction `64`, register effects `256`, references `256`,
+  relocations per instruction `64`, relaxation options `8`, jump-table targets
+  `65536`, and CFI register effects `256`.
+- The post-encode validator decodes each final instruction at its planned output
+  address and checks instruction family, resolved output target, expression
+  place, and low-12 relocation round trips. Relocation-only records are not
+  passed to the instruction decoder and are validated by typed width/alignment/
+  value-domain rules.
+- Snapshot extensions are typed and reserved for sibling domains:
+  indirect targets, TLS bindings, jump tables, and CFI effects. An extension
+  must have a unique identity and bounded payload; unknown extension kinds are
+  rejected rather than guessed.
+- A semantic plan with an error diagnostic, unresolved required fixup, invalid
+  source/output map, duplicate identity, malformed extension, or failed
+  post-encode validation cannot proceed to physical layout or publication.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Invalid/empty entity identity or duplicate candidate | `SemanticPlanMalformed`/`SemanticTargetUnresolved`; no handoff |
+| Duplicate or overlapping same-kind address-map range | `SemanticAddressMapDuplicate`; no handoff |
+| Source/output range overflow or typed-domain mismatch | `SemanticAddressMapOverflow`/`SemanticAddressMapMalformed`; no handoff |
+| Decoder backend failure or malformed source range | stable semantic instruction diagnostic; no fixup emission |
+| Unsupported PC-relative family without opaque-preservation contract | `SemanticFixupUnsupported`; no final encoding |
+| Bounded, runtime-resolved, veneer, or long-address target | `SemanticFixupDeferred`; layout/runtime resolver must continue |
+| Unresolved target or missing target binding | `SemanticTargetUnresolved`; no publication |
+| Relocation raw metadata, width, alignment, or value mismatch | `SemanticFixupMalformed`/`SemanticFixupOutOfRange`; no ELF write |
+| Snapshot exceeds any count/byte/string limit | `SemanticPlanSnapshotLimitExceeded`; no decode/handoff |
+| Snapshot magic/version/architecture/enum/UTF-8 invalid | `SemanticPlanSnapshotMalformed` or `SemanticPlanSnapshotUnsupported` |
+| Snapshot trailing digest mismatch | `SemanticPlanSnapshotIntegrityMismatch`; no semantic records accepted |
+| Final instruction re-decode or target mismatch | `SemanticFixupValidationFailed`; no publication |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a projected function has deterministic typed ranges, exact internal
+  targets, preserved relocation metadata, a canonical snapshot digest, and a
+  layout consumer can resolve every required fixup before final validation.
+- Base: a plan contains a bounded jump-table target set, runtime PLT binding, or
+  veneer-required branch; the snapshot preserves the state as deferred with
+  its extension identity and does not claim a final encoding.
+- Bad: copy a raw instruction to a new address, infer a target from stale
+  immediate bits despite a symbolic relocation, collapse an ambiguous target
+  set, accept a malformed snapshot after digest failure, or let a layout
+  consumer import AsmStone types and recreate classification independently.
+
+### 6. Tests Required
+
+- Projector tests assert typed source ranges, operand/register/flag projection,
+  direct-call versus indirect-call classification, PC-relative family mapping,
+  literal references, and relocation raw-field preservation.
+- Address-map tests assert exact/smallest-range resolution, duplicate/overlap
+  rejection, source/output overflow, typed identity validation, and defensive
+  collection copies.
+- Encoder/validator tests assert direct instruction round trips, stale-target
+  rejection, deferred bounded/runtime/veneer states, relocation-only validation,
+  low-12 alignment, and unsupported-family diagnostics.
+- Snapshot tests assert deterministic bytes for differently ordered equivalent
+  inputs, canonical digest verification, mutation rejection, strict bounds,
+  extension identity, unresolved/deferred classification, nested relocation
+  ordering, and defensive copies.
+- Integration tests assert `Aarch64SemanticPlanFactory` rejects incomplete
+  analysis, validates `LoadMap` agreement, maps functions/blocks/instructions/
+  relocation sites, and passes one canonical plan to the future layout consumer.
+- The current managed quality gate remains `dotnet build UrProtect.sln
+  --configuration Release --no-restore` plus the full Core test project,
+  fixture validation, regression matrix, and `git diff --check`. Runtime
+  feature promotion additionally requires separate glibc, musl, and bionic
+  evidence owned by the parent workflow.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+copy raw instruction bytes to the new address
+-> infer a branch target from the copied immediate
+-> serialize a second ad-hoc JSON/ABI record
+-> let the loader/layout writer guess unresolved targets
+```
+
+#### Correct
+
+```text
+AsmStone -> project-owned semantic instruction
+       -> typed AddressMap + symbolic SemanticFixup
+       -> canonical SemanticPlanSnapshotCodec digest
+       -> layout/runtime resolver handles deferred states
+       -> post-encode decoder/target validation
+       -> Protected Image/workflow binds the snapshot digest
+```
+
+The semantic layer owns meaning and canonical handoff bytes; the layout layer
+owns physical placement; the runtime/evidence layer owns loader-specific
+behavior. No layer silently reimplements another layer's contract.
+
 
 ## Scenario: Hermetic full-corpus runtime evidence and bionic Node.js witness
 
