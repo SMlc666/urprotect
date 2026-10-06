@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
-- **Last Active**: 2026-10-06
+- **Total Sessions**: 11
+- **Last Active**: 2026-10-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~319 | Active |
+| `journal-1.md` | ~342 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-10-07 | Purge historical contract and freeze current runtime | `fb61de8`, `825730d` | `main` |
 | 10 | 2026-10-06 | Correct structural validation boundary | `4bb9227`, `7c50b63` | `main` |
 | 9 | 2026-10-06 | Implement generic ELF layout planner | `1bb4801`, `b9c4f3a`, `37fb6b0` | `feat/100x-independent-evaluator` |
 | 8 | 2026-10-06 | Complete 100x compatibility and Scheme-A integration | `5139b9e`, `57008a2`, `12fd7f1`, `ae03827`, `3457570`, `66c185d`, `cd6ad48`, `b25bd10`, `ad4daa5`, `b7a22b9`, `9c7d2d2`, `46e50ee`, `9918c47` | `feat/100x-independent-evaluator` |

@@ -317,3 +317,26 @@ Separated generic ELF structural validation from whole-image instruction observa
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Purge historical contract and freeze current runtime
+<!-- trellis-session: v=2 fp=a0e01efaf0bf3eac -->
+
+**Date**: 2026-10-07
+**Task**: Purge historical contract and freeze current runtime
+**Branch**: `main`
+
+### Summary
+
+Completed G0 current-contract purge. Removed historical managed/native Payload Frame paths, API/CLI aliases, legacy host projection, migration evidence rows, and the obsolete AArch64 analyzer wrapper; retained one v3 current contract with explicit profiles. Added and synchronized architecture-boundary planning artifacts. Verified release build, 266 managed tests, 290 Python tests, 13 fixtures, 19 regression cases, native runtime/contract tests, task validation, and diff checks. Native launcher full test remains environment-unavailable because musl-gcc is absent; no fallback claim was made.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fb61de8` | refactor: purge historical current-contract paths |
+| `825730d` | chore(task): record architecture boundary gates |
+
+### Status
+
+[OK] **Completed**
