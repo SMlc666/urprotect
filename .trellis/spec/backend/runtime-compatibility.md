@@ -1270,7 +1270,7 @@ The producer emits `protected-image.bin`, `protected-image.json`, `stage.json`, 
 
 ### 6. Tests Required
 
-- Managed tests cover codec round trips, malformed/overflow/duplicate/overlap/alias cases, role/stage binding, no-spare-`PT_NULL` planning, and atomic rollback.
+- Managed tests cover codec round trips, malformed/overflow/duplicate/overlap/alias cases, role/stage binding, the shared PT_NULL/RX-extension/relocated-table layout planner, and atomic rollback.
 - CLI tests cover selector/pass parsing, output path conflicts, success publication, failed source binding, focused JSON reporting, and legacy command compatibility.
 - The producer script/checker tests cover success/failure retention, closed SHA256SUMS, path traversal, digest continuity, and no partial artifact on failure.
 - The CI workflow contract asserts additive execution after build, `if: always()` evidence checking/upload, and no change to strict evaluator claim semantics.
@@ -1319,7 +1319,7 @@ The managed result owns `NativeImage` bytes and `RehydrationRecord`. The native 
 
 - Rehydration authenticates the Protected Image canonical digest and verifies source/request/unit/profile/producer/consumer bindings before materialization. Unknown operations, invalid executable mappings, overflow, unsupported permission/layout transitions, and incomplete operation streams fail closed.
 - A passed Native Image is deterministic, reparses as AArch64 ELF, has a distinct hash from Source and Protected Image, and is atomically published with a native-image role and rehydration record. A failed stage retains diagnostics but no successful Native Image or role.
-- The first layout strategy appends an executable `PT_LOAD` through a validated `PT_NULL` representation and applies operation-specified AArch64 branch fixups. The absence of a representable slot is `RehydrationLayoutUnavailable`, not a direct-protector fallback. Later layout-expansion children own header-table rebuilding and broader lowering.
+- Rehydration delegates physical placement to one bounded ELF layout planner/materializer. It deterministically considers a compatible terminal RX `PT_LOAD` extension, an ordinary available `PT_NULL` record, and a relocated/expanded program-header table, then applies typed AArch64 branch decisions and edits before reparsing. A missing slot is not a prerequisite; an occupied table uses the relocated-table candidate or returns `RehydrationLayoutUnavailable` without a direct-protector fallback. The materializer retains the selected strategy and bounded address map in layout evidence.
 - Strict handoff requires `memfd_create`, executable mode, `fsync`, required seals where supported, `execveat(AT_EMPTY_PATH)`, bounded host-captured stdout/stderr, and separate helper/target status. A path-based execution is never a strict pass.
 - The evidence checker requires a closed `SHA256SUMS`, stage-specific source/protected/native/handoff/rehydration hashes, target-loader and behavioral-oracle records, and matching first-failure stage. Producer success alone remains incomplete compatibility evidence.
 - Native loader semantics remain outside the rehydrator: dependencies, dynamic symbols, relocations, TLS, constructors, destructors, and process lifecycle are handled only by the target loader.
@@ -1344,7 +1344,7 @@ The managed result owns `NativeImage` bytes and `RehydrationRecord`. The native 
 
 ### 6. Tests Required
 
-- Managed tests cover valid materialization, source/request/consumer mismatch, tamper/overflow/unsupported operation, no-`PT_NULL` layout failure, deterministic Native Image hash, atomic publication, and record binding.
+- Managed tests cover valid materialization, source/request/consumer mismatch, tamper/overflow/unsupported operation, occupied-table relocation, RX extension, PT_NULL parity, branch-range diagnostics/relaxation, deterministic Native Image hash, atomic publication, and record binding.
 - Native helper tests cover digest mismatch before memfd, seal verification, bounded output, target status/signal, and exact `execveat` markers.
 - Runner/checker tests cover closed-manifest ownership, source/protected/native/handoff hash continuity, pre-handoff record binding, failed-stage retention, target-loader/oracle continuity, and first-failure classification.
 - CI workflow tests assert additive execution/checking after build, always-retained evidence, and no change to evaluator claimability or frozen corpus policy.

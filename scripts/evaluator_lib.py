@@ -1135,8 +1135,24 @@ def load_product_evidence(
             _product_equal(rehydration.get(field), expected, f"rehydration.{field}", "rehydration")
         if rehydration.get("abiId") != "urprotect.protected-image.v1" or rehydration.get("abiVersion") != 1 or rehydration.get("architecture") != "AArch64":
             _product_failure("rehydration ABI or architecture binding is unsupported", "rehydration")
-        if rehydration.get("layoutStrategy") != "append-executable-pt-load-v1" or rehydration.get("materializationStatus") != "passed":
+        if rehydration.get("layoutStrategy") not in {
+            "existing-rx-load-extension",
+            "available-program-header-slot",
+            "relocated-program-header-table",
+        } or rehydration.get("materializationStatus") != "passed":
             _product_failure("rehydration materialization strategy/status is unsupported", "rehydration")
+        layout_evidence = rehydration.get("layoutEvidence")
+        if not isinstance(layout_evidence, dict) or layout_evidence.get("strategyValue") != rehydration.get("layoutStrategy"):
+            _product_failure("rehydration layout evidence is missing or not strategy-bound", "rehydration")
+        for field in ("sourceSha256", "outputSha256", "preservedMetadataSha256"):
+            _product_digest(layout_evidence.get(field), f"rehydration.layoutEvidence.{field}", "rehydration")
+        if layout_evidence.get("sourceSha256") != rehydration.get("sourceSha256") or layout_evidence.get("outputSha256") != rehydration.get("nativeImageSha256"):
+            _product_failure("rehydration layout evidence digest binding is inconsistent", "rehydration")
+        if layout_evidence.get("outputLength") != rehydration.get("nativeImageSize"):
+            _product_failure("rehydration layout evidence size binding is inconsistent", "rehydration")
+        for field in ("placements", "addressMap", "branchDecisions"):
+            if not isinstance(layout_evidence.get(field), list) or len(layout_evidence[field]) > 4096:
+                _product_failure(f"rehydration layout evidence {field} is outside its bound", "rehydration")
         native_image_sha256 = _product_digest(rehydration.get("nativeImageSha256"), "rehydration.nativeImageSha256", "rehydration")
         if rehydration.get("nativeImageSize") is None or not isinstance(rehydration.get("nativeImageSize"), int) or rehydration["nativeImageSize"] <= 0:
             _product_failure("rehydration Native Image size is invalid", "rehydration")

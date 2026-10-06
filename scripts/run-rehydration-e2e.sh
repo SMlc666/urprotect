@@ -147,7 +147,7 @@ record = {
     "producerBuildSha256": producer_build,
     "consumerId": consumer,
     "consumerBuildSha256": hashlib.sha256(b"rehydrator-not-started").hexdigest(),
-    "layoutStrategy": "append-executable-pt-load-v1",
+    "layoutStrategy": "generic-elf-layout-v1",
     "handoffRecordPath": "handoff.json",
     "rawEvidenceManifestPath": "SHA256SUMS",
     "materializationStatus": "failed",

@@ -53,6 +53,8 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
             "target-loader",
             "behavioral-oracle",
             "execveat-at-empty-path",
+            "layoutEvidence",
+            "relocated-program-header-table",
         ):
             self.assertIn(marker, self.checker)
 

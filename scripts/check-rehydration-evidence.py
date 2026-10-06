@@ -20,6 +20,12 @@ MAX_SOURCE_IMAGE_BYTES = 128 * 1024 * 1024
 MAX_NATIVE_IMAGE_BYTES = 128 * 1024 * 1024
 MAX_STREAM_BYTES = 1024 * 1024
 UNIT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+LAYOUT_STRATEGIES = frozenset({
+    "existing-rx-load-extension",
+    "available-program-header-slot",
+    "relocated-program-header-table",
+})
+LAYOUT_DEFAULT = "generic-elf-layout-v1"
 
 
 def fail(message: str) -> None:
@@ -206,11 +212,28 @@ def check_rehydration(
         record.get("abiId") != "urprotect.protected-image.v1"
         or record.get("abiVersion") != 1
         or record.get("architecture") != "AArch64"
-        or record.get("layoutStrategy") != "append-executable-pt-load-v1"
+        or record.get("layoutStrategy") not in LAYOUT_STRATEGIES | {LAYOUT_DEFAULT}
     ):
         fail("rehydration ABI, architecture, or layout binding is unsupported")
     check_diagnostics(record, record["status"])
     if record["status"] == "passed":
+        if record.get("layoutStrategy") not in LAYOUT_STRATEGIES:
+            fail("passed rehydration stage does not bind a selected generic ELF layout strategy")
+        evidence = record.get("layoutEvidence")
+        if not isinstance(evidence, dict):
+            fail("passed rehydration stage does not retain bounded layout evidence")
+        if evidence.get("strategyValue") != record.get("layoutStrategy"):
+            fail("rehydration layout evidence strategy does not match the record")
+        for field in ("sourceSha256", "outputSha256", "preservedMetadataSha256"):
+            require_digest(evidence.get(field), f"rehydration layoutEvidence.{field}")
+        if evidence.get("sourceSha256") != record.get("sourceSha256") or evidence.get("outputSha256") != record.get("nativeImageSha256"):
+            fail("rehydration layout evidence digest bindings do not match the record")
+        if evidence.get("outputLength") != record.get("nativeImageSize"):
+            fail("rehydration layout evidence size does not match the record")
+        for field in ("placements", "addressMap", "branchDecisions"):
+            value = evidence.get(field)
+            if not isinstance(value, list) or len(value) > 4096:
+                fail(f"rehydration layout evidence {field} is outside its bound")
         if producer_stage.get("status") != "passed" or role == {} or source is None or protected is None:
             fail("rehydration passed without a passed producer and retained inputs")
         if record.get("firstFailureStage") is not None or record.get("materializationStatus") != "passed":
