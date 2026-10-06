@@ -77,7 +77,7 @@ public sealed class ConcurrencyRegressionTests
             {
                 for (var iteration = 0; iteration < iterations; iteration++)
                 {
-                    var result = new NoOpPipeline().Validate(input, emitOutput: true, analyzeInstructions: false);
+                    var result = new NoOpPipeline().ValidateStructurally(input, emitOutput: true);
                     if (!result.IsSuccess || result.OutputBytes is null || !input.SequenceEqual(result.OutputBytes))
                     {
                         failures.Enqueue($"worker={worker} iteration={iteration}");

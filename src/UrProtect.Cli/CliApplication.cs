@@ -164,7 +164,7 @@ public sealed class CliApplication
                 : (int)ProductExitCode.Validation;
         }
 
-        var validation = new NoOpPipeline().Validate(payload.SourceBytes, analyzeInstructions: false);
+        var validation = new NoOpPipeline().ValidateStructurally(payload.SourceBytes);
         if (!validation.IsSuccess || validation.File?.Kind != ElfFileKind.PieExecutable)
         {
             foreach (var diagnostic in validation.Diagnostics)
@@ -332,7 +332,8 @@ public sealed class CliApplication
         writer.WriteLine("urprotect - conservative AArch64 ELF validator");
         writer.WriteLine();
         writer.WriteLine("Usage:");
-        writer.WriteLine("  urprotect validate <input> [--copy <output>] [--json <path|->] [--no-analysis]");
+        writer.WriteLine("  urprotect validate <input> [--copy <output>] [--json <path|->] [--observe-analysis]");
+        writer.WriteLine("    Structural validation is the default; --no-analysis is retained as a legacy alias.");
         writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime] [--path-preserving]");
         writer.WriteLine("  urprotect protect <input> --output <protected> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--json <path|->]");
         writer.WriteLine("  urprotect protect-image <input> --artifact <path> --role <path> --manifest <path> --stage <path> --unit <id> --profile <outer-execveat|host-context-entry> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--producer-id <id>] [--producer-build-sha256 <sha256>] [--rehydrator <id>] [--source-sha256 <sha256>] [--request-sha256 <sha256>] [--json <path|->]");
@@ -372,13 +373,19 @@ public sealed class CliApplication
         }
 
         var pipeline = new NoOpPipeline();
-        var result = options.CopyPath is null
-            ? pipeline.Validate(input, analyzeInstructions: options.Analyze)
-            : pipeline.ValidateAndCopy(
-                options.InputPath,
-                options.CopyPath,
-                options.Analyze,
-                inputOverride: input);
+        var result = options.AnalysisMode == NoOpAnalysisMode.ObservationOnly
+            ? options.CopyPath is null
+                ? pipeline.ValidateObservationOnly(input)
+                : pipeline.ValidateAndCopyObservationOnly(
+                    options.InputPath,
+                    options.CopyPath,
+                    inputOverride: input)
+            : options.CopyPath is null
+                ? pipeline.ValidateStructurally(input)
+                : pipeline.ValidateAndCopyStructurally(
+                    options.InputPath,
+                    options.CopyPath,
+                    inputOverride: input);
         var outputRequested = options.CopyPath is not null;
         var outputPublished = outputRequested && result.OutputBytes is not null;
         var report = ProductReportFactory.Create(
@@ -1099,7 +1106,8 @@ public sealed class CliApplication
 
         string? copyPath = null;
         string? jsonPath = null;
-        var analyze = true;
+        var analysisMode = NoOpAnalysisMode.StructuralOnly;
+        var analysisOption = false;
         for (var index = 2; index < args.Length; index++)
         {
             switch (args[index])
@@ -1124,8 +1132,25 @@ public sealed class CliApplication
 
                     jsonPath = args[++index];
                     break;
+                case "--observe-analysis":
+                    if (analysisOption && analysisMode != NoOpAnalysisMode.ObservationOnly)
+                    {
+                        error = "Usage: --observe-analysis conflicts with --no-analysis.";
+                        return false;
+                    }
+
+                    analysisMode = NoOpAnalysisMode.ObservationOnly;
+                    analysisOption = true;
+                    break;
                 case "--no-analysis":
-                    analyze = false;
+                    if (analysisOption && analysisMode != NoOpAnalysisMode.StructuralOnly)
+                    {
+                        error = "Usage: --no-analysis conflicts with --observe-analysis.";
+                        return false;
+                    }
+
+                    analysisMode = NoOpAnalysisMode.StructuralOnly;
+                    analysisOption = true;
                     break;
                 case "-h":
                 case "--help":
@@ -1149,7 +1174,7 @@ public sealed class CliApplication
             return false;
         }
 
-        options = new CliOptions(args[1], copyPath, jsonPath, analyze);
+        options = new CliOptions(args[1], copyPath, jsonPath, analysisMode);
         return true;
     }
 
@@ -2215,6 +2240,12 @@ public sealed class CliApplication
                 + $"{result.File.RelaRelocations.Count} RELA relocations.");
         }
 
+        if (result.AnalysisMode == NoOpAnalysisMode.ObservationOnly)
+        {
+            stdout.WriteLine(
+                $"Observation-only instruction analysis: {result.Analysis?.Candidates.Count ?? 0} candidate(s).");
+        }
+
         if (result.IsSuccess && copyPath is not null)
         {
             stdout.WriteLine($"Byte-identical output written to {copyPath}.");
@@ -2335,7 +2366,7 @@ public sealed class CliApplication
         string InputPath,
         string? CopyPath,
         string? JsonPath,
-        bool Analyze);
+        NoOpAnalysisMode AnalysisMode);
 
     private sealed record PackOptions(
         string InputPath,

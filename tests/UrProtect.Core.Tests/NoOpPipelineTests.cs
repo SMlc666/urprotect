@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using UrProtect.Core.Aarch64;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Pipeline;
@@ -11,10 +12,7 @@ public sealed class NoOpPipelineTests
     {
         var input = ElfFixture.MinimalPie();
 
-        var result = new NoOpPipeline().Validate(
-            input,
-            emitOutput: true,
-            analyzeInstructions: false);
+        var result = new NoOpPipeline().ValidateStructurally(input, emitOutput: true);
 
         TestAssertions.Success(result.IsSuccess, result.Diagnostics, "byte-identical no-op output");
         Assert.NotNull(result.OutputBytes);
@@ -22,13 +20,71 @@ public sealed class NoOpPipelineTests
     }
 
     [Fact]
-    public void AnalyzesOnlyTheExecutableEntryRegionByDefault()
+    public void StructuralValidationIsDecoderIndependentByDefault()
     {
-        var result = new NoOpPipeline().Validate(ElfFixture.MinimalPie());
+        var decoder = new AsmStoneAdapter((encoding, address) =>
+            Aarch64DecodeResult.BackendUnavailable(encoding, address));
 
-        TestAssertions.Success(result.IsSuccess, result.Diagnostics, "entry-region analysis");
+        var result = new NoOpPipeline(decoder).Validate(ElfFixture.MinimalPie());
+
+        TestAssertions.Success(result.IsSuccess, result.Diagnostics, "structural validation");
+        Assert.Equal(NoOpAnalysisMode.StructuralOnly, result.AnalysisMode);
+        Assert.Null(result.Analysis);
+    }
+
+    [Fact]
+    public void UnrelatedUnknownExecutableBytesDoNotAffectStructuralValidation()
+    {
+        var input = ElfFixture.MinimalPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            input.AsSpan(ElfFixture.EntryInstructionOffset),
+            0xFFFFFFFF);
+        var decoder = new AsmStoneAdapter((encoding, address) =>
+            Aarch64DecodeResult.BackendUnavailable(encoding, address));
+
+        var result = new NoOpPipeline(decoder).Validate(input);
+
+        TestAssertions.Success(result.IsSuccess, result.Diagnostics, "unknown executable bytes");
+        Assert.Null(result.Analysis);
+        Assert.DoesNotContain(result.Diagnostics, diagnostic =>
+            diagnostic.Code is DiagnosticCode.UnknownInstruction or DiagnosticCode.AsmStoneUnavailable);
+    }
+
+    [Fact]
+    public void ObservationAnalysisIsExplicitAndRetainsDecoderDiagnostics()
+    {
+        var decoder = new AsmStoneAdapter((encoding, address) => new Aarch64DecodeResult(
+            Aarch64DecodeStatus.UnknownEncoding,
+            null,
+            $"Synthetic unknown instruction 0x{encoding:X8} at 0x{address:X}."));
+
+        var result = new NoOpPipeline(decoder).ValidateObservationOnly(ElfFixture.MinimalPie());
+
+        TestAssertions.Success(result.IsSuccess, result.Diagnostics, "observation-only analysis");
+        Assert.Equal(NoOpAnalysisMode.ObservationOnly, result.AnalysisMode);
         Assert.NotNull(result.Analysis);
         Assert.Contains(result.Analysis!.Candidates, candidate => candidate.VirtualAddress == 0x1200);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.UnknownInstruction);
+    }
+
+    [Fact]
+    public void ObservationOnlyCopyRetainsItsExplicitModeOnInputFailure()
+    {
+        var directory = Directory.CreateTempSubdirectory("urprotect-observation-failure-");
+        try
+        {
+            var result = new NoOpPipeline().ValidateAndCopyObservationOnly(
+                Path.Combine(directory.FullName, "missing.elf"),
+                Path.Combine(directory.FullName, "copy.elf"));
+
+            Assert.False(result.IsSuccess);
+            Assert.Equal(NoOpAnalysisMode.ObservationOnly, result.AnalysisMode);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.InputIoFailure);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 
     [Fact]
@@ -47,8 +103,10 @@ public sealed class NoOpPipelineTests
             File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
             var mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
             File.SetUnixFileMode(inputPath, mode);
+            var decoder = new AsmStoneAdapter((encoding, address) =>
+                Aarch64DecodeResult.BackendUnavailable(encoding, address));
 
-            var result = new NoOpPipeline().ValidateAndCopy(inputPath, outputPath, analyzeInstructions: false);
+            var result = new NoOpPipeline(decoder).ValidateAndCopy(inputPath, outputPath);
 
             TestAssertions.Success(result.IsSuccess, result.Diagnostics, "mode-preserving copy");
             Assert.Equal(mode, File.GetUnixFileMode(outputPath));
@@ -65,19 +123,19 @@ public sealed class NoOpPipelineTests
         var decoder = new AsmStoneAdapter((encoding, address) =>
             Aarch64DecodeResult.BackendUnavailable(encoding, address));
 
-        var result = new NoOpPipeline(decoder).Validate(ElfFixture.MinimalPie());
+        var result = new NoOpPipeline(decoder).ValidateObservationOnly(ElfFixture.MinimalPie());
 
         Assert.False(result.IsSuccess);
+        Assert.Equal(NoOpAnalysisMode.ObservationOnly, result.AnalysisMode);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.AsmStoneUnavailable);
     }
 
     [Fact]
     public void DoesNotWriteAnOutputForInvalidInput()
     {
-        var result = new NoOpPipeline().Validate(
+        var result = new NoOpPipeline().ValidateStructurally(
             new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' },
-            emitOutput: true,
-            analyzeInstructions: false);
+            emitOutput: true);
 
         Assert.False(result.IsSuccess);
         Assert.Null(result.OutputBytes);
@@ -94,7 +152,7 @@ public sealed class NoOpPipelineTests
             var input = ElfFixture.MinimalPie();
             File.WriteAllBytes(inputPath, input);
 
-            var result = new NoOpPipeline().ValidateAndCopy(inputPath, outputPath, analyzeInstructions: false);
+            var result = new NoOpPipeline().ValidateAndCopyStructurally(inputPath, outputPath);
 
             TestAssertions.Success(result.IsSuccess, result.Diagnostics, "atomic copy");
             TestAssertions.ByteIdentity(input, File.ReadAllBytes(outputPath), "atomic copy");
@@ -117,10 +175,9 @@ public sealed class NoOpPipelineTests
             File.WriteAllBytes(inputPath, source);
 
             var invalidSnapshot = new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' };
-            var result = new NoOpPipeline().ValidateAndCopy(
+            var result = new NoOpPipeline().ValidateAndCopyStructurally(
                 inputPath,
                 outputPath,
-                analyzeInstructions: false,
                 inputOverride: invalidSnapshot);
 
             Assert.False(result.IsSuccess);

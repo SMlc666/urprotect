@@ -47,7 +47,14 @@ public sealed record ProductSummaryReport(
     int RelaRelocations,
     int RelrWords,
     int AndroidPackedRelocations,
-    int AnalysisCandidates);
+    int AnalysisCandidates)
+{
+    /// <summary>
+    /// Reports whether validation remained structural or explicitly ran the
+    /// legacy whole-image observation pass.
+    /// </summary>
+    public string AnalysisMode { get; init; } = "structural";
+}
 
 public sealed record ProductDiagnosticReport(
     string Severity,
@@ -311,7 +318,12 @@ public static class ProductReportFactory
             file?.RelaRelocations.Count ?? 0,
             file?.RelrWords.Count ?? 0,
             file?.AndroidPackedRelocations.Count ?? 0,
-            result.Analysis?.Candidates.Count ?? 0);
+            result.Analysis?.Candidates.Count ?? 0)
+        {
+            AnalysisMode = result.AnalysisMode == NoOpAnalysisMode.ObservationOnly
+                ? "observation-only"
+                : "structural",
+        };
     }
 
     private static ProductDynamicReport? CreateDynamicReport(NoOpValidationResult result)

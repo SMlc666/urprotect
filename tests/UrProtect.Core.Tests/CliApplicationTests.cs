@@ -13,6 +13,7 @@ public sealed class CliApplicationTests
     private static readonly string[] MissingInputArgs = { "validate", "/tmp/urprotect-does-not-exist.elf" };
     private static readonly string[] ThreadLifetimeOuterArgs =
         { "pack", "missing.so", "--output", "out", "--launcher", "launcher", "--thread-lifetime" };
+    private static readonly string[] HelpArgs = { "--help" };
 
     [Fact]
     [Trait("Category", "Cli")]
@@ -26,7 +27,7 @@ public sealed class CliApplicationTests
         using var stderr = new StringWriter();
 
         var exitCode = CliApplication.Run(
-            new[] { "validate", inputPath, "--json", "-", "--no-analysis" },
+            new[] { "validate", inputPath, "--json", "-" },
             stdout,
             stderr);
 
@@ -42,7 +43,46 @@ public sealed class CliApplicationTests
             Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant(),
             root.GetProperty("input").GetProperty("sha256").GetString());
         Assert.Equal("ET_DYN", root.GetProperty("elf").GetProperty("type").GetString());
+        Assert.Equal("structural", root.GetProperty("summary").GetProperty("analysisMode").GetString());
+        Assert.Equal(0, root.GetProperty("summary").GetProperty("analysisCandidates").GetInt32());
         Assert.False(root.TryGetProperty("output", out _));
+    }
+
+    [Fact]
+    [Trait("Category", "Cli")]
+    public void ObserveAnalysisFlagEnablesOnlyTheObservationPass()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[] { "validate", inputPath, "--json", "-", "--observe-analysis" },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Success, exitCode);
+        Assert.Empty(stderr.ToString());
+        using var document = JsonDocument.Parse(stdout.ToString());
+        var summary = document.RootElement.GetProperty("summary");
+        Assert.Equal("observation-only", summary.GetProperty("analysisMode").GetString());
+        Assert.True(summary.GetProperty("analysisCandidates").GetInt32() > 0);
+    }
+
+    [Fact]
+    [Trait("Category", "Cli")]
+    public void HelpNamesStructuralDefaultAndExplicitObservationMode()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(HelpArgs, stdout, stderr);
+
+        Assert.Equal((int)ProductExitCode.Success, exitCode);
+        Assert.Contains("--observe-analysis", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Structural validation is the default", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -65,6 +105,7 @@ public sealed class CliApplicationTests
         using var document = JsonDocument.Parse(jsonStdout.ToString());
         Assert.Equal("ET_EXEC", document.RootElement.GetProperty("elf").GetProperty("type").GetString());
         Assert.Equal("DynamicExecutable", document.RootElement.GetProperty("elf").GetProperty("kind").GetString());
+        Assert.Equal("structural", document.RootElement.GetProperty("summary").GetProperty("analysisMode").GetString());
 
         using var humanStdout = new StringWriter();
         using var humanStderr = new StringWriter();

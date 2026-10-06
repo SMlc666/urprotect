@@ -33,12 +33,15 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 
 - `ElfParser.Parse(ReadOnlyMemory<byte>)` returns `ElfParseResult`; malformed
   input becomes diagnostics and a missing `File`, not an exception.
-- `NoOpPipeline.Validate` preserves the parsed file when safe, appends analysis
-  diagnostics, and creates output bytes only after all errors are absent and
-  byte identity is proven.
-- `NoOpPipeline.ValidateAndCopy` accepts an optional `inputOverride` snapshot so
-  report hashes and copied bytes describe the same source. It writes a flushed
-  temporary sibling and removes it on every failure path.
+- `NoOpPipeline.Validate` preserves the parsed file when safe. It appends
+  instruction-analysis diagnostics only when the explicitly selected
+  observation-only mode is requested, and creates output bytes only after all
+  errors are absent and byte identity is proven.
+- `NoOpPipeline.ValidateAndCopy` defaults to structural validation and accepts an
+  optional `inputOverride` snapshot so report hashes and copied bytes describe
+  the same source. Observation-only copying is explicitly selected through its
+  named API. It writes a flushed temporary sibling and removes it on every
+  failure path.
 - `PayloadFrameCodec` validates version, flags, architecture, names, bounds,
   encoded digest, exact decompressed size, and source digest before returning
   source bytes.
@@ -94,10 +97,9 @@ if (!loadMap.TryVirtualAddressToFileOffset(address, size, out var fileOffset))
 Correct snapshot reuse:
 
 ```csharp
-pipeline.ValidateAndCopy(
+pipeline.ValidateAndCopyStructurally(
     options.InputPath,
     options.CopyPath,
-    options.Analyze,
     inputOverride: input);
 ```
 

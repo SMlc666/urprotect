@@ -16,7 +16,7 @@ public sealed class LargeInputRegressionTests
         Assert.NotNull(parsed.File);
         Assert.DoesNotContain(parsed.Diagnostics, diagnostic => diagnostic.IsError);
 
-        var result = new NoOpPipeline().Validate(input, emitOutput: true, analyzeInstructions: false);
+        var result = new NoOpPipeline().ValidateStructurally(input, emitOutput: true);
         TestAssertions.Success(result.IsSuccess, result.Diagnostics, "large no-op validation");
         Assert.NotNull(result.OutputBytes);
         TestAssertions.ByteIdentity(input, result.OutputBytes!, "large no-op validation");

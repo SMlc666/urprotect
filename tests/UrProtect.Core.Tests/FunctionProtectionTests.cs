@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text.Json;
 using UrProtect.Cli;
+using UrProtect.Core.Aarch64;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Elf;
 using UrProtect.Core.Protect;
@@ -63,6 +64,35 @@ public sealed class FunctionProtectionTests
         Assert.NotEqual(
             source.AsSpan(checked((int)selectedOffset), checked((int)selected.Size)).ToArray(),
             output.AsSpan(checked((int)selectedOffset), checked((int)selected.Size)).ToArray());
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void ProtectionAnalysisDecodesOnlyTheExplicitlySelectedFunction()
+    {
+        var source = WithProgramHeaderSlot(ReadVersionedFixture());
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var selected = Assert.Single(parse.File!.FunctionSymbols, function =>
+            function.Table == ElfSymbolTableKind.Static && function.TableIndex == 23);
+        Assert.True(selected.TryGetEnd(out var selectedEnd));
+        var observedAddresses = new List<ulong>();
+        var fallback = new AsmStoneAdapter();
+        var decoder = new AsmStoneAdapter((encoding, address) =>
+        {
+            observedAddresses.Add(address);
+            return fallback.Decode(encoding, address);
+        });
+
+        var result = new FunctionProtectionService(decoder).Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(ElfSymbolTableKind.Static, 23) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotEmpty(observedAddresses);
+        Assert.All(observedAddresses, address => Assert.InRange(address, selected.Value, selectedEnd - 1));
     }
 
     [Fact]

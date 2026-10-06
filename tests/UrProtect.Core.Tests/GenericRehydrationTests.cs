@@ -47,6 +47,35 @@ public sealed class GenericRehydrationTests
 
     [Fact]
     [Trait("Category", "Rehydration")]
+    public void RehydrationAndLayoutIgnoreUnknownBytesInAnUnselectedExecutableFunction()
+    {
+        var source = CreateSourceWithProgramHeaderSlot();
+        var parsed = ElfParser.Parse(source);
+        Assert.NotNull(parsed.File);
+        var unrelated = Assert.Single(parsed.File!.FunctionSymbols, function =>
+            function.Table == ElfSymbolTableKind.Static && function.TableIndex == 21);
+        Assert.True(unrelated.Size >= sizeof(uint));
+        Assert.True(parsed.File.LoadMap.TryVirtualAddressToFileOffset(
+            unrelated.Value,
+            sizeof(uint),
+            out var unrelatedOffset));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(checked((int)unrelatedOffset)),
+            0xFFFFFFFF);
+
+        var emitted = Emit(source);
+        var result = GenericRehydrationEngine.Rehydrate(
+            source,
+            emitted.ArtifactBytes!,
+            Options(source, emitted.Role!.RequestSha256));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.NativeImage);
+        Assert.NotNull(result.NativeImage!.LayoutEvidence);
+    }
+
+    [Fact]
+    [Trait("Category", "Rehydration")]
     public void OccupiedProgramHeaderTableUsesRelocatedTableWithoutNativeImageFallback()
     {
         var source = File.ReadAllBytes(FixturePath);

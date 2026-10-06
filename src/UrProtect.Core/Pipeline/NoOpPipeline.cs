@@ -4,6 +4,17 @@ using UrProtect.Core.Elf;
 
 namespace UrProtect.Core.Pipeline;
 
+/// <summary>
+/// Selects the scope of optional instruction inspection performed by
+/// <see cref="NoOpPipeline"/>. Structural validation is the default and does
+/// not decode executable bytes.
+/// </summary>
+public enum NoOpAnalysisMode
+{
+    StructuralOnly = 0,
+    ObservationOnly = 1,
+}
+
 public sealed record NoOpValidationResult(
     ElfFile? File,
     Aarch64AnalysisReport? Analysis,
@@ -11,33 +22,70 @@ public sealed record NoOpValidationResult(
     byte[]? OutputBytes)
 {
     public bool IsSuccess => File is not null && Diagnostics.All(diagnostic => !diagnostic.IsError);
+
+    /// <summary>
+    /// Gets the analysis scope used for this validation result. A structural
+    /// result has no instruction-analysis dependency.
+    /// </summary>
+    public NoOpAnalysisMode AnalysisMode { get; init; } = NoOpAnalysisMode.StructuralOnly;
 }
 
 public sealed class NoOpPipeline
 {
-    private readonly IAarch64Decoder decoder;
+    private readonly IAarch64Decoder? decoder;
 
     public NoOpPipeline(IAarch64Decoder? decoder = null)
     {
-        this.decoder = decoder ?? new AsmStoneAdapter();
+        // Keep the decoder lazy: structural validation must remain independent
+        // of decoder construction and backend availability.
+        this.decoder = decoder;
     }
 
+    /// <summary>
+    /// Validates ELF structure without decoding instructions unless the legacy
+    /// <paramref name="analyzeInstructions"/> compatibility switch is true.
+    /// Prefer <see cref="ValidateStructurally"/> or
+    /// <see cref="ValidateObservationOnly"/> at new call sites.
+    /// </summary>
     public NoOpValidationResult Validate(
         ReadOnlyMemory<byte> input,
         bool emitOutput = false,
-        bool analyzeInstructions = true)
+        bool analyzeInstructions = false) =>
+        Validate(
+            input,
+            emitOutput,
+            analyzeInstructions
+                ? NoOpAnalysisMode.ObservationOnly
+                : NoOpAnalysisMode.StructuralOnly);
+
+    /// <summary>
+    /// Validates ELF structure with an explicit analysis scope.
+    /// </summary>
+    public NoOpValidationResult Validate(
+        ReadOnlyMemory<byte> input,
+        bool emitOutput,
+        NoOpAnalysisMode analysisMode)
     {
+        if (analysisMode is not (NoOpAnalysisMode.StructuralOnly or NoOpAnalysisMode.ObservationOnly))
+        {
+            throw new ArgumentOutOfRangeException(nameof(analysisMode));
+        }
+
         var parse = ElfParser.Parse(input);
         var diagnostics = parse.Diagnostics.ToList();
         if (parse.File is null)
         {
-            return new NoOpValidationResult(null, null, diagnostics, null);
+            return new NoOpValidationResult(null, null, diagnostics, null)
+            {
+                AnalysisMode = analysisMode,
+            };
         }
 
         Aarch64AnalysisReport? analysis = null;
-        if (analyzeInstructions)
+        if (analysisMode == NoOpAnalysisMode.ObservationOnly)
         {
-            analysis = new Aarch64Analyzer(decoder).Analyze(parse.File);
+            var observationDecoder = decoder ?? new AsmStoneAdapter();
+            analysis = new Aarch64ObservationAnalyzer(observationDecoder).Analyze(parse.File);
             diagnostics.AddRange(analysis.Diagnostics);
         }
 
@@ -55,19 +103,52 @@ public sealed class NoOpPipeline
             }
         }
 
-        return new NoOpValidationResult(parse.File, analysis, diagnostics, output);
+        return new NoOpValidationResult(parse.File, analysis, diagnostics, output)
+        {
+            AnalysisMode = analysisMode,
+        };
     }
+
+    /// <summary>
+    /// Validates ELF structure with a named analysis scope. This overload keeps
+    /// the scope argument discoverable without requiring an output argument.
+    /// </summary>
+    public NoOpValidationResult Validate(
+        ReadOnlyMemory<byte> input,
+        NoOpAnalysisMode analysisMode,
+        bool emitOutput = false) =>
+        Validate(input, emitOutput, analysisMode);
+
+    /// <summary>
+    /// Performs decoder-independent structural validation.
+    /// </summary>
+    public NoOpValidationResult ValidateStructurally(
+        ReadOnlyMemory<byte> input,
+        bool emitOutput = false) =>
+        Validate(input, emitOutput, NoOpAnalysisMode.StructuralOnly);
+
+    /// <summary>
+    /// Performs explicitly requested whole-image observation. This mode is not
+    /// a protection or publication prerequisite and may report decoder facts.
+    /// </summary>
+    public NoOpValidationResult ValidateObservationOnly(
+        ReadOnlyMemory<byte> input,
+        bool emitOutput = false) =>
+        Validate(input, emitOutput, NoOpAnalysisMode.ObservationOnly);
 
     public NoOpValidationResult ValidateAndCopy(
         string inputPath,
         string outputPath,
-        bool analyzeInstructions = true,
+        bool analyzeInstructions = false,
         ReadOnlyMemory<byte>? inputOverride = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(inputPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
         var diagnostics = new DiagnosticBag();
+        var analysisMode = analyzeInstructions
+            ? NoOpAnalysisMode.ObservationOnly
+            : NoOpAnalysisMode.StructuralOnly;
         string inputFullPath;
         string outputFullPath;
         try
@@ -78,7 +159,10 @@ public sealed class NoOpPipeline
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
             diagnostics.Error(DiagnosticCode.InvalidArgument, exception.Message);
-            return new NoOpValidationResult(null, null, diagnostics.ToArray(), null);
+            return new NoOpValidationResult(null, null, diagnostics.ToArray(), null)
+            {
+                AnalysisMode = analysisMode,
+            };
         }
 
         var pathComparison = OperatingSystem.IsWindows()
@@ -89,7 +173,10 @@ public sealed class NoOpPipeline
             diagnostics.Error(
                 DiagnosticCode.OutputPathConflict,
                 "The no-op output path must differ from the input path.");
-            return new NoOpValidationResult(null, null, diagnostics.ToArray(), null);
+            return new NoOpValidationResult(null, null, diagnostics.ToArray(), null)
+            {
+                AnalysisMode = analysisMode,
+            };
         }
 
         byte[] input;
@@ -106,11 +193,17 @@ public sealed class NoOpPipeline
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 diagnostics.Error(DiagnosticCode.InputIoFailure, exception.Message);
-                return new NoOpValidationResult(null, null, diagnostics.ToArray(), null);
+                return new NoOpValidationResult(null, null, diagnostics.ToArray(), null)
+                {
+                    AnalysisMode = analysisMode,
+                };
             }
         }
 
-        var result = Validate(input, emitOutput: false, analyzeInstructions);
+        var result = Validate(
+            input,
+            emitOutput: false,
+            analyzeInstructions: analyzeInstructions);
         if (!result.IsSuccess)
         {
             return result;
@@ -178,6 +271,54 @@ public sealed class NoOpPipeline
             TryDelete(temporaryPath);
         }
     }
+
+    /// <summary>
+    /// Copies a validated ELF with an explicit analysis scope.
+    /// </summary>
+    public NoOpValidationResult ValidateAndCopy(
+        string inputPath,
+        string outputPath,
+        NoOpAnalysisMode analysisMode,
+        ReadOnlyMemory<byte>? inputOverride = null)
+    {
+        if (analysisMode is not (NoOpAnalysisMode.StructuralOnly or NoOpAnalysisMode.ObservationOnly))
+        {
+            throw new ArgumentOutOfRangeException(nameof(analysisMode));
+        }
+
+        return ValidateAndCopy(
+            inputPath,
+            outputPath,
+            analyzeInstructions: analysisMode == NoOpAnalysisMode.ObservationOnly,
+            inputOverride: inputOverride);
+    }
+
+    /// <summary>
+    /// Copies a validated ELF without instruction decoding.
+    /// </summary>
+    public NoOpValidationResult ValidateAndCopyStructurally(
+        string inputPath,
+        string outputPath,
+        ReadOnlyMemory<byte>? inputOverride = null) =>
+        ValidateAndCopy(
+            inputPath,
+            outputPath,
+            analyzeInstructions: false,
+            inputOverride: inputOverride);
+
+    /// <summary>
+    /// Copies a validated ELF after explicitly requesting whole-image
+    /// observation-only analysis.
+    /// </summary>
+    public NoOpValidationResult ValidateAndCopyObservationOnly(
+        string inputPath,
+        string outputPath,
+        ReadOnlyMemory<byte>? inputOverride = null) =>
+        ValidateAndCopy(
+            inputPath,
+            outputPath,
+            analyzeInstructions: true,
+            inputOverride: inputOverride);
 
     private static NoOpValidationResult WithDiagnostic(
         NoOpValidationResult result,

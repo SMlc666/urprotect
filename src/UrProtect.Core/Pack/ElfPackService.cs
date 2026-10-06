@@ -9,7 +9,6 @@ namespace UrProtect.Core.Pack;
 public sealed record ElfPackOptions(
     PayloadCompression Compression = PayloadCompression.Deflate,
     PayloadFrameLimits? Limits = null,
-    bool AnalyzeInstructions = false,
     PayloadDispatchProfile Profile = PayloadDispatchProfile.OuterExecveat,
     string EntrySymbol = HostContextContract.EntrySymbol,
     bool RequireThreadLifetime = false,
@@ -100,7 +99,9 @@ public sealed class ElfPackService
             return Failure(diagnostics);
         }
 
-        var sourceValidation = pipeline.Validate(sourceBytes, analyzeInstructions: options.AnalyzeInstructions);
+        // Packing owns structural ELF acceptance only. Instruction semantics are
+        // selected-function protection concerns, not a wrapper prerequisite.
+        var sourceValidation = pipeline.ValidateStructurally(sourceBytes);
         diagnostics.AddRange(sourceValidation.Diagnostics);
         if (!sourceValidation.IsSuccess || sourceValidation.File is null)
         {
@@ -126,7 +127,7 @@ public sealed class ElfPackService
             return Failure(diagnostics, sourceBytes.Length);
         }
 
-        var launcherValidation = pipeline.Validate(launcherBytes, analyzeInstructions: false);
+        var launcherValidation = pipeline.ValidateStructurally(launcherBytes);
         if (!launcherValidation.IsSuccess || launcherValidation.File is null)
         {
             diagnostics.Error(DiagnosticCode.LauncherUnavailable, "The launcher is not a valid AArch64 ET_DYN executable.");
@@ -194,7 +195,7 @@ public sealed class ElfPackService
         Buffer.BlockCopy(encoding.FrameBytes, 0, wrapper, launcherBytes.Length, encoding.FrameBytes.Length);
         Buffer.BlockCopy(trailer, 0, wrapper, launcherBytes.Length + encoding.FrameBytes.Length, trailer.Length);
 
-        var wrapperValidation = pipeline.Validate(wrapper, analyzeInstructions: false);
+        var wrapperValidation = pipeline.ValidateStructurally(wrapper);
         var expectedWrapperKind = options.Profile == PayloadDispatchProfile.OuterExecveat
             ? ElfFileKind.StaticPieExecutable
             : ElfFileKind.PieExecutable;

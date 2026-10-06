@@ -1,6 +1,8 @@
+using UrProtect.Core.Aarch64;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Elf;
 using UrProtect.Core.Pack;
+using UrProtect.Core.Pipeline;
 
 namespace UrProtect.Core.Tests;
 
@@ -36,6 +38,28 @@ public sealed class ElfPackServiceTests
         Assert.Equal(PayloadFrameCodec.CurrentFormatVersion, payload.Frame!.FrameVersion);
         Assert.Equal(PayloadDispatchProfile.OuterExecveat, payload.Frame.Profile);
         Assert.Null(payload.Frame.HostContextMetadata);
+    }
+
+    [Fact]
+    [Trait("Category", "PackWrapper")]
+    public void PackingRemainsStructuralWhenTheDecoderBackendIsUnavailable()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var launcherPath = directory.Path("launcher.elf");
+        var outputPath = directory.Path("wrapped.elf");
+        File.WriteAllBytes(inputPath, ElfFixture.MinimalPie());
+        File.WriteAllBytes(launcherPath, ElfFixture.StaticPieLauncher());
+        var decoder = new AsmStoneAdapter((encoding, address) =>
+            Aarch64DecodeResult.BackendUnavailable(encoding, address));
+
+        var result = new ElfPackService(new NoOpPipeline(decoder)).Pack(
+            inputPath,
+            outputPath,
+            launcherPath);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.True(File.Exists(outputPath));
     }
 
     [Fact]

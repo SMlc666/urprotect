@@ -13,7 +13,7 @@ public sealed class GoldenReportTests
     public void ValidSyntheticReportMatchesGoldenFile()
     {
         var input = ElfFixture.MinimalPie();
-        var result = new NoOpPipeline().Validate(input, analyzeInstructions: false);
+        var result = new NoOpPipeline().ValidateStructurally(input);
 
         Assert.Equal(
             ReadGolden("valid-synthetic.json"),
@@ -30,7 +30,7 @@ public sealed class GoldenReportTests
     public void SectionlessStrippedReportMatchesGoldenFile()
     {
         var input = ElfFixture.MinimalPie();
-        var result = new NoOpPipeline().Validate(input, analyzeInstructions: false);
+        var result = new NoOpPipeline().ValidateStructurally(input);
 
         Assert.Equal(
             ReadGolden("stripped-synthetic.json"),
@@ -47,7 +47,7 @@ public sealed class GoldenReportTests
     public void InvalidReportMatchesGoldenFile()
     {
         var input = new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' };
-        var result = new NoOpPipeline().Validate(input, analyzeInstructions: false);
+        var result = new NoOpPipeline().ValidateStructurally(input);
 
         Assert.Equal(
             ReadGolden("invalid-truncated.json"),
@@ -68,7 +68,7 @@ public sealed class GoldenReportTests
             Aarch64DecodeStatus.UnknownEncoding,
             null,
             $"Synthetic unknown instruction 0x{encoding:X8} at 0x{address:X}."));
-        var result = new NoOpPipeline(decoder).Validate(input);
+        var result = new NoOpPipeline(decoder).ValidateObservationOnly(input);
         var report = ProductReportFactory.Create(
             CliApplication.ToolVersion,
             input,

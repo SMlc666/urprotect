@@ -72,7 +72,7 @@ public sealed class ElfSymbolVersionParserTests
     public void ProjectsDefinedVersionCountInStableReportSummary()
     {
         var bytes = ReadVersionedFixture();
-        var validation = new NoOpPipeline().Validate(bytes, analyzeInstructions: false);
+        var validation = new NoOpPipeline().ValidateStructurally(bytes);
         var report = ProductReportFactory.Create(
             CliApplication.ToolVersion,
             bytes,

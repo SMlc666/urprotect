@@ -41,6 +41,11 @@ Validate an AArch64 ELF and print the human-readable result:
 urprotect validate ./program
 ```
 
+Generic validation is structural and decoder-independent by default. Use the
+explicit `--observe-analysis` option only when whole-image instruction
+observation is wanted; the legacy `--no-analysis` option remains an alias for
+structural validation.
+
 Create a safe no-op copy and a machine-readable report:
 
 ```sh
@@ -52,7 +57,7 @@ urprotect validate ./program \
 Stream exactly one JSON document to stdout:
 
 ```sh
-urprotect validate ./program --json - --no-analysis > report.json
+urprotect validate ./program --json - > report.json
 ```
 
 ## Explicit function protection

@@ -28,6 +28,11 @@
   and report unsupported semantics rather than guessing.
 - Keep the no-op pipeline byte-preserving. Any output must be compared to the
   source before publication.
+- Keep generic ELF validation, packing, layout materialization, and rehydration
+  structural by default: they must not decode unrelated executable bytes.
+  Whole-image instruction inspection is an explicitly named observation-only
+  mode; protection code analysis begins at selected-function roots and may make
+  only bounded, demand-driven dependency queries.
 - Pin and retain licenses for AsmStone and miniz. Native source, compiler
   inputs, specs hashes, and output hashes belong in provenance.
 

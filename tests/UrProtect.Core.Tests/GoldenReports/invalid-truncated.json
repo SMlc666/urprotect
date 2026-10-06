@@ -18,7 +18,8 @@
     "relaRelocations": 0,
     "relrWords": 0,
     "androidPackedRelocations": 0,
-    "analysisCandidates": 0
+    "analysisCandidates": 0,
+    "analysisMode": "structural"
   },
   "diagnostics": [
     {
