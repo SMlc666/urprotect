@@ -270,3 +270,27 @@ Completed the parent 100x integration: explicit immutable Scheme-A v2 baseline/r
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Implement generic ELF layout planner
+<!-- trellis-session: v=2 fp=5bcfaf7bc5ec34a8 -->
+
+**Date**: 2026-10-06
+**Task**: Implement generic ELF layout planner
+**Branch**: `feat/100x-independent-evaluator`
+
+### Summary
+
+Implemented and verified the generic AArch64 ELF layout planner/materializer. Replaced the PT_NULL-only production path with one bounded planner covering existing RX PT_LOAD extension, ordinary PT_NULL placement, and relocated/expanded program-header tables. Added typed placements, ranges, branch/veneer decisions, deterministic layout evidence, post-parse validation, and atomic rehydration evidence bindings. Updated runtime compatibility contracts, evaluator scripts, and tests. Release build passed with 0 warnings/errors; 260 Core tests, 290 Python tests, 13 fixture cases, regression matrix, rehydration evidence tests, and glibc rehydration E2E passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1bb4801` | feat: add generic ELF layout planner and materializer |
+| `b9c4f3a` | chore: update rehydration layout evidence contracts |
+| `37fb6b0` | chore(task): record ELF layout rewriter implementation |
+
+### Status
+
+[OK] **Completed**
