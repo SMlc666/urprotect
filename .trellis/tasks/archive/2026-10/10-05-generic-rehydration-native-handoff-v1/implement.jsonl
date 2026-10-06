@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Protected Image, Native Image, native handoff, strict compatibility-stage, and evidence contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Bounded binary parsing, diagnostics, malformed tests, native evidence, and CI quality gates."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Stable failure propagation, publication rollback, and CLI/native status semantics."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Managed Core/Rehydrate, native launcher/runtime, scripts, fixtures, and test ownership."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Source -> Protected Image -> Native Image -> loader data flow and record ownership."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Parent artifact model, six-stage compatibility gate, rollback, and CI retention requirements."}
+{"file":".trellis/tasks/archive/2026-10/10-05-protected-image-emission-v1/design.md","reason":"Current ABI v1 producer/role/stage shape and explicit follow-on boundary."}

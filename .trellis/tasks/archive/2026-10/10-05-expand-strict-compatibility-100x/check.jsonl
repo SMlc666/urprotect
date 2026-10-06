@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify exact six-stage runtime/loader/oracle evidence and no fallback."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify identity uniqueness, closed evidence and full regression coverage."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Verify exact growth target and Scheme-A remains independently gated."}
+{"file":"fixtures/evaluator/compatibility-corpus.json","reason":"Check append-only corpus identity and unchanged fixed row."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-v2-reference.json","reason":"Check denominator is the approved immutable one-unit v2 baseline."}
+{"file":"scripts/evaluator_lib.py","reason":"Review derivation, deduplication, fixed/growth counts and anti-gaming rules."}

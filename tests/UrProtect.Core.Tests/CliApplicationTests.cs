@@ -2,11 +2,13 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using UrProtect.Cli;
 using UrProtect.Core.Pack;
+using UrProtect.Core.Protect;
 
 namespace UrProtect.Core.Tests;
 
 public sealed class CliApplicationTests
 {
+    private const string VersionedFixturePath = "Fixtures/SymbolVersions/liburp-versioned.so";
     private static readonly string[] UnknownArgumentArgs = { "validate", "input.elf", "--unknown" };
     private static readonly string[] MissingInputArgs = { "validate", "/tmp/urprotect-does-not-exist.elf" };
     private static readonly string[] ThreadLifetimeOuterArgs =
@@ -153,6 +155,95 @@ public sealed class CliApplicationTests
         Assert.Equal((int)ProductExitCode.Validation, exitCode);
         Assert.False(File.Exists(reportPath));
         Assert.Contains("InputTooSmall", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "ProtectedImageCli")]
+    public void ProtectImagePublishesFocusedRoleStageAndChecksumEvidence()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var artifactPath = directory.Path("protected-image.bin");
+        var rolePath = directory.Path("protected-image.json");
+        var manifestPath = directory.Path("SHA256SUMS");
+        var stagePath = directory.Path("stage.json");
+        var input = File.ReadAllBytes(VersionedFixturePath);
+        File.WriteAllBytes(inputPath, input);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[]
+            {
+                "protect-image", inputPath,
+                "--artifact", artifactPath,
+                "--role", rolePath,
+                "--manifest", manifestPath,
+                "--stage", stagePath,
+                "--unit", "unit.fixture",
+                "--profile", "outer-execveat",
+                "--function-id", "symtab:23",
+                "--pass", "control-flow-flattening",
+                "--json", "-",
+            },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Success, exitCode);
+        Assert.Empty(stderr.ToString());
+        Assert.True(File.Exists(artifactPath));
+        Assert.True(File.Exists(rolePath));
+        Assert.True(File.Exists(manifestPath));
+        Assert.True(File.Exists(stagePath));
+        using var report = JsonDocument.Parse(stdout.ToString());
+        Assert.True(report.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("protected-image", report.RootElement.GetProperty("role").GetProperty("artifactRole").GetString());
+        Assert.Equal("passed", report.RootElement.GetProperty("stage").GetProperty("status").GetString());
+        var stage = report.RootElement.GetProperty("stage");
+        Assert.True(stage.GetProperty("analysisDurationMilliseconds").GetInt64() >= 0);
+        Assert.True(stage.GetProperty("emissionDurationMilliseconds").GetInt64() >= 0);
+        Assert.Contains("stage.json", File.ReadAllText(manifestPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "ProtectedImageCli")]
+    public void ProtectImageRetainsFailureStageWithoutPublishingPartialEvidence()
+    {
+        using var directory = new TemporaryDirectory();
+        var inputPath = directory.Path("input.elf");
+        var artifactPath = directory.Path("protected-image.bin");
+        var rolePath = directory.Path("protected-image.json");
+        var manifestPath = directory.Path("SHA256SUMS");
+        var stagePath = directory.Path("stage.json");
+        File.WriteAllBytes(inputPath, File.ReadAllBytes(VersionedFixturePath));
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[]
+            {
+                "protect-image", inputPath,
+                "--artifact", artifactPath,
+                "--role", rolePath,
+                "--manifest", manifestPath,
+                "--stage", stagePath,
+                "--unit", "unit.fixture",
+                "--profile", "outer-execveat",
+                "--source-sha256", new string('f', 64),
+                "--function-id", "symtab:23",
+                "--pass", "control-flow-flattening",
+            },
+            stdout,
+            stderr);
+
+        Assert.Equal((int)ProductExitCode.Validation, exitCode);
+        Assert.True(File.Exists(stagePath));
+        Assert.False(File.Exists(artifactPath));
+        Assert.False(File.Exists(rolePath));
+        Assert.False(File.Exists(manifestPath));
+        using var stage = JsonDocument.Parse(File.ReadAllText(stagePath));
+        Assert.Equal("failed", stage.RootElement.GetProperty("status").GetString());
+        Assert.Contains("ProtectedImageSourceMismatch", File.ReadAllText(stagePath), StringComparison.Ordinal);
     }
 
     [Fact]

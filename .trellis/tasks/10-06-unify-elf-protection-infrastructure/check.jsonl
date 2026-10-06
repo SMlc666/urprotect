@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Bounded binary reads, program-header authority, atomic publication, parser/fuzz requirements, and three-runtime evidence rules govern the rewrite."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"HostContext, TLS, relocation, loader, runtime-matrix, and evidence boundaries must remain synchronized with the new claims."}
+{"file":"COMPATIBILITY.md","reason":"Existing conditional compatibility claims and evidence-layer distinctions constrain the new three-runtime semantic support rows."}
+{"file":"tests/ContractInventory.md","reason":"Review must verify that ABI and cross-layer contract ownership remains single-source."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/current-protection-pipeline.md","reason":"Review baseline for detecting duplicate production writers and incomplete migration."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/runtime-and-evidence-baseline.md","reason":"Review baseline for separate glibc, musl, and bionic evidence and no-fallback claims."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/semantic-boundaries.md","reason":"Review checklist for layout, relocation, indirect control-flow, TLS, and CFI coverage."}

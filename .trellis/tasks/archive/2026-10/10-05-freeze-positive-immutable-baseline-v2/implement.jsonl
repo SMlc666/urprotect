@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Frozen six-stage evaluator, closed evidence, native runtime, loader/oracle and rollback contract."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Content-addressed publication, bounded checker inputs, deterministic JSON and failure retention."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Parent baseline, exact growth rule, Scheme-A independence and rollback."}
+{"file":".trellis/tasks/archive/2026-10/10-05-analyze-strict-chain-evaluator/research/strict-chain-evaluator-analysis.md","reason":"Observed hashes, blockers, complete six-stage unit and positive-baseline gate requirements."}
+{"file":".trellis/tasks/archive/2026-10/10-05-analyze-strict-chain-evaluator/research/follow-on-positive-baseline-v2-child.md","reason":"Reviewed draft child artifacts, local gate algorithm, payload/reference and rollback shape."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-baseline-zero.json","reason":"Historical immutable baseline that must remain unchanged."}
+{"file":"fixtures/evaluator/baseline-reference.json","reason":"Historical baseline reference and content-addressing contract."}

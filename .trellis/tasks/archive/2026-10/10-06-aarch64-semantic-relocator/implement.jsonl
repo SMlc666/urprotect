@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Semantic decoding and fixups must use bounded arithmetic, typed address domains, stable diagnostics, and focused malformed tests."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Relocation and runtime evidence must remain layer-specific and separate across glibc, musl, and bionic."}
+{"file":"COMPATIBILITY.md","reason":"Semantic promotion requires parser/model, materialization, loader, and runtime evidence boundaries."}
+{"file":"tests/ContractInventory.md","reason":"The semantic fixup and artifact ABI owners must be recorded without duplicated wire literals."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/current-protection-pipeline.md","reason":"Migration baseline for replacing raw-copy/Branch26 assumptions."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/semantic-boundaries.md","reason":"Shared semantic domains and sibling-child extension boundaries."}

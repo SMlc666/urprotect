@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Quality gate for bounded reads, stable diagnostics, focused malformed tests, fuzz retention, and CI evidence."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Review contract for native AArch64 execution, profile-specific handoff, evidence layers, and no silent compatibility promotion."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Review ownership and cross-layer placement for managed, native, scripts, fixtures, tests, and reports."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review all format transitions and validation ownership across protector, Protected Image, rehydrator, loader, and evaluator."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/baseline-evaluator-protocol.md","reason":"Review measured facts versus proposed rules and verify the gate does not promote missing Protected Image or Scheme-A evidence."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/compatibility-protocol.md","reason":"Review corpus immutability, six-stage completeness, fixed/growth views, baseline-zero handling, and exact 100x count gate."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/scheme-a-protocol.md","reason":"Review independent per-family 100x factors, raw attack evidence, objective predicates, environment statuses, and anti-gaming invariants."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/research/ci-evidence-contract.md","reason":"Review CI artifact closure, failure retention, evaluator isolation, benchmark/fuzz preservation, and analysis-agent handoff."}

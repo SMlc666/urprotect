@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Frozen evaluator stage bindings, strict chain, source/runtime/oracle identity, closed evidence and CI contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Read-only evaluator, anti-gaming, bounded evidence and schema validation requirements."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Parent compatibility calculation, baseline-zero semantics, and six-stage gate."}
+{"file":".trellis/tasks/archive/2026-10/10-05-generic-rehydration-native-handoff-v1/design.md","reason":"Producer/rehydration/native evidence records and hash continuity to consume."}
+{"file":"fixtures/evaluator/compatibility-corpus.json","reason":"Frozen row identity and source-provenance semantics must remain unchanged."}
+{"file":"fixtures/evaluator/evaluator-protocol.json","reason":"Frozen six-stage, zero-baseline and claimability rules."}

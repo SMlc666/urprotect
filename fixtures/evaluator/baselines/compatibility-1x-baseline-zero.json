@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "kind": "compatibility-1x-baseline",
+  "baselineVersion": "compatibility-1x-v1",
+  "commit": "86270e71362572d32544c9fa979553e2f3c4cb7c",
+  "prdSha256": "4e88cafe02ffd2703c3dae33d151c1624016898ec4e2cc301b5c2f69b500f469",
+  "corpusManifestSha256": "8f48bed4fe66a2fde8ad968972fec2654890956d777a54d6394687d5e503efa4",
+  "fixtureManifestSha256": "c354380e84234e6dd94a9d848956010a2d92ad4014dcec24bf5e466eb9a3ddab",
+  "runtimeRegistrySha256": "8d778d22926ba5e2791f46821623700e0baccad3fce26201e10ba6cf0ea0dac5",
+  "protocolSha256": "b3aa29a728cb4e98d4704ab7fa9cd7bf6e4afefaa6e646fde92a211557e8c6bd",
+  "schemeManifestSha256": "bece932bd38e8c3e1def844023e19306acd37583862f17c6e3943c4ecf57eacc",
+  "oracleManifestSha256": "91e8a867157808f839edbabaf6c766c00d86e10f10729130debab0ce640175a4",
+  "toolchainManifestSha256": "613d8088b6ee7dc9df930863d12b2434ce927363431d863b1bef09a726f8833d",
+  "environment": {
+    "status": "environment-unavailable",
+    "runnerArchitecture": "aarch64",
+    "runtimeCell": "glibc.current.native-arm64",
+    "nativeResultsCaptured": false,
+    "reason": "The local checkout lacks the pinned .NET SDK and the native CI runtime cell is not available; no native product result is promoted into this baseline."
+  },
+  "fixedCorpusRows": 1,
+  "completeUnits": 0,
+  "baselineStatus": "baseline-zero",
+  "strengthStatus": "baseline-not-calibrated",
+  "rawEvidenceStatus": "not-captured",
+  "rawEvidenceSha256": null,
+  "strictChainBlockers": [
+    "protected-image-stage-not-declared",
+    "rehydration-stage-not-declared",
+    "native-target-loader-oracle-not-captured"
+  ],
+  "schemeABlockers": [
+    "no-pinned-attack-toolset",
+    "no-three-finite-reproducible-baseline-successes"
+  ],
+  "immutable": true,
+  "generatedBy": "scripts/run-independent-evaluator.py",
+  "immutableArtifactId": "compatibility-1x-baseline-zero",
+  "completeUnitIds": []
+}

@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify strict six-stage binding, loader boundary, no fallback, and retained evidence."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify bounded arithmetic, structural validation, tests, fuzz, and CI artifact closure."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify stable diagnostics and failed-stage/no-publication behavior."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Review parent local gate and evaluator integration without changing thresholds."}
+{"file":".trellis/tasks/archive/2026-10/10-05-protected-image-emission-v1/prd.md","reason":"Verify producer ABI remains explicit and producer-only evidence is not relabeled."}

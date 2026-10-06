@@ -732,6 +732,191 @@ resolve exact user selectors from .symtab/.dynsym
 -> publish only after all selected functions and runtime checks pass
 ```
 
+## Scenario: canonical AArch64 semantic-plan handoff
+
+### 1. Scope / Trigger
+
+This contract applies when the AArch64 protection path needs to hand semantic
+instruction, address-map, relocation, target-resolution, or post-encode
+validation data from the project-owned decoder/rewrite layer to an ELF layout,
+Protected Image, or workflow consumer. It is a planning/handoff contract, not
+a physical ELF writer and not a replacement for the versioned Protected Image
+artifact codec.
+
+The semantic layer must remain independent of final file placement. A later
+layout consumer supplies output addresses, veneers, and runtime bindings; it
+must not reconstruct semantic meaning by re-reading raw bytes or by importing
+AsmStone model types.
+
+### 2. Signatures
+
+```text
+Aarch64SemanticInstructionProjector.Project(
+    Aarch64FunctionInstruction instruction,
+    IEnumerable<RelaRelocation>? relocations = null)
+    -> SemanticInstructionProjectionResult
+
+Aarch64SemanticPlanFactory.Create(
+    Aarch64FunctionAnalysis analysis,
+    LoadMap? loadMap = null,
+    IEnumerable<RelaRelocation>? relocations = null,
+    AddressMap? placement = null,
+    IEnumerable<ISemanticPlanExtension>? extensions = null)
+    -> SemanticRewritePlanResult
+
+SemanticPlanSnapshotProjector.Project(
+    SemanticRewritePlan plan)
+    -> SemanticPlanSnapshotResult
+
+SemanticPlanSnapshotCodec.Decode(
+    ReadOnlyMemory<byte> canonicalBytes)
+    -> SemanticPlanSnapshotResult
+
+Aarch64SemanticPlanValidator.Validate(
+    SemanticRewritePlan plan,
+    SemanticPlanResolutionResult resolutions,
+    IAarch64Decoder decoder)
+    -> SemanticPlanValidationResult
+```
+
+The canonical handoff representation is version `1`, architecture `EM_AARCH64`
+(`183`), magic `URP-SPS1`, and includes a trailing SHA-256 digest. Its digest
+is computed over the canonical bytes owned by `SemanticPlanSnapshotCodec`.
+Protected Image producers may bind this digest; they must not duplicate the
+semantic serializer.
+
+### 3. Contracts
+
+- `SemanticInstruction` is project-owned and retains typed source
+  `FileOffset`/`VirtualAddress` ranges, raw encoding, project-owned operands,
+  register/flag effects, control-flow classification, PC-relative expression,
+  literal reference, relocation bindings, and sibling extension records.
+- `SemanticTarget` has exactly one explicit resolution mode: `Exact`,
+  `BoundedSet`, `RuntimeResolved`, or `Unresolved`. A bounded set is never
+  reduced to one target merely because one address currently maps; selection
+  belongs to layout or runtime resolution.
+- `AddressMap` is immutable after construction. It maps typed source/output
+  ranges for functions, basic blocks, instructions, literals, veneers, tables,
+  relocation targets, and relocation sites. Same-kind duplicate or overlapping
+  source/output ranges fail closed; nested ranges resolve to the smallest unique
+  typed entity where the API permits it.
+- `Aarch64SemanticInstructionProjector` is the only decoder-to-IR projection
+  owner. It supports the declared `B`, `BL`, conditional/test branch,
+  `ADR`/`ADRP`, literal-load, and matching relocation families. `BLR`,
+  authenticated indirect calls, and other opaque targets remain explicit
+  indirect/runtime/unresolved states; the projector never guesses a destination.
+- `RelocationBinding` preserves relocation kind, raw relocation type, raw
+  `r_info`, addend, symbol index/name, PLT identity, relocation virtual
+  address, and relocation-table address. A nonzero symbol index remains an
+  external binding even when stale instruction bits contain a plausible target.
+- `SemanticFixup` contains a symbolic target and optional PC-relative or
+  relocation expression. The encoder may return `Resolved`, `Deferred`, or
+  `Unresolved`; veneer/long-address, bounded-target, and runtime-target cases
+  are deferred until their owning resolver supplies the missing decision.
+- `SemanticPlanSnapshotCodec` deterministically orders nested entities,
+  instructions, fixups, extensions, diagnostics, operands, references, target
+  candidates, relocation metadata, and relaxation options. It applies bounded
+  limits before allocation and validates strict UTF-8, enum values, identities,
+  ranges, and digest before accepting decoded records.
+- Current snapshot limits are: canonical bytes `16 MiB`, metadata `2 MiB`,
+  strings `4096` UTF-8 bytes, address-map entries/instructions/fixups `131072`
+  each, extensions `32768`, diagnostics `16384`, target candidates `4096`,
+  operands per instruction `64`, register effects `256`, references `256`,
+  relocations per instruction `64`, relaxation options `8`, jump-table targets
+  `65536`, and CFI register effects `256`.
+- The post-encode validator decodes each final instruction at its planned output
+  address and checks instruction family, resolved output target, expression
+  place, and low-12 relocation round trips. Relocation-only records are not
+  passed to the instruction decoder and are validated by typed width/alignment/
+  value-domain rules.
+- Snapshot extensions are typed and reserved for sibling domains:
+  indirect targets, TLS bindings, jump tables, and CFI effects. An extension
+  must have a unique identity and bounded payload; unknown extension kinds are
+  rejected rather than guessed.
+- A semantic plan with an error diagnostic, unresolved required fixup, invalid
+  source/output map, duplicate identity, malformed extension, or failed
+  post-encode validation cannot proceed to physical layout or publication.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Invalid/empty entity identity or duplicate candidate | `SemanticPlanMalformed`/`SemanticTargetUnresolved`; no handoff |
+| Duplicate or overlapping same-kind address-map range | `SemanticAddressMapDuplicate`; no handoff |
+| Source/output range overflow or typed-domain mismatch | `SemanticAddressMapOverflow`/`SemanticAddressMapMalformed`; no handoff |
+| Decoder backend failure or malformed source range | stable semantic instruction diagnostic; no fixup emission |
+| Unsupported PC-relative family without opaque-preservation contract | `SemanticFixupUnsupported`; no final encoding |
+| Bounded, runtime-resolved, veneer, or long-address target | `SemanticFixupDeferred`; layout/runtime resolver must continue |
+| Unresolved target or missing target binding | `SemanticTargetUnresolved`; no publication |
+| Relocation raw metadata, width, alignment, or value mismatch | `SemanticFixupMalformed`/`SemanticFixupOutOfRange`; no ELF write |
+| Snapshot exceeds any count/byte/string limit | `SemanticPlanSnapshotLimitExceeded`; no decode/handoff |
+| Snapshot magic/version/architecture/enum/UTF-8 invalid | `SemanticPlanSnapshotMalformed` or `SemanticPlanSnapshotUnsupported` |
+| Snapshot trailing digest mismatch | `SemanticPlanSnapshotIntegrityMismatch`; no semantic records accepted |
+| Final instruction re-decode or target mismatch | `SemanticFixupValidationFailed`; no publication |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a projected function has deterministic typed ranges, exact internal
+  targets, preserved relocation metadata, a canonical snapshot digest, and a
+  layout consumer can resolve every required fixup before final validation.
+- Base: a plan contains a bounded jump-table target set, runtime PLT binding, or
+  veneer-required branch; the snapshot preserves the state as deferred with
+  its extension identity and does not claim a final encoding.
+- Bad: copy a raw instruction to a new address, infer a target from stale
+  immediate bits despite a symbolic relocation, collapse an ambiguous target
+  set, accept a malformed snapshot after digest failure, or let a layout
+  consumer import AsmStone types and recreate classification independently.
+
+### 6. Tests Required
+
+- Projector tests assert typed source ranges, operand/register/flag projection,
+  direct-call versus indirect-call classification, PC-relative family mapping,
+  literal references, and relocation raw-field preservation.
+- Address-map tests assert exact/smallest-range resolution, duplicate/overlap
+  rejection, source/output overflow, typed identity validation, and defensive
+  collection copies.
+- Encoder/validator tests assert direct instruction round trips, stale-target
+  rejection, deferred bounded/runtime/veneer states, relocation-only validation,
+  low-12 alignment, and unsupported-family diagnostics.
+- Snapshot tests assert deterministic bytes for differently ordered equivalent
+  inputs, canonical digest verification, mutation rejection, strict bounds,
+  extension identity, unresolved/deferred classification, nested relocation
+  ordering, and defensive copies.
+- Integration tests assert `Aarch64SemanticPlanFactory` rejects incomplete
+  analysis, validates `LoadMap` agreement, maps functions/blocks/instructions/
+  relocation sites, and passes one canonical plan to the future layout consumer.
+- The current managed quality gate remains `dotnet build UrProtect.sln
+  --configuration Release --no-restore` plus the full Core test project,
+  fixture validation, regression matrix, and `git diff --check`. Runtime
+  feature promotion additionally requires separate glibc, musl, and bionic
+  evidence owned by the parent workflow.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+copy raw instruction bytes to the new address
+-> infer a branch target from the copied immediate
+-> serialize a second ad-hoc JSON/ABI record
+-> let the loader/layout writer guess unresolved targets
+```
+
+#### Correct
+
+```text
+AsmStone -> project-owned semantic instruction
+       -> typed AddressMap + symbolic SemanticFixup
+       -> canonical SemanticPlanSnapshotCodec digest
+       -> layout/runtime resolver handles deferred states
+       -> post-encode decoder/target validation
+       -> Protected Image/workflow binds the snapshot digest
+```
+
+The semantic layer owns meaning and canonical handoff bytes; the layout layer
+owns physical placement; the runtime/evidence layer owns loader-specific
+behavior. No layer silently reimplements another layer's contract.
+
 
 ## Scenario: Hermetic full-corpus runtime evidence and bionic Node.js witness
 
@@ -893,4 +1078,367 @@ attempt the required tier oracle
 -> bind result, closure, fingerprint, and aggregate evidence
 -> sanitize and prove worker/container/image cleanup
 -> publish accepted-and-runs only after the target actually ran
+```
+
+
+## Scenario: Independent compatibility and Scheme-A evaluator
+
+### 1. Scope / Trigger
+
+This contract applies when CI measures the parent 100x goal. The evaluator is a read-only control plane under `scripts/`, `fixtures/evaluator/`, `tests/`, and `.artifacts/evaluator/<tier>/`; it binds product evidence but does not implement a Protected Image, rehydrator, loader, protection pass, or attack tool. Existing fixture, real-sample, runtime, benchmark, test, and fuzz jobs remain separate required evidence.
+
+### 2. Signatures
+
+```sh
+python3 scripts/validate-evaluator-manifests.py
+./scripts/run-independent-evaluator.sh --tier pr|nightly|release
+python3 scripts/check-independent-evaluator.py .artifacts/evaluator/<tier>
+python3 scripts/check-independent-evaluator.py .artifacts/evaluator/<tier> \
+  --require-claimable-if-baseline-positive
+```
+
+The runner writes only `.artifacts/evaluator/<tier>/`. The checker accepts only an artifact root below `.artifacts/evaluator/` and verifies `gate.json`, `analysis-input.json`, closed `SHA256SUMS`, per-unit records, and six-family Scheme-A attempts.
+
+### 3. Contracts
+
+The strict compatibility chain is:
+
+```text
+Protector -> Protected Image -> rehydration -> Native Image
+          -> target native loader -> behavioral oracle
+```
+
+A complete unit requires all six stages to pass for the same registered `unitId`, source digest, profile, runtime cell, target loader, oracle, and run. `fixed view` contains immutable baseline rows; `growth view` is append-only and rejects duplicate identity keys. The exact growth condition is `candidateGrowthCompleteUnits >= 100 * baselineCompleteUnits`; a zero baseline produces `baseline-zero` with a null factor and never becomes claimable.
+
+The Scheme-A vector is the conjunction of six required families: `runtime_dump_reassembly`, `patch_repack`, `function_logic_recovery`, `static_decomposition`, `dynamic_instrumentation`, and `integrity_handoff`. Each family has three baseline and three candidate replicas, equal frozen budgets/tools/recipes, zero manual steps, and independent `factorLowerBound >= 100`. Missing attack tools or finite baseline successes are `baseline-not-calibrated`/`environment-unavailable`, never a pass.
+
+The evaluator evidence tree contains `environment.json`, copied protocol/corpus/oracle/scheme/baseline manifests, compatibility unit records, raw `SHA256SUMS`, Scheme-A attempts, `scheme-a-gate.json`, `gate.json`, `analysis-input.json`, and a closed top-level `SHA256SUMS`. `gate.json` is normative; `analysis-input.json` is the analysis-agent handoff. Baselines are content-addressed, immutable, and never overwritten. Stage records require stage-specific hashes and metadata; a generic shared hash cannot satisfy a passed stage.
+
+### Additive Scheme-A v2 calibration and restricted-runner fallback
+
+#### 1. Scope / Trigger
+
+This contract applies when CI explicitly selects `fixtures/evaluator/scheme-a-manifest-v2.json`. The historical `scheme-a-manifest.json` remains the default and remains `baseline-not-calibrated`; the additive selection must not mutate the v1 manifest or the compatibility baseline references.
+
+#### 2. Signatures
+
+```sh
+python3 scripts/validate-evaluator-manifests.py \
+  --scheme-a fixtures/evaluator/scheme-a-manifest-v2.json \
+  --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+./scripts/run-independent-evaluator.sh --tier pr \
+  --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
+  --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+python3 scripts/check-scheme-a-baseline-v2.py
+```
+
+#### 3. Contracts
+
+- v2 binds `scheme-a-baseline-v2` through a separate immutable reference/artifact pair. The reference records the selected manifest digest, six family IDs in frozen order, three finite baseline replicas per family, and never-overwrite/content-addressed markers.
+- `scheme-a-gate.json` binds the Scheme-A baseline ID/digest, not the compatibility baseline ID. Candidate factors use the frozen maximum baseline replica cost from the Scheme-A baseline artifact; they never use a newly measured candidate-run baseline as the denominator.
+- Each family wrapper validates the retained Protected Image, Native Image, target-loader, behavioral-oracle, and integrity negative-witness records before emitting a scorer result. It records its recipe/tool identity, CPU cost, recovered artifact, blue-oracle binding, resource record, command log, and raw checksum manifest.
+- A process-limited evaluator may run the same checked-in wrapper in-process only after a child start returns `EAGAIN`; arguments, wrapper identity, output, and bounded budget remain unchanged. Missing evidence, tool drift, malformed output, or other startup failures remain `environment-unavailable`.
+- `EVALUATOR_TOOL_<NAME>_PATH/VERSION` is captured before seccomp/staged fallback and used only as an exact executable/version handoff; it cannot create a missing capability or override digest validation.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| v2 Scheme-A reference/artifact digest, family order, or parent v1 digest mismatch | manifest/evidence gate fails closed |
+| Missing baseline family or fewer than three finite replicas | `baseline-not-calibrated`; no factor |
+| Candidate family below 100x or mixed replica result | Scheme-A not pass; overall claim remains false |
+| Missing strict product/blue oracle/negative integrity witness | scorer fails closed; no attack success |
+| `EAGAIN` child start under the frozen process limit | exact checked-in wrapper runs in-process; evidence remains bounded and hash-bound |
+| Any other wrapper start failure | `environment-unavailable`; no fabricated ratio |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: explicit v2 selection validates the immutable six-family baseline, runs three baseline and candidate replicas, recomputes all factors from raw records, and exposes `schemeA.status=pass` only when every family is at least 100x.
+- Base: default v1 selection retains `baseline-not-calibrated` and does not require v2 baseline files.
+- Bad: using compatibility baseline-v2 as the Scheme-A denominator, assigning nominal cost without a measured scorer record, or turning an unavailable child process into an attack pass.
+
+#### 6. Tests Required
+
+- Validate both default v1 and explicit v2 manifest paths; assert copied Scheme-A reference/artifact closure and distinct baseline IDs.
+- Run all six family wrappers with missing product/blue evidence and tool drift; assert fail-closed results.
+- Run the evaluator under a deliberately low `RLIMIT_NPROC`; assert the in-process wrapper fallback still emits six complete replica sets and factors from the frozen baseline.
+- Run the full Python suite, manifest/evidence checkers, native CI evaluator, strict compatibility growth gate, and all pre-existing product/runtime/sample/fuzz/benchmark jobs.
+
+#### 7. Wrong vs Correct
+
+**Wrong:** calculate a 100x factor from the current evaluator's own baseline replicas, or mark all six families successful after a subprocess `EAGAIN`.
+
+**Correct:** validate the immutable Scheme-A v2 reference first, use its frozen per-family maximum costs, then score each checked-in recipe against the retained blue oracle and preserve explicit unavailable evidence on any other failure.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Missing Protected Image or rehydration product stage | compatibility `baseline-zero`/`not-ready`; no strict unit |
+| Zero compatibility baseline | null factor; claim gate remains non-claimable |
+| Missing required corpus row, duplicate identity, changed frozen metadata | protocol failure |
+| Non-passed stage or missing stage-specific binding | unit incomplete with first-failure layer |
+| Missing attack tool or fewer than three finite baseline successes | Scheme-A `baseline-not-calibrated` |
+| Mixed candidate replica outcomes | `unknown`; no favorable averaging |
+| Missing raw evidence, unsafe path, symlink, checksum mismatch, duplicate JSON key, or self-referential manifest | evidence gate fails closed |
+| Required prior CI evidence job fails | evaluator preserves the result and CI fails the required evidence gate |
+| Positive strict baseline exists but compatibility or any Scheme-A family is below 100x | claim gate fails |
+
+### 5. Good / Base / Bad Cases
+
+- Good: native CI retains every evaluator row, rejects forged stage/gate fields by recomputation, and reports a positive claim only when compatibility and all six Scheme-A families independently pass.
+- Base: the current checkout produces `baseline-zero`, `baseline-not-calibrated`, complete raw unavailable evidence, and `claimable=false` without inventing native or attack results.
+- Bad: relabeling a compressed complete ELF as Protected Image, removing an inconvenient sample, weakening an oracle, treating missing tools as attack failure/pass, or accepting a hard-coded `claimable` marker.
+
+### 6. Tests Required
+
+- Manifest tests mutate duplicate keys, non-finite values, digests, frozen rows, unsafe paths, tool availability, budgets, and ABI/oracle fields and require rejection.
+- Compatibility tests assert six-stage completeness, stage-specific bindings, fixed/growth counting, baseline identity preservation, first-failure classification, and zero-denominator handling.
+- Scheme-A tests assert three replicas, equal budgets/tool/recipe identity, finite baseline requirements, censored lower bounds, mixed-result rejection, and per-family conjunction.
+- Evidence tests assert closed checksum coverage, raw-manifest ownership, symlink/root rejection, recomputed anti-gaming fields, read-only checkout behavior, and deferred claimability before a positive baseline.
+- CI tests parse the workflow and assert additive evaluator dependencies, existing evidence-job preservation, always-upload behavior, and conditional positive-baseline claim enforcement.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+if wrapper_decodes_to_elf:
+    count_compatibility_unit()
+if attack_tool_missing:
+    mark_attack_failed_and_continue()
+if gate.claimable:
+    trust_gate()
+```
+
+#### Correct
+
+```text
+validate frozen manifests and baseline digests
+-> require Protected Image + rehydration + Native Image + loader + oracle
+-> recompute stage/growth evidence from immutable records
+-> require every Scheme-A family and replica policy
+-> retain environment-unavailable/not-ready evidence
+-> derive claimable only from both independent gates
+```
+
+## Scenario: Protected Image v1 producer evidence
+
+### 1. Scope / Trigger
+
+This contract applies to the explicit `protect-image` command and its additive CI producer evidence. It is a producer-stage contract only: it does not claim that the artifact has been rehydrated, materialized as a Native Image, handed to a loader, or behaviorally executed.
+
+### 2. Signatures
+
+```text
+urprotect protect-image INPUT --artifact PATH --role PATH --manifest PATH --stage PATH
+  --unit ID --profile outer-execveat|host-context-entry
+  (--function NAME | --function-id symtab:INDEX|dynsym:INDEX
+                    | --function-address 0xADDRESS)+
+  (--pass control-flow-flattening | --pass register-permutation)+
+  [--producer-id ID] [--producer-build-sha256 SHA256]
+  [--rehydrator ID] [--source-sha256 SHA256] [--request-sha256 SHA256]
+  [--json PATH|-]
+```
+
+The producer emits `protected-image.bin`, `protected-image.json`, `stage.json`, and a closed `SHA256SUMS` file. The stage record is schema v1 with `status`, command/environment/producer/source/request/artifact bindings, bounded diagnostics, transformation identity, and `publicationComplete`.
+
+### 3. Contracts
+
+- The command snapshots explicit selectors and passes, uses the managed `ProtectedImageProducer`, and publishes through `ProtectedImagePublisher`; the legacy `protect` command and `ProductReport` schema remain unchanged.
+- A passed stage binds `artifactRole=protected-image`, `abiId=urprotect.protected-image.v1`, `abiVersion=1`, the role artifact digest/size, the declared rehydrator consumer, and a raw manifest path. A failed stage retains diagnostics and streams but publishes neither artifact nor role.
+- The producer artifact is a bounded canonical Protected Image document. It is not a complete source/final ELF and is not counted as a strict compatibility unit until the rehydrator, Native Image, loader, and behavior stages are present.
+- CI runs the producer script after build and uploads `.artifacts/protected-image/` with `if: always()`. The script retains failure evidence and the checker recomputes closed manifest hashes; it never relabels a producer pass as compatibility success.
+- `commandDigest` and `environmentDigest` are evidence provenance, not authorization or compatibility factors. Their inputs are bounded and stable for the invoking process.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Missing/duplicate output path or explicit selector/pass | usage/`InvalidArgument`; no partial publication |
+| Source/request/role/ABI mismatch | stable Protected Image diagnostic; failed stage; no artifact/role |
+| Truncated, oversized, duplicate, overlapping, unknown, or non-canonical ABI record | codec validation failure before publication |
+| Output move, hash, or manifest failure | `OutputIoFailure`; rollback of moved producer outputs; retained failed stage |
+| Closed manifest missing a retained stream/stage/role/artifact | producer evidence checker fails |
+| Passed producer stage without rehydrator/native/loader/behavior evidence | remains additive producer evidence; strict evaluator unit remains incomplete |
+
+### 5. Good / Base / Bad Cases
+
+- Good: one explicit fixture request emits deterministic role/artifact/stage/checksum records, and repeating the same request produces identical artifact bytes.
+- Base: compiler or producer prerequisites are unavailable; the script retains a failed stage, stdout/stderr, and closed checksum manifest without claiming support.
+- Bad: treating a direct protected ELF, complete source ELF, or generic PayloadFrame as a Protected Image; accepting a passed stage from a forged role or open manifest; or counting producer emission as end-to-end compatibility.
+
+### 6. Tests Required
+
+- Managed tests cover codec round trips, malformed/overflow/duplicate/overlap/alias cases, role/stage binding, the shared PT_NULL/RX-extension/relocated-table layout planner, and atomic rollback.
+- CLI tests cover selector/pass parsing, output path conflicts, success publication, failed source binding, focused JSON reporting, and legacy command compatibility.
+- The producer script/checker tests cover success/failure retention, closed SHA256SUMS, path traversal, digest continuity, and no partial artifact on failure.
+- The CI workflow contract asserts additive execution after build, `if: always()` evidence checking/upload, and no change to strict evaluator claim semantics.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+protect-image = rename(finalElfBytes)
+producerPassed = true
+compatibilityUnitComplete = true
+```
+
+#### Correct
+
+```text
+explicit request -> layout-neutral plan -> canonical Protected Image
+-> role/stage/checksum publication -> later bounded rehydration
+-> Native Image -> native loader -> behavior oracle
+```
+
+## Scenario: Generic rehydration, Native Image, and strict native handoff
+
+### 1. Scope / Trigger
+
+This contract applies when a Protected Image producer result is consumed by the first strict compatibility vertical slice. It covers the managed `rehydrate-image` boundary, deterministic Native Image materialization, the native memfd/`execveat(AT_EMPTY_PATH)` helper, and the retained stage evidence. It does not turn the rehydrator into a dynamic loader.
+
+### 2. Signatures
+
+```text
+urprotect rehydrate-image SOURCE --artifact PROTECTED_IMAGE
+  --native-image NATIVE_IMAGE --role NATIVE_ROLE --record REHYDRATION_RECORD
+  --unit ID --profile outer-execveat|host-context-entry
+  --source-sha256 SHA256 --request-sha256 SHA256
+  --producer-id ID --producer-build-sha256 SHA256
+  --consumer-id ID --consumer-build-sha256 SHA256 [--json PATH|-]
+
+native-image-handoff IMAGE EXPECTED_SHA256 REHYDRATION_SHA256 EVIDENCE_JSON
+  STDOUT_FILE STDERR_FILE OUTPUT_LIMIT -- ARG0 [ARG ...]
+```
+
+The managed result owns `NativeImage` bytes and `RehydrationRecord`. The native helper owns only sealed memfd creation, bounded streams/resource facts, and `execveat` invocation. The record fields `handoffRecordSha256`, `handoffStatus`, and `preHandoffRecordSha256` bind the completed handoff without creating a mutable hash cycle.
+
+### 3. Contracts
+
+- Rehydration authenticates the Protected Image canonical digest and verifies source/request/unit/profile/producer/consumer bindings before materialization. Unknown operations, invalid executable mappings, overflow, unsupported permission/layout transitions, and incomplete operation streams fail closed.
+- A passed Native Image is deterministic, reparses as AArch64 ELF, has a distinct hash from Source and Protected Image, and is atomically published with a native-image role and rehydration record. A failed stage retains diagnostics but no successful Native Image or role.
+- Rehydration delegates physical placement to one bounded ELF layout planner/materializer. It deterministically considers a compatible terminal RX `PT_LOAD` extension, an ordinary available `PT_NULL` record, and a relocated/expanded program-header table, then applies typed AArch64 branch decisions and edits before reparsing. A missing slot is not a prerequisite; an occupied table uses the relocated-table candidate or returns `RehydrationLayoutUnavailable` without a direct-protector fallback. The materializer retains the selected strategy and bounded address map in layout evidence.
+- Strict handoff requires `memfd_create`, executable mode, `fsync`, required seals where supported, `execveat(AT_EMPTY_PATH)`, bounded host-captured stdout/stderr, and separate helper/target status. A path-based execution is never a strict pass.
+- The evidence checker requires a closed `SHA256SUMS`, stage-specific source/protected/native/handoff/rehydration hashes, target-loader and behavioral-oracle records, and matching first-failure stage. Producer success alone remains incomplete compatibility evidence.
+- Native loader semantics remain outside the rehydrator: dependencies, dynamic symbols, relocations, TLS, constructors, destructors, and process lifecycle are handled only by the target loader.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Source/protected/consumer/request mismatch | stable binding diagnostic; no Native Image publication |
+| Tampered/truncated/unknown/overlapping operation or address overflow | bounded decode/materialization failure; failed rehydration record |
+| No valid executable mapping or representable output layout | `RehydrationLayoutUnavailable`; no direct protected-ELF fallback |
+| Native Image parse/hash/role mismatch | `NativeImageMalformed`/`OutputIdentityMismatch`; rollback all Native Image outputs |
+| memfd/seal/fsync/execveat/stream capture failure | failed handoff evidence; target-loader and oracle do not pass |
+| Handoff target status/streams differ from frozen oracle | behavioral-oracle failure; strict unit remains incomplete |
+| Missing/unsafe/stale evidence or open checksum manifest | rehydration evidence checker fails closed |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a source plus producer artifact produces distinct Native Image bytes, the sealed memfd handoff runs the target, and retained baseline/target status and streams match.
+- Base: a producer artifact is valid but native prerequisites or layout capability are absent; the run retains an explicit rehydration/handoff failure and the evaluator keeps the unit incomplete.
+- Bad: executing Source or direct protected ELF after rehydration failure, treating a Native Image hash as proof of loader behavior, or accepting helper exit success without sealed memfd/`execveat` evidence.
+
+### 6. Tests Required
+
+- Managed tests cover valid materialization, source/request/consumer mismatch, tamper/overflow/unsupported operation, occupied-table relocation, RX extension, PT_NULL parity, branch-range diagnostics/relaxation, deterministic Native Image hash, atomic publication, and record binding.
+- Native helper tests cover digest mismatch before memfd, seal verification, bounded output, target status/signal, and exact `execveat` markers.
+- Runner/checker tests cover closed-manifest ownership, source/protected/native/handoff hash continuity, pre-handoff record binding, failed-stage retention, target-loader/oracle continuity, and first-failure classification.
+- CI workflow tests assert additive execution/checking after build, always-retained evidence, and no change to evaluator claimability or frozen corpus policy.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+if rehydrate_failed:
+    execve(source_or_legacy_protected_elf_path)
+if handoff_exited_zero:
+    claim_loader_behavior()
+```
+
+#### Correct
+
+```text
+authenticate Protected Image -> materialize -> parse/hash Native Image
+-> sealed memfd + execveat -> target-loader record
+-> baseline/target behavior oracle -> complete strict unit only then
+```
+
+## Scenario: Content-addressed positive compatibility baseline-v2 and explicit evaluator selection
+
+### 1. Scope / Trigger
+
+This contract applies when a strictly measured positive compatibility denominator is frozen after the independent evaluator has produced a complete six-stage unit. It keeps historical `compatibility-1x-baseline-zero` immutable and makes baseline selection explicit; it does not upgrade Scheme-A or the overall claim.
+
+### 2. Signatures
+
+```sh
+./scripts/run-independent-evaluator.sh --tier pr|nightly|release \
+  [--baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json]
+python3 scripts/check-positive-immutable-baseline-v2.py \
+  --evaluator-root .artifacts/evaluator/<tier> \
+  --product-root .artifacts/protected-image/<tier>/<runtime>/<unit> \
+  --previous-baseline fixtures/evaluator/baselines/compatibility-1x-baseline-zero.json \
+  [--check-only]
+```
+
+The baseline-v2 payload and external reference are content-addressed and immutable. A denominator of one sets a future integer growth target of 100; it is not itself a 100x result.
+
+### 3. Contracts
+
+- Omitting `--baseline-reference` preserves the historical baseline-zero default. Selecting v2 requires its content hash, immutable flags, corpus/protocol identity, and one complete unit to validate before compatibility scoring.
+- The selected reference and payload are copied into the evaluator evidence tree; the gate and analysis input bind the selected baseline ID/hash. The previous zero baseline and reference remain byte-identical.
+- The append-only corpus may add reviewed growth rows without rewriting the v2 denominator. The current protocol ledger binds the current corpus digest, while the v2 payload retains its historical corpus/protocol snapshot; the frozen fixed row is checked by a content-addressed row digest.
+- The baseline-v2 checker requires exact commit freshness, closed evaluator/unit/product manifests, native compatibility environment, one complete six-stage fixed row, distinct Protected/Native Image hashes, exact loader and behavior-oracle evidence, and a nearest-negative rollback witness. Any unmet condition writes only a blocked local gate and publishes no payload/reference.
+- Evaluator environment schema v2 records runner identity, host/runtime identity, namespace/mount/security facts, resource limits, pinned SDK/tool hashes, product source hashes, and strict-unit bindings. Availability is recomputed from those observations; caller-provided compatibility flags cannot make it available.
+- Scheme-A remains the frozen six-family conjunction. Baseline-v2 records `baseline-not-calibrated`, null family factors, and no Scheme-A claim. Overall claimability remains false until compatibility growth and every Scheme-A family independently pass.
+- `calculate_claimable` is derived from environment availability, measured fixed/growth compatibility, Scheme-A pass, and all anti-gaming checks; a complete-looking stage projection in an unavailable environment cannot make the result claimable.
+- Compatibility and Scheme-A are separate dimensions. The baseline freeze does not mutate the evaluator protocol rules, Scheme-A policy, or 100x math.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Explicit v2 reference does not match payload bytes/identity | evaluator/local gate fails; no claim |
+| Checkout, gate, and environment commits differ | local gate blocks baseline publication |
+| Root manifest digest differs from either gate field | evidence checker/local gate fails closed |
+| Any stage/hash/oracle/negative witness is missing or inconsistent | no baseline-v2 publication; retain blocked evidence |
+| Historical zero-baseline bytes/reference drift | hard failure; no overwrite or repair |
+| One-unit v2 candidate with no further growth | measured factor 1.0, target 100, growthViewPass=false, claimable=false |
+| 100 distinct complete growth units with unavailable declared runtime | retain measured compatibility counts but local/overall claim remains unavailable until the CI runtime evidence is available |
+| Scheme-A remains uncalibrated | six families retained, factors null, claimable=false |
+| Evaluator environment unavailable | claimable=false even if stage records are complete |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a fresh evidence package binds one strict unit to a new immutable v2 payload/reference; explicit evaluator selection reports measured factor 1.0 and preserves non-claimability.
+- Base: no reference is specified; the historical baseline-zero behavior remains unchanged.
+- Bad: silently changing the default reference, overwriting the zero baseline, treating denominator publication as 100x success, or marking Scheme-A pass from compatibility evidence.
+
+### 6. Tests Required
+
+- Evaluator tests cover explicit v2 selection, default zero fallback, stale reference/payload, fixed/growth values, historical baseline immutability, and Scheme-A non-claimability.
+- Local-gate tests cover commit freshness, root/nested manifest closure, all-six-stage hashes, negative rollback witness, environment unavailability, and no publication after any failed precondition.
+- Workflow tests assert the independent evaluator job provisions its pinned SDK, validates both references, explicitly selects v2, retains artifacts, and preserves the positive-baseline claim gate.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+compatibilityComplete = true
+baselineZero = 0
+factor = infinity
+claimable = true
+```
+
+#### Correct
+
+```text
+explicit immutable baseline-v2 -> candidate=1, baseline=1, factor=1.0
+-> future growth target=100 -> Scheme-A still independent -> claimable=false
 ```

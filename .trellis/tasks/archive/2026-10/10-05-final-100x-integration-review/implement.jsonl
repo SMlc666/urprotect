@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Strict six-stage compatibility, runtime evidence, Scheme-A separation, and CI retention contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Full quality/evidence/fuzz/benchmark/anti-gaming gates."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Parent final 100x gate and exact claimability conjunction."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-v2-reference.json","reason":"Immutable positive compatibility denominator reference."}
+{"file":"fixtures/evaluator/scheme-a-manifest.json","reason":"Frozen six-family policy and budget/tool/recipe contract."}

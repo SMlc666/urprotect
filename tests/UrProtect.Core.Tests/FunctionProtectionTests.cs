@@ -102,7 +102,7 @@ public sealed class FunctionProtectionTests
 
     [Fact]
     [Trait("Category", "Protect")]
-    public void LayoutWithoutProgramHeaderCapacityFailsBeforePublication()
+    public void OccupiedProgramHeaderTableUsesSharedLayoutPlanner()
     {
         var source = ReadVersionedFixture();
 
@@ -112,11 +112,14 @@ public sealed class FunctionProtectionTests
                 new[] { FunctionSelector.ByIdentity(ElfSymbolTableKind.Static, 23) },
                 new[] { ProtectionPass.ControlFlowFlattening }));
 
-        Assert.False(result.IsSuccess);
-        Assert.Null(result.OutputBytes);
-        Assert.Contains(
-            result.Diagnostics,
-            diagnostic => diagnostic.Code == DiagnosticCode.ProtectionLayoutUnavailable);
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.OutputBytes);
+        Assert.NotNull(result.LayoutEvidence);
+        Assert.Equal(ElfLayoutStrategy.RelocatedProgramHeaderTable, result.LayoutEvidence!.Strategy);
+        var parsed = ElfParser.Parse(result.OutputBytes!);
+        Assert.True(parsed.IsSuccess, string.Join(Environment.NewLine, parsed.Diagnostics));
+        Assert.True(parsed.File!.Header.ProgramHeaderOffset >= (ulong)source.Length);
+        Assert.True(parsed.File.Header.ProgramHeaderCount > ElfParser.Parse(source).File!.Header.ProgramHeaderCount);
     }
 
     [Fact]

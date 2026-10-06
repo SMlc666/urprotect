@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "evaluator-v1",
+  "kind": "urprotect-independent-evaluator-protocol",
+  "readOnly": true,
+  "manifestDigests": {
+    "compatibilityCorpusSha256": "19c8cf639d33ae4f222f926fb1a6498f596c7153860f1061264121ef526965db",
+    "runtimeMatrixSha256": "8d778d22926ba5e2791f46821623700e0baccad3fce26201e10ba6cf0ea0dac5",
+    "schemeAManifestSha256": "bece932bd38e8c3e1def844023e19306acd37583862f17c6e3943c4ecf57eacc",
+    "oracleRegistrySha256": "91e8a867157808f839edbabaf6c766c00d86e10f10729130debab0ce640175a4",
+    "toolchainManifestSha256": "613d8088b6ee7dc9df930863d12b2434ce927363431d863b1bef09a726f8833d",
+    "baselineReferenceBinding": "baseline-reference.json:baselineArtifactSha256"
+  },
+  "compatibility": {
+    "stages": [
+      "protector",
+      "protected-image",
+      "rehydration",
+      "native-image",
+      "target-loader",
+      "behavioral-oracle"
+    ],
+    "stageStatuses": [
+      "passed",
+      "failed",
+      "environment-unavailable",
+      "not-applicable",
+      "unknown",
+      "protocol-failure"
+    ],
+    "firstFailureOrder": [
+      "protector",
+      "protected-image",
+      "rehydration",
+      "native-image",
+      "target-loader",
+      "behavioral-oracle"
+    ],
+    "completeRule": "Every required stage passes for the same unit, source digest, profile, runtime cell, oracle, and evaluator run.",
+    "fixedViewRule": "Every frozen baseline row remains present with byte-identical registration metadata and no complete-unit regression.",
+    "growthViewRule": "Count distinct pre-registered identityKey values from the append-only growth view; require candidateGrowthCompleteUnits >= 100 * frozenBaselineCompleteUnits.",
+    "growthMultiplier": 100,
+    "zeroBaselineStatus": "baseline-zero",
+    "zeroDenominatorFactor": null,
+    "currentStrictChainStatus": "not-ready"
+  },
+  "schemeA": {
+    "protocolVersion": "scheme-a-v1",
+    "requiredFamilyIds": [
+      "runtime_dump_reassembly",
+      "patch_repack",
+      "function_logic_recovery",
+      "static_decomposition",
+      "dynamic_instrumentation",
+      "integrity_handoff"
+    ],
+    "replicaCount": 3,
+    "roles": [
+      "baseline",
+      "candidate"
+    ],
+    "minimumFactor": 100.0,
+    "baselineCostRule": "maximum successCpuNs across all three successful baseline replicas",
+    "candidateCostRule": "minimum successCpuNs across all three successful candidate replicas",
+    "censoredCandidateCostRule": "The frozen CPU budget is a lower bound only after all three candidate replicas were actually attempted and fully exhausted without success.",
+    "factorRule": "candidateCostLowerBoundCpuNs / max(baselineCostCpuNs, 1000000)",
+    "mixedReplicaRule": "Mixed candidate success outcomes are unknown and never averaged.",
+    "baselineNotCalibratedRule": "A family is baseline-not-calibrated until three reproducible finite successful baseline replicas and raw evidence exist.",
+    "classificationVocabulary": [
+      "attack-success",
+      "attack-failed",
+      "environment-unavailable",
+      "tool-not-applicable",
+      "unknown",
+      "protocol-failure"
+    ],
+    "requiredFamilyGate": "Every required family independently has status pass, factorLowerBound >= 100.0, a valid blue oracle, equal frozen budgets/tools/recipe, and complete raw evidence."
+  },
+  "budgets": {
+    "wallSeconds": 60,
+    "cpuSeconds": 45,
+    "rssBytes": 1073741824,
+    "processLimit": 32,
+    "outputBytes": 16777216,
+    "rawArtifactBytes": 268435456,
+    "manualSteps": 0,
+    "networkDisabled": true
+  },
+  "evidenceLimits": {
+    "maxJsonBytes": 1048576,
+    "maxTextBytes": 16777216,
+    "maxTreeFiles": 10000,
+    "maxTreeBytes": 536870912,
+    "maxPathLength": 240,
+    "allowSymlinks": false,
+    "allowExternalPaths": false
+  },
+  "artifactRules": {
+    "root": ".artifacts/evaluator/<tier>",
+    "fileManifest": "SHA256SUMS",
+    "manifestCoverage": "Every regular file in the evaluator tree except the SHA256SUMS file itself is listed exactly once.",
+    "attemptRawEvidenceRequiredForMeasuredPass": true,
+    "rawEvidenceHashWithoutRetainedBytesIsInsufficient": true,
+    "gateIsNormative": true,
+    "analysisInputIsAdvisory": true
+  },
+  "baselineRules": {
+    "immutable": true,
+    "contentAddressed": true,
+    "neverOverwrite": true,
+    "currentCommit": "86270e71362572d32544c9fa979553e2f3c4cb7c",
+    "nativeResultsMayBeInferred": false
+  }
+}

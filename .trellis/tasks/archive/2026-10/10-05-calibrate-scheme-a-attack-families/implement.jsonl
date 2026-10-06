@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Independent evaluator/Scheme-A policy, artifact bindings, CI retention and no-claim requirements."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Pinned tool identities, bounded process/evidence handling, negative tests and CI quality gates."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Frozen six-family definitions, cost/factor formula, replica/budget rules and overall conjunction."}
+{"file":"fixtures/evaluator/scheme-a-manifest.json","reason":"Immutable v1 family order, tool/recipe/budget/oracle identity to preserve."}
+{"file":"fixtures/evaluator/evaluator-protocol.json","reason":"Frozen independent compatibility/Scheme-A claimability policy."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-v2-reference.json","reason":"Strict-chain product artifact/source identity that attack evidence must bind."}

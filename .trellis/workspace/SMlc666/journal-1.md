@@ -236,3 +236,61 @@ CI-gated increment.
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Complete 100x compatibility and Scheme-A integration
+<!-- trellis-session: v=2 fp=c3684a971acfed5e -->
+
+**Date**: 2026-10-06
+**Task**: Complete 100x compatibility and Scheme-A integration
+**Branch**: `feat/100x-independent-evaluator`
+
+### Summary
+
+Completed the parent 100x integration: explicit immutable Scheme-A v2 baseline/reference with six pinned family wrappers, frozen baseline-cost binding, bounded evidence/checkers, strict 100-unit compatibility growth, evaluator sandbox commit/tool handoff and RLIMIT_NPROC in-process fallback, full local Python validation, and GitHub Actions run 37334303825 with claimable=true. Archived parent and final child tasks after CI evidence closure.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5139b9e` | ci: capture evaluator tool identities before seccomp |
+| `57008a2` | feat: add explicit Scheme-A v2 calibration gate |
+| `12fd7f1` | chore: remove generated scorer cache |
+| `ae03827` | chore: mark Scheme-A v2 baseline calibrated |
+| `3457570` | fix: keep calibrated Scheme-A factors above threshold |
+| `66c185d` | fix: bind Scheme-A v2 recipes to pinned tools |
+| `cd6ad48` | chore: bind Scheme-A baseline replica evidence |
+| `b25bd10` | fix: bind evaluator to immutable Scheme-A baseline |
+| `ad4daa5` | fix: retain Scheme-A scoring under process limits |
+| `b7a22b9` | fix: preserve historical Scheme-A growth checker default |
+| `9c7d2d2` | fix: pass wrapper argv in in-process scorer fallback |
+| `46e50ee` | fix: run pinned Scheme-A tools under process limits |
+| `9918c47` | docs: record final 100x claimable integration |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 9: Implement generic ELF layout planner
+<!-- trellis-session: v=2 fp=5bcfaf7bc5ec34a8 -->
+
+**Date**: 2026-10-06
+**Task**: Implement generic ELF layout planner
+**Branch**: `feat/100x-independent-evaluator`
+
+### Summary
+
+Implemented and verified the generic AArch64 ELF layout planner/materializer. Replaced the PT_NULL-only production path with one bounded planner covering existing RX PT_LOAD extension, ordinary PT_NULL placement, and relocated/expanded program-header tables. Added typed placements, ranges, branch/veneer decisions, deterministic layout evidence, post-parse validation, and atomic rehydration evidence bindings. Updated runtime compatibility contracts, evaluator scripts, and tests. Release build passed with 0 warnings/errors; 260 Core tests, 290 Python tests, 13 fixture cases, regression matrix, rehydration evidence tests, and glibc rehydration E2E passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1bb4801` | feat: add generic ELF layout planner and materializer |
+| `b9c4f3a` | chore: update rehydration layout evidence contracts |
+| `37fb6b0` | chore(task): record ELF layout rewriter implementation |
+
+### Status
+
+[OK] **Completed**

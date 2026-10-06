@@ -57,16 +57,14 @@ public sealed record FunctionProtectionResult(
     IReadOnlyList<FunctionProtectionFunctionResult> Functions,
     IReadOnlyList<Diagnostic> Diagnostics)
 {
+    public ElfLayoutEvidence? LayoutEvidence { get; init; }
+
     public bool IsSuccess => OutputBytes is not null
         && Diagnostics.All(diagnostic => !diagnostic.IsError);
 }
 
 public sealed class FunctionProtectionService
 {
-    private const uint PtNull = ElfConstants.PtNull;
-    private const uint PtLoad = ElfConstants.PtLoad;
-    private const uint PfRead = ElfConstants.PfR;
-    private const uint PfExecute = ElfConstants.PfX;
     private const ulong SegmentAlignment = 0x1000;
     private const byte StateRegister = 16;
     private static readonly IReadOnlyDictionary<byte, byte> RegisterPermutation =
@@ -77,6 +75,212 @@ public sealed class FunctionProtectionService
     public FunctionProtectionService(AsmStoneAdapter? decoder = null)
     {
         this.decoder = decoder ?? new AsmStoneAdapter();
+    }
+
+    /// <summary>
+    /// Builds the layout-neutral protection plan used by the Protected Image
+    /// producer. Unlike <see cref="Protect"/>, this method never searches for a
+    /// PT_NULL slot and never emits final ELF bytes.
+    /// </summary>
+    public FunctionProtectionPlanResult Plan(
+        ReadOnlyMemory<byte> input,
+        FunctionProtectionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var diagnostics = new DiagnosticBag();
+        var functionResults = new List<FunctionProtectionFunctionResult>();
+        if (options.Selectors is null || options.Selectors.Count == 0)
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidArgument,
+                "At least one explicit function selector is required for protection.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (options.Passes is null || options.Passes.Count == 0)
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidArgument,
+                "At least one protection pass is required for protection.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (options.Selectors.Count > ProtectedImageLimits.MaximumSelectorCount)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageLimitExceeded,
+                "The protection request contains too many function selectors.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (options.Passes.Count > 2)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageLimitExceeded,
+                "The protection request contains too many protection passes.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var selectorSnapshot = options.Selectors.ToArray();
+        var passSnapshot = options.Passes.ToArray();
+        if (passSnapshot.Any(pass => pass is not (
+                ProtectionPass.ControlFlowFlattening
+                or ProtectionPass.RegisterPermutation)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidArgument,
+                "The protection request contains an unknown pass.");
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var sourceSnapshot = input.ToArray();
+        var orderedPasses = ProtectionPassOrdering.Normalize(passSnapshot);
+        var parse = ElfParser.Parse(sourceSnapshot);
+        diagnostics.AddRange(parse.Diagnostics);
+        if (parse.File is null || diagnostics.HasErrors)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var selection = FunctionSelectorResolver.Resolve(parse.File, selectorSnapshot);
+        diagnostics.AddRange(selection.Diagnostics);
+        if (!selection.IsSuccess)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        ValidateSelectedRanges(parse.File, selection.Functions, diagnostics);
+        if (diagnostics.HasErrors)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var analyses = new List<Aarch64FunctionAnalysis>();
+        var hasFlattening = orderedPasses.Contains(ProtectionPass.ControlFlowFlattening);
+        var hasPermutation = orderedPasses.Contains(ProtectionPass.RegisterPermutation);
+        foreach (var function in selection.Functions)
+        {
+            var analysis = new Aarch64FunctionAnalyzer(decoder).Analyze(parse.File, function);
+            analyses.Add(analysis);
+            if (!analysis.IsComplete)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.FunctionAnalysisIncomplete,
+                    $"Function '{function.Name}' cannot be transformed because analysis is incomplete.",
+                    function.Value);
+                functionResults.Add(new FunctionProtectionFunctionResult(
+                    function,
+                    true,
+                    false,
+                    Array.Empty<ProtectionPass>(),
+                    analysis.Diagnostics));
+                continue;
+            }
+
+            var resourcePlan = Aarch64RegisterResourcePlanner.Plan(
+                analysis,
+                decoder,
+                hasFlattening,
+                hasPermutation);
+            if (!resourcePlan.IsSufficient)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.FunctionResourceUnavailable,
+                    resourcePlan.FailureReason ?? "The selected function has insufficient register resources.",
+                    function.Value);
+                functionResults.Add(new FunctionProtectionFunctionResult(
+                    function,
+                    true,
+                    false,
+                    Array.Empty<ProtectionPass>(),
+                    new[]
+                    {
+                        new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.FunctionResourceUnavailable,
+                            resourcePlan.FailureReason
+                                ?? "The selected function has insufficient register resources.",
+                            function.Value),
+                    })
+                {
+                    ResourcePlan = resourcePlan,
+                });
+            }
+        }
+
+        if (diagnostics.HasErrors)
+        {
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        if (!TryBuildProtectedCode(
+                parse.File,
+                analyses,
+                orderedPasses,
+                out var protectedCode,
+                out var transformedResults,
+                out var rewriteDiagnostics,
+                codeBaseOverride: 0))
+        {
+            diagnostics.AddRange(rewriteDiagnostics);
+            functionResults.AddRange(transformedResults);
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        functionResults.AddRange(transformedResults);
+        var regions = new List<ProtectedImageEmitRegion>(protectedCode.Patches.Count);
+        var fixups = new List<ProtectedImageEntryBranchFixup>(protectedCode.Patches.Count);
+        for (var index = 0; index < protectedCode.Patches.Count; index++)
+        {
+            var patch = protectedCode.Patches[index];
+            if (patch.TargetAddress > uint.MaxValue
+                || patch.OutputSize > int.MaxValue
+                || patch.TargetAddress > ulong.MaxValue - patch.OutputSize
+                || patch.TargetAddress + patch.OutputSize > (ulong)protectedCode.Bytes.Length)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ProtectedImageLimitExceeded,
+                    "The layout-neutral protected code region exceeds the Protected Image bounds.",
+                    patch.SourceAddress);
+                continue;
+            }
+
+            var regionId = checked((uint)index + 1);
+            var generated = protectedCode.Bytes.AsSpan(
+                checked((int)patch.TargetAddress),
+                checked((int)patch.OutputSize)).ToArray();
+            regions.Add(new ProtectedImageEmitRegion(
+                regionId,
+                new VirtualAddress(patch.SourceAddress),
+                patch.SourceSize,
+                generated));
+            fixups.Add(new ProtectedImageEntryBranchFixup(
+                regionId,
+                regionId,
+                new VirtualAddress(patch.SourceAddress),
+                0,
+                0,
+                ProtectedImageFixupKind.Aarch64Branch26));
+        }
+
+        if (diagnostics.HasErrors || regions.Count != protectedCode.Patches.Count)
+        {
+            if (!diagnostics.HasErrors)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ProtectedImageMalformed,
+                    "The layout-neutral protection plan did not bind every transformed function.");
+            }
+
+            return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
+        }
+
+        var plan = new ProtectionPlan(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(sourceSnapshot)).ToLowerInvariant(),
+            regions,
+            fixups,
+            functionResults);
+        return new FunctionProtectionPlanResult(plan, functionResults, diagnostics.ToArray());
     }
 
     public FunctionProtectionResult Protect(
@@ -191,35 +395,83 @@ public sealed class FunctionProtectionService
             return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
         }
 
-        if (!TryFindRewriteSlot(parse.File, out var rewriteSlotIndex))
+        if (!TryGetCodeBase(parse.File, out var codeBase))
         {
             diagnostics.Error(
                 DiagnosticCode.ProtectionLayoutUnavailable,
-                "The ELF has no spare PT_NULL program-header slot for protected code.");
+                "The executable load-map virtual range cannot be represented by the protection layout planner.");
             return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
         }
 
-        if (!TryBuildProtectedCode(
-                parse.File,
-                analyses,
-                orderedPasses,
-                out var rewritten,
-                out var transformedResults,
-                out var rewriteDiagnostics))
+        ProtectedCode rewritten = default!;
+        IReadOnlyList<FunctionProtectionFunctionResult> transformedResults = Array.Empty<FunctionProtectionFunctionResult>();
+        ElfLayoutPlan? layoutPlan = null;
+        ElfLayoutEvidence? layoutEvidence = null;
+        byte[]? output = null;
+        IReadOnlyList<Diagnostic> planningDiagnostics = Array.Empty<Diagnostic>();
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            diagnostics.AddRange(rewriteDiagnostics);
-            functionResults.AddRange(transformedResults);
-            return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
+            if (!TryBuildProtectedCode(
+                    parse.File,
+                    analyses,
+                    orderedPasses,
+                    out rewritten,
+                    out transformedResults,
+                    out var rewriteDiagnostics,
+                    codeBaseOverride: codeBase))
+            {
+                diagnostics.AddRange(rewriteDiagnostics);
+                functionResults.AddRange(transformedResults);
+                return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
+            }
+
+            var planning = PlanProtectedCode(parse.File, rewritten);
+            if (planning.Plan is null || planning.Diagnostics.Any(diagnostic => diagnostic.IsError))
+            {
+                diagnostics.AddRange(planning.Diagnostics);
+                functionResults.AddRange(transformedResults);
+                return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
+            }
+
+            var plannedCodeBase = planning.Plan.Placements
+                .Select(placement => placement.VirtualAddress.Value)
+                .DefaultIfEmpty(0UL)
+                .Min();
+            planningDiagnostics = planning.Diagnostics;
+            if (plannedCodeBase != rewritten.VirtualAddress && attempt == 0)
+            {
+                codeBase = plannedCodeBase;
+                continue;
+            }
+
+            if (plannedCodeBase != rewritten.VirtualAddress)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ProtectionLayoutUnavailable,
+                    "The semantic code base does not agree with the selected physical ELF layout.");
+                functionResults.AddRange(transformedResults);
+                return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
+            }
+
+            var materialized = ElfLayoutMaterializer.Materialize(parse.File.Bytes, parse.File, planning.Plan);
+            if (materialized.Bytes is null || materialized.ParsedOutput is null || materialized.Plan is null)
+            {
+                diagnostics.AddRange(materialized.Diagnostics);
+                functionResults.AddRange(transformedResults);
+                return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
+            }
+
+            diagnostics.AddRange(planningDiagnostics);
+            diagnostics.AddRange(materialized.Diagnostics);
+            layoutPlan = materialized.Plan;
+            layoutEvidence = materialized.Evidence;
+            output = materialized.Bytes;
+            break;
         }
 
-        if (!TryAppendExecutableSegment(
-                parse.File,
-                rewriteSlotIndex,
-                rewritten,
-                out var output,
-                out var layoutDiagnostic))
+        if (output is null || layoutPlan is null)
         {
-            diagnostics.Add(layoutDiagnostic);
+            diagnostics.Error(DiagnosticCode.ProtectionLayoutUnavailable, "The shared ELF layout planner did not produce a materialized output.");
             functionResults.AddRange(transformedResults);
             return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
         }
@@ -240,14 +492,98 @@ public sealed class FunctionProtectionService
                 outputParse.File,
                 output,
                 rewritten,
-                rewriteSlotIndex,
+                layoutPlan,
                 selection.Functions,
                 diagnostics))
         {
             return new FunctionProtectionResult(null, functionResults, diagnostics.ToArray());
         }
 
-        return new FunctionProtectionResult(output, functionResults, diagnostics.ToArray());
+        return new FunctionProtectionResult(output, functionResults, diagnostics.ToArray())
+        {
+            LayoutEvidence = layoutEvidence,
+        };
+    }
+
+    private static ulong AlignUp(ulong value, ulong alignment)
+    {
+        var remainder = value % alignment;
+        return remainder == 0 ? value : checked(value + alignment - remainder);
+    }
+
+    private static bool TryGetCodeBase(ElfFile file, out ulong codeBase)
+    {
+        try
+        {
+            var highestVirtualEnd = file.LoadMap.Segments
+                .Select(segment => checked(segment.VirtualAddress + segment.MemorySize))
+                .DefaultIfEmpty(0UL)
+                .Max();
+            codeBase = AlignUp(highestVirtualEnd, SegmentAlignment);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            codeBase = 0;
+            return false;
+        }
+    }
+
+    private static ElfLayoutPlanningResult PlanProtectedCode(ElfFile file, ProtectedCode code)
+    {
+        var regions = new List<ElfLayoutRegionRequest>(code.Patches.Count);
+        var branches = new List<ElfLayoutBranchRequest>(code.Patches.Count);
+        for (var index = 0; index < code.Patches.Count; index++)
+        {
+            var patch = code.Patches[index];
+            if (patch.TargetAddress < code.VirtualAddress
+                || patch.OutputSize > (ulong)code.Bytes.Length
+                || patch.TargetAddress - code.VirtualAddress > (ulong)code.Bytes.Length - patch.OutputSize
+                || patch.OutputSize == 0
+                || patch.OutputSize > int.MaxValue)
+            {
+                return new ElfLayoutPlanningResult(
+                    null,
+                    null,
+                    new[]
+                    {
+                        new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.ProtectionLayoutUnavailable,
+                            "A protected code patch is outside the emitted code buffer.",
+                            patch.TargetAddress),
+                    });
+            }
+
+            var regionIdentity = $"function:{index:D8}:{patch.SourceAddress:X}";
+            var codeOffset = checked((int)(patch.TargetAddress - code.VirtualAddress));
+            var codeBytes = code.Bytes.AsSpan(codeOffset, checked((int)patch.OutputSize)).ToArray();
+            regions.Add(new ElfLayoutRegionRequest(
+                regionIdentity,
+                regionIdentity,
+                new VirtualAddress(patch.SourceAddress),
+                patch.SourceSize,
+                codeBytes));
+            branches.Add(new ElfLayoutBranchRequest(
+                $"entry:{index}:{patch.SourceAddress:X}",
+                regionIdentity,
+                regionIdentity,
+                new VirtualAddress(patch.SourceAddress),
+                0,
+                0));
+        }
+
+        var options = new ElfLayoutOptions(
+            MaximumOutputBytes: ElfLayoutLimits.DefaultMaximumOutputBytes,
+            MaximumProgramHeaderCount: ElfLayoutLimits.DefaultMaximumProgramHeaderCount,
+            MaximumGeneratedCodeBytes: ProtectedImageLimits.MaximumAggregateCodeBytes,
+            MaximumVeneerCount: ElfLayoutLimits.DefaultMaximumVeneerCount,
+            MaximumEditCount: ElfLayoutLimits.DefaultMaximumEditCount,
+            MaximumPaddingBytes: ElfLayoutLimits.DefaultMaximumPaddingBytes,
+            SegmentAlignment: SegmentAlignment,
+            CodeAlignment: ElfLayoutLimits.DefaultCodeAlignment,
+            MaximumAlignment: ElfLayoutLimits.DefaultMaximumAlignment);
+        return ElfLayoutPlanner.Plan(file.Bytes, file, regions, branches, options);
     }
 
     private static void ValidateSelectedRanges(
@@ -323,7 +659,8 @@ public sealed class FunctionProtectionService
         IReadOnlyList<ProtectionPass> passes,
         out ProtectedCode code,
         out IReadOnlyList<FunctionProtectionFunctionResult> results,
-        out IReadOnlyList<Diagnostic> diagnostics)
+        out IReadOnlyList<Diagnostic> diagnostics,
+        ulong? codeBaseOverride = null)
     {
         var diagnosticBag = new DiagnosticBag();
         var resultList = new List<FunctionProtectionFunctionResult>();
@@ -380,9 +717,17 @@ public sealed class FunctionProtectionService
             return false;
         }
 
-        var codeBase = AlignUp(
-            file.LoadMap.Segments.Max(segment => checked(segment.VirtualAddress + segment.MemorySize)),
-            SegmentAlignment);
+        if (codeBaseOverride is not { } codeBase
+            && !TryGetCodeBase(file, out codeBase))
+        {
+            diagnosticBag.Error(
+                DiagnosticCode.ProtectionLayoutUnavailable,
+                "The executable load-map virtual range cannot be represented by the protection layout planner.");
+            code = default!;
+            results = resultList;
+            diagnostics = diagnosticBag.ToArray();
+            return false;
+        }
 
         var emitter = new CodeEmitter(codeBase);
         foreach (var builder in builders)
@@ -461,7 +806,8 @@ public sealed class FunctionProtectionService
             builders.Select(builder => new FunctionPatch(
                 builder.Source.Function.Value,
                 builder.OutputAddress,
-                builder.Source.Function.Size)).ToArray());
+                builder.Source.Function.Size,
+                builder.OutputSize)).ToArray());
         results = resultList;
         diagnostics = diagnosticBag.ToArray();
         return true;
@@ -623,7 +969,7 @@ public sealed class FunctionProtectionService
         ElfFile rewrittenFile,
         byte[] rewrittenBytes,
         ProtectedCode protectedCode,
-        int rewriteSlotIndex,
+        ElfLayoutPlan layoutPlan,
         IReadOnlyList<ElfFunctionSymbol> selected,
         DiagnosticBag diagnostics)
     {
@@ -635,9 +981,12 @@ public sealed class FunctionProtectionService
                 return new FileRange(offset, function.Size);
             })
             .ToArray();
-        var programHeaderOffset = source.Header.ProgramHeaderOffset
-            + checked((ulong)rewriteSlotIndex * source.Header.ProgramHeaderEntrySize);
-        var programHeaderRange = new FileRange(programHeaderOffset, ElfConstants.ProgramHeaderSize64);
+        var layoutRanges = layoutPlan.Edits
+            .Where(edit => edit.Offset.Value < (ulong)source.Bytes.Length)
+            .Select(edit => new FileRange(
+                edit.Offset.Value,
+                Math.Min((ulong)edit.Bytes.Length, (ulong)source.Bytes.Length - edit.Offset.Value)))
+            .ToArray();
         var sourceSpan = source.Bytes.Span;
         var rewrittenSpan = rewrittenBytes.AsSpan();
         if (rewrittenSpan.Length < sourceSpan.Length)
@@ -651,7 +1000,7 @@ public sealed class FunctionProtectionService
         for (ulong offset = 0; offset < (ulong)sourceSpan.Length; offset++)
         {
             if (changedRanges.Any(range => range.Contains(offset))
-                || programHeaderRange.Contains(offset))
+                || layoutRanges.Any(range => range.Contains(offset)))
             {
                 continue;
             }
@@ -660,7 +1009,7 @@ public sealed class FunctionProtectionService
             {
                 diagnostics.Error(
                     DiagnosticCode.WrapperMalformed,
-                    "The protected writer changed bytes outside selected functions and its reserved program-header slot.",
+                    "The protected layout changed bytes outside selected functions and its planned layout edits.",
                     offset);
                 return false;
             }
@@ -742,151 +1091,6 @@ public sealed class FunctionProtectionService
         }
 
         return true;
-    }
-
-    private static bool TryFindRewriteSlot(ElfFile file, out int index)
-    {
-        for (var current = 0; current < file.ProgramHeaders.Count; current++)
-        {
-            if (file.ProgramHeaders[current].Type == PtNull)
-            {
-                index = current;
-                return true;
-            }
-        }
-
-        index = -1;
-        return false;
-    }
-
-    private static bool TryAppendExecutableSegment(
-        ElfFile file,
-        int rewriteSlotIndex,
-        ProtectedCode code,
-        out byte[] output,
-        out Diagnostic diagnostic)
-    {
-        var fileOffset = AlignUp((ulong)file.Bytes.Length, SegmentAlignment);
-        if (fileOffset > int.MaxValue)
-        {
-            output = Array.Empty<byte>();
-            diagnostic = new Diagnostic(
-                DiagnosticSeverity.Error,
-                DiagnosticCode.ProtectionLayoutUnavailable,
-                "The protected code file offset exceeds the supported writer range.");
-            return false;
-        }
-
-        var totalLength = checked(fileOffset + (ulong)code.Bytes.Length);
-        if (totalLength > int.MaxValue)
-        {
-            output = Array.Empty<byte>();
-            diagnostic = new Diagnostic(
-                DiagnosticSeverity.Error,
-                DiagnosticCode.ProtectionLayoutUnavailable,
-                "The protected ELF exceeds the supported writer range.");
-            return false;
-        }
-
-        output = new byte[(int)totalLength];
-        file.Bytes.Span.CopyTo(output);
-        code.Bytes.CopyTo(output.AsSpan((int)fileOffset));
-        foreach (var patch in code.Patches)
-        {
-            if (!file.LoadMap.TryVirtualAddressToFileOffset(
-                    patch.SourceAddress,
-                    4,
-                    out var patchOffset)
-                || !TryEncodeBranch(patch.SourceAddress, patch.TargetAddress, out var branch))
-            {
-                diagnostic = new Diagnostic(
-                    DiagnosticSeverity.Error,
-                    DiagnosticCode.ProtectionBranchOutOfRange,
-                    "A protected function entry cannot reach its generated code.",
-                    patch.SourceAddress);
-                return false;
-            }
-
-            BinaryPrimitives.WriteUInt32LittleEndian(
-                output.AsSpan(checked((int)patchOffset), sizeof(uint)),
-                branch);
-            var remaining = patch.SourceSize - sizeof(uint);
-            for (ulong offset = 0; offset < remaining; offset += sizeof(uint))
-            {
-                BinaryPrimitives.WriteUInt32LittleEndian(
-                    output.AsSpan(checked((int)(patchOffset + sizeof(uint) + offset)), sizeof(uint)),
-                    0xD503201F);
-            }
-        }
-
-        var programHeaderOffset = checked(file.Header.ProgramHeaderOffset
-            + (ulong)rewriteSlotIndex * file.Header.ProgramHeaderEntrySize);
-        if (programHeaderOffset > int.MaxValue
-            || programHeaderOffset + ElfConstants.ProgramHeaderSize64 > (ulong)output.Length)
-        {
-            diagnostic = new Diagnostic(
-                DiagnosticSeverity.Error,
-                DiagnosticCode.ProtectionLayoutUnavailable,
-                "The spare program-header slot is outside the output.");
-            return false;
-        }
-
-        var program = output.AsSpan((int)programHeaderOffset, ElfConstants.ProgramHeaderSize64);
-        program.Clear();
-        BinaryPrimitives.WriteUInt32LittleEndian(program, PtLoad);
-        BinaryPrimitives.WriteUInt32LittleEndian(program[4..], PfRead | PfExecute);
-        BinaryPrimitives.WriteUInt64LittleEndian(program[8..], fileOffset);
-        BinaryPrimitives.WriteUInt64LittleEndian(program[16..], code.VirtualAddress);
-        BinaryPrimitives.WriteUInt64LittleEndian(program[24..], code.VirtualAddress);
-        BinaryPrimitives.WriteUInt64LittleEndian(program[32..], (ulong)code.Bytes.Length);
-        BinaryPrimitives.WriteUInt64LittleEndian(program[40..], (ulong)code.Bytes.Length);
-        BinaryPrimitives.WriteUInt64LittleEndian(program[48..], SegmentAlignment);
-        diagnostic = default;
-        return true;
-    }
-
-    private static bool TryEncodeBranch(ulong source, ulong target, out uint encoding)
-    {
-        long displacement;
-        if (target >= source)
-        {
-            var delta = target - source;
-            if (delta > long.MaxValue)
-            {
-                encoding = 0;
-                return false;
-            }
-
-            displacement = (long)delta;
-        }
-        else
-        {
-            var delta = source - target;
-            if (delta > (ulong)long.MaxValue)
-            {
-                encoding = 0;
-                return false;
-            }
-
-            displacement = -(long)delta;
-        }
-
-        if ((displacement & 3) != 0
-            || displacement < -(128L * 1024 * 1024)
-            || displacement >= 128L * 1024 * 1024)
-        {
-            encoding = 0;
-            return false;
-        }
-
-        encoding = 0x14000000u | (uint)((displacement >> 2) & 0x03FFFFFF);
-        return true;
-    }
-
-    private static ulong AlignUp(ulong value, ulong alignment)
-    {
-        var remainder = value % alignment;
-        return remainder == 0 ? value : checked(value + alignment - remainder);
     }
 
     private sealed class ProtectedFunctionBuilder
@@ -1092,7 +1296,8 @@ public sealed class FunctionProtectionService
     private readonly record struct FunctionPatch(
         ulong SourceAddress,
         ulong TargetAddress,
-        ulong SourceSize);
+        ulong SourceSize,
+        ulong OutputSize);
 
     private sealed class CodeEmitter
     {

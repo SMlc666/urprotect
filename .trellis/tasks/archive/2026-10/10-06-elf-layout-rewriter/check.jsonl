@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Quality gate for bounded ELF layout, typed address arithmetic, parser authority, diagnostics, and tests."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify stable layout diagnostics, no partial output, and atomic publication behavior."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify layout results do not overclaim glibc, musl, or bionic runtime support."}
+{"file":".trellis/tasks/10-06-elf-layout-rewriter/design.md","reason":"Verify the implementation matches the single-planner, three-strategy design and sibling boundaries."}
+{"file":".trellis/tasks/10-06-elf-layout-rewriter/implement.md","reason":"Verify every implementation and validation checklist item is covered before archive."}

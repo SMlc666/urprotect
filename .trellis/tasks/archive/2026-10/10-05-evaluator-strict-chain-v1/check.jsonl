@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify strict six-stage recomputation, source-image distinction, closed evidence, and CI semantics."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify read-only behavior, bounded paths, anti-gaming, and schema tests."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Verify zero-baseline/null-factor and claimability preservation."}
+{"file":"fixtures/evaluator/compatibility-corpus.json","reason":"Verify no frozen corpus identity mutation."}
+{"file":"fixtures/evaluator/evaluator-protocol.json","reason":"Verify no stage/threshold/protocol mutation."}

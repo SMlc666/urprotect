@@ -49,7 +49,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Record runner environment
@@ -74,6 +74,57 @@ jobs:
         run: dotnet restore UrProtect.sln --locked-mode
       - name: Build
         run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
+      - name: Run Protected Image producer evidence (additive, not strict compatibility)
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-protected-image-e2e.sh --tier "${tier}" --runtime glibc
+      - name: Check retained Protected Image producer evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-protected-image-evidence.py \
+            ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
+            --tier "${tier}" --runtime glibc \
+            --unit compat.protection-symbolized-fixture.glibc.outer-execveat
+      - name: Run Generic Rehydration and Native Image handoff (additive; evaluator remains incomplete)
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-rehydration-e2e.sh --tier "${tier}" --runtime glibc
+      - name: Check retained Generic Rehydration and Native Image evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-rehydration-evidence.py \
+            ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
+            --tier "${tier}" --runtime glibc \
+            --unit compat.protection-symbolized-fixture.glibc.outer-execveat
+      - name: Run strict compatibility corpus growth evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-strict-compatibility-corpus.sh --tier "${tier}" --runtime glibc
       - name: Run required bionic Node.js Python contracts
         run: |
           python3 tests/test_bionic_node_runner.py
@@ -219,8 +270,10 @@ jobs:
             .artifacts/environment/
             .artifacts/compatibility-matrix.md
             .artifacts/protection/
+            .artifacts/protected-image/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
+          include-hidden-files: true
           if-no-files-found: warn
 
   # The current approved public real-sample slice is a required full-corpus gate on every PR.
@@ -868,3 +921,118 @@ jobs:
           name: release-${{ github.run_id }}
           path: .artifacts/release/
           if-no-files-found: warn
+
+  # Independent evaluator control plane. It is additive: existing product,
+  # fixture, runtime, benchmark, and fuzz jobs remain unchanged.
+  independent-evaluator:
+    if: always()
+    needs:
+      - build-and-test
+      - real-sample-matrix
+      - runtime-matrix-native-arm64
+      - bionic-native-arm64
+      - musl-container-smoke
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      EVALUATOR_BUILD_RESULT: ${{ needs['build-and-test'].result }}
+      EVALUATOR_REAL_SAMPLE_RESULT: ${{ needs['real-sample-matrix'].result }}
+      EVALUATOR_RUNTIME_RESULT: ${{ needs['runtime-matrix-native-arm64'].result }}
+      EVALUATOR_BIONIC_RESULT: ${{ needs['bionic-native-arm64'].result }}
+      EVALUATOR_MUSL_RESULT: ${{ needs['musl-container-smoke'].result }}
+      EVALUATOR_CI_ISOLATION: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install evaluator sandbox runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap util-linux
+      # The evaluator records the pinned SDK identity in its environment evidence.
+      # Do not rely on an image-global dotnet installation in this independent job.
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Download build-and-test Protected Image evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: test-evidence-${{ github.run_id }}
+          path: .
+      - name: Normalize downloaded evidence paths
+        if: always()
+        run: |
+          set -euo pipefail
+          checkout_root="${GITHUB_WORKSPACE}"
+          destination="${checkout_root}/.artifacts/protected-image"
+          while IFS= read -r -d '' source; do
+            [[ "${source}" == "${destination}" ]] && continue
+            mkdir -p "${destination}"
+            cp -a -- "${source}/." "${destination}/"
+          done < <(find "${checkout_root}" -type d -path '*/.artifacts/protected-image' -print0)
+          if [[ ! -d "${destination}" ]]; then
+            echo "No downloaded Protected Image evidence path found; evaluator will retain unavailable evidence."
+          fi
+      - name: Select evaluator tier
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV" ;;
+            release) echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${{ inputs.run_release_rehearsal }}" == true ]]; then
+                echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV"
+              elif [[ "${{ inputs.run_nightly_rehearsal }}" == true ]]; then
+                echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV"
+              else
+                echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV"
+              fi
+              ;;
+            *) echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV" ;;
+          esac
+      - name: Validate historical and positive evaluator manifests
+        run: |
+          python3 scripts/validate-evaluator-manifests.py
+          python3 scripts/validate-evaluator-manifests.py \
+            --scheme-a fixtures/evaluator/scheme-a-manifest-v2.json \
+            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+      - name: Check immutable Scheme-A baseline-v2
+        run: python3 scripts/check-scheme-a-baseline-v2.py
+      - name: Run independent evaluator against immutable positive baseline-v2
+        run: |
+          ./scripts/run-independent-evaluator.sh \
+            --tier "${EVALUATOR_TIER}" \
+            --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
+            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
+      - name: Check independent evaluator evidence
+        if: always()
+        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
+      - name: Check strict compatibility growth gate
+        if: always()
+        run: python3 scripts/check-strict-compatibility-growth.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
+      - name: Preserve existing required evidence gates
+        if: always()
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == pull_request || "${GITHUB_EVENT_NAME}" == schedule || "${GITHUB_EVENT_NAME}" == release || "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            for result in \
+              "${EVALUATOR_BUILD_RESULT}" \
+              "${EVALUATOR_REAL_SAMPLE_RESULT}" \
+              "${EVALUATOR_RUNTIME_RESULT}" \
+              "${EVALUATOR_BIONIC_RESULT}" \
+              "${EVALUATOR_MUSL_RESULT}"; do
+              if [[ "${result}" != success ]]; then
+                echo "an existing required evidence job did not pass: ${result}" >&2
+                exit 1
+              fi
+            done
+          fi
+      - name: Enforce independent evaluator claim gate after positive baseline
+        if: always()
+        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json --require-claimable-if-baseline-positive
+      - name: Upload independent evaluator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-evaluator-${{ env.EVALUATOR_TIER }}-${{ github.run_id }}
+          path: .artifacts/evaluator/
+          if-no-files-found: warn
+          include-hidden-files: true

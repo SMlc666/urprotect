@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "kind": "evaluator-baseline-reference",
+  "baselineArtifactId": "compatibility-1x-baseline-zero",
+  "baselineArtifactPath": "fixtures/evaluator/baselines/compatibility-1x-baseline-zero.json",
+  "baselineArtifactSha256": "3e34370ec7db4095fdbc9465f25df13370dda6372efff395cd707d15c84806c2",
+  "baselineCommit": "86270e71362572d32544c9fa979553e2f3c4cb7c",
+  "corpusVersion": "compat-corpus-v1",
+  "protocolVersion": "evaluator-v1",
+  "schemeProtocolVersion": "scheme-a-v1",
+  "fixedCorpusRows": 1,
+  "completeUnits": 0,
+  "baselineStatus": "baseline-zero",
+  "strengthStatus": "baseline-not-calibrated",
+  "immutable": true,
+  "contentAddressed": true,
+  "neverOverwrite": true
+}

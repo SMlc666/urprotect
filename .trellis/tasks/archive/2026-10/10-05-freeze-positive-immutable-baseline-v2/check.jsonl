@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Verify exact six-stage and native/oracle evidence requirements."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify bounded read-only checker and immutable publication."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Verify positive denominator does not claim 100x and preserves Scheme-A independence."}
+{"file":".trellis/tasks/archive/2026-10/10-05-analyze-strict-chain-evaluator/research/strict-chain-evaluator-analysis.md","reason":"Check current package freshness blockers and strict-unit hash ledger."}
+{"file":"fixtures/evaluator/baseline-reference.json","reason":"Verify old reference and zero baseline remain unchanged."}

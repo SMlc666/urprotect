@@ -129,6 +129,8 @@ public sealed record Aarch64Instruction(
     Aarch64ControlFlowKind ControlFlow,
     ulong? DirectTarget)
 {
+    public string Mnemonic { get; init; } = SourceName;
+
     public IReadOnlyList<Aarch64SemanticOperand> Operands { get; init; } =
         Array.Empty<Aarch64SemanticOperand>();
 }
@@ -434,6 +436,7 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
             target);
         return projectInstruction with
         {
+            Mnemonic = instruction.Mnemonic,
             Operands = instruction.OperandSemantics
                 .Select(MapSemanticOperand)
                 .ToArray(),
@@ -562,16 +565,16 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
             return Aarch64ControlFlowKind.Return;
         }
 
-        if (!flags.HasFlag(A64InstructionFlags.IsBranch))
-        {
-            return Aarch64ControlFlowKind.None;
-        }
-
         if (flags.HasFlag(A64InstructionFlags.IsCall))
         {
             return target.HasValue
                 ? Aarch64ControlFlowKind.DirectCall
                 : Aarch64ControlFlowKind.IndirectBranch;
+        }
+
+        if (!flags.HasFlag(A64InstructionFlags.IsBranch))
+        {
+            return Aarch64ControlFlowKind.None;
         }
 
         return IsConditionalMnemonic(instruction.Mnemonic)

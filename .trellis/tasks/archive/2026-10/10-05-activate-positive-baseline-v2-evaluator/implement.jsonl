@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Evaluator baseline, six-stage compatibility and claimability contract."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Read-only manifest/reference validation and evidence retention."}
+{"file":".trellis/tasks/10-05-100x-compatibility-protection-benchmark/design.md","reason":"Parent exact growth rule and baseline immutability."}
+{"file":"fixtures/evaluator/baseline-reference.json","reason":"Historical default baseline behavior must remain unchanged."}
+{"file":"fixtures/evaluator/baselines/compatibility-1x-v2-reference.json","reason":"New additive positive baseline reference to activate explicitly."}

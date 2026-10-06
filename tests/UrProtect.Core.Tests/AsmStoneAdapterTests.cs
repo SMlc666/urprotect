@@ -45,6 +45,20 @@ public sealed class AsmStoneAdapterTests
     }
 
     [Fact]
+    public void AdapterDistinguishesDirectBlFromIndirectBlr()
+    {
+        var directCall = new AsmStoneAdapter().Decode(0x94000004u, 0x1000);
+        Assert.True(directCall.IsSuccess, directCall.Diagnostic);
+        Assert.Equal(Aarch64ControlFlowKind.DirectCall, directCall.Instruction!.ControlFlow);
+        Assert.Equal(0x1010UL, directCall.Instruction.DirectTarget);
+
+        var indirectCall = new AsmStoneAdapter().Decode(0xD63F0000u, 0x1000);
+        Assert.True(indirectCall.IsSuccess, indirectCall.Diagnostic);
+        Assert.Equal(Aarch64ControlFlowKind.IndirectBranch, indirectCall.Instruction!.ControlFlow);
+        Assert.Null(indirectCall.Instruction.DirectTarget);
+    }
+
+    [Fact]
     public void AdapterCoversProjectInstructionContractVectors()
     {
         var vectors = new[]
