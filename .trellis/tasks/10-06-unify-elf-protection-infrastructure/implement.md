@@ -1,6 +1,7 @@
 # Implementation plan
 
 ## Phase 0: Freeze the migration contract
+0. Audit and correct the structural-versus-code-analysis boundary: make generic validation/wrapper paths structural by default, remove whole-image instruction scanning as a production prerequisite, and add selected-function/demand-driven analysis regressions.
 
 1. Record current `protect`, `protect-image`, and `rehydrate-image` outputs as migration fixtures and behavior oracles.
 2. Add occupied-program-header, long-distance branch, PC-relative, call, literal, indirect, jump-table, TLS, CFI, malformed-CFI, and three-runtime fixture inventory entries before implementation.

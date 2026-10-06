@@ -8,6 +8,14 @@ The user value is a protection artifact that remains executable and behaviorally
 
 ## Confirmed requirements
 
+### R0. Structural wrapper and selected-function analysis boundary
+
+- Generic ELF parsing, validation, packing, layout, and rehydration must remain structural operations over program headers, load maps, symbols, relocations, dynamic metadata, and bounded byte ranges; they must not disassemble the whole image or build a whole-image code CFG as a prerequisite.
+- AArch64 instruction semantics, CFG, register/data-flow, indirect-target discovery, and jump-table resolution belong to explicit selected-function passes and demand-driven dependency queries.
+- `protect` and `protect-image` begin from explicit function selectors. `rehydrate-image` consumes the semantic/layout artifact and does not rediscover code meaning from raw source bytes.
+- The legacy global `Aarch64Analyzer`/generic validation scan is observation-only until its scope is redesigned; it must not gate wrapper validation, packing, layout, or protection publication.
+- Whole-file output materialization does not imply whole-program code analysis. Unrelated functions and executable bytes must not affect a selected-function protection result.
+
 ### R1. One production pipeline
 
 - `protect` becomes a high-level one-command facade over the same producer/materializer workflow used by `protect-image` and `rehydrate-image`.

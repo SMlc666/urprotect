@@ -31,6 +31,15 @@ ElfParser / ElfValidator / LoadMap
 `ProtectionRewritePlan` owns semantic movement. `ElfLayoutPlan` owns physical placement. The materializer consumes both; neither mutates the source model while planning.
 
 ## Semantic IR
+## Analysis boundaries
+
+The pipeline separates three concerns that were previously conflated:
+
+1. `ElfStructuralIndex`: whole-ELF bounded parsing of headers, load maps, symbols, relocations, dynamic metadata, and raw ranges. This layer does not disassemble executable segments.
+2. `SelectedFunctionPass`: explicit function-rooted AArch64 decoding, CFG/data-flow, semantic projection, and demand-driven indirect/jump-table dependency resolution. It may query a referenced table, relocation, symbol, or exact target range without scanning unrelated code.
+3. `ElfLayoutPlan`/`NativeImageMaterializer`: whole-file physical placement and byte/header emission. It consumes validated semantic contracts and never reconstructs semantic meaning by rescanning the source image.
+
+The legacy whole-image instruction observer is not a production prerequisite. Structural validation must succeed independently of the decoder backend and of unrelated unknown instructions; instruction-analysis diagnostics belong only to an explicitly requested analysis scope.
 
 Add project-owned records around the existing AsmStone adapter. Every instruction retains source address/file offset/raw encoding plus decoded operands, implicit register/flag effects, control-flow classification, PC-relative expression, literal reference, TLS reference, relocation binding, and unwind effect. The IR distinguishes exact targets, bounded target sets, runtime-resolved targets, and unresolved targets.
 

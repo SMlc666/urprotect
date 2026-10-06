@@ -1,0 +1,10 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Indirect target/table implementation must preserve bounded binary access, typed address domains, program-header authority, stable diagnostics, and malformed tests."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Target proof gaps, table ambiguity, ownership conflicts, and rewrite failures must fail closed without partial output."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Semantic target resolution, deferred/runtime bindings, evidence layers, and glibc/musl/bionic claims must remain separate."}
+{"file":"tests/ContractInventory.md","reason":"The shared semantic snapshot, target/table extension, layout, and evidence contracts need single ownership."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/analysis-boundary-audit.md","reason":"Architecture correction is a prerequisite: wrappers stay structural, selected-function passes own code analysis, and indirect resolution is demand-driven."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/semantic-boundaries.md","reason":"Indirect targets, jump tables, address maps, and sibling-domain boundaries are shared infrastructure constraints."}
+{"file":"src/UrProtect.Core/Aarch64/SemanticModel.cs","reason":"Reuse Exact/BoundedSet/RuntimeResolved/Unresolved target modes and typed address/entity contracts."}
+{"file":"src/UrProtect.Core/Aarch64/SemanticPlanSnapshot.cs","reason":"Reuse canonical extension, target candidate, bounds, digest, and limit contracts rather than adding a second wire model."}
+{"file":"src/UrProtect.Core/Aarch64/FunctionAnalysis.cs","reason":"Selected-function CFG/data-flow is the code-analysis root for indirect control-flow discovery."}
+{"file":"src/UrProtect.Core/Protect/FunctionProtectionService.cs","reason":"Function selectors and selected-function protection closure are the integration boundary."}
