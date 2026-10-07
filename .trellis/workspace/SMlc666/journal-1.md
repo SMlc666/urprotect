@@ -386,3 +386,25 @@ Completed G2 unified current protection workflow. Added one ProtectionWorkflow o
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: Record HostContext evidence runner follow-up
+<!-- trellis-session: v=2 fp=a9d033f87e2daaba -->
+
+**Date**: 2026-10-07
+**Task**: Record HostContext evidence runner follow-up
+**Branch**: `main`
+
+### Summary
+
+Added the HostContext rehydration evidence runner that was omitted from the first G2 product commit. The executable runner builds the native fixture/helper, selects the explicit dynsym transform target, runs current host-context production and rehydration, performs the sealed-memfd handoff, binds record/role/handoff hashes and release evidence, and writes the retained current evidence artifacts. No product behavior or contract changed; the follow-up commit restores the complete G2 evidence surface.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fe14891` | test: add HostContext rehydration evidence runner |
+
+### Status
+
+[OK] **Completed**
