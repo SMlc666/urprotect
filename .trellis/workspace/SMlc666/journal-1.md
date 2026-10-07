@@ -340,3 +340,26 @@ Completed G0 current-contract purge. Removed historical managed/native Payload F
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: Complete G1 namespace-first responsibility boundaries
+<!-- trellis-session: v=2 fp=6e77e5d605487a5e -->
+
+**Date**: 2026-10-07
+**Task**: Complete G1 namespace-first responsibility boundaries
+**Branch**: `main`
+
+### Summary
+
+Completed G1 responsibility-boundaries after two implementation passes and an independent blocker review. Established the checked-in ownership map and deterministic architecture checker with a deliberate forbidden-reference fixture; moved Core and CLI ownership areas into StructuralElf, Aarch64Semantics, SemanticPlanning, ElfLayout, ArtifactProtocol, Application, Infrastructure, and CLI Parsing/Commands/Rendering; extracted ValidationWorkflow, protection planning/code-emission/layout/output seams, Application workflows, and Infrastructure side-effect adapters; split semantic model/snapshot/layout/Payload Frame buckets and reclassified test namespaces. Preserved the current v3 frame contract and kept G2 workflow convergence, HostContext materialization, TLS, CFI, indirect-control, and native changes out of scope. Final independent gates passed: Release build, 266 managed tests, 294 Python tests, 13 fixture cases, 19 regression cases, architecture production plus deliberate fixture self-test, task validation, and git diff --check.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2809137` | refactor: establish G1 responsibility boundaries |
+| `224dcde` | chore(task): record G1 ownership boundaries |
+
+### Status
+
+[OK] **Completed**
