@@ -63,11 +63,11 @@ The musl and bionic rehydration commands are expected to be added or made profil
 
 ## Risky files and rollback points
 
-- `src/UrProtect.Core/Elf/ElfParser.cs`, `ElfTypes.cs`, `LoadMap.cs`: parser/model contract and address domains.
-- `src/UrProtect.Core/Aarch64/`: semantic IR, decoder adapter, CFG, register/resource analysis.
-- `src/UrProtect.Core/Protect/`: producer ABI, layout plan, fixups, publisher, and workflow.
-- `src/UrProtect.Core/Rehydrate/`: Native Image materializer and metadata publication.
-- `src/UrProtect.Cli/CliApplication.cs` and report records: public command/report contract.
+- `src/UrProtect.Core/StructuralElf/ElfParser.cs`, `ElfTypes.cs`, `LoadMap.cs`: parser/model contract and address domains.
+- `src/UrProtect.Core/Aarch64Semantics/`: semantic IR, decoder adapter, CFG, register/resource analysis.
+- `src/UrProtect.Core/Application/Protection/`: producer ABI, layout plan, fixups, publisher, and workflow.
+- `src/UrProtect.Core/Application/Rehydration/`: Native Image materializer and metadata publication.
+- `src/UrProtect.Cli/Commands/CliApplication.cs` and report records: public command/report contract.
 - `fixtures/manifest.json`, runtime matrix, native fixtures, and CI workflows: three-runtime evidence contract.
 
 Rollback remains artifact-safe: each stage writes only temporary output, failure removes staged files, and a failed slice is reverted at its commit boundary without reintroducing an alternate production writer or historical test data.

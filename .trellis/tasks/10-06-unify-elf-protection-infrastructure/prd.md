@@ -69,9 +69,9 @@ The user value is a protection artifact that remains executable and behaviorally
 
 ## Confirmed repository facts
 
-- `src/UrProtect.Core/Protect/FunctionProtectionService.cs` currently finds a `PT_NULL` slot, appends an RX `PT_LOAD`, patches an entry `B imm26`, and rejects direct calls, indirect branches, and most non-terminal PC-relative instructions.
-- `src/UrProtect.Core/Protect/ProtectedImageV1.cs` currently models only `EmitRegion` and `ApplyEntryBranch26` operations.
-- `src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs` currently materializes the `outer-execveat` layout and reports the HostContext materializer as a later boundary.
+- `src/UrProtect.Core/Application/Protection/FunctionProtectionService.cs` currently finds a `PT_NULL` slot, appends an RX `PT_LOAD`, patches an entry `B imm26`, and rejects direct calls, indirect branches, and most non-terminal PC-relative instructions.
+- `src/UrProtect.Core/Application/Protection/ProtectedImageV1.cs` currently models only `EmitRegion` and `ApplyEntryBranch26` operations.
+- `src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs` currently materializes the `outer-execveat` layout and reports the HostContext materializer as a later boundary.
 - The repository has no general `.eh_frame`/CFI rewrite engine or complete TLS semantic rewriter today.
 - The current narrow glibc vertical slice is healthy: Release build succeeds with zero warnings/errors, 175 managed tests pass, protection E2E passes, and rehydration/native-handoff/behavioral-oracle evidence passes.
 

@@ -5,12 +5,21 @@
 1. Verify G0 current-contract purge is complete and freeze file ownership before moving code.
 2. Add the ownership map, namespace rules, forbidden dependency check, and test ownership map.
 3. Extract CLI dispatch/parsing/commands/rendering/publication/native handoff seams.
-4. Extract structural validation/observation/copy publication from `NoOpPipeline`.
+4. Extract structural validation/observation/copy publication from `ValidationWorkflow`.
 5. Extract shared protection request/selection/analysis planning from `FunctionProtectionService.Plan` and `.Protect`.
 6. Split semantic model/snapshot/layout/frame bucket files into concept-oriented files and codecs.
 7. Split pack/rehydration orchestration from policy, materialization, publication, metrics, and evidence adapters.
 8. Move/rename tests to their owning layer and update project namespaces without adding compatibility test aliases.
 9. Run dependency checks, build/tests, inspect the complete diff, and hand off the stable seams to G2.
+
+## G1 blocker-fix execution note
+
+The blocker-fix slice completed the CLI/Application/Infrastructure extraction,
+request and selected-function planner seams, concept-oriented bucket-file split,
+and ownership-qualified test namespace move. The current v3 payload frame,
+protected-image ABI, layout planner/materializer, and command behavior remain
+unchanged; G2 workflow convergence and HostContext materialization remain out of
+scope.
 
 ## Validation
 

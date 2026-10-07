@@ -132,10 +132,10 @@ The HostContext rehydration command/oracle is a new current workflow gate owned 
 
 ## Risky files and rollback points
 
-- `src/UrProtect.Core/Pack/PayloadFrame.cs` and native frame/runtime headers: current wire contract; managed/native changes must land together.
-- `src/UrProtect.Core/Protect/FunctionProtectionService.cs`, `ProtectionPlan.cs`, and `ProtectedImageV1.cs`: shared workflow/artifact ownership.
-- `src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs`: profile-specific materialization and publication boundary.
-- `src/UrProtect.Cli/CliApplication.cs`: public CLI grammar and command routing.
+- `src/UrProtect.Core/ArtifactProtocol/PayloadFrameCodecContracts.cs`, the adjacent managed frame encode/decode/wrapper files, and native frame/runtime headers: current wire contract; managed/native changes must land together.
+- `src/UrProtect.Core/Application/Protection/FunctionProtectionService.cs`, `ProtectionPlan.cs`, and `ProtectedImageV1.cs`: shared workflow/artifact ownership.
+- `src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs`: profile-specific materialization and publication boundary.
+- `src/UrProtect.Cli/Commands/CliApplication.cs`: public CLI grammar and command routing.
 - `native/urprotect-runtime/runtime.c`, `host_context_launcher.c`, and self-tests: HostContext handoff and current frame parsing.
 - `fixtures/manifest.json`, compatibility specs, and evidence scripts: current support claims.
 

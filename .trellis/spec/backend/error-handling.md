@@ -33,11 +33,11 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 
 - `ElfParser.Parse(ReadOnlyMemory<byte>)` returns `ElfParseResult`; malformed
   input becomes diagnostics and a missing `File`, not an exception.
-- `NoOpPipeline.ValidateStructurally` preserves the parsed file when safe.
+- `ValidationWorkflow.ValidateStructurally` preserves the parsed file when safe.
   `ValidateObservationOnly` appends instruction-analysis diagnostics only when
   the explicitly selected observation-only mode is requested, and creates
   output bytes only after all errors are absent and byte identity is proven.
-- `NoOpPipeline.ValidateAndCopyStructurally` accepts an optional `inputOverride`
+- `ValidationWorkflow.ValidateAndCopyStructurally` accepts an optional `inputOverride`
   snapshot so report hashes and copied bytes describe the same source.
   Observation-only copying is explicitly selected through
   `ValidateAndCopyObservationOnly`. Both APIs write a flushed temporary sibling
@@ -64,7 +64,7 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 
 ## CLI Contract
 
-`src/UrProtect.Cli/CliApplication.cs` owns product exit codes:
+`src/UrProtect.Cli/Commands/CliApplication.cs` owns product exit codes:
 
 | Code | Meaning |
 |------|---------|
@@ -105,7 +105,7 @@ pipeline.ValidateAndCopyStructurally(
 ```
 
 Relevant regressions live in `ElfMalformedCorpusTests.cs`,
-`ElfParserFuzzTests.cs`, `BinaryPropertyTests.cs`, `NoOpPipelineTests.cs`,
+`ElfParserFuzzTests.cs`, `BinaryPropertyTests.cs`, `ValidationWorkflowTests.cs`,
 `CliApplicationTests.cs`, `PayloadFrameTests.cs`, and
 `ElfPackServiceTests.cs`.
 

@@ -10,7 +10,7 @@ Make the managed code structure express one-way ownership: structural ELF, selec
 - Establish namespace/directory boundaries for Structural ELF, AArch64 semantics, Semantic Planning, Elf Layout, Artifact Protocol, Application, Infrastructure, and CLI.
 - Split central god objects and bucket files without creating a duplicate semantic model or protocol grammar.
 - Extract `CliApplication` dispatch/parsing/commands/rendering/atomic writing/native handoff responsibilities.
-- Extract `NoOpPipeline` structural validation, observation, and identity-copy publication responsibilities.
+- Extract `ValidationWorkflow` structural validation, observation, and identity-copy publication responsibilities.
 - Extract `FunctionProtectionService` request validation/planning/code emission/layout adaptation/output validation/workflow responsibilities.
 - Split `SemanticModel`, `SemanticPlanSnapshot`, `ElfLayout`, `PayloadFrame`, `ElfPackService`, and `GenericRehydrationEngine` around cohesive reasons to change.
 - Establish one-way dependency checks: domain/semantic/layout code cannot depend on CLI, filesystem, process, or native-handoff details.
@@ -19,14 +19,14 @@ Make the managed code structure express one-way ownership: structural ELF, selec
 
 ## Acceptance Criteria
 
-- [ ] A checked-in ownership map names each namespace/directory owner, allowed dependencies, forbidden dependencies, and the contract types at each seam.
-- [ ] Central files are split or redesigned so each extracted type has one cohesive reason to change; no duplicate semantic model, codec, writer, or validator is introduced.
-- [ ] CLI files contain argument translation/rendering/dispatch only; application workflows own use-case orchestration; infrastructure owns file/process/native publication.
-- [ ] Structural ELF and AArch64 semantic code have no dependency on CLI, filesystem, process metrics, or native handoff.
-- [ ] Protection and rehydration share typed plan/materializer contracts without direct cross-layer implementation coupling.
-- [ ] Automated namespace/dependency checks fail on a deliberately forbidden reference and pass for the current tree.
-- [ ] Test projects/namespaces reflect ownership, with cross-layer tests explicitly integration-owned.
-- [ ] Release build, managed tests, static checks, and `git diff --check` pass without adding compatibility paths.
+- [x] A checked-in ownership map names each namespace/directory owner, allowed dependencies, forbidden dependencies, and the contract types at each seam.
+- [x] Central files are split or redesigned so each extracted type has one cohesive reason to change; no duplicate semantic model, codec, writer, or validator is introduced.
+- [x] CLI files contain argument translation/rendering/dispatch only; application workflows own use-case orchestration; infrastructure owns file/process/native publication.
+- [x] Structural ELF and AArch64 semantic code have no dependency on CLI, filesystem, process metrics, or native handoff.
+- [x] Protection and rehydration share typed plan/materializer contracts without direct cross-layer implementation coupling.
+- [x] Automated namespace/dependency checks fail on a deliberately forbidden reference and pass for the current tree.
+- [x] Test projects/namespaces reflect ownership, with cross-layer tests explicitly integration-owned.
+- [x] Release build, managed tests, static checks, and `git diff --check` pass without adding compatibility paths.
 
 ## Out of Scope
 

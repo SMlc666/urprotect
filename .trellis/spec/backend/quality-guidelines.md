@@ -60,7 +60,7 @@ tests plus the relevant malformed-input path:
 - `BinaryPropertyTests.cs` covers bounded reads, range overflow, and load-map
   round trips.
 - `GoldenReportTests.cs` protects JSON diagnostic/report projections.
-- `NoOpPipelineTests.cs` and `CliApplicationTests.cs` cover atomic output,
+- `ValidationWorkflowTests.cs` and `CliApplicationTests.cs` cover atomic output,
   stable exit codes, JSON stream behavior, and byte identity.
 - `PayloadFrameTests.cs` and `ElfPackServiceTests.cs` cover deterministic
   frames, limits, digests, launcher variants, and publication failures.
@@ -124,12 +124,12 @@ ASLR addresses and timing.
 
 ## Examples
 
-- `src/UrProtect.Core/Elf/ElfParser.cs` demonstrates bounded program-header,
+- `src/UrProtect.Core/StructuralElf/ElfParser.cs` demonstrates bounded program-header,
   dynamic-table, note, relocation, and symbol-version parsing.
-- `src/UrProtect.Core/Pack/ElfPackService.cs` demonstrates source/launcher
+- `src/UrProtect.Core/Application/Pack/ElfPackService.cs` demonstrates source/launcher
   separation, atomic wrapper publication, and final recovery verification.
-- `tests/UrProtect.Core.Tests/GoldenReportTests.cs` demonstrates stable report
-  snapshots rather than assertions on incidental console formatting.
+- `tests/UrProtect.Core.Tests/Cli/GoldenReportTests.cs` demonstrates stable
+  report snapshots rather than assertions on incidental console formatting.
 - `native/urprotect-launcher/Makefile` demonstrates the pinned static-PIE
   compile/link contract and strict AArch64 build checks.
 
