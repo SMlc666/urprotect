@@ -1249,7 +1249,9 @@ public static class ElfLayoutPlanner
                         || fixup.AddressExpression.Kind != TlsAddressExpressionKind.ThreadPointerRelative
                         || fixup.GotEntry is null
                         || type is not (ElfConstants.RArm64TlsIeMovwGottprelG1
-                            or ElfConstants.RArm64TlsIeMovwGottprelG0Nc)))
+                            or ElfConstants.RArm64TlsIeMovwGottprelG0Nc
+                            or ElfConstants.RArm64TlsIeAdrGottprelPage21
+                            or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)))
                 || request.OutputOffset > (ulong)region.CodeBytes.Length
                 || sizeof(uint) > (ulong)region.CodeBytes.Length - request.OutputOffset
                 || (request.OutputOffset & 3) != 0
@@ -1305,6 +1307,7 @@ public static class ElfLayoutPlanner
         ValidateLocalExecAddRequestPairs(sourceFile, regions, fixups, diagnostics);
         ValidateLocalExecLdst32RequestPairs(sourceFile, fixups, diagnostics);
         ValidateInitialExecMovwRequestPairs(sourceFile, fixups, diagnostics);
+        ValidateInitialExecAdrLd64RequestPairs(sourceFile, regions, fixups, diagnostics);
         ValidateLocalExecMovwRequestPairs(sourceFile, fixups, diagnostics);
     }
 
@@ -1478,6 +1481,105 @@ public static class ElfLayoutPlanner
         return valid;
     }
 
+    private static void ValidateInitialExecAdrLd64RequestPairs(
+        ElfFile sourceFile,
+        IReadOnlyList<ElfLayoutRegionRequest> regions,
+        IReadOnlyList<ElfLayoutTlsFixupRequest> fixups,
+        DiagnosticBag diagnostics)
+    {
+        var groups = fixups
+            .Where(request => request?.Fixup?.Relocation?.RelocationType is
+                ElfConstants.RArm64TlsIeAdrGottprelPage21
+                or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)
+            .GroupBy(request => (request.RegionIdentity, request.Fixup.SequenceSourceRange));
+        foreach (var group in groups)
+        {
+            var ordered = group.OrderBy(request => request.Fixup.PairOrdinal).ToArray();
+            var valid = ordered.Length == 2
+                && ordered[0].Fixup.PairOrdinal == 0
+                && ordered[1].Fixup.PairOrdinal == 1
+                && ordered[0].Fixup.Relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
+                && ordered[1].Fixup.Relocation.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+                && ordered[0].Fixup.Relocation.Addend == ordered[1].Fixup.Relocation.Addend
+                && ordered[0].Fixup.Relocation.SymbolIndex == ordered[1].Fixup.Relocation.SymbolIndex
+                && string.Equals(
+                    ordered[0].Fixup.Relocation.SymbolName,
+                    ordered[1].Fixup.Relocation.SymbolName,
+                    StringComparison.Ordinal)
+                && ordered[0].Fixup.GotEntry == ordered[1].Fixup.GotEntry
+                && ordered[0].Fixup.SequenceOutputRange == ordered[1].Fixup.SequenceOutputRange
+                && ordered[0].Fixup.RelocationSourceRange.FileOffset.Value >= ordered[0].Fixup.SequenceSourceRange.FileOffset.Value
+                && ordered[0].Fixup.RelocationSourceRange.VirtualAddress.Value >= ordered[0].Fixup.SequenceSourceRange.VirtualAddress.Value
+                && ordered[0].Fixup.RelocationSourceRange.VirtualAddress.Value <= ulong.MaxValue - sizeof(uint)
+                && ordered[1].Fixup.RelocationSourceRange.VirtualAddress.Value
+                    == ordered[0].Fixup.RelocationSourceRange.VirtualAddress.Value + sizeof(uint)
+                && ordered[0].OutputOffset <= ulong.MaxValue - sizeof(uint)
+                && ordered[1].OutputOffset == ordered[0].OutputOffset + sizeof(uint);
+            var region = valid
+                ? regions.SingleOrDefault(candidate => string.Equals(
+                    candidate.Identity,
+                    group.Key.RegionIdentity,
+                    StringComparison.Ordinal))
+                : null;
+            if (region is null)
+            {
+                valid = false;
+            }
+
+            if (valid && region is not null)
+            {
+                var first = ordered[0].Fixup;
+                var sourceDelta = first.RelocationSourceRange.FileOffset.Value
+                    - first.SequenceSourceRange.FileOffset.Value;
+                var outputDelta = ordered[0].OutputOffset;
+                valid = first.SequenceSourceRange.Size >= 2 * sizeof(uint)
+                    && sourceDelta % sizeof(uint) == 0
+                    && outputDelta % sizeof(uint) == 0
+                    && sourceDelta <= first.SequenceSourceRange.Size - (2 * sizeof(uint))
+                    && region.CodeBytes.Length >= 2 * sizeof(uint)
+                    && outputDelta <= (ulong)region.CodeBytes.Length - (2 * sizeof(uint))
+                    && first.SequenceSourceRange.Size <= int.MaxValue
+                    && first.SequenceSourceRange.Size % sizeof(uint) == 0
+                    && first.SequenceSourceRange.FileOffset.Value <= (ulong)sourceFile.Bytes.Length
+                    && first.SequenceSourceRange.Size <= (ulong)sourceFile.Bytes.Length
+                        - first.SequenceSourceRange.FileOffset.Value
+                    && outputDelta <= (ulong)region.CodeBytes.Length
+                    && first.SequenceSourceRange.Size <= (ulong)region.CodeBytes.Length - outputDelta;
+                if (valid)
+                {
+                    var wordCount = checked((int)(first.SequenceSourceRange.Size / sizeof(uint)));
+                    var sourceWords = new uint[wordCount];
+                    var outputWords = new uint[wordCount];
+                    for (var index = 0; index < wordCount; index++)
+                    {
+                        sourceWords[index] = BinaryPrimitives.ReadUInt32LittleEndian(sourceFile.Bytes.Span.Slice(
+                            checked((int)(first.SequenceSourceRange.FileOffset.Value + ((ulong)index * sizeof(uint)))),
+                            sizeof(uint)));
+                        outputWords[index] = BinaryPrimitives.ReadUInt32LittleEndian(region.CodeBytes.AsSpan(
+                            checked((int)(outputDelta + ((ulong)index * sizeof(uint)))),
+                            sizeof(uint)));
+                    }
+
+                    valid = Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
+                                sourceWords,
+                                checked((int)(sourceDelta / sizeof(uint))),
+                                requireSourceLow12Zero: true)
+                        && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
+                            outputWords,
+                            0,
+                            requireSourceLow12Zero: false);
+                }
+            }
+
+            if (!valid)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLSIE ADRP/LD64 GOTTPREL pair is incomplete, interleaved, or inconsistent in source identity, chain shape, addend, or output mapping.",
+                    ordered.Length == 0 ? null : ordered[0].Fixup.RelocationSourceRange.FileOffset.Value);
+            }
+        }
+    }
     private static void ValidateInitialExecMovwRequestPairs(
         ElfFile sourceFile,
         IReadOnlyList<ElfLayoutTlsFixupRequest> fixups,
@@ -1780,7 +1882,49 @@ public static class ElfLayoutPlanner
         var outputIndex = checked((int)request.OutputOffset);
         var outputEncoding = BinaryPrimitives.ReadUInt32LittleEndian(outputCode.AsSpan(outputIndex, sizeof(uint)));
         uint fixedEncoding;
-        if (relocationType is ElfConstants.RArm64TlsIeMovwGottprelG1 or ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
+        if (relocationType is ElfConstants.RArm64TlsIeAdrGottprelPage21
+            or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)
+        {
+            var isAdr = relocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21;
+            var pairSourceOffset = isAdr
+                ? sourceOffset
+                : sourceOffset >= sizeof(uint) ? sourceOffset - sizeof(uint) : ulong.MaxValue;
+            var pairOutputOffset = isAdr
+                ? (ulong)outputIndex
+                : (ulong)outputIndex >= sizeof(uint) ? (ulong)outputIndex - sizeof(uint) : ulong.MaxValue;
+            if (fixup.GotEntry is null
+                || pairSourceOffset == ulong.MaxValue
+                || pairOutputOffset == ulong.MaxValue
+                || pairSourceOffset > int.MaxValue
+                || pairSourceOffset > (ulong)sourceFile.Bytes.Length
+                || 2 * sizeof(uint) > (ulong)sourceFile.Bytes.Length - pairSourceOffset
+                || pairOutputOffset > (ulong)outputCode.Length
+                || 2 * sizeof(uint) > (ulong)outputCode.Length - pairOutputOffset
+                || !Aarch64TlsInstructionSemantics.TryEncodeInitialExecAdrLd64Pair(
+                    BinaryPrimitives.ReadUInt32LittleEndian(sourceFile.Bytes.Span.Slice(
+                        checked((int)pairSourceOffset), sizeof(uint))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(sourceFile.Bytes.Span.Slice(
+                        checked((int)(pairSourceOffset + sizeof(uint))), sizeof(uint))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(outputCode.AsSpan(
+                        checked((int)pairOutputOffset), sizeof(uint))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(outputCode.AsSpan(
+                        checked((int)(pairOutputOffset + sizeof(uint))), sizeof(uint))),
+                    placement.VirtualAddress.Value + pairOutputOffset,
+                    fixup.GotEntry?.SourceRange.VirtualAddress.Value ?? 0,
+                    fixup.Addend,
+                    out var encodedAdr,
+                    out var encodedLd))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLSIE ADRP/LD64 output pair conflicts with its page, scaled low-12, GOT, opcode, or register contract.",
+                    sourceOffset);
+                return false;
+            }
+
+            fixedEncoding = isAdr ? encodedAdr : encodedLd;
+        }
+        else if (relocationType is ElfConstants.RArm64TlsIeMovwGottprelG1 or ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
         {
             const uint relocationMask = 0x001F_FFE0u;
             if (!Aarch64TlsInstructionSemantics.IsSupportedInitialExecRelocationInstruction(relocationType, sourceEncoding)

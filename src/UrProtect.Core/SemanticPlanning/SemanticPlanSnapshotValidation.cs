@@ -898,6 +898,25 @@ public static partial class SemanticPlanSnapshotCodec
                         site.SourceRange.FileOffset.Value);
                 }
             }
+            else if (binding.AccessModel == TlsAccessModel.InitialExec
+                && relocationType is ElfConstants.RArm64TlsIeAdrGottprelPage21
+                    or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)
+            {
+                var matchingInstructions = binding.InstructionSequence.Instructions
+                    .Where(instruction => instruction is not null
+                        && instruction.SourceRange.VirtualAddress == site.SourceRange.VirtualAddress)
+                    .ToArray();
+                if (matchingInstructions.Length != 1
+                    || !Aarch64TlsInstructionSemantics.IsSupportedInitialExecRelocationInstruction(
+                        relocationType.Value,
+                        matchingInstructions[0].Encoding))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsSequenceMalformed,
+                        "A TLSIE ADRP/LD64 relocation must own the exact AArch64 page or 64-bit GOT-load instruction.",
+                        site.SourceRange.FileOffset.Value);
+                }
+            }
         }
 
         if (!TlsRelocationClassifier.IsCompleteRelocationPattern(
@@ -924,7 +943,7 @@ public static partial class SemanticPlanSnapshotCodec
         {
             diagnostics.Error(
                 DiagnosticCode.TlsSequenceMalformed,
-                "The supported initial-exec snapshot requires one ordered TLSIE MOVW GOTTPREL G1/G0_NC pair and a validated GOT entry.",
+                "The supported initial-exec snapshot requires one ordered TLSIE MOVW G1/G0_NC or ADRP/LD64 GOTTPREL pair and a validated GOT entry.",
                 offset);
         }
         else if (binding.AccessModel == TlsAccessModel.LocalExec
@@ -1047,11 +1066,16 @@ public static partial class SemanticPlanSnapshotCodec
     {
         return binding.GotEntry is not null
             && sites.Count == 2
-            && sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
-            && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG0Nc
-            && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(
-                binding.InstructionSequence.Instructions,
-                sites);
+            && (sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
+                && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG0Nc
+                && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(
+                    binding.InstructionSequence.Instructions,
+                    sites)
+                || sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
+                && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+                && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(
+                    binding.InstructionSequence.Instructions,
+                    sites));
     }
 
     private static bool IsValidLocalExecRelocationPair(

@@ -396,7 +396,7 @@ public static class GenericRehydrationEngine
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "The current transformed TLS semantic slice accepts only local-exec or exact TLSIE MOVW model bindings.",
+                    "The current transformed TLS semantic slice accepts only local-exec or exact TLSIE MOVW/ADRP model bindings.",
                     binding.SourceRange.FileOffset.Value);
                 valid = false;
             }
@@ -706,7 +706,7 @@ public static class GenericRehydrationEngine
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "Rehydration currently materializes only local-exec or exact TLSIE MOVW TLS semantic fixups.",
+                    "Rehydration currently materializes only local-exec or exact TLSIE MOVW/ADRP TLS semantic fixups.",
                     fixup.RelocationSourceRange.FileOffset.Value);
                 continue;
             }

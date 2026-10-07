@@ -212,7 +212,9 @@ public static class ElfLayoutMaterializer
                         || fixup.AddressExpression.Kind != TlsAddressExpressionKind.ThreadPointerRelative
                         || fixup.GotEntry is null
                         || relocationType is not (ElfConstants.RArm64TlsIeMovwGottprelG1
-                            or ElfConstants.RArm64TlsIeMovwGottprelG0Nc))))
+                            or ElfConstants.RArm64TlsIeMovwGottprelG0Nc
+                            or ElfConstants.RArm64TlsIeAdrGottprelPage21
+                            or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc))))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
@@ -315,7 +317,8 @@ public static class ElfLayoutMaterializer
         return ValidateLocalExecAddFixupPairs(sourceFile, plan, output, diagnostics)
             && ValidateLocalExecLdst32FixupPairs(sourceFile, outputFile, plan, output, diagnostics)
             && ValidateLocalExecMovwFixupPairs(sourceFile, outputFile, plan, output, diagnostics)
-            && ValidateInitialExecMovwFixupPairs(sourceFile, plan, output, diagnostics);
+            && ValidateInitialExecMovwFixupPairs(sourceFile, plan, output, diagnostics)
+            && ValidateInitialExecAdrLd64FixupPairs(sourceFile, outputFile, plan, output, diagnostics);
     }
 
     private static bool ValidateLocalExecAddFixupPairs(
@@ -416,6 +419,125 @@ public static class ElfLayoutMaterializer
         return true;
     }
 
+    private static bool ValidateInitialExecAdrLd64FixupPairs(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        ElfLayoutPlan plan,
+        byte[] output,
+        DiagnosticBag diagnostics)
+    {
+        var groups = plan.TlsFixups
+            .Where(decision => decision?.Fixup?.Relocation?.RelocationType is
+                ElfConstants.RArm64TlsIeAdrGottprelPage21
+                or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)
+            .GroupBy(decision => (decision.RegionIdentity, decision.Fixup.SequenceSourceRange));
+        foreach (var group in groups)
+        {
+            var ordered = group.OrderBy(decision => decision.Fixup.PairOrdinal).ToArray();
+            var valid = ordered.Length == 2
+                && ordered[0].Fixup.PairOrdinal == 0
+                && ordered[1].Fixup.PairOrdinal == 1
+                && ordered[0].Fixup.Relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
+                && ordered[1].Fixup.Relocation.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+                && ordered[0].Fixup.Addend == ordered[1].Fixup.Addend
+                && ordered[0].Fixup.Relocation.SymbolIndex == ordered[1].Fixup.Relocation.SymbolIndex
+                && string.Equals(
+                    ordered[0].Fixup.Relocation.SymbolName,
+                    ordered[1].Fixup.Relocation.SymbolName,
+                    StringComparison.Ordinal)
+                && ordered[0].Fixup.GotEntry == ordered[1].Fixup.GotEntry
+                && ordered[0].Fixup.RelocationSourceRange.FileOffset.Value >= ordered[0].Fixup.SequenceSourceRange.FileOffset.Value
+                && ordered[0].Fixup.RelocationSourceRange.VirtualAddress.Value >= ordered[0].Fixup.SequenceSourceRange.VirtualAddress.Value
+                && ordered[0].OutputFileOffset.Value <= ulong.MaxValue - sizeof(uint)
+                && ordered[1].OutputFileOffset.Value == ordered[0].OutputFileOffset.Value + sizeof(uint)
+                && ordered[0].OutputVirtualAddress.Value <= ulong.MaxValue - sizeof(uint)
+                && ordered[1].OutputVirtualAddress.Value == ordered[0].OutputVirtualAddress.Value + sizeof(uint)
+                && ordered[0].Fixup.RelocationSourceRange.FileOffset.Value <= ulong.MaxValue - sizeof(uint)
+                && ordered[1].Fixup.RelocationSourceRange.FileOffset.Value
+                    == ordered[0].Fixup.RelocationSourceRange.FileOffset.Value + sizeof(uint)
+                && ordered[0].Fixup.RelocationSourceRange.VirtualAddress.Value <= ulong.MaxValue - sizeof(uint)
+                && ordered[1].Fixup.RelocationSourceRange.VirtualAddress.Value
+                    == ordered[0].Fixup.RelocationSourceRange.VirtualAddress.Value + sizeof(uint);
+            var placement = valid
+                ? plan.Placements.SingleOrDefault(candidate => string.Equals(
+                    candidate.Identity,
+                    group.Key.RegionIdentity,
+                    StringComparison.Ordinal))
+                : null;
+            if (placement is null)
+            {
+                valid = false;
+            }
+            else if (ordered[0].OutputFileOffset.Value < placement.FileOffset.Value
+                || ordered[0].OutputVirtualAddress.Value < placement.VirtualAddress.Value)
+            {
+                valid = false;
+            }
+
+            if (valid && placement is not null)
+            {
+                var first = ordered[0].Fixup;
+                var sourceDelta = first.RelocationSourceRange.FileOffset.Value
+                    - first.SequenceSourceRange.FileOffset.Value;
+                var outputDelta = ordered[0].OutputFileOffset.Value - placement.FileOffset.Value;
+                var sourcePairDelta = sourceDelta / sizeof(uint) <= int.MaxValue
+                    ? (int)(sourceDelta / sizeof(uint))
+                    : -1;
+                var outputPairDelta = outputDelta / sizeof(uint) <= int.MaxValue
+                    ? (int)(outputDelta / sizeof(uint))
+                    : -1;
+                var sourceWords = Array.Empty<uint>();
+                var outputWords = Array.Empty<uint>();
+                var sourceRead = sourcePairDelta >= 0
+                    && outputPairDelta >= 0
+                    && sourceDelta % sizeof(uint) == 0
+                    && outputDelta % sizeof(uint) == 0
+                    && TryReadWords(
+                        sourceFile.Bytes.Span,
+                        first.SequenceSourceRange.FileOffset.Value,
+                        first.SequenceSourceRange.Size,
+                        out sourceWords)
+                    && TryReadWords(
+                        output,
+                        placement.FileOffset.Value,
+                        placement.Size,
+                        out outputWords);
+                valid = sourceRead
+                    && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
+                        sourceWords,
+                        sourcePairDelta,
+                        requireSourceLow12Zero: true)
+                    && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
+                        outputWords,
+                        outputPairDelta,
+                        requireSourceLow12Zero: false)
+                    && first.GotEntry is { } gotEntry
+                    && Aarch64TlsInstructionSemantics.TryEncodeInitialExecAdrLd64Pair(
+                        sourceWords[sourcePairDelta],
+                        sourceWords[sourcePairDelta + 1],
+                        outputWords[outputPairDelta],
+                        outputWords[outputPairDelta + 1],
+                        ordered[0].OutputVirtualAddress.Value,
+                        gotEntry.SourceRange.VirtualAddress.Value,
+                        first.Addend,
+                        out var expectedAdr,
+                        out var expectedLd)
+                    && outputWords[outputPairDelta] == expectedAdr
+                    && outputWords[outputPairDelta + 1] == expectedLd;
+            }
+
+            if (!valid)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The reparsed TLSIE ADRP/LD64 GOTTPREL pair does not retain its source-preserved GOT chain, page/low-12 semantics, register wiring, addend, and output order.",
+                    ordered.Length == 0 ? null : ordered[0].Fixup.RelocationSourceRange.FileOffset.Value);
+                return false;
+            }
+        }
+
+        return true;
+    }
     private static bool ValidateInitialExecMovwFixupPairs(
         ElfFile sourceFile,
         ElfLayoutPlan plan,

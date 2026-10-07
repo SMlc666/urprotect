@@ -412,15 +412,18 @@ public static class Aarch64TlsSequenceRecognizer
             var validPair = sites.Count == 2
                 && sites[0].PairOrdinal == 0
                 && sites[1].PairOrdinal == 1
-                && sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
-                && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG0Nc
                 && gotEntry is not null
-                && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(instructions, sites);
+                && ((sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
+                        && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG0Nc
+                        && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(instructions, sites))
+                    || (sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
+                        && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+                        && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(instructions, sites)));
             if (!validPair)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSequenceMalformed,
-                    "The supported initial-exec rewrite requires the exact ordered TLSIE MOVW GOTTPREL G1/G0_NC pair and TP/GOT address chain.",
+                    "The supported initial-exec rewrite requires the exact ordered TLSIE MOVW G1/G0_NC or ADRP/LD64 GOTTPREL pair and TP/GOT address chain.",
                     sites[0].SourceRange.FileOffset.Value);
                 complete = false;
             }
@@ -523,9 +526,13 @@ public static class Aarch64TlsSequenceRecognizer
                 && memoryIndices.Length > 0
                 && (relocationSites[0].Binding.RelocationType != ElfConstants.RArm64TlsLeMovwTprelG1
                     || IsSupportedLocalExecMovwSequence(instructions, relocationSites, memoryIndices)),
-            TlsAccessModel.InitialExec => Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(
-                instructions,
-                relocationSites),
+            TlsAccessModel.InitialExec => relocationSites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
+                ? Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(
+                    instructions,
+                    relocationSites)
+                : Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(
+                    instructions,
+                    relocationSites),
             TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic => adrpIndex >= 0
                 && addIndex > adrpIndex
                 && resolverKind == TlsResolverKind.TlsGetAddr

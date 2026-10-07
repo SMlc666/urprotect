@@ -11,6 +11,7 @@ namespace UrProtect.Core.Application.Protection;
 public sealed partial class FunctionProtectionService
 {
     private bool TryBuildProtectedCode(
+        ElfFile sourceFile,
         IReadOnlyList<Aarch64FunctionAnalysis> analyses,
         IReadOnlyList<ProtectionPass> passes,
         out ProtectedCode code,
@@ -35,6 +36,7 @@ public sealed partial class FunctionProtectionService
                 hasFlattening,
                 hasPermutation);
             if (!TryBuildFunction(
+                    sourceFile,
                     analysis,
                     hasFlattening,
                     hasPermutation,
@@ -160,6 +162,7 @@ public sealed partial class FunctionProtectionService
     }
 
     private bool TryBuildFunction(
+        ElfFile sourceFile,
         Aarch64FunctionAnalysis analysis,
         bool flatten,
         bool permutation,
@@ -200,6 +203,15 @@ public sealed partial class FunctionProtectionService
         }
 
         var scratchRegister = flatten && permutation ? (byte)17 : (byte)16;
+        var tlsFacts = sourceFile.TlsMetadata.StaticRelocations
+            .Concat(sourceFile.TlsMetadata.Dynamic.Relocations)
+            .Where(fact => fact.Relocation.Offset >= analysis.Function.Value
+                && analysis.Function.TryGetEnd(out var functionEnd)
+                && fact.Relocation.Offset < functionEnd)
+            .ToArray();
+        var supportsTlsIeAdrLd64 = Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64EmitterSequence(
+            analysis.Instructions,
+            tlsFacts);
         foreach (var instruction in analysis.Instructions)
         {
             if (decoder.UsesGeneralRegister(instruction.Encoding, instruction.Address, StateRegister)
@@ -220,7 +232,9 @@ public sealed partial class FunctionProtectionService
             var isTerminalBranch = controlFlow is Aarch64ControlFlowKind.DirectBranch
                 or Aarch64ControlFlowKind.ConditionalBranch;
             if ((instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true
-                    && !isTerminalBranch)
+                    && !isTerminalBranch
+                    && !(supportsTlsIeAdrLd64
+                        && instruction.Address == tlsFacts[0].Relocation.Offset))
                 || controlFlow is Aarch64ControlFlowKind.DirectCall
                     or Aarch64ControlFlowKind.IndirectBranch)
             {
@@ -306,17 +320,29 @@ public sealed partial class FunctionProtectionService
             return false;
         }
 
-        builder = new ProtectedFunctionBuilder(analysis, flatten, permutation);
+        builder = new ProtectedFunctionBuilder(
+            analysis,
+            flatten,
+            permutation,
+            supportsTlsIeAdrLd64,
+            supportsTlsIeAdrLd64 ? tlsFacts[0].Relocation.Offset : null);
         return true;
     }
 
     private sealed class ProtectedFunctionBuilder
     {
-        public ProtectedFunctionBuilder(Aarch64FunctionAnalysis source, bool flatten, bool permutation)
+        public ProtectedFunctionBuilder(
+            Aarch64FunctionAnalysis source,
+            bool flatten,
+            bool permutation,
+            bool supportsTlsIeAdrLd64,
+            ulong? tlsIeAdrLd64PairAddress)
         {
             Source = source;
             Flatten = flatten;
             Permutation = permutation;
+            SupportsTlsIeAdrLd64 = supportsTlsIeAdrLd64;
+            TlsIeAdrLd64PairAddress = tlsIeAdrLd64PairAddress;
         }
 
         public Aarch64FunctionAnalysis Source { get; }
@@ -324,6 +350,10 @@ public sealed partial class FunctionProtectionService
         public bool Flatten { get; }
 
         public bool Permutation { get; }
+
+        public bool SupportsTlsIeAdrLd64 { get; }
+
+        public ulong? TlsIeAdrLd64PairAddress { get; }
 
         public ulong OutputAddress { get; set; }
 
@@ -378,7 +408,8 @@ public sealed partial class FunctionProtectionService
                 {
                     var instruction = block.Instructions[index];
                     if (instruction.Decode.Instruction!.ControlFlow != Aarch64ControlFlowKind.None
-                        || instruction.Decode.Instruction.Properties.HasFlag(Aarch64InstructionProperties.PcRelative))
+                        || (instruction.Decode.Instruction.Properties.HasFlag(Aarch64InstructionProperties.PcRelative)
+                            && !(SupportsTlsIeAdrLd64 && instruction.Address == TlsIeAdrLd64PairAddress)))
                     {
                         diagnostics.Error(
                             DiagnosticCode.ProtectionUnsupportedInstruction,

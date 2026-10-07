@@ -269,10 +269,61 @@ internal static class ElfFixture
     }
 
     /// <summary>
-    /// GNU AArch64 TLSIE MOVW GOTTPREL shape with a source-preserved writable
-    /// GOT entry owned by R_AARCH64_TLS_TPREL64. The fixture is managed
-    /// semantic/layout evidence only; it is not a native runtime oracle.
+    /// GNU AArch64 TLSIE ADRP/LD64 GOTTPREL shape with a source-preserved
+    /// writable GOT entry owned by R_AARCH64_TLS_TPREL64. The source relocation
+    /// fields retain the relocatable zero page/low-12 encoding; shared layout
+    /// resolves the output fields against the preserved GOT address.
     /// </summary>
+    public static byte[] TlsInitialExecAdrLd64FunctionPie(long relocationAddend = 0)
+    {
+        var bytes = TlsInitialExecMovwFunctionPie(relocationAddend);
+        const int codeOffset = 0x200;
+        const int codeSize = 6 * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int relocationTableOffset = 0x600;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64 + 8,
+            (1UL << 32) | ElfConstants.RArm64TlsIeAdrGottprelPage21);
+        BinaryPrimitives.WriteInt64LittleEndian(
+            bytes.AsSpan(relocationTableOffset + ElfConstants.RelaEntrySize64 + 16),
+            relocationAddend);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + (2 * ElfConstants.RelaEntrySize64) + 8,
+            (1UL << 32) | ElfConstants.RArm64TlsIeLd64GottprelLo12Nc);
+        BinaryPrimitives.WriteInt64LittleEndian(
+            bytes.AsSpan(relocationTableOffset + (2 * ElfConstants.RelaEntrySize64) + 16),
+            relocationAddend);
+
+        var words = new uint[]
+        {
+            0x90000009, // ADRP x9, :gottprel:tls_value (page relocation)
+            0xF9400129, // LDR x9, [x9] (LD64 low-12 relocation)
+            0xD53BD04A, // MRS x10, TPIDR_EL0
+            0x8B090149, // ADD x9, x10, x9 (TLS address)
+            0xB9400120, // LDR w0, [x9]
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        bytes.AsSpan(codeOffset + codeSize, sizeof(uint) * 2).Clear();
+        return bytes;
+    }
     public static byte[] TlsInitialExecMovwFunctionPie(
         long relocationAddend = 0,
         bool useMovn = false)

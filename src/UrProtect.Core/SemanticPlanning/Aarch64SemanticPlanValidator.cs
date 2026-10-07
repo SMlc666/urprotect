@@ -211,7 +211,7 @@ public static class Aarch64SemanticPlanValidator
 
         if (resolution.Fixup.Kind == SemanticFixupKind.Relocation)
         {
-            if (IsInstructionRelocation(resolution.Fixup.Relocation?.Kind))
+            if (IsInstructionRelocation(resolution.Fixup.Relocation))
             {
                 if (resolution.InstructionEncoding is { } instructionEncoding)
                 {
@@ -403,6 +403,40 @@ public static class Aarch64SemanticPlanValidator
             return false;
         }
 
+        if (relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21)
+        {
+            if (!Aarch64TlsInstructionSemantics.TryGetInitialExecAdrRegister(encoding, out _))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticFixupMalformed,
+                    "The TLSIE ADR relocation does not own an ADRP instruction.",
+                    fixup.SourceFileOffset.Value);
+                return false;
+            }
+
+            return true;
+        }
+
+        if (relocation.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)
+        {
+            if (!Aarch64TlsInstructionSemantics.TryGetInitialExecLd64GotRegisters(
+                    encoding,
+                    out _,
+                    out _,
+                    out var gotOffset)
+                || targetValue % sizeof(ulong) != 0
+                || (targetValue & 0xFFF) / sizeof(ulong) != gotOffset / sizeof(ulong))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticFixupMalformed,
+                    "The TLSIE LD64 relocation does not retain its 64-bit scaled GOT low-12 semantics.",
+                    fixup.SourceFileOffset.Value);
+                return false;
+            }
+
+            return true;
+        }
+
         switch (relocation.Kind)
         {
             case Aarch64RelocationKind.AddAbsLo12:
@@ -472,16 +506,20 @@ public static class Aarch64SemanticPlanValidator
         }
     }
 
-    private static bool IsInstructionRelocation(Aarch64RelocationKind? kind) =>
-        kind is Aarch64RelocationKind.Call26
-            or Aarch64RelocationKind.Jump26
-            or Aarch64RelocationKind.ConditionalBranch19
-            or Aarch64RelocationKind.TestBranch14
-            or Aarch64RelocationKind.AdrPrelLo21
-            or Aarch64RelocationKind.AdrPrelPgHi21
-            or Aarch64RelocationKind.Literal19
-            or Aarch64RelocationKind.AddAbsLo12
-            or Aarch64RelocationKind.LoadStore;
+    private static bool IsInstructionRelocation(RelocationBinding? relocation) =>
+        relocation?.Kind is
+            Aarch64RelocationKind.Call26
+                or Aarch64RelocationKind.Jump26
+                or Aarch64RelocationKind.ConditionalBranch19
+                or Aarch64RelocationKind.TestBranch14
+                or Aarch64RelocationKind.AdrPrelLo21
+                or Aarch64RelocationKind.AdrPrelPgHi21
+                or Aarch64RelocationKind.Literal19
+                or Aarch64RelocationKind.AddAbsLo12
+                or Aarch64RelocationKind.LoadStore
+            || relocation?.RelocationType is
+                ElfConstants.RArm64TlsIeAdrGottprelPage21
+                or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc;
 
     private static void ValidateRelocationOnly(
         SemanticRewritePlan plan,
@@ -901,6 +939,11 @@ public static class Aarch64SemanticPlanValidator
                 SemanticFixupKind.Literal19 => PcRelativeExpressionKind.Literal19,
                 _ => null,
             };
+        }
+
+        if (fixup.Relocation?.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21)
+        {
+            return PcRelativeExpressionKind.AdrPrelPgHi21;
         }
 
         return fixup.Relocation?.Kind switch

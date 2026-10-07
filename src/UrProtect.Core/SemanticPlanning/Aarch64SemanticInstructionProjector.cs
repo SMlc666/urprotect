@@ -650,7 +650,8 @@ public static class Aarch64SemanticInstructionProjector
                 PcRelativeExpressionKind.AdrPrelLo21 =>
                     relocation.Kind == Aarch64RelocationKind.AdrPrelLo21,
                 PcRelativeExpressionKind.AdrPrelPgHi21 =>
-                    relocation.Kind == Aarch64RelocationKind.AdrPrelPgHi21,
+                    relocation.Kind == Aarch64RelocationKind.AdrPrelPgHi21
+                    || relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21,
                 PcRelativeExpressionKind.Literal19 =>
                     relocation.Kind == Aarch64RelocationKind.Literal19,
                 _ => false,
@@ -752,7 +753,7 @@ public static class Aarch64SemanticInstructionProjector
         if (expression is not null)
         {
             var matchingRelocations = effectiveRelocations
-                .Where(relocation => MatchesExpression(expression.Kind, relocation.Kind))
+                .Where(relocation => MatchesExpression(expression.Kind, relocation))
                 .ToArray();
             if (matchingRelocations.Length > 1)
             {
@@ -775,7 +776,7 @@ public static class Aarch64SemanticInstructionProjector
                 }
 
                 var relocation = matchingRelocations[0];
-                if (SemanticFixup.GetRelocationWriteSize(relocation.Kind) != InstructionSize)
+                if (SemanticFixup.GetRelocationWriteSize(relocation) != InstructionSize)
                 {
                     diagnostics.Error(
                         DiagnosticCode.SemanticFixupMalformed,
@@ -812,7 +813,7 @@ public static class Aarch64SemanticInstructionProjector
 
         foreach (var relocation in effectiveRelocations)
         {
-            if (!IsInstructionWordRelocation(relocation.Kind))
+            if (!IsInstructionWordRelocation(relocation))
             {
                 diagnostics.Warning(
                     DiagnosticCode.SemanticFixupUnsupported,
@@ -832,12 +833,12 @@ public static class Aarch64SemanticInstructionProjector
         return fixups;
     }
 
-    private static bool IsInstructionWordRelocation(Aarch64RelocationKind kind) =>
-        SemanticFixup.GetRelocationWriteSize(kind) == InstructionSize;
+    private static bool IsInstructionWordRelocation(RelocationBinding relocation) =>
+        SemanticFixup.GetRelocationWriteSize(relocation) == InstructionSize;
 
     private static bool MatchesExpression(
         PcRelativeExpressionKind expressionKind,
-        Aarch64RelocationKind relocationKind) => (expressionKind, relocationKind) switch
+        RelocationBinding relocation) => (expressionKind, relocation.Kind) switch
         {
             (PcRelativeExpressionKind.Branch26, Aarch64RelocationKind.Jump26) => true,
             (PcRelativeExpressionKind.Call26, Aarch64RelocationKind.Call26) => true,
@@ -845,6 +846,8 @@ public static class Aarch64SemanticInstructionProjector
             (PcRelativeExpressionKind.TestBranch14, Aarch64RelocationKind.TestBranch14) => true,
             (PcRelativeExpressionKind.AdrPrelLo21, Aarch64RelocationKind.AdrPrelLo21) => true,
             (PcRelativeExpressionKind.AdrPrelPgHi21, Aarch64RelocationKind.AdrPrelPgHi21) => true,
+            (PcRelativeExpressionKind.AdrPrelPgHi21, Aarch64RelocationKind.ThreadLocal) =>
+                relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21,
             (PcRelativeExpressionKind.Literal19, Aarch64RelocationKind.Literal19) => true,
             _ => false,
         };

@@ -281,9 +281,13 @@ public static class Aarch64SemanticFixupEncoder
                 ResolveRelocationAdr(fixup, outputSourceAddress, outputPlaceAddress, value.Value, targetAddress, diagnostics),
             Aarch64RelocationKind.AdrPrelPgHi21 =>
                 ResolveRelocationAdrp(fixup, outputSourceAddress, outputPlaceAddress, value.Value, targetAddress, diagnostics),
+            Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21 =>
+                ResolveRelocationAdrp(fixup, outputSourceAddress, outputPlaceAddress, value.Value, targetAddress, diagnostics),
             Aarch64RelocationKind.AddAbsLo12 =>
                 ResolveAddLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
             Aarch64RelocationKind.LoadStore =>
+                ResolveLoadStoreLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
+            Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc =>
                 ResolveLoadStoreLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
             _ => UnsupportedRelocation(fixup, outputSourceAddress, targetAddress, diagnostics),
         };
@@ -518,6 +522,7 @@ public static class Aarch64SemanticFixupEncoder
             ElfConstants.RArm64Ldst16AbsLo12Nc => 2UL,
             ElfConstants.RArm64Ldst32AbsLo12Nc => 4UL,
             ElfConstants.RArm64Ldst64AbsLo12Nc => 8UL,
+            ElfConstants.RArm64TlsIeLd64GottprelLo12Nc => 8UL,
             ElfConstants.RArm64Ldst128AbsLo12Nc => 16UL,
             _ => (ulong?)null,
         };

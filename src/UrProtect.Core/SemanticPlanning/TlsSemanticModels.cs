@@ -328,7 +328,8 @@ public static class TlsRelocationClassifier
                     || HasPair(types, ElfConstants.RArm64TlsLeAddTprelHi12, ElfConstants.RArm64TlsLeLdst32TprelLo12Nc)
                     || HasPair(types, ElfConstants.RArm64TlsLeMovwTprelG1, ElfConstants.RArm64TlsLeMovwTprelG0Nc)),
             TlsAccessModel.InitialExec => families.Contains(TlsRelocationFamily.GotTprel)
-                && HasPair(types, ElfConstants.RArm64TlsIeMovwGottprelG1, ElfConstants.RArm64TlsIeMovwGottprelG0Nc),
+                && (HasPair(types, ElfConstants.RArm64TlsIeMovwGottprelG1, ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
+                    || HasPair(types, ElfConstants.RArm64TlsIeAdrGottprelPage21, ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)),
             TlsAccessModel.LocalDynamic => families.Contains(TlsRelocationFamily.Dtpmod)
                 && families.Contains(TlsRelocationFamily.Dtprel)
                 && (HasPair(types, ElfConstants.RArm64TlsLdAdrPage21, ElfConstants.RArm64TlsLdAddLo12Nc)
@@ -372,6 +373,11 @@ public static class Aarch64TlsInstructionSemantics
     private const uint MovzOpcode = 0xD280_0000;
     private const uint MovnOpcode = 0x9280_0000;
     private const uint MovkOpcode = 0xF280_0000;
+    private const uint AdrpOpcodeMask = 0x9F00_0000;
+    private const uint AdrpOpcode = 0x9000_0000;
+    private const uint AdrpImmediateMask = 0x60FF_FFE0;
+    private const uint Ld64UnsignedOpcodeMask = 0xFFC0_0000;
+    private const uint Ld64UnsignedOpcode = 0xF940_0000;
     private const uint AddRegisterOpcodeMask = 0xFF20_0000;
     private const uint AddRegisterOpcode = 0x8B00_0000;
     private const uint AddRegisterShiftMask = 0x00C0_FC00;
@@ -745,11 +751,121 @@ public static class Aarch64TlsInstructionSemantics
         return true;
     }
 
+    /// <summary>
+    /// Validates the exact TLSIE ADRP/LD64 GOTTPREL sequence emitted by GNU
+    /// AArch64 toolchains. The relocatable source form has a zero low-12 field;
+    /// the shared layout path resolves that field against the preserved GOT entry.
+    /// </summary>
+    public static bool IsSupportedInitialExecAdrLd64Pair(
+        IReadOnlyList<SemanticInstruction> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        if (!TryValidateInitialExecAdrLd64PairRelocations(relocationSites, out var firstAddress, out var secondAddress))
+        {
+            return false;
+        }
+
+        var firstIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == firstAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        var secondIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == secondAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        return firstIndex >= 0
+            && secondIndex == firstIndex + 1
+            && IsSupportedInitialExecAdrLd64Sequence(
+                instructions.Select(instruction => instruction.Encoding).ToArray(),
+                firstIndex,
+                requireSourceLow12Zero: true);
+    }
+
+    /// <summary>Validates the canonical TLSIE ADRP/LD64 sequence after projection.</summary>
+    public static bool IsSupportedInitialExecAdrLd64Pair(
+        IReadOnlyList<TlsInstructionRecord> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        if (!TryValidateInitialExecAdrLd64PairRelocations(relocationSites, out var firstAddress, out var secondAddress))
+        {
+            return false;
+        }
+
+        var firstIndex = FindInstructionIndex(instructions, firstAddress);
+        var secondIndex = FindInstructionIndex(instructions, secondAddress);
+        return firstIndex >= 0
+            && secondIndex == firstIndex + 1
+            && IsSupportedInitialExecAdrLd64Sequence(
+                instructions.Select(instruction => instruction.Encoding).ToArray(),
+                firstIndex,
+                requireSourceLow12Zero: true)
+            && instructions.Count(item => item.Role == TlsInstructionRole.TlsMemoryAccess) == 1
+            && instructions.Count(item => item.Role == TlsInstructionRole.GotEntryLoad) == 1;
+    }
+
+    /// <summary>
+    /// Validates the raw TLSIE ADRP/LD64 chain at a pair-relative instruction index.
+    /// </summary>
+    public static bool IsSupportedInitialExecAdrLd64Sequence(
+        IReadOnlyList<uint> encodings,
+        int pairIndex,
+        bool requireSourceLow12Zero = false)
+    {
+        ArgumentNullException.ThrowIfNull(encodings);
+        if (pairIndex < 0 || pairIndex > encodings.Count - 6
+            || !TryGetInitialExecAdrRegister(encodings[pairIndex], out var adrRegister)
+            || !TryGetInitialExecLd64GotRegisters(
+                encodings[pairIndex + 1],
+                out var gotBaseRegister,
+                out var gotValueRegister,
+                out var gotOffset)
+            || gotBaseRegister != adrRegister
+            || (requireSourceLow12Zero && gotOffset != 0)
+            || !TryGetThreadPointerRegister(encodings[pairIndex + 2], out var threadPointerRegister)
+            || !TryGetLocalExecAddressRegister(
+                encodings[pairIndex + 3],
+                threadPointerRegister,
+                gotValueRegister,
+                out var tlsAddressRegister)
+            || threadPointerRegister == gotValueRegister
+            || !TryGetInitialExecTlsAccessRegisters(
+                encodings[pairIndex + 4],
+                out var tlsBaseRegister,
+                out _)
+            || tlsBaseRegister != tlsAddressRegister)
+        {
+            return false;
+        }
+
+        var memoryIndices = encodings
+            .Select((encoding, index) => (encoding, index))
+            .Where(item => IsLoadStoreEncoding(item.encoding))
+            .Select(item => item.index)
+            .ToArray();
+        return memoryIndices.Length == 2
+            && memoryIndices[0] == pairIndex + 1
+            && memoryIndices[1] == pairIndex + 4;
+    }
+
     public static bool IsSupportedInitialExecRelocationInstruction(uint relocationType, uint encoding) =>
         relocationType switch
         {
             ElfConstants.RArm64TlsIeMovwGottprelG1 => TryGetInitialExecMovwRegister(relocationType, encoding, out _),
             ElfConstants.RArm64TlsIeMovwGottprelG0Nc => TryGetInitialExecMovwRegister(relocationType, encoding, out _),
+            ElfConstants.RArm64TlsIeAdrGottprelPage21 => TryGetInitialExecAdrRegister(encoding, out _),
+            ElfConstants.RArm64TlsIeLd64GottprelLo12Nc => TryGetInitialExecLd64GotRegisters(
+                encoding,
+                out _,
+                out _,
+                out _),
             _ => false,
         };
 
@@ -781,6 +897,231 @@ public static class Aarch64TlsInstructionSemantics
         return register != 31;
     }
 
+    public static bool TryGetInitialExecAdrRegister(uint encoding, out byte register)
+    {
+        register = 0;
+        if ((encoding & AdrpOpcodeMask) != AdrpOpcode)
+        {
+            return false;
+        }
+
+        register = (byte)(encoding & 0x1F);
+        return register != 31;
+    }
+
+    public static bool TryGetInitialExecLd64GotRegisters(
+        uint encoding,
+        out byte baseRegister,
+        out byte valueRegister,
+        out uint low12Offset)
+    {
+        baseRegister = 0;
+        valueRegister = 0;
+        low12Offset = 0;
+        if ((encoding & Ld64UnsignedOpcodeMask) != Ld64UnsignedOpcode)
+        {
+            return false;
+        }
+
+        baseRegister = (byte)((encoding >> 5) & 0x1F);
+        valueRegister = (byte)(encoding & 0x1F);
+        low12Offset = ((encoding >> 10) & 0xFFFu) * sizeof(ulong);
+        return baseRegister != 31 && valueRegister != 31;
+    }
+
+    /// <summary>
+    /// Encodes the output words for the bounded TLSIE ADRP/LD64 pair. The ADRP
+    /// points at the source-preserved GOT owner and the LD64 carries its scaled
+    /// low-12 field; register/opcode ownership remains output-owned.
+    /// </summary>
+    public static bool TryEncodeInitialExecAdrLd64Pair(
+        uint sourceAdrEncoding,
+        uint sourceLdEncoding,
+        uint outputAdrEncoding,
+        uint outputLdEncoding,
+        ulong outputAdrAddress,
+        ulong gotAddress,
+        long addend,
+        out uint encodedAdr,
+        out uint encodedLd)
+    {
+        encodedAdr = 0;
+        encodedLd = 0;
+        if (!TryGetInitialExecAdrRegister(sourceAdrEncoding, out var sourceAdrRegister)
+            || !TryGetInitialExecLd64GotRegisters(
+                sourceLdEncoding,
+                out var sourceLdBase,
+                out _,
+                out var sourceLdOffset)
+            || sourceAdrRegister != sourceLdBase
+            || sourceLdOffset != 0)
+        {
+            return false;
+        }
+
+        if (!TryGetInitialExecAdrRegister(outputAdrEncoding, out var outputAdrRegister)
+            || !TryGetInitialExecLd64GotRegisters(
+                outputLdEncoding,
+                out var outputLdBase,
+                out _,
+                out _)
+            || outputAdrRegister != outputLdBase)
+        {
+            return false;
+        }
+
+        if (!TryAddSigned(gotAddress, addend, out var targetAddress)
+            || !TryGetPageImmediate(targetAddress, outputAdrAddress, out var pageImmediate)
+            || targetAddress % sizeof(ulong) != 0)
+        {
+            return false;
+        }
+
+        var low12 = targetAddress & 0xFFF;
+        if (low12 % sizeof(ulong) != 0 || low12 / sizeof(ulong) > 0xFFF)
+        {
+            return false;
+        }
+
+        encodedAdr = (outputAdrEncoding & ~AdrpImmediateMask)
+            | EncodePageImmediate(pageImmediate);
+        encodedLd = (outputLdEncoding & ~(0xFFFu << 10))
+            | (uint)(low12 / sizeof(ulong)) << 10;
+        return true;
+    }
+
+    public static bool TryGetInitialExecAdrLd64PairRelocation(
+        uint firstType,
+        uint secondType,
+        ulong firstAddress,
+        ulong secondAddress,
+        long firstAddend,
+        long secondAddend) =>
+        firstType == ElfConstants.RArm64TlsIeAdrGottprelPage21
+        && secondType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+        && firstAddress <= ulong.MaxValue - sizeof(uint)
+        && secondAddress == firstAddress + sizeof(uint)
+        && firstAddend == secondAddend;
+    public static bool IsSupportedInitialExecAdrLd64EmitterSequence(
+        IReadOnlyList<Aarch64FunctionInstruction> instructions,
+        IReadOnlyList<TlsRelocationFacts> relocationFacts)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationFacts);
+        var ordered = relocationFacts
+            .Where(fact => fact.Relocation.Type is
+                ElfConstants.RArm64TlsIeAdrGottprelPage21
+                or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)
+            .OrderBy(fact => fact.Relocation.Offset)
+            .ToArray();
+        if (ordered.Length != 2
+            || ordered[0].Symbol is null
+            || ordered[1].Symbol is null
+            || ordered[0].Symbol!.SymbolIndex != ordered[1].Symbol!.SymbolIndex
+            || !string.Equals(ordered[0].Symbol!.Name, ordered[1].Symbol!.Name, StringComparison.Ordinal)
+            || !TryGetInitialExecAdrLd64PairRelocation(
+                ordered[0].Relocation.Type,
+                ordered[1].Relocation.Type,
+                ordered[0].Relocation.Offset,
+                ordered[1].Relocation.Offset,
+                ordered[0].Relocation.Addend,
+                ordered[1].Relocation.Addend))
+        {
+            return false;
+        }
+
+        var firstIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.Address == ordered[0].Relocation.Offset)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        return firstIndex >= 0
+            && IsSupportedInitialExecAdrLd64Sequence(
+                instructions.Select(instruction => instruction.Encoding).ToArray(),
+                firstIndex,
+                requireSourceLow12Zero: true);
+    }
+
+    private static bool TryValidateInitialExecAdrLd64PairRelocations(
+        IReadOnlyList<TlsRelocationSite> relocationSites,
+        out VirtualAddress firstAddress,
+        out VirtualAddress secondAddress)
+    {
+        firstAddress = default;
+        secondAddress = default;
+        if (relocationSites.Count != 2
+            || relocationSites[0] is null
+            || relocationSites[1] is null
+            || relocationSites[0].PairOrdinal != 0
+            || relocationSites[1].PairOrdinal != 1
+            || relocationSites[0].Binding.RelocationType != ElfConstants.RArm64TlsIeAdrGottprelPage21
+            || relocationSites[1].Binding.RelocationType != ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+            || relocationSites[0].Binding.SymbolIndex != relocationSites[1].Binding.SymbolIndex
+            || !string.Equals(
+                relocationSites[0].Binding.SymbolName,
+                relocationSites[1].Binding.SymbolName,
+                StringComparison.Ordinal)
+            || !TryGetInitialExecAdrLd64PairRelocation(
+                relocationSites[0].Binding.RelocationType!.Value,
+                relocationSites[1].Binding.RelocationType!.Value,
+                relocationSites[0].SourceRange.VirtualAddress.Value,
+                relocationSites[1].SourceRange.VirtualAddress.Value,
+                relocationSites[0].Binding.Addend,
+                relocationSites[1].Binding.Addend)
+            || relocationSites[0].SourceRange.FileOffset.Value > ulong.MaxValue - sizeof(uint)
+            || relocationSites[1].SourceRange.FileOffset.Value
+                != relocationSites[0].SourceRange.FileOffset.Value + sizeof(uint))
+        {
+            return false;
+        }
+
+        firstAddress = relocationSites[0].SourceRange.VirtualAddress;
+        secondAddress = relocationSites[1].SourceRange.VirtualAddress;
+        return true;
+    }
+
+    private static bool IsLoadStoreEncoding(uint encoding) =>
+        (encoding & 0x3FC0_0000u) is
+            0x3900_0000u or 0x3940_0000u
+            or 0x7900_0000u or 0x7940_0000u
+            or 0xB900_0000u or 0xB940_0000u
+            or 0xF900_0000u or 0xF940_0000u;
+
+    private static bool TryGetPageImmediate(ulong target, ulong place, out long immediate)
+    {
+        var targetPage = target & ~0xFFFUL;
+        var placePage = place & ~0xFFFUL;
+        if (targetPage >= placePage)
+        {
+            var delta = targetPage - placePage;
+            if (delta % 0x1000 != 0 || delta / 0x1000 > (ulong)((1L << 20) - 1))
+            {
+                immediate = default;
+                return false;
+            }
+
+            immediate = (long)(delta / 0x1000);
+            return true;
+        }
+
+        var reverse = placePage - targetPage;
+        if (reverse % 0x1000 != 0 || reverse / 0x1000 > (ulong)(1L << 20))
+        {
+            immediate = default;
+            return false;
+        }
+
+        immediate = -(long)(reverse / 0x1000);
+        return true;
+    }
+
+    private static uint EncodePageImmediate(long immediate)
+    {
+        var bits = unchecked((ulong)immediate);
+        return (uint)(bits & 0x3) << 29
+            | (uint)((bits >> 2) & 0x7FFFF) << 5;
+    }
     public static bool TryGetInitialExecGotLoadRegisters(
         uint encoding,
         out byte baseRegister,

@@ -7,3 +7,4 @@
 {"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/design.md","reason":"Parent ownership of semantic plan, layout, artifact, runtime evidence, and G0-G2 ordering."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsle-movw-g1-g0nc-oracle.md","reason":"Exact ABI constants, MOVW instruction fields, relocation pair order/addends, and GNU linker-produced shape for this implementation slice."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsle-ldst32-oracle.md","reason":"GNU AArch64 assembler/linker evidence for the verified ADD_TPREL_HI12 plus LDST32_TPREL_LO12_NC pair, scale-four semantics, and fail-closed boundaries."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsie-adr-ld64-oracle.md","reason":"GNU AArch64 ABI/toolchain evidence for exact TLSIE ADRP/LD64 GOTTPREL page/low-12 semantics and preserved TLS_TPREL64 GOT ownership."}

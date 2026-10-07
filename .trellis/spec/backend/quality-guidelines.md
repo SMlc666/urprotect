@@ -301,7 +301,9 @@ The current managed positive forms are:
 - local-exec `ADD_TPREL_HI12 + LDST32_TPREL_LO12_NC`;
 - local-exec `MOVW_TPREL_G1 + MOVW_TPREL_G0_NC`;
 - initial-exec `MOVW_GOTTPREL_G1 + MOVW_GOTTPREL_G0_NC` with one preserved
-  `R_AARCH64_TLS_TPREL64` GOT owner.
+  `R_AARCH64_TLS_TPREL64` GOT owner;
+- initial-exec `ADR_GOTTPREL_PAGE21 + LD64_GOTTPREL_LO12_NC` with the same
+  preserved GOT owner and validated page/scale semantics.
 
 ### 3. Contracts
 
@@ -316,6 +318,11 @@ The current managed positive forms are:
   `ElfLayoutPlanner` and `ElfLayoutMaterializer`. PT_TLS template, zero-fill,
   alignment, relocation identity, and initial-exec GOT ownership are reparsed
   and compared before publication.
+- TLSIE ADRP/LD64 requires an adjacent pair, page-congruent ADRP target,
+  signed page-range validity, scaled 64-bit LD64 low-12 offset, and a TP-relative
+  ADD that does not overwrite the GOT-loaded value before the final access.
+- Planner and materializer bind all relocation/source/output offsets through
+  checked bounded ranges before subtraction or integer conversion.
 - A decoder may report zero optional operand-width metadata. The semantic
   projector fills missing widths from a decoded register or memory base and
   uses bounded scalar defaults for non-register operands; nonzero decoder widths
@@ -330,7 +337,7 @@ The current managed positive forms are:
 | --- | --- |
 | missing snapshot for transformed TLS operations | reject before materialization/publication |
 | model, family, symbol, pair order, addend, or register mismatch | stable TLS semantic diagnostic; no artifact |
-| incomplete ADD/MOVW/LDST32 pair or non-supported TLS form | fail closed before layout |
+| incomplete ADD/MOVW/LDST32/ADRP-LD64 pair or non-supported TLS form | fail closed before layout |
 | initial-exec GOT missing, duplicated, overlapping, non-writable, or unmapped | stable GOT/TLS diagnostic; no output |
 | source/output range, opcode, width, scale, or address-map mismatch | layout diagnostic; no Native Image |
 | PT_TLS/template/zero-fill/relocation reparse mismatch | output validation failure; no publication |

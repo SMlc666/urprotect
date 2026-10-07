@@ -41,6 +41,7 @@ public sealed partial class FunctionProtectionService
         var analyses = selectedPlan.Analyses;
         var orderedPasses = ProtectionPassOrdering.Normalize(passSnapshot);
         if (!TryBuildProtectedCode(
+                selectedPlan.File,
                 analyses,
                 orderedPasses,
                 out var protectedCode,
@@ -162,7 +163,7 @@ public sealed partial class FunctionProtectionService
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "The selected function contains a TLS relocation outside the current local-exec or exact TLSIE MOVW rewrite slices.",
+                    "The selected function contains a TLS relocation outside the current local-exec or exact TLSIE MOVW/ADRP rewrite slices.",
                     facts[0].Relocation.Offset);
                 continue;
             }
@@ -177,14 +178,16 @@ public sealed partial class FunctionProtectionService
                     or ElfConstants.RArm64TlsLeMovwTprelG0Nc
                     or ElfConstants.RArm64TlsLeLdst32TprelLo12Nc)
                 : facts.Length == 2
-                    && facts[0].Relocation.Type == ElfConstants.RArm64TlsIeMovwGottprelG1
-                    && facts[1].Relocation.Type == ElfConstants.RArm64TlsIeMovwGottprelG0Nc;
+                    && ((facts[0].Relocation.Type == ElfConstants.RArm64TlsIeMovwGottprelG1
+                            && facts[1].Relocation.Type == ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
+                        || (facts[0].Relocation.Type == ElfConstants.RArm64TlsIeAdrGottprelPage21
+                            && facts[1].Relocation.Type == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc));
             if (!supported)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
                     model == TlsAccessModel.InitialExec
-                        ? "The current initial-exec layout slice accepts only the ordered TLSIE MOVW GOTTPREL G1/G0_NC pair."
+                        ? "The current initial-exec layout slice accepts only the ordered TLSIE MOVW G1/G0_NC or ADRP/LD64 GOTTPREL pair."
                         : "The current local-exec layout slice accepts only ADD TPREL HI12/LO12, ADD TPREL HI12/LDST32 LO12_NC, or MOVW TPREL G1/G0_NC pairs.",
                     facts[0].Relocation.Offset);
                 continue;
@@ -211,7 +214,9 @@ public sealed partial class FunctionProtectionService
             var projectedInstructions = new List<SemanticInstruction>(analysis.Instructions.Count);
             foreach (var sourceInstruction in analysis.Instructions)
             {
-                var projected = Aarch64SemanticInstructionProjector.Project(sourceInstruction);
+                var projected = Aarch64SemanticInstructionProjector.Project(
+                    sourceInstruction,
+                    facts.Select(fact => fact.Relocation));
                 diagnostics.AddRange(projected.Diagnostics);
                 if (projected.Instruction is { } instruction)
                 {
