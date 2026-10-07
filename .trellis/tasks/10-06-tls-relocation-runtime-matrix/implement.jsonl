@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Shared bounded-binary, semantic/layout ownership, atomic publication, and test contracts for TLS rewrite work."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed diagnostics, rollback, and no-partial-publication rules at semantic/materialization boundaries."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Current v3 profiles, PT_TLS adapter rows, HostContext lifecycle, and independent runtime evidence contract."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/prd.md","reason":"User-resolved requirement that all five TLS models are fully modeled/re-written before runtime promotion."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/design.md","reason":"Complete semantic-first TLS model, rewrite, snapshot, layout, lifecycle, and runtime matrix design."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-semantic-baseline.md","reason":"Repository-backed baseline for existing TLS extension, relocation, native adapter, fixture, and archived lifecycle contracts."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/design.md","reason":"Parent ownership of semantic plan, layout, artifact, runtime evidence, and G0-G2 ordering."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsle-movw-g1-g0nc-oracle.md","reason":"Exact ABI constants, MOVW instruction fields, relocation pair order/addends, and GNU linker-produced shape for this implementation slice."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsle-ldst32-oracle.md","reason":"GNU AArch64 assembler/linker evidence for the verified ADD_TPREL_HI12 plus LDST32_TPREL_LO12_NC pair, scale-four semantics, and fail-closed boundaries."}

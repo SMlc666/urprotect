@@ -800,7 +800,7 @@ public static class Aarch64SemanticFixupEncoder
 
         if (fixup.Relocation is { } sourceRelocation)
         {
-            var sourceWriteSize = SemanticFixup.GetRelocationWriteSize(sourceRelocation.Kind);
+            var sourceWriteSize = SemanticFixup.GetRelocationWriteSize(sourceRelocation);
             if (sourceWriteSize == 0)
             {
                 diagnostics.Error(
@@ -846,7 +846,7 @@ public static class Aarch64SemanticFixupEncoder
         }
 
         var requiredAlignment = fixup.Relocation is { } relocation
-            ? SemanticFixup.GetRelocationWriteSize(relocation.Kind)
+            ? SemanticFixup.GetRelocationWriteSize(relocation)
             : (ulong)InstructionAlignment;
         if (requiredAlignment == 0)
         {

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
+using UrProtect.Core.SemanticPlanning;
 
 namespace UrProtect.Core.ElfLayout;
 
@@ -325,6 +326,18 @@ public sealed record ElfBranchPlacementDecision(
     long MinimumDisplacement,
     long MaximumDisplacementExclusive);
 
+public sealed record ElfLayoutTlsFixupRequest(
+    string RegionIdentity,
+    ulong OutputOffset,
+    TlsSemanticFixup Fixup);
+
+public sealed record ElfLayoutTlsFixupDecision(
+    string RegionIdentity,
+    TlsSemanticFixup Fixup,
+    FileOffset OutputFileOffset,
+    VirtualAddress OutputVirtualAddress,
+    uint OutputEncoding);
+
 public sealed record ElfLayoutPlan(
     string SourceSha256,
     ElfLayoutStrategy Strategy,
@@ -338,7 +351,10 @@ public sealed record ElfLayoutPlan(
     IReadOnlyList<ElfLayoutPlacement> Placements,
     IReadOnlyList<ElfLayoutAddressMapEntry> AddressMap,
     IReadOnlyList<ElfBranchPlacementDecision> BranchDecisions,
-    IReadOnlyList<ElfLayoutByteEdit> Edits);
+    IReadOnlyList<ElfLayoutByteEdit> Edits)
+{
+    public IReadOnlyList<ElfLayoutTlsFixupDecision> TlsFixups { get; init; } = Array.Empty<ElfLayoutTlsFixupDecision>();
+}
 
 /// <summary>Bounded serializable projection of a selected physical layout.</summary>
 public sealed record ElfLayoutEvidence(
@@ -354,6 +370,8 @@ public sealed record ElfLayoutEvidence(
     IReadOnlyList<ElfLayoutAddressMapEntry> AddressMap,
     IReadOnlyList<ElfBranchPlacementDecision> BranchDecisions)
 {
+    public IReadOnlyList<ElfLayoutTlsFixupDecision> TlsFixups { get; init; } = Array.Empty<ElfLayoutTlsFixupDecision>();
+
     public const int CurrentSchemaVersion = 1;
 
     public string StrategyValue => Strategy.ToEvidenceValue();

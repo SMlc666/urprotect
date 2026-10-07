@@ -3,36 +3,24 @@ using UrProtect.Core.Aarch64Semantics;
 namespace UrProtect.Core.SemanticPlanning;
 
 /// <summary>
-/// Preserves a TLS relocation or binding for the TLS semantic child.
+/// Carries the single typed TLS access contract through the current semantic-plan
+/// extension owner. Model and relocation family are enums, never string aliases.
 /// </summary>
 public sealed record SemanticTlsBindingExtension : ISemanticPlanExtension
 {
-    public SemanticTlsBindingExtension(
-        SemanticEntityId sourceIdentity,
-        SemanticSourceRange sourceRange,
-        RelocationBinding binding,
-        string model,
-        string? diagnostic = null)
+    public SemanticTlsBindingExtension(TlsBinding binding, string? diagnostic = null)
     {
-        SourceIdentity = sourceIdentity;
-        SourceRange = sourceRange;
         Binding = binding ?? throw new ArgumentNullException(nameof(binding));
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            throw new ArgumentException("A TLS binding model is required.", nameof(model));
-        }
-
-        Model = model;
         Diagnostic = diagnostic;
     }
 
-    public SemanticEntityId SourceIdentity { get; }
+    public TlsBinding Binding { get; }
 
-    public SemanticSourceRange SourceRange { get; }
+    public SemanticEntityId SourceIdentity => Binding.SourceIdentity;
 
-    public RelocationBinding Binding { get; }
+    public SemanticSourceRange SourceRange => Binding.SourceRange;
 
-    public string Model { get; }
+    public TlsAccessModel Model => Binding.AccessModel;
 
     public string? Diagnostic { get; }
 

@@ -137,8 +137,17 @@ public sealed record SemanticFixup
             sourceRange ?? new SemanticSourceRange(
                 sourceFileOffset,
                 sourceAddress,
-                GetRelocationWriteSize(relocation.Kind)),
+                GetRelocationWriteSize(relocation)),
             relocation: relocation);
+    }
+
+    public static ulong GetRelocationWriteSize(RelocationBinding relocation)
+    {
+        ArgumentNullException.ThrowIfNull(relocation);
+        return relocation.RelocationType is { } type
+            && TlsRelocationClassifier.IsTlsRelocation(type)
+                ? TlsRelocationClassifier.GetWriteSize(type)
+                : GetRelocationWriteSize(relocation.Kind);
     }
 
     public static ulong GetRelocationWriteSize(Aarch64RelocationKind kind) => kind switch

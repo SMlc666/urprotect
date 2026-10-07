@@ -141,6 +141,16 @@ public static class ElfParser
             dynamicMetadata,
             dynamicSymbols,
             diagnostics);
+        var tlsMetadata = ElfTlsParser.Parse(
+            bytes,
+            programHeaders,
+            sectionHeaders,
+            loadMap,
+            dynamicEntries,
+            dynamicMetadata,
+            dynamicSymbols,
+            relaRelocations,
+            diagnostics);
 
         var file = new ElfFile(
             bytes,
@@ -156,7 +166,8 @@ public static class ElfParser
             relrWords,
             androidPackedRelocations,
             dynamicSymbols,
-            functionSymbols);
+            functionSymbols,
+            tlsMetadata);
 
         var validation = ElfValidator.Validate(file);
         foreach (var diagnostic in validation.Diagnostics)

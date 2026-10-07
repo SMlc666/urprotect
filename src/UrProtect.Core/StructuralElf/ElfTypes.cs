@@ -20,8 +20,10 @@ public static class ElfConstants
     public const ushort RelrEntrySize64 = 8;
     public const uint ShtSymTab = 2;
     public const uint ShtStrTab = 3;
+    public const uint ShtRela = 4;
     public const uint ShtDynSym = 11;
     public const byte SttFunc = 2;
+    public const byte SttTls = 6;
     public const ushort PnXnum = ushort.MaxValue;
     public const ushort ShnXindex = ushort.MaxValue;
 
@@ -81,6 +83,8 @@ public static class ElfConstants
     public const ulong DtRelr = 36;
     public const ulong DtRelrSz = 35;
     public const ulong DtRelrEnt = 37;
+    public const ulong DtTlsDescPlt = 0x6FFFFEF6;
+    public const ulong DtTlsDescGot = 0x6FFFFEF7;
     public const ulong DtAndroidRel = 0x6000000E;
     public const ulong DtAndroidRelsz = 0x6000000F;
     public const ulong DtAndroidRela = 0x60000011;
@@ -112,6 +116,68 @@ public static class ElfConstants
     public const uint RArm64GlobDat = 1025;
     public const uint RArm64JumpSlot = 1026;
     public const uint RArm64Relative = 1027;
+    public const uint RArm64TlsGdAdrPrel21 = 512;
+    public const uint RArm64TlsGdAdrPage21 = 513;
+    public const uint RArm64TlsGdAddLo12Nc = 514;
+    public const uint RArm64TlsGdMovwG1 = 515;
+    public const uint RArm64TlsGdMovwG0Nc = 516;
+    public const uint RArm64TlsLdAdrPrel21 = 517;
+    public const uint RArm64TlsLdAdrPage21 = 518;
+    public const uint RArm64TlsLdAddLo12Nc = 519;
+    public const uint RArm64TlsLdMovwG1 = 520;
+    public const uint RArm64TlsLdMovwG0Nc = 521;
+    public const uint RArm64TlsLdLdPrel19 = 522;
+    public const uint RArm64TlsLdMovwDtprelG2 = 523;
+    public const uint RArm64TlsLdMovwDtprelG1 = 524;
+    public const uint RArm64TlsLdMovwDtprelG1Nc = 525;
+    public const uint RArm64TlsLdMovwDtprelG0 = 526;
+    public const uint RArm64TlsLdMovwDtprelG0Nc = 527;
+    public const uint RArm64TlsLdAddDtprelHi12 = 528;
+    public const uint RArm64TlsLdAddDtprelLo12 = 529;
+    public const uint RArm64TlsLdAddDtprelLo12Nc = 530;
+    public const uint RArm64TlsLdLdst8DtprelLo12 = 531;
+    public const uint RArm64TlsLdLdst8DtprelLo12Nc = 532;
+    public const uint RArm64TlsLdLdst16DtprelLo12 = 533;
+    public const uint RArm64TlsLdLdst16DtprelLo12Nc = 534;
+    public const uint RArm64TlsLdLdst32DtprelLo12 = 535;
+    public const uint RArm64TlsLdLdst32DtprelLo12Nc = 536;
+    public const uint RArm64TlsLdLdst64DtprelLo12 = 537;
+    public const uint RArm64TlsLdLdst64DtprelLo12Nc = 538;
+    public const uint RArm64TlsIeMovwGottprelG1 = 539;
+    public const uint RArm64TlsIeMovwGottprelG0Nc = 540;
+    public const uint RArm64TlsIeAdrGottprelPage21 = 541;
+    public const uint RArm64TlsIeLd64GottprelLo12Nc = 542;
+    public const uint RArm64TlsIeLdGottprelPrel19 = 543;
+    public const uint RArm64TlsLeMovwTprelG2 = 544;
+    public const uint RArm64TlsLeMovwTprelG1 = 545;
+    public const uint RArm64TlsLeMovwTprelG1Nc = 546;
+    public const uint RArm64TlsLeMovwTprelG0 = 547;
+    public const uint RArm64TlsLeMovwTprelG0Nc = 548;
+    public const uint RArm64TlsLeAddTprelHi12 = 549;
+    public const uint RArm64TlsLeAddTprelLo12 = 550;
+    public const uint RArm64TlsLeAddTprelLo12Nc = 551;
+    public const uint RArm64TlsLeLdst8TprelLo12 = 552;
+    public const uint RArm64TlsLeLdst8TprelLo12Nc = 553;
+    public const uint RArm64TlsLeLdst16TprelLo12 = 554;
+    public const uint RArm64TlsLeLdst16TprelLo12Nc = 555;
+    public const uint RArm64TlsLeLdst32TprelLo12 = 556;
+    public const uint RArm64TlsLeLdst32TprelLo12Nc = 557;
+    public const uint RArm64TlsLeLdst64TprelLo12 = 558;
+    public const uint RArm64TlsLeLdst64TprelLo12Nc = 559;
+    public const uint RArm64TlsDescLdPrel19 = 560;
+    public const uint RArm64TlsDescAdrPrel21 = 561;
+    public const uint RArm64TlsDescAdrPage21 = 562;
+    public const uint RArm64TlsDescLd64Lo12 = 563;
+    public const uint RArm64TlsDescAddLo12 = 564;
+    public const uint RArm64TlsDescOffG1 = 565;
+    public const uint RArm64TlsDescOffG0Nc = 566;
+    public const uint RArm64TlsDescLdr = 567;
+    public const uint RArm64TlsDescAdd = 568;
+    public const uint RArm64TlsDescCall = 569;
+    public const uint RArm64TlsLeLdst128TprelLo12 = 570;
+    public const uint RArm64TlsLeLdst128TprelLo12Nc = 571;
+    public const uint RArm64TlsLdLdst128DtprelLo12 = 572;
+    public const uint RArm64TlsLdLdst128DtprelLo12Nc = 573;
     public const uint RArm64TlsDtpMod64 = 1028;
     public const uint RArm64TlsDtpRel64 = 1029;
     public const uint RArm64TlsTprel64 = 1030;
@@ -426,7 +492,8 @@ public readonly record struct RelaRelocation(
             or ElfConstants.RArm64Ldst32AbsLo12Nc
             or ElfConstants.RArm64Ldst64AbsLo12Nc
             or ElfConstants.RArm64Ldst128AbsLo12Nc => Aarch64RelocationKind.LoadStore,
-        ElfConstants.RArm64TlsDtpMod64
+        >= ElfConstants.RArm64TlsGdAdrPrel21 and <= ElfConstants.RArm64TlsLdLdst128DtprelLo12Nc
+            or ElfConstants.RArm64TlsDtpMod64
             or ElfConstants.RArm64TlsDtpRel64
             or ElfConstants.RArm64TlsTprel64
             or ElfConstants.RArm64TlsDesc => Aarch64RelocationKind.ThreadLocal,
@@ -498,7 +565,8 @@ public sealed class ElfFile
         IReadOnlyList<RelrWord> relrWords,
         IReadOnlyList<AndroidPackedRelocationTable> androidPackedRelocations,
         IReadOnlyList<DynamicSymbol> dynamicSymbols,
-        IReadOnlyList<ElfFunctionSymbol> functionSymbols)
+        IReadOnlyList<ElfFunctionSymbol> functionSymbols,
+        ElfTlsMetadata tlsMetadata)
     {
         Bytes = bytes;
         Header = header;
@@ -514,6 +582,7 @@ public sealed class ElfFile
         AndroidPackedRelocations = androidPackedRelocations;
         DynamicSymbols = dynamicSymbols;
         FunctionSymbols = functionSymbols;
+        TlsMetadata = tlsMetadata;
     }
 
     public ReadOnlyMemory<byte> Bytes { get; }
@@ -543,6 +612,8 @@ public sealed class ElfFile
     public IReadOnlyList<DynamicSymbol> DynamicSymbols { get; }
 
     public IReadOnlyList<ElfFunctionSymbol> FunctionSymbols { get; }
+
+    public ElfTlsMetadata TlsMetadata { get; }
 
     public ElfFileKind Kind =>
         Header.Type == ElfConstants.TypeExec

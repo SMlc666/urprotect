@@ -48,6 +48,7 @@ public enum ProtectedImageOperationCode : byte
 {
     EmitRegion = 1,
     ApplyEntryBranch26 = 2,
+    SemanticPlanSnapshot = 3,
 }
 
 public abstract record ProtectedImageOperation(ProtectedImageOperationCode Code);
@@ -67,6 +68,32 @@ public sealed record ProtectedImageEntryBranchFixup(
     uint TargetOffset,
     ProtectedImageFixupKind FixupKind)
     : ProtectedImageOperation(ProtectedImageOperationCode.ApplyEntryBranch26);
+
+/// <summary>Bounded canonical semantic-plan bytes carried by the one shared snapshot codec.</summary>
+public sealed record ProtectedImageSemanticPlanSnapshot : ProtectedImageOperation
+{
+    private readonly byte[] canonicalBytes;
+
+    public ProtectedImageSemanticPlanSnapshot(byte[] canonicalBytes, string planSha256)
+        : base(ProtectedImageOperationCode.SemanticPlanSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalBytes);
+        ArgumentNullException.ThrowIfNull(planSha256);
+        this.canonicalBytes = canonicalBytes.ToArray();
+        PlanSha256 = planSha256;
+    }
+
+    public ProtectedImageSemanticPlanSnapshot(SemanticPlanSnapshot snapshot)
+        : this(
+            (snapshot ?? throw new ArgumentNullException(nameof(snapshot))).CanonicalBytes,
+            snapshot.PlanSha256)
+    {
+    }
+
+    public byte[] CanonicalBytes => canonicalBytes.ToArray();
+
+    public string PlanSha256 { get; }
+}
 
 public sealed record ProtectedImageDocument(
     string UnitId,
@@ -91,6 +118,7 @@ public static class ProtectedImageLimits
     public const int MaximumOperations = 1024;
     public const int MaximumRegions = MaximumOperations / 2;
     public const int MaximumAggregateCodeBytes = 8 * 1024 * 1024;
+    public const int MaximumSemanticPlanSnapshotBytes = 8 * 1024 * 1024;
     public const int MaximumUnitIdBytes = 128;
     public const int MaximumProducerIdBytes = 128;
     public const int MaximumConsumerIdBytes = 128;
@@ -402,6 +430,21 @@ public static class ProtectedImageCodec
                     targetOffset,
                     (ProtectedImageFixupKind)fixupKind));
             }
+            else if (codeValue == (byte)ProtectedImageOperationCode.SemanticPlanSnapshot)
+            {
+                if (!reader.TryReadUInt32(body, out var snapshotLength)
+                    || snapshotLength is 0 or > ProtectedImageLimits.MaximumSemanticPlanSnapshotBytes
+                    || !reader.TrySlice(checked(body + sizeof(uint)), DigestSize, out var snapshotDigest)
+                    || !reader.TrySlice(checked(body + sizeof(uint) + DigestSize), snapshotLength, out var snapshotBytes)
+                    || checked(body + sizeof(uint) + DigestSize + snapshotLength) != recordEnd)
+                {
+                    return Malformed("Protected Image semantic-plan snapshot operation is truncated or oversized.");
+                }
+
+                operations.Add(new ProtectedImageSemanticPlanSnapshot(
+                    snapshotBytes.ToArray(),
+                    Convert.ToHexString(snapshotDigest.Span).ToLowerInvariant()));
+            }
             else
             {
                 diagnostics.Error(
@@ -587,8 +630,7 @@ public static class ProtectedImageCodec
         }
 
         if (image.Operations is null
-            || image.Operations.Count is < 2 or > ProtectedImageLimits.MaximumOperations
-            || image.Operations.Count % 2 != 0)
+            || image.Operations.Count is < 2 or > ProtectedImageLimits.MaximumOperations)
         {
             diagnostics.Error(DiagnosticCode.ProtectedImageLimitExceeded, "Protected Image operation count is outside the supported bounds.");
             return false;
@@ -596,6 +638,7 @@ public static class ProtectedImageCodec
 
         var regions = new Dictionary<uint, ProtectedImageEmitRegion>();
         var fixups = new List<ProtectedImageEntryBranchFixup>();
+        var semanticSnapshots = new List<ProtectedImageSemanticPlanSnapshot>();
         var sourceRanges = new List<(ulong Start, ulong End)>();
         var codeBytes = 0;
         foreach (var operation in image.Operations)
@@ -658,6 +701,22 @@ public static class ProtectedImageCodec
 
                     fixups.Add(fixup);
                     break;
+                case ProtectedImageSemanticPlanSnapshot snapshot:
+                    semanticSnapshots.Add(snapshot);
+                    if (snapshot.CanonicalBytes.Length is 0 or > ProtectedImageLimits.MaximumSemanticPlanSnapshotBytes)
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.ProtectedImageLimitExceeded,
+                            "Protected Image semantic-plan snapshot is outside the supported byte bound.");
+                        valid = false;
+                    }
+
+                    if (!ValidateSemanticPlanSnapshot(snapshot, diagnostics))
+                    {
+                        valid = false;
+                    }
+
+                    break;
                 default:
                     diagnostics.Error(DiagnosticCode.ProtectedImageUnsupported, "Protected Image operation type is unsupported.");
                     valid = false;
@@ -665,9 +724,18 @@ public static class ProtectedImageCodec
             }
         }
 
-        if (regions.Count == 0 || regions.Count != fixups.Count)
+        if (regions.Count == 0 || regions.Count > ProtectedImageLimits.MaximumRegions || regions.Count != fixups.Count)
         {
-            diagnostics.Error(DiagnosticCode.ProtectedImageMalformed, "Each Protected Image code region must have exactly one entry fixup.");
+            diagnostics.Error(DiagnosticCode.ProtectedImageMalformed, "Each Protected Image code region must have exactly one entry fixup and stay within the region bound.");
+            valid = false;
+        }
+
+        if (semanticSnapshots.Count > 1
+            || image.Operations.Count != (2 * regions.Count) + semanticSnapshots.Count)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageMalformed,
+                "Protected Image permits at most one semantic-plan snapshot operation, with no unclaimed operation records.");
             valid = false;
         }
 
@@ -727,6 +795,140 @@ public static class ProtectedImageCodec
         }
 
         return valid && !diagnostics.HasErrors;
+    }
+
+    private static bool ValidateSemanticPlanSnapshot(
+        ProtectedImageSemanticPlanSnapshot operation,
+        DiagnosticBag diagnostics)
+    {
+        var valid = ValidateSha256(operation.PlanSha256, "semantic-plan", diagnostics);
+        if (operation.PlanSha256 is null
+            || !string.Equals(operation.PlanSha256, operation.PlanSha256.ToLowerInvariant(), StringComparison.Ordinal))
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageMalformed,
+                "Protected Image semantic-plan digest must use canonical lowercase hexadecimal.");
+            valid = false;
+        }
+        var canonicalBytes = operation.CanonicalBytes;
+        if (canonicalBytes.Length is 0 or > ProtectedImageLimits.MaximumSemanticPlanSnapshotBytes)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageLimitExceeded,
+                "Protected Image semantic-plan snapshot is outside the supported byte bound.");
+            return false;
+        }
+
+        var decoded = SemanticPlanSnapshotCodec.Decode(canonicalBytes);
+        diagnostics.AddRange(decoded.Diagnostics);
+        if (!decoded.IsSuccess || decoded.Snapshot is null)
+        {
+            return false;
+        }
+
+        if (!string.Equals(decoded.Snapshot.PlanSha256, operation.PlanSha256, StringComparison.Ordinal))
+        {
+            diagnostics.Error(
+                DiagnosticCode.ProtectedImageIntegrityMismatch,
+                "Protected Image semantic-plan digest does not match the canonical snapshot digest.");
+            valid = false;
+        }
+
+        valid &= ValidateTlsSnapshotFixupConsistency(decoded.Snapshot, diagnostics);
+        return valid;
+    }
+
+    private static bool ValidateTlsSnapshotFixupConsistency(
+        SemanticPlanSnapshot snapshot,
+        DiagnosticBag diagnostics)
+    {
+        var valid = true;
+        var bindings = snapshot.Extensions
+            .OfType<SemanticTlsBindingExtension>()
+            .Select(extension => extension.Binding)
+            .ToArray();
+        var tlsSiteKeys = new HashSet<(ulong Address, ulong FileOffset)>();
+        foreach (var binding in bindings)
+        {
+            if (binding.RelocationSites.Count == 0)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsBindingUnresolved,
+                    "A carried TLS model has no relocation sites to bind its semantic fixups.",
+                    binding.SourceRange.FileOffset.Value);
+                valid = false;
+                continue;
+            }
+
+            foreach (var site in binding.RelocationSites)
+            {
+                var key = (site.SourceRange.VirtualAddress.Value, site.SourceRange.FileOffset.Value);
+                if (!tlsSiteKeys.Add(key))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsSequenceMalformed,
+                        "Multiple carried TLS bindings claim the same source relocation site.",
+                        site.SourceRange.FileOffset.Value);
+                    valid = false;
+                    continue;
+                }
+
+                var matchingFixups = snapshot.Fixups
+                    .Select(item => item.Fixup)
+                    .Where(fixup => fixup.Kind == SemanticFixupKind.Relocation
+                        && fixup.SourceAddress == site.SourceRange.VirtualAddress
+                        && fixup.SourceFileOffset == site.SourceRange.FileOffset
+                        && fixup.Relocation is not null)
+                    .ToArray();
+                if (matchingFixups.Length != 1)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsBindingUnresolved,
+                        "A carried TLS relocation site does not bind exactly one semantic relocation fixup.",
+                        site.SourceRange.FileOffset.Value);
+                    valid = false;
+                    continue;
+                }
+
+                var relocation = matchingFixups[0].Relocation!;
+                if (matchingFixups[0].SourceRange != site.SourceRange
+                    || matchingFixups[0].Target != site.Binding.Target
+                    || relocation.Kind != site.Binding.Kind
+                    || relocation.RelocationType != site.Binding.RelocationType
+                    || relocation.RawInfo != site.Binding.RawInfo
+                    || relocation.SymbolIndex != site.Binding.SymbolIndex
+                    || relocation.IsPlt != site.Binding.IsPlt
+                    || !string.Equals(relocation.SymbolName, site.Binding.SymbolName, StringComparison.Ordinal)
+                    || relocation.Addend != site.Binding.Addend
+                    || relocation.Target != site.Binding.Target
+                    || relocation.RelocationAddress != site.Binding.RelocationAddress
+                    || relocation.RelocationTableAddress != site.Binding.RelocationTableAddress)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsLayoutMismatch,
+                        "A carried TLS binding and semantic fixup disagree on source range or relocation identity.",
+                        site.SourceRange.FileOffset.Value);
+                    valid = false;
+                }
+            }
+        }
+
+        foreach (var item in snapshot.Fixups)
+        {
+            var relocationType = item.Fixup.Relocation?.RelocationType;
+            if (relocationType is { } type
+                && TlsRelocationClassifier.IsTlsRelocation(type)
+                && !tlsSiteKeys.Contains((item.Fixup.SourceAddress.Value, item.Fixup.SourceFileOffset.Value)))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsBindingUnresolved,
+                    "A TLS semantic relocation fixup has no matching typed model binding.",
+                    item.Fixup.SourceFileOffset.Value);
+                valid = false;
+            }
+        }
+
+        return valid;
     }
 
     private static bool ValidateId(string? value, int maximumBytes, string label, DiagnosticBag diagnostics)
@@ -877,6 +1079,12 @@ public static class ProtectedImageCodec
                 writer.Write(fixup.TargetOffset);
                 writer.Write((byte)fixup.FixupKind);
                 writer.Write(new byte[3]);
+                break;
+            case ProtectedImageSemanticPlanSnapshot snapshot:
+                var canonicalBytes = snapshot.CanonicalBytes;
+                writer.Write(checked((uint)canonicalBytes.Length));
+                writer.Write(Convert.FromHexString(snapshot.PlanSha256));
+                writer.Write(canonicalBytes);
                 break;
             default:
                 throw new ArgumentException("Unknown Protected Image operation type.", nameof(operation));

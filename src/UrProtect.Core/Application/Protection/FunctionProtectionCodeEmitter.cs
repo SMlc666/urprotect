@@ -152,7 +152,8 @@ public sealed partial class FunctionProtectionService
                 builder.Source.Function.Value,
                 builder.OutputAddress,
                 builder.Source.Function.Size,
-                builder.OutputSize)).ToArray());
+                builder.OutputSize,
+                new Dictionary<ulong, ulong>(builder.InstructionOutputOffsets))).ToArray());
         results = resultList;
         diagnostics = diagnosticBag.ToArray();
         return true;
@@ -328,11 +329,14 @@ public sealed partial class FunctionProtectionService
 
         public ulong OutputSize { get; set; }
 
+        public Dictionary<ulong, ulong> InstructionOutputOffsets { get; } = new();
+
         public bool Emit(
             CodeEmitter emitter,
             AsmStoneAdapter decoder,
             DiagnosticBag diagnostics)
         {
+            OutputAddress = emitter.PositionAddress;
             var scratchRegister = Flatten && Permutation ? (byte)17 : (byte)16;
             if (Permutation)
             {
@@ -462,6 +466,7 @@ public sealed partial class FunctionProtectionService
             Aarch64FunctionInstruction instruction,
             DiagnosticBag diagnostics)
         {
+            InstructionOutputOffsets[instruction.Address] = emitter.PositionAddress - OutputAddress;
             if (!Permutation)
             {
                 emitter.EmitWord(instruction.Encoding);
@@ -513,7 +518,8 @@ public sealed partial class FunctionProtectionService
         ulong SourceAddress,
         ulong TargetAddress,
         ulong SourceSize,
-        ulong OutputSize);
+        ulong OutputSize,
+        IReadOnlyDictionary<ulong, ulong> InstructionOutputOffsets);
 
     private sealed class CodeEmitter
     {

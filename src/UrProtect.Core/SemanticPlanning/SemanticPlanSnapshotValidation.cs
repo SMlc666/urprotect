@@ -602,10 +602,7 @@ public static partial class SemanticPlanSnapshotCodec
                 ValidateString(relocation.Diagnostic, "relocation-extension diagnostic", false, diagnostics);
                 break;
             case SemanticTlsBindingExtension tls:
-                ValidateEntityId(tls.SourceIdentity, "TLS source identity", diagnostics);
-                ValidateRange(tls.SourceRange, "TLS source", diagnostics);
-                ValidateRelocation(tls.Binding, diagnostics, tls.SourceRange.FileOffset.Value);
-                ValidateString(tls.Model, "TLS model", false, diagnostics);
+                ValidateTlsBinding(tls.Binding, diagnostics);
                 ValidateOptionalString(tls.Diagnostic, "TLS diagnostic", diagnostics);
                 break;
             case SemanticJumpTableExtension jumpTable:
@@ -647,6 +644,736 @@ public static partial class SemanticPlanSnapshotCodec
                 break;
         }
     }
+
+    private static void ValidateTlsBinding(TlsBinding binding, DiagnosticBag diagnostics)
+    {
+        var offset = binding.SourceRange.FileOffset.Value;
+        if (!Enum.IsDefined(typeof(TlsAccessModel), binding.AccessModel)
+            || !Enum.IsDefined(typeof(TlsRelocationFamily), binding.RelocationFamily)
+            || !TlsRelocationClassifier.IsModelCompatible(binding.AccessModel, binding.RelocationFamily))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                "A TLS binding contains an unsupported or model-inconsistent access/relocation family.",
+                offset);
+        }
+
+        ValidateEntityId(binding.SourceIdentity, "TLS source identity", diagnostics, offset);
+        ValidateRange(binding.SourceRange, "TLS source sequence", diagnostics, offset);
+        ValidateTlsModule(binding.Module, diagnostics, offset);
+        ValidateTlsSymbol(binding.Symbol, binding.Module, diagnostics, offset);
+        if (binding.AccessModel is TlsAccessModel.LocalExec or TlsAccessModel.InitialExec
+            && (binding.Module.Kind != TlsModuleIdentityKind.ImageLocal
+                || binding.Module.RuntimeModuleIndex is not null
+                || binding.Module.Template is null
+                || binding.Symbol is null
+                || !binding.Symbol.IsDefined
+                || binding.Symbol.SymbolType != ElfConstants.SttTls))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A local-exec or initial-exec TLS binding requires a resolved image-local module and a defined STT_TLS symbol.",
+                offset);
+        }
+
+        if (binding.SourceRange != binding.InstructionSequence.SourceRange
+            || binding.SourceRange.VirtualAddress.Value % sizeof(uint) != 0
+            || binding.SourceRange.Size % sizeof(uint) != 0)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS binding and instruction sequence do not identify the same aligned source range.",
+                offset);
+        }
+
+        ValidateCount(
+            binding.InstructionSequence.Instructions.Count,
+            SemanticPlanSnapshotLimits.MaximumTlsInstructions,
+            "TLS instruction",
+            diagnostics);
+        var sequence = binding.InstructionSequence;
+        if (sequence.Instructions.Count == 0
+            || !Enum.IsDefined(typeof(TlsResolverKind), sequence.ResolverKind))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "A TLS instruction sequence is empty or has an unsupported resolver kind.",
+                offset);
+        }
+
+        var resolverCallCount = 0;
+        var expectedSequenceSize = checked((ulong)sequence.Instructions.Count * sizeof(uint));
+        if (binding.SourceRange.Size != expectedSequenceSize)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS instruction count does not cover exactly the declared source sequence range.",
+                offset);
+        }
+
+        for (var index = 0; index < sequence.Instructions.Count; index++)
+        {
+            var instruction = sequence.Instructions[index];
+            if (instruction is null)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSequenceMalformed,
+                    "The TLS instruction sequence contains a null instruction.",
+                    offset);
+                continue;
+            }
+
+            var step = checked((ulong)index * sizeof(uint));
+            var virtualRangeValid = TryAdd(binding.SourceRange.VirtualAddress.Value, step, out var expectedVirtual);
+            var fileRangeValid = TryAdd(binding.SourceRange.FileOffset.Value, step, out var expectedFile);
+            if (!virtualRangeValid || !fileRangeValid)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSequenceMalformed,
+                    "The TLS instruction sequence address arithmetic overflowed its typed source domain.",
+                    offset);
+            }
+
+            if (!instruction.SourceRange.IsInstructionRange
+                || instruction.SourceRange.Size != sizeof(uint)
+                || !virtualRangeValid
+                || !fileRangeValid
+                || instruction.SourceRange.VirtualAddress.Value != expectedVirtual
+                || instruction.SourceRange.FileOffset.Value != expectedFile
+                || !Enum.IsDefined(typeof(TlsInstructionRole), instruction.Role))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSequenceMalformed,
+                    "A TLS sequence contains a non-contiguous, unaligned, or unsupported instruction record.",
+                    instruction.SourceRange.FileOffset.Value);
+            }
+
+            ValidateString(instruction.Mnemonic, "TLS instruction mnemonic", false, diagnostics, instruction.SourceRange.FileOffset.Value);
+            ValidateCount(
+                instruction.InputRegisters.Count,
+                SemanticPlanSnapshotLimits.MaximumCandidates,
+                "TLS input register",
+                diagnostics);
+            ValidateCount(
+                instruction.OutputRegisters.Count,
+                SemanticPlanSnapshotLimits.MaximumCandidates,
+                "TLS output register",
+                diagnostics);
+            foreach (var register in instruction.InputRegisters.Concat(instruction.OutputRegisters))
+            {
+                ValidateRegister(register, diagnostics, instruction.SourceRange.FileOffset.Value);
+            }
+
+            ValidateCount(
+                instruction.RegisterEffects.Count,
+                SemanticPlanSnapshotLimits.MaximumRegisterEffectsPerInstruction,
+                "TLS register effect",
+                diagnostics);
+            foreach (var effect in instruction.RegisterEffects)
+            {
+                ValidateRegisterEffect(effect, diagnostics, instruction.SourceRange.FileOffset.Value);
+            }
+
+            if (instruction.IsResolverCall)
+            {
+                resolverCallCount++;
+                if (!instruction.IsCall)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsSequenceMalformed,
+                        "A TLS resolver-call instruction is not marked as a call.",
+                        instruction.SourceRange.FileOffset.Value);
+                }
+            }
+        }
+
+        var needsResolver = binding.AccessModel is TlsAccessModel.LocalDynamic
+            or TlsAccessModel.GeneralDynamic
+            or TlsAccessModel.TlsDesc;
+        if ((needsResolver && (sequence.ResolverKind == TlsResolverKind.None
+                || resolverCallCount != 1
+                || sequence.ResolverTarget is null))
+            || (!needsResolver && (sequence.ResolverKind != TlsResolverKind.None
+                || resolverCallCount != 0
+                || sequence.ResolverTarget is not null)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS model and resolver call ownership are incomplete or inconsistent.",
+                offset);
+        }
+
+        if (binding.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+            && sequence.ResolverKind != TlsResolverKind.TlsGetAddr
+            || binding.AccessModel == TlsAccessModel.TlsDesc
+                && sequence.ResolverKind != TlsResolverKind.TlsDesc)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS instruction sequence uses the wrong resolver family for its access model.",
+                offset);
+        }
+
+        ValidateTarget(sequence.ResolverTarget, "TLS resolver target", diagnostics, offset);
+        ValidateCount(
+            binding.RelocationSites.Count,
+            SemanticPlanSnapshotLimits.MaximumTlsRelocationSites,
+            "TLS relocation site",
+            diagnostics);
+        var relocationSites = new HashSet<(VirtualAddress VirtualAddress, FileOffset FileOffset)>();
+        var familySet = new HashSet<TlsRelocationFamily>();
+        foreach (var site in binding.RelocationSites)
+        {
+            if (site is null || site.Binding is null)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSequenceMalformed,
+                    "The TLS binding contains a null relocation site or relocation binding.",
+                    offset);
+                continue;
+            }
+
+            var relocationType = site.Binding.RelocationType;
+            var writeSize = relocationType is { } type ? TlsRelocationClassifier.GetWriteSize(type) : 0;
+            ValidateRange(site.SourceRange, "TLS relocation site", diagnostics, site.SourceRange.FileOffset.Value);
+            if (!Enum.IsDefined(typeof(TlsRelocationFamily), site.Family)
+                || !TlsRelocationClassifier.IsModelCompatible(binding.AccessModel, site.Family)
+                || relocationType is null
+                || TlsRelocationClassifier.GetFamily(relocationType.Value) != site.Family
+                || (TlsRelocationClassifier.GetAccessModel(relocationType.Value) is { } inferredModel
+                    && inferredModel != binding.AccessModel)
+                || (binding.Symbol is not null
+                    && (site.Binding.SymbolIndex != binding.Symbol.SymbolIndex
+                        || !string.Equals(site.Binding.SymbolName, binding.Symbol.Name, StringComparison.Ordinal)))
+                || writeSize == 0
+                || site.SourceRange.Size != writeSize
+                || site.SourceRange.FileOffset.Value % writeSize != 0
+                || site.SourceRange.VirtualAddress.Value % writeSize != 0
+                || site.PairOrdinal < 0
+                || (site.Binding.RelocationAddress is { } siteAddress
+                    && siteAddress != site.SourceRange.VirtualAddress))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSequenceMalformed,
+                    "A TLS relocation site has an unsupported family, write range, pair identity, or model association.",
+                    site.SourceRange.FileOffset.Value);
+            }
+
+            ValidateRelocation(site.Binding, diagnostics, site.SourceRange.FileOffset.Value);
+            if (!relocationSites.Add((site.SourceRange.VirtualAddress, site.SourceRange.FileOffset)))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSequenceMalformed,
+                    "A TLS binding contains duplicate relocation sites.",
+                    site.SourceRange.FileOffset.Value);
+            }
+
+            familySet.Add(site.Family);
+            if (relocationType is { } codeType
+                && codeType < ElfConstants.RArm64TlsDtpMod64
+                && !binding.InstructionSequence.Instructions.Any(instruction =>
+                    instruction is not null
+                    && instruction.SourceRange.VirtualAddress == site.SourceRange.VirtualAddress))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSequenceMalformed,
+                    "A TLS instruction relocation site is not owned by the declared source instruction sequence.",
+                    site.SourceRange.FileOffset.Value);
+            }
+
+            if (binding.AccessModel == TlsAccessModel.LocalExec && relocationType is { } localExecType)
+            {
+                var matchingInstructions = binding.InstructionSequence.Instructions
+                    .Where(instruction => instruction is not null
+                        && instruction.SourceRange.VirtualAddress == site.SourceRange.VirtualAddress)
+                    .ToArray();
+                if (matchingInstructions.Length != 1
+                    || !Aarch64TlsInstructionSemantics.IsSupportedLocalExecRelocationInstruction(
+                        localExecType,
+                        matchingInstructions[0].Encoding))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsSequenceMalformed,
+                        "A local-exec TPREL relocation must own an instruction with the exact supported opcode and immediate shift in the canonical source sequence.",
+                        site.SourceRange.FileOffset.Value);
+                }
+            }
+        }
+
+        if (!TlsRelocationClassifier.IsCompleteRelocationPattern(
+                binding.AccessModel,
+                binding.RelocationSites
+                    .Where(site => site is not null
+                        && site.Binding is not null
+                        && site.Binding.RelocationType.HasValue)
+                    .Select(site => site.Binding!.RelocationType!.Value)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS binding omits one or more required relocation-family sites for its model.",
+                offset);
+        }
+
+        var orderedLocalExecSites = binding.RelocationSites
+            .Where(site => site is not null)
+            .OrderBy(site => site.PairOrdinal)
+            .ToArray();
+        if (binding.AccessModel == TlsAccessModel.InitialExec
+            && (binding.GotEntry is null
+                || !IsValidInitialExecRelocationPair(binding, orderedLocalExecSites)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The supported initial-exec snapshot requires one ordered TLSIE MOVW GOTTPREL G1/G0_NC pair and a validated GOT entry.",
+                offset);
+        }
+        else if (binding.AccessModel == TlsAccessModel.LocalExec
+            && !IsValidLocalExecRelocationPair(binding, orderedLocalExecSites))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The supported local-exec snapshot requires one ordered ADD HI12/LO12, ADD HI12/LDST32 LO12_NC, or MOVW G1/G0_NC pair with a resolved symbol and consistent addend.",
+                offset);
+        }
+
+        if (!familySet.Contains(binding.RelocationFamily))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS binding's primary relocation family is absent from its typed relocation sites.",
+                offset);
+        }
+
+        if (binding.AccessModel == TlsAccessModel.InitialExec
+            && binding.GotEntry is { } gotEntry)
+        {
+            ValidateTlsGotEntry(gotEntry, binding.Module, binding.Symbol, binding.Addend, diagnostics, offset);
+        }
+
+        if (binding.AccessSize is not (1 or 2 or 4 or 8 or 16))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanSnapshotMalformed,
+                "A TLS access width is outside the supported scalar/vector widths.",
+                offset);
+        }
+
+        var expression = binding.AddressExpression;
+        var expectedExpression = binding.AccessModel switch
+        {
+            TlsAccessModel.LocalExec or TlsAccessModel.InitialExec => TlsAddressExpressionKind.ThreadPointerRelative,
+            TlsAccessModel.LocalDynamic => TlsAddressExpressionKind.ModuleRelative,
+            TlsAccessModel.GeneralDynamic => TlsAddressExpressionKind.ResolverReturned,
+            TlsAccessModel.TlsDesc => TlsAddressExpressionKind.DescriptorMediated,
+            _ => (TlsAddressExpressionKind?)null,
+        };
+        if (!Enum.IsDefined(typeof(TlsAddressExpressionKind), expression.Kind)
+            || expectedExpression is null
+            || expectedExpression.Value != expression.Kind
+            || expression.Module != binding.Module
+            || expression.Symbol != binding.Symbol
+            || expression.Addend != binding.Addend)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS address expression does not match the typed model, module, and symbol identities.",
+                offset);
+        }
+
+        if (expression.BaseRegister is { } baseRegister)
+        {
+            ValidateRegister(baseRegister, diagnostics, offset);
+        }
+
+        if (expression.ValueRegister is { } valueRegister)
+        {
+            ValidateRegister(valueRegister, diagnostics, offset);
+        }
+
+        if (!Enum.IsDefined(typeof(TlsModuleIdentityKind), binding.Module.Kind)
+            || string.IsNullOrWhiteSpace(binding.Module.Identity))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "The TLS module identity is missing or unsupported.",
+                offset);
+        }
+
+        ValidateCount(
+            binding.ProfileRequirements.Count,
+            SemanticPlanSnapshotLimits.MaximumTlsRequirements,
+            "TLS profile requirement",
+            diagnostics);
+        var profiles = new HashSet<TlsProfile>();
+        foreach (var requirement in binding.ProfileRequirements)
+        {
+            if (requirement is null
+                || !Enum.IsDefined(typeof(TlsProfile), requirement.Profile)
+                || !profiles.Add(requirement.Profile))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanSnapshotMalformed,
+                    "A TLS profile requirement is unsupported or duplicated.",
+                    offset);
+            }
+        }
+
+        ValidateCount(
+            binding.RuntimeRequirements.Count,
+            SemanticPlanSnapshotLimits.MaximumTlsRequirements,
+            "TLS runtime requirement",
+            diagnostics);
+        var runtimes = new HashSet<(TlsRuntime Runtime, TlsRuntimeRequirementKind Kind)>();
+        foreach (var requirement in binding.RuntimeRequirements)
+        {
+            if (requirement is null
+                || !Enum.IsDefined(typeof(TlsRuntime), requirement.Runtime)
+                || !Enum.IsDefined(typeof(TlsRuntimeRequirementKind), requirement.Kind)
+                || !runtimes.Add((requirement.Runtime, requirement.Kind)))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanSnapshotMalformed,
+                    "A TLS runtime requirement is unsupported or duplicated for its runtime.",
+                    offset);
+            }
+        }
+
+        ValidateModelSequenceRoles(binding, diagnostics);
+    }
+
+    private static bool IsValidInitialExecRelocationPair(
+        TlsBinding binding,
+        IReadOnlyList<TlsRelocationSite> sites)
+    {
+        return binding.GotEntry is not null
+            && sites.Count == 2
+            && sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
+            && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG0Nc
+            && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(
+                binding.InstructionSequence.Instructions,
+                sites);
+    }
+
+    private static bool IsValidLocalExecRelocationPair(
+        TlsBinding binding,
+        IReadOnlyList<TlsRelocationSite> sites)
+    {
+        if (binding.Symbol is null
+            || sites.Count != 2
+            || sites[0].Binding is null
+            || sites[1].Binding is null
+            || sites[0].PairOrdinal != 0
+            || sites[1].PairOrdinal != 1
+            || sites[0].Binding.Addend != binding.Addend
+            || sites[1].Binding.Addend != binding.Addend
+            || sites[0].SourceRange.VirtualAddress.Value >= sites[1].SourceRange.VirtualAddress.Value
+            || sites[0].SourceRange.FileOffset.Value > ulong.MaxValue - sizeof(uint)
+            || sites[1].SourceRange.FileOffset.Value
+                != sites[0].SourceRange.FileOffset.Value + sizeof(uint))
+        {
+            return false;
+        }
+
+        var firstType = sites[0].Binding.RelocationType.GetValueOrDefault();
+        var secondType = sites[1].Binding.RelocationType.GetValueOrDefault();
+        var isAddPair = firstType == ElfConstants.RArm64TlsLeAddTprelHi12
+            && secondType is ElfConstants.RArm64TlsLeAddTprelLo12 or ElfConstants.RArm64TlsLeAddTprelLo12Nc;
+        if (isAddPair)
+        {
+            return Aarch64TlsInstructionSemantics.IsSupportedLocalExecAddPair(instructions: binding.InstructionSequence.Instructions, relocationSites: sites);
+        }
+
+        var isLdst32Pair = firstType == ElfConstants.RArm64TlsLeAddTprelHi12
+            && secondType == ElfConstants.RArm64TlsLeLdst32TprelLo12Nc;
+        if (isLdst32Pair)
+        {
+            return binding.Symbol is not null
+                && Aarch64TlsInstructionSemantics.TryAddSigned(
+                    binding.Symbol.Value,
+                    binding.Addend,
+                    out var tprelOffset)
+                && Aarch64TlsInstructionSemantics.IsSupportedLocalExecLdst32Pair(
+                    binding.InstructionSequence.Instructions,
+                    sites,
+                    tprelOffset);
+        }
+
+        if (firstType != ElfConstants.RArm64TlsLeMovwTprelG1
+            || secondType != ElfConstants.RArm64TlsLeMovwTprelG0Nc)
+        {
+            return false;
+        }
+
+        var instructions = binding.InstructionSequence.Instructions;
+        var firstIndex = FindTlsInstructionIndex(instructions, sites[0].SourceRange.VirtualAddress);
+        var secondIndex = FindTlsInstructionIndex(instructions, sites[1].SourceRange.VirtualAddress);
+        if (firstIndex < 0
+            || secondIndex != firstIndex + 1
+            || !Aarch64TlsInstructionSemantics.IsSupportedLocalExecMovwPair(
+                firstType,
+                instructions[firstIndex].Encoding,
+                sites[0].SourceRange.VirtualAddress.Value,
+                sites[0].Binding.Addend,
+                secondType,
+                instructions[secondIndex].Encoding,
+                sites[1].SourceRange.VirtualAddress.Value,
+                sites[1].Binding.Addend)
+            || !Aarch64TlsInstructionSemantics.TryGetLocalExecMovwRegister(
+                firstType,
+                instructions[firstIndex].Encoding,
+                out var tprelRegister))
+        {
+            return false;
+        }
+
+        var threadPointerInstructions = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => Aarch64TlsInstructionSemantics.TryGetThreadPointerRegister(
+                item.instruction.Encoding,
+                out _))
+            .ToArray();
+        if (threadPointerInstructions.Length != 1
+            || !Aarch64TlsInstructionSemantics.TryGetThreadPointerRegister(
+                threadPointerInstructions[0].instruction.Encoding,
+                out var threadPointerRegister))
+        {
+            return false;
+        }
+
+        var threadPointerIndex = threadPointerInstructions[0].index;
+        if (threadPointerIndex != firstIndex - 1
+            && threadPointerIndex != secondIndex + 1)
+        {
+            return false;
+        }
+
+        // The TP read and MOVW pair must be distinct live values until ADD
+        // consumes them. A register alias would make the address expression
+        // semantically different from TP + TPREL.
+        if (threadPointerRegister == tprelRegister)
+        {
+            return false;
+        }
+
+        var expectedAddIndex = Math.Max(secondIndex, threadPointerIndex) + 1;
+        var addInstructions = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.index == expectedAddIndex
+                && Aarch64TlsInstructionSemantics.TryGetLocalExecAddressRegister(
+                    item.instruction.Encoding,
+                    threadPointerRegister,
+                    tprelRegister,
+                    out _))
+            .ToArray();
+        if (addInstructions.Length != 1
+            || !Aarch64TlsInstructionSemantics.TryGetLocalExecAddressRegister(
+                addInstructions[0].instruction.Encoding,
+                threadPointerRegister,
+                tprelRegister,
+                out var addressRegister))
+        {
+            return false;
+        }
+
+        var memoryAccesses = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.Role == TlsInstructionRole.TlsMemoryAccess)
+            .ToArray();
+        return memoryAccesses.Length == 1
+            && memoryAccesses[0].index == addInstructions[0].index + 1
+            && memoryAccesses[0].instruction.InputRegisters.Any(register =>
+                register.Class == Aarch64RegisterClass.General
+                && register.Role == Aarch64RegisterRole.None
+                && register.Width == 64
+                && register.Index == addressRegister);
+    }
+
+    private static int FindTlsInstructionIndex(
+        IReadOnlyList<TlsInstructionRecord> instructions,
+        VirtualAddress address) => instructions
+        .Select((instruction, index) => (instruction, index))
+        .Where(item => item.instruction is not null && item.instruction.SourceRange.VirtualAddress == address)
+        .Select(item => item.index)
+        .DefaultIfEmpty(-1)
+        .First();
+
+    private static void ValidateTlsGotEntry(
+        TlsGotEntryBinding gotEntry,
+        TlsModuleIdentity module,
+        TlsSymbolIdentity? symbol,
+        long addend,
+        DiagnosticBag diagnostics,
+        ulong offset)
+    {
+        ValidateEntityId(gotEntry.SourceIdentity, "TLSIE GOT source identity", diagnostics, offset);
+        ValidateRange(gotEntry.SourceRange, "TLSIE GOT source range", diagnostics, offset);
+        ValidateRelocation(gotEntry.Relocation, diagnostics, offset);
+        var valid = symbol is not null
+            && gotEntry.Symbol == symbol
+            && gotEntry.Addend == addend
+            && gotEntry.SourceRange.Size == sizeof(ulong)
+            && gotEntry.SourceRange.FileOffset.Value % sizeof(ulong) == 0
+            && gotEntry.SourceRange.VirtualAddress.Value % sizeof(ulong) == 0
+            && gotEntry.Relocation.RelocationType == ElfConstants.RArm64TlsTprel64
+            && !gotEntry.Relocation.IsPlt
+            && gotEntry.Relocation.Kind == Aarch64RelocationKind.ThreadLocal
+            && gotEntry.Relocation.SymbolIndex == gotEntry.Symbol.SymbolIndex
+            && string.Equals(gotEntry.Relocation.SymbolName, gotEntry.Symbol.Name, StringComparison.Ordinal)
+            && gotEntry.Relocation.Addend == addend
+            && gotEntry.Relocation.RelocationAddress == gotEntry.SourceRange.VirtualAddress
+            && gotEntry.Relocation.Target.Resolution == SemanticTargetResolution.RuntimeResolved
+            && string.Equals(
+                gotEntry.Relocation.Target.RuntimeBinding,
+                $"tls-got:{module.Identity}:{gotEntry.Symbol.Name}",
+                StringComparison.Ordinal)
+            && gotEntry.Relocation.IsKindConsistent;
+        if (!valid)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "The TLSIE GOT entry has an invalid source identity, relocation, module, symbol, range, or addend.",
+                offset);
+        }
+    }
+
+    private static void ValidateTlsModule(
+        TlsModuleIdentity module,
+        DiagnosticBag diagnostics,
+        ulong offset)
+    {
+        if (!Enum.IsDefined(typeof(TlsModuleIdentityKind), module.Kind)
+            || string.IsNullOrWhiteSpace(module.Identity))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A TLS module identity is missing or unsupported.",
+                offset);
+        }
+
+        ValidateOptionalString(module.Soname, "TLS module SONAME", diagnostics, offset);
+        if (module.Kind == TlsModuleIdentityKind.RuntimeAssigned && module.RuntimeModuleIndex is not null)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A runtime-assigned TLS module number must remain unresolved in the semantic snapshot.",
+                offset);
+        }
+
+        if (module.Template is { } template)
+        {
+            if (template.FileSize > template.MemorySize
+                || template.MemorySize == 0
+                || template.FileSize > ulong.MaxValue - template.FileOffset.Value
+                || template.MemorySize > ulong.MaxValue - template.VirtualAddress.Value
+                || template.OwningLoadProgramHeaderIndex < 0
+                || template.Alignment > 1 && (!IsSnapshotPowerOfTwo(template.Alignment)
+                    || template.FileOffset.Value % template.Alignment != template.VirtualAddress.Value % template.Alignment)
+                || (template.Permissions & ElfConstants.PfR) == 0
+                || (template.Permissions & ElfConstants.PfX) != 0
+                || !IsSha256(template.InitializedTemplateSha256))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsMetadataMalformed,
+                    "The TLS template contract has an invalid size, owner, alignment, permission set, or digest.",
+                    offset);
+            }
+        }
+    }
+
+    private static void ValidateTlsSymbol(
+        TlsSymbolIdentity? symbol,
+        TlsModuleIdentity module,
+        DiagnosticBag diagnostics,
+        ulong offset)
+    {
+        if (symbol is null)
+        {
+            return;
+        }
+
+        if (symbol.SymbolIndex == 0
+            || string.IsNullOrWhiteSpace(symbol.Name)
+            || symbol.SymbolType != ElfConstants.SttTls
+            || symbol.Visibility > 3
+            || symbol.IsDefined != (symbol.SectionIndex != 0))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A TLS symbol identity is incomplete or inconsistent with its dynamic-symbol fields.",
+                offset);
+        }
+
+        ValidateString(symbol.Name, "TLS symbol name", false, diagnostics, offset);
+        if (symbol.IsDefined)
+        {
+            var template = module.Template;
+            if (template is null
+                || symbol.Value > template.MemorySize
+                || symbol.Size > template.MemorySize - symbol.Value)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsMetadataMalformed,
+                    "A defined TLS symbol lies outside its PT_TLS template and zero-fill range.",
+                    offset);
+            }
+        }
+    }
+
+    private static void ValidateModelSequenceRoles(TlsBinding binding, DiagnosticBag diagnostics)
+    {
+        var roles = binding.InstructionSequence.Instructions
+            .Where(instruction => instruction is not null)
+            .Select(instruction => instruction.Role)
+            .ToHashSet();
+        var valid = binding.AccessModel switch
+        {
+            TlsAccessModel.LocalExec => roles.Contains(TlsInstructionRole.ThreadPointerRead)
+                && roles.Contains(TlsInstructionRole.AddressFormation)
+                && roles.Contains(TlsInstructionRole.TlsMemoryAccess),
+            TlsAccessModel.InitialExec => roles.Contains(TlsInstructionRole.AddressFormation)
+                && roles.Contains(TlsInstructionRole.GotEntryLoad)
+                && roles.Contains(TlsInstructionRole.ThreadPointerRead)
+                && roles.Contains(TlsInstructionRole.TlsMemoryAccess),
+            TlsAccessModel.LocalDynamic => roles.Contains(TlsInstructionRole.ModuleLookup)
+                && roles.Contains(TlsInstructionRole.ResolverCall)
+                && roles.Contains(TlsInstructionRole.SymbolOffsetFormation)
+                && binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtpmod)
+                && binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtprel),
+            TlsAccessModel.GeneralDynamic => roles.Contains(TlsInstructionRole.ModuleLookup)
+                && roles.Contains(TlsInstructionRole.ResolverCall)
+                && binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtpmod)
+                && binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtprel),
+            TlsAccessModel.TlsDesc => roles.Contains(TlsInstructionRole.DescriptorLoad)
+                && roles.Contains(TlsInstructionRole.DescriptorCall)
+                && roles.Contains(TlsInstructionRole.AddressFinalization),
+            _ => false,
+        };
+        if (!valid)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLS model's instruction sequence is incomplete or inconsistent with its relocation family.",
+                binding.SourceRange.FileOffset.Value);
+        }
+    }
+
+    private static bool IsSnapshotPowerOfTwo(ulong value) => value != 0 && (value & (value - 1)) == 0;
+
+    private static bool TryAdd(ulong value, ulong amount, out ulong result)
+    {
+        if (amount > ulong.MaxValue - value)
+        {
+            result = 0;
+            return false;
+        }
+
+        result = value + amount;
+        return true;
+    }
+
+    private static bool IsSha256(string? value) => value is not null
+        && value.Length == 64
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static void ValidateDiagnostic(
         Diagnostic? diagnostic,

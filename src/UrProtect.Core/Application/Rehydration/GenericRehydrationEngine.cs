@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
 using UrProtect.Core.Application.Protection;
+using UrProtect.Core.SemanticPlanning;
 
 using UrProtect.Core.ElfLayout;
 using UrProtect.Core.ArtifactProtocol;
@@ -233,11 +234,17 @@ public static class GenericRehydrationEngine
             }
         }
 
+        SemanticPlanSnapshot? semanticSnapshot = null;
+        if (document is not null && sourceFile is not null)
+        {
+            semanticSnapshot = ValidateTlsSemanticSnapshotPresence(sourceFile, document, diagnostics);
+        }
+
         if (document is not null && sourceFile is not null && profilePolicy is not null && !diagnostics.HasErrors)
         {
             var sourceValid = profilePolicy.ValidateSource(sourceFile, options, diagnostics);
             var layoutResult = sourceValid
-                ? Materialize(sourceBytes, sourceFile, document, profilePolicy, diagnostics)
+                ? Materialize(sourceBytes, sourceFile, document, profilePolicy, diagnostics, semanticSnapshot)
                 : null;
             layoutEvidence = layoutResult?.Evidence;
             layoutStrategy = layoutResult?.Plan?.Strategy;
@@ -330,6 +337,172 @@ public static class GenericRehydrationEngine
             diagnostics.ToArray());
     }
 
+    private static SemanticPlanSnapshot? ValidateTlsSemanticSnapshotPresence(
+        ElfFile source,
+        ProtectedImageDocument document,
+        DiagnosticBag diagnostics)
+    {
+        var regions = document.Operations.OfType<ProtectedImageEmitRegion>().ToArray();
+        var selectedTlsRelocations = source.TlsMetadata.StaticRelocations
+            .Concat(source.TlsMetadata.Dynamic.Relocations)
+            .Where(relocation => TlsRelocationClassifier.IsTlsRelocation(relocation.Relocation.Type))
+            .Where(relocation => regions.Any(region => relocation.Relocation.Offset >= region.SourceAddress.Value
+                && relocation.Relocation.Offset - region.SourceAddress.Value < region.SourceSize))
+            .ToArray();
+        var snapshots = document.Operations.OfType<ProtectedImageSemanticPlanSnapshot>().ToArray();
+        if (selectedTlsRelocations.Length == 0 && snapshots.Length == 0)
+        {
+            return null;
+        }
+
+        if (selectedTlsRelocations.Length > 0 && snapshots.Length != 1)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A transformed TLS relocation requires exactly one canonical semantic-plan snapshot operation.",
+                selectedTlsRelocations[0].Relocation.Offset);
+            return null;
+        }
+
+        // Decode at the publication boundary as well as in the operation codec so the
+        // selected source's relocation inventory is bound to the snapshot being applied.
+        var decoded = SemanticPlanSnapshotCodec.Decode(snapshots[0].CanonicalBytes);
+        diagnostics.AddRange(decoded.Diagnostics);
+        if (!decoded.IsSuccess || decoded.Snapshot is null)
+        {
+            return null;
+        }
+
+        var valid = true;
+        var tlsBindings = decoded.Snapshot.Extensions
+            .OfType<SemanticTlsBindingExtension>()
+            .Select(extension => extension.Binding)
+            .ToArray();
+        if (tlsBindings.Length == 0 && selectedTlsRelocations.Length == 0)
+        {
+            return null;
+        }
+
+        var sourceModule = TlsStructuralAdapter.CreateImageModule(source);
+        diagnostics.AddRange(sourceModule.Diagnostics);
+        if (!sourceModule.IsSuccess || sourceModule.Value is null)
+        {
+            return null;
+        }
+
+        foreach (var binding in tlsBindings)
+        {
+            if (binding.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSemanticsUnsupported,
+                    "The current transformed TLS semantic slice accepts only local-exec or exact TLSIE MOVW model bindings.",
+                    binding.SourceRange.FileOffset.Value);
+                valid = false;
+            }
+
+            if (binding.AccessModel == TlsAccessModel.InitialExec)
+            {
+                if (binding.GotEntry is null)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsBindingUnresolved,
+                        "The transformed initial-exec binding has no carried GOT entry ownership.",
+                        binding.SourceRange.FileOffset.Value);
+                    valid = false;
+                }
+                else
+                {
+                    var gotFacts = source.TlsMetadata.StaticRelocations
+                        .Concat(source.TlsMetadata.Dynamic.Relocations)
+                        .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsTprel64
+                            && fact.Relocation.Offset == binding.GotEntry.SourceRange.VirtualAddress.Value
+                            && fact.Relocation.Addend == binding.GotEntry.Addend
+                            && fact.Symbol is not null
+                            && fact.Symbol.SymbolIndex == binding.GotEntry.Symbol.SymbolIndex
+                            && string.Equals(fact.Symbol.Name, binding.GotEntry.Symbol.Name, StringComparison.Ordinal))
+                        .ToArray();
+                    if (gotFacts.Length != 1)
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.TlsBindingUnresolved,
+                            "The transformed initial-exec binding does not match exactly one source-preserved TLSIE GOT relocation.",
+                            binding.GotEntry.SourceRange.FileOffset.Value);
+                        valid = false;
+                    }
+                }
+            }
+
+            if (binding.Module != sourceModule.Value)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The carried TLS module/template facts do not match the parsed source PT_TLS contract.",
+                    binding.SourceRange.FileOffset.Value);
+                valid = false;
+            }
+
+            var sourceSymbols = selectedTlsRelocations
+                .Where(relocation => binding.RelocationSites.Any(site =>
+                    site.SourceRange.VirtualAddress.Value == relocation.Relocation.Offset))
+                .Select(relocation => TlsStructuralAdapter.ProjectSymbol(relocation.Symbol))
+                .Distinct()
+                .ToArray();
+            if (sourceSymbols.Length != 1 || sourceSymbols[0] != binding.Symbol)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsBindingUnresolved,
+                    "The carried TLS symbol identity does not match the selected source relocation symbols.",
+                    binding.SourceRange.FileOffset.Value);
+                valid = false;
+            }
+        }
+
+        var carriedSites = tlsBindings
+            .SelectMany(binding => binding.RelocationSites)
+            .ToArray();
+        foreach (var relocation in selectedTlsRelocations)
+        {
+            if (!source.LoadMap.TryVirtualAddressToFileOffset(
+                    new VirtualAddress(relocation.Relocation.Offset),
+                    relocation.WriteSize,
+                    out var sourceFileOffset))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsMetadataMalformed,
+                    "A transformed source TLS relocation has no bounded source file range.",
+                    relocation.Relocation.Offset);
+                valid = false;
+                continue;
+            }
+
+            var matches = carriedSites.Where(site =>
+                    site.SourceRange.VirtualAddress == new VirtualAddress(relocation.Relocation.Offset)
+                    && site.SourceRange.FileOffset == sourceFileOffset
+                    && site.SourceRange.Size == relocation.WriteSize
+                    && site.Binding.Kind == relocation.Relocation.Kind
+                    && site.Binding.RelocationType == relocation.Relocation.Type
+                    && site.Binding.RawInfo == relocation.Relocation.Info
+                    && site.Binding.SymbolIndex == relocation.Relocation.SymbolIndex
+                    && site.Binding.IsPlt == relocation.Relocation.IsPlt
+                    && string.Equals(site.Binding.SymbolName, relocation.Symbol?.Name, StringComparison.Ordinal)
+                    && site.Binding.Addend == relocation.Relocation.Addend
+                    && site.Binding.RelocationAddress == new VirtualAddress(relocation.Relocation.Offset)
+                    && site.Binding.RelocationTableAddress == new VirtualAddress(relocation.Relocation.SourceAddress))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsBindingUnresolved,
+                    "A transformed source TLS relocation does not bind exactly one matching typed semantic model and fixup.",
+                    relocation.Relocation.Offset);
+                valid = false;
+            }
+        }
+
+        return valid ? decoded.Snapshot : null;
+    }
+
     private static void ValidateOptions(RehydrationOptions options, DiagnosticBag diagnostics)
     {
         ValidateDigest(options.ExpectedSourceSha256, "expected source", diagnostics);
@@ -400,7 +573,8 @@ public static class GenericRehydrationEngine
         ElfFile sourceFile,
         ProtectedImageDocument image,
         IProfileMaterializationPolicy profilePolicy,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        SemanticPlanSnapshot? semanticSnapshot)
     {
         if (image.Profile != profilePolicy.Profile)
         {
@@ -441,6 +615,12 @@ public static class GenericRehydrationEngine
                 fixup.TargetOffset))
             .ToArray();
 
+        var tlsFixupRequests = BuildTlsFixupRequests(image, semanticSnapshot, sourceFile, diagnostics);
+        if (diagnostics.HasErrors)
+        {
+            return null;
+        }
+
         var options = new ElfLayoutOptions(
             MaximumOutputBytes: RehydrationLimits.MaximumNativeImageBytes,
             MaximumProgramHeaderCount: ElfLayoutLimits.DefaultMaximumProgramHeaderCount,
@@ -451,7 +631,13 @@ public static class GenericRehydrationEngine
             SegmentAlignment: RehydrationLimits.PageAlignment,
             CodeAlignment: ElfLayoutLimits.DefaultCodeAlignment,
             MaximumAlignment: ElfLayoutLimits.DefaultMaximumAlignment);
-        var planning = ElfLayoutPlanner.Plan(source, sourceFile, regionRequests, branchRequests, options);
+        var planning = ElfLayoutPlanner.Plan(
+            source,
+            sourceFile,
+            regionRequests,
+            branchRequests,
+            options,
+            tlsFixupRequests);
         diagnostics.AddRange(planning.Diagnostics);
         if (planning.Plan is null || planning.Diagnostics.Any(diagnostic => diagnostic.IsError))
         {
@@ -492,6 +678,87 @@ public static class GenericRehydrationEngine
         }
 
         return true;
+    }
+
+    private static IReadOnlyList<ElfLayoutTlsFixupRequest> BuildTlsFixupRequests(
+        ProtectedImageDocument image,
+        SemanticPlanSnapshot? snapshot,
+        ElfFile sourceFile,
+        DiagnosticBag diagnostics)
+    {
+        if (snapshot is null)
+        {
+            return Array.Empty<ElfLayoutTlsFixupRequest>();
+        }
+
+        var semanticFixups = TlsSemanticFixupPlanner.Build(snapshot.Plan);
+        diagnostics.AddRange(semanticFixups.Diagnostics);
+        if (!semanticFixups.IsSuccess)
+        {
+            return Array.Empty<ElfLayoutTlsFixupRequest>();
+        }
+
+        var regions = image.Operations.OfType<ProtectedImageEmitRegion>().ToArray();
+        var requests = new List<ElfLayoutTlsFixupRequest>(semanticFixups.Fixups.Count);
+        foreach (var fixup in semanticFixups.Fixups)
+        {
+            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsSemanticsUnsupported,
+                    "Rehydration currently materializes only local-exec or exact TLSIE MOVW TLS semantic fixups.",
+                    fixup.RelocationSourceRange.FileOffset.Value);
+                continue;
+            }
+
+            var matchingRegions = regions.Where(region =>
+                    region.SourceAddress == fixup.SequenceSourceRange.VirtualAddress
+                    && region.SourceSize >= fixup.SequenceSourceRange.Size)
+                .ToArray();
+            if (matchingRegions.Length != 1
+                || fixup.RelocationOutputRange.FileOffset.Value < fixup.SequenceOutputRange.FileOffset.Value
+                || fixup.RelocationOutputRange.VirtualAddress.Value < fixup.SequenceOutputRange.VirtualAddress.Value)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "A local-exec TLS semantic fixup does not map to exactly one emitted Protected Image region.",
+                    fixup.RelocationSourceRange.FileOffset.Value);
+                continue;
+            }
+
+            var fileDelta = fixup.RelocationOutputRange.FileOffset.Value - fixup.SequenceOutputRange.FileOffset.Value;
+            var virtualDelta = fixup.RelocationOutputRange.VirtualAddress.Value - fixup.SequenceOutputRange.VirtualAddress.Value;
+            var regionLength = checked((ulong)matchingRegions[0].CodeBytes.Length);
+            if (fileDelta != virtualDelta
+                || fileDelta > regionLength
+                || fixup.RelocationOutputRange.Size > regionLength - fileDelta)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The local-exec TLS output relocation site has inconsistent file and virtual address-map deltas.",
+                    fixup.RelocationSourceRange.FileOffset.Value);
+                continue;
+            }
+
+            var region = matchingRegions[0];
+            var identity = RegionIdentity(region.RegionId);
+            if (!sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+                    fixup.RelocationSourceRange.VirtualAddress,
+                    fixup.RelocationSourceRange.Size,
+                    out var sourceFileOffset)
+                || sourceFileOffset != fixup.RelocationSourceRange.FileOffset)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The local-exec TLS fixup source range is not the structural ELF mapping.",
+                    fixup.RelocationSourceRange.FileOffset.Value);
+                continue;
+            }
+
+            requests.Add(new ElfLayoutTlsFixupRequest(identity, fileDelta, fixup));
+        }
+
+        return Array.AsReadOnly(requests.ToArray());
     }
 
     private static string RegionIdentity(uint regionId) => $"region:{regionId:D10}";

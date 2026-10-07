@@ -356,10 +356,7 @@ public static partial class SemanticPlanSnapshotCodec
                 context.WriteString(relocation.Diagnostic);
                 break;
             case SemanticTlsBindingExtension tls:
-                WriteEntityId(context, tls.SourceIdentity);
-                WriteRange(context, tls.SourceRange);
-                context.WriteString(tls.Model);
-                WriteRelocation(context, tls.Binding);
+                WriteTlsBinding(context, tls.Binding);
                 context.WriteOptionalString(tls.Diagnostic);
                 break;
             case SemanticJumpTableExtension jumpTable:
@@ -401,6 +398,168 @@ public static partial class SemanticPlanSnapshotCodec
                     "The semantic-plan extension has no canonical encoding.",
                     DiagnosticCode.SemanticPlanSnapshotUnsupported);
         }
+    }
+
+    private static void WriteTlsBinding(CanonicalWriteContext context, TlsBinding binding)
+    {
+        context.Writer.Write((byte)binding.AccessModel);
+        context.Writer.Write((byte)binding.RelocationFamily);
+        WriteEntityId(context, binding.SourceIdentity);
+        WriteRange(context, binding.SourceRange);
+        WriteRange(context, binding.InstructionSequence.SourceRange);
+        context.Writer.Write((byte)binding.InstructionSequence.ResolverKind);
+        WriteOptionalTarget(context, binding.InstructionSequence.ResolverTarget);
+        context.WriteCount(binding.InstructionSequence.Instructions.Count);
+        foreach (var instruction in binding.InstructionSequence.Instructions)
+        {
+            WriteRange(context, instruction.SourceRange);
+            context.Writer.Write(instruction.Encoding);
+            context.WriteString(instruction.Mnemonic);
+            context.Writer.Write((byte)instruction.Role);
+            WriteTlsRegisters(context, instruction.InputRegisters);
+            WriteTlsRegisters(context, instruction.OutputRegisters);
+            var effects = instruction.RegisterEffects
+                .OrderBy(effect => GetRegisterSortKey(effect.Register), StringComparer.Ordinal)
+                .ThenBy(effect => (int)effect.Kind)
+                .ThenBy(effect => effect.IsImplicit)
+                .ToArray();
+            context.WriteCount(effects.Length);
+            foreach (var effect in effects)
+            {
+                WriteRegisterEffect(context, effect);
+                context.EnsureWithinCanonicalLimit();
+            }
+
+            context.Writer.Write(instruction.IsCall ? (byte)1 : (byte)0);
+            context.Writer.Write(instruction.IsResolverCall ? (byte)1 : (byte)0);
+            context.EnsureWithinCanonicalLimit();
+        }
+
+        WriteTlsModule(context, binding.Module);
+        WriteOptionalTlsSymbol(context, binding.Symbol);
+        context.Writer.Write(binding.Addend);
+        var sites = binding.RelocationSites
+            .OrderBy(site => site.PairOrdinal)
+            .ThenBy(site => site.SourceRange.VirtualAddress.Value)
+            .ThenBy(site => site.SourceRange.FileOffset.Value)
+            .ThenBy(site => (int)site.Family)
+            .ToArray();
+        context.WriteCount(sites.Length);
+        foreach (var site in sites)
+        {
+            context.Writer.Write((byte)site.Family);
+            WriteRange(context, site.SourceRange);
+            WriteRelocation(context, site.Binding);
+            context.Writer.Write(site.PairOrdinal);
+            context.Writer.Write(site.IsGotOrDescriptorOwned ? (byte)1 : (byte)0);
+            context.EnsureWithinCanonicalLimit();
+        }
+
+        if (binding.AccessModel == TlsAccessModel.InitialExec)
+        {
+            context.Writer.Write(binding.GotEntry is not null ? (byte)1 : (byte)0);
+            if (binding.GotEntry is { } gotEntry)
+            {
+                WriteTlsGotEntry(context, gotEntry);
+            }
+        }
+
+        context.Writer.Write(binding.AccessSize);
+        context.Writer.Write((byte)binding.AddressExpression.Kind);
+        WriteTlsModule(context, binding.AddressExpression.Module);
+        WriteOptionalTlsSymbol(context, binding.AddressExpression.Symbol);
+        WriteOptionalRegister(context, binding.AddressExpression.BaseRegister);
+        WriteOptionalRegister(context, binding.AddressExpression.ValueRegister);
+        context.Writer.Write(binding.AddressExpression.Addend);
+        var profiles = binding.ProfileRequirements.OrderBy(item => (int)item.Profile).ToArray();
+        context.WriteCount(profiles.Length);
+        foreach (var requirement in profiles)
+        {
+            context.Writer.Write((byte)requirement.Profile);
+            context.Writer.Write(requirement.Required ? (byte)1 : (byte)0);
+            context.EnsureWithinCanonicalLimit();
+        }
+
+        var runtimes = binding.RuntimeRequirements
+            .OrderBy(item => (int)item.Runtime)
+            .ThenBy(item => (int)item.Kind)
+            .ToArray();
+        context.WriteCount(runtimes.Length);
+        foreach (var requirement in runtimes)
+        {
+            context.Writer.Write((byte)requirement.Runtime);
+            context.Writer.Write((byte)requirement.Kind);
+            context.Writer.Write(requirement.Required ? (byte)1 : (byte)0);
+            context.EnsureWithinCanonicalLimit();
+        }
+    }
+
+    private static void WriteTlsGotEntry(
+        CanonicalWriteContext context,
+        TlsGotEntryBinding gotEntry)
+    {
+        WriteEntityId(context, gotEntry.SourceIdentity);
+        WriteRange(context, gotEntry.SourceRange);
+        WriteRelocation(context, gotEntry.Relocation);
+        WriteOptionalTlsSymbol(context, gotEntry.Symbol);
+        context.Writer.Write(gotEntry.Addend);
+    }
+
+    private static void WriteTlsRegisters(
+        CanonicalWriteContext context,
+        IReadOnlyList<Aarch64RegisterView> registers)
+    {
+        var ordered = registers.OrderBy(GetRegisterSortKey, StringComparer.Ordinal).ToArray();
+        context.WriteCount(ordered.Length);
+        foreach (var register in ordered)
+        {
+            WriteRegister(context, register);
+            context.EnsureWithinCanonicalLimit();
+        }
+    }
+
+    private static void WriteTlsModule(CanonicalWriteContext context, TlsModuleIdentity module)
+    {
+        context.Writer.Write((byte)module.Kind);
+        context.WriteString(module.Identity);
+        context.WriteOptionalString(module.Soname);
+        WriteOptionalUInt32(context, module.RuntimeModuleIndex);
+        context.Writer.Write(module.Template is not null ? (byte)1 : (byte)0);
+        if (module.Template is { } template)
+        {
+            WriteTlsTemplate(context, template);
+        }
+    }
+
+    private static void WriteTlsTemplate(CanonicalWriteContext context, TlsTemplateContract template)
+    {
+        context.Writer.Write(template.FileOffset.Value);
+        context.Writer.Write(template.VirtualAddress.Value);
+        context.Writer.Write(template.FileSize);
+        context.Writer.Write(template.MemorySize);
+        context.Writer.Write(template.Alignment);
+        context.Writer.Write(template.Permissions);
+        context.Writer.Write(template.OwningLoadProgramHeaderIndex);
+        context.WriteString(template.InitializedTemplateSha256);
+    }
+
+    private static void WriteOptionalTlsSymbol(CanonicalWriteContext context, TlsSymbolIdentity? symbol)
+    {
+        context.Writer.Write(symbol is not null ? (byte)1 : (byte)0);
+        if (symbol is null)
+        {
+            return;
+        }
+
+        context.Writer.Write(symbol.SymbolIndex);
+        context.WriteString(symbol.Name);
+        context.Writer.Write(symbol.Binding);
+        context.Writer.Write(symbol.SymbolType);
+        context.Writer.Write(symbol.Visibility);
+        context.Writer.Write(symbol.SectionIndex);
+        context.Writer.Write(symbol.Value);
+        context.Writer.Write(symbol.Size);
+        context.Writer.Write(symbol.IsDefined ? (byte)1 : (byte)0);
     }
 
     private static void WriteDiagnostic(CanonicalWriteContext context, Diagnostic diagnostic)

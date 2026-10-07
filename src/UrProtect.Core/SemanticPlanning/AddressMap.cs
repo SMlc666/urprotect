@@ -266,8 +266,16 @@ public sealed class AddressMap
 
         var candidates = entries
             .Where(entry =>
-                Contains(entry.SourceRange.FileOffset.Value, entry.SourceRange.Size, sourceRange.FileOffset.Value)
-                && Contains(entry.SourceRange.VirtualAddress, entry.SourceRange.Size, sourceRange.VirtualAddress.Value));
+                ContainsRange(
+                    entry.SourceRange.FileOffset.Value,
+                    entry.SourceRange.Size,
+                    sourceRange.FileOffset.Value,
+                    sourceRange.Size)
+                && ContainsRange(
+                    entry.SourceRange.VirtualAddress.Value,
+                    entry.SourceRange.Size,
+                    sourceRange.VirtualAddress.Value,
+                    sourceRange.Size));
         var smallestCandidates = SelectSmallestCandidates(candidates, preferredKind);
         if (smallestCandidates.Length != 1)
         {
@@ -491,6 +499,11 @@ public sealed class AddressMap
 
     private static bool Contains(ulong start, ulong size, ulong value) =>
         value >= start && value - start < size;
+
+    private static bool ContainsRange(ulong start, ulong rangeSize, ulong target, ulong targetSize) =>
+        target >= start
+        && target - start <= rangeSize
+        && targetSize <= rangeSize - (target - start);
 
     private static bool TryTranslate(
         ulong sourceStart,

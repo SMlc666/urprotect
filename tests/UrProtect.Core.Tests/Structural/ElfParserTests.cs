@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using UrProtect.Core.Diagnostics;
+using UrProtect.Core.SemanticPlanning;
 using UrProtect.Core.StructuralElf;
 
 namespace UrProtect.Core.Tests.Structural;
@@ -236,6 +237,220 @@ public sealed class ElfParserTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.InvalidSegment);
+    }
+
+    [Fact]
+    public void ParsesLocalExecFunctionRelocationsAndSelectedFunctionIdentity()
+    {
+        var result = ElfParser.Parse(ElfFixture.TlsLocalExecFunctionPie());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.Contains(result.File!.FunctionSymbols, function => function.Name == "tls_fixture" && function.Size == 28);
+        Assert.Collection(
+            result.File.TlsMetadata.StaticRelocations,
+            fact => Assert.Equal(ElfConstants.RArm64TlsLeAddTprelHi12, fact.Relocation.Type),
+            fact => Assert.Equal(ElfConstants.RArm64TlsLeAddTprelLo12Nc, fact.Relocation.Type));
+    }
+
+    [Fact]
+    public void ParsesBoundedPtTlsTemplateZeroFillAndOwningLoad()
+    {
+        var result = ElfParser.Parse(ElfFixture.TlsPie());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var file = Assert.IsType<ElfFile>(result.File);
+        var tls = Assert.Single(file.TlsMetadata.Segments);
+        Assert.Equal(4UL, tls.FileSize);
+        Assert.Equal(8UL, tls.MemorySize);
+        Assert.Equal(4UL, tls.ZeroFillSize);
+        Assert.Equal(new FileOffset(0x1E0), tls.TemplateFileOffset);
+        Assert.Equal(new VirtualAddress(0x1E0), tls.TemplateAddress);
+        Assert.Equal(4UL, tls.Alignment);
+        Assert.Equal(0, tls.OwningLoadProgramHeaderIndex);
+        Assert.Equal(new byte[] { 0x11, 0x22, 0x33, 0x44 }, tls.InitializedTemplate.ToArray());
+        Assert.Empty(file.TlsMetadata.Dynamic.Relocations);
+    }
+
+    [Fact]
+    public void RejectsMalformedPtTlsSizeAlignmentAndPermissions()
+    {
+        var fileszExceedsMemsz = ElfFixture.TlsPie();
+        var tlsHeaderOffset = ElfFixture.FirstProgramHeaderOffset + (4 * ElfConstants.ProgramHeaderSize64);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            fileszExceedsMemsz.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.MemorySize),
+            2);
+        var malformedSize = ElfParser.Parse(fileszExceedsMemsz);
+        Assert.False(malformedSize.IsSuccess);
+        Assert.Contains(malformedSize.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsMetadataMalformed);
+
+        var incongruent = ElfFixture.TlsPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            incongruent.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress),
+            0x1E1);
+        var malformedAlignment = ElfParser.Parse(incongruent);
+        Assert.False(malformedAlignment.IsSuccess);
+        Assert.Contains(malformedAlignment.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.InvalidAlignment);
+
+        var executable = ElfFixture.TlsPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            executable.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.Flags),
+            ElfConstants.PfR | ElfConstants.PfX);
+        var malformedPermissions = ElfParser.Parse(executable);
+        Assert.False(malformedPermissions.IsSuccess);
+        Assert.Contains(malformedPermissions.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsMetadataMalformed);
+    }
+
+    [Fact]
+    public void ParsesTypedTlsRelocationFactsAndRejectsWrongTargetPermissions()
+    {
+        var result = ElfParser.Parse(ElfFixture.TlsRelocationPie());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var relocation = Assert.Single(result.File!.TlsMetadata.Dynamic.Relocations);
+        Assert.Equal(ElfConstants.RArm64TlsLeMovwTprelG1, relocation.Relocation.Type);
+        Assert.Equal(4UL, relocation.WriteSize);
+        Assert.Null(relocation.Symbol);
+        Assert.False(relocation.UsesRuntimeModuleResolution);
+
+        var wrongPermissions = ElfParser.Parse(ElfFixture.TlsRelocationPie(ElfConstants.RArm64TlsDtpMod64));
+        Assert.False(wrongPermissions.IsSuccess);
+        Assert.Contains(
+            wrongPermissions.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.TlsMetadataMalformed
+                && diagnostic.Message.Contains("permissions required", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ParsesSectionOwnedTlsInstructionRelocationsAndStaticSymbolIdentity()
+    {
+        var result = ElfParser.Parse(ElfFixture.TlsStaticRelocationPie());
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var file = Assert.IsType<ElfFile>(result.File);
+        var relocation = Assert.Single(file.TlsMetadata.StaticRelocations);
+        Assert.False(relocation.IsDynamic);
+        Assert.Equal(ElfConstants.RArm64TlsIeAdrGottprelPage21, relocation.Relocation.Type);
+        Assert.Equal(4UL, relocation.WriteSize);
+        Assert.Equal("tls_value", relocation.Symbol!.Name);
+        Assert.Equal(ElfConstants.SttTls, relocation.Symbol.Type);
+        Assert.Equal(3, relocation.Symbol.SectionIndex);
+        var table = Assert.Single(file.TlsMetadata.StaticRelocationSections);
+        Assert.Equal(5, table.SectionHeaderIndex);
+        Assert.Equal(new FileOffset(0x240), table.FileOffset);
+        Assert.Equal(2U, table.SymbolTableSectionIndex);
+        Assert.Equal(4U, table.TargetSectionIndex);
+        Assert.Empty(file.TlsMetadata.Dynamic.Relocations);
+    }
+
+    [Fact]
+    public void ProjectsStructuralTlsFactsIntoTheExistingTypedSemanticOwners()
+    {
+        var parse = ElfParser.Parse(ElfFixture.TlsStaticRelocationPie());
+        Assert.True(parse.IsSuccess, string.Join(Environment.NewLine, parse.Diagnostics));
+        var file = parse.File!;
+        var module = TlsStructuralAdapter.CreateImageModule(file);
+        Assert.True(module.IsSuccess, string.Join(Environment.NewLine, module.Diagnostics));
+        Assert.Equal(TlsModuleIdentityKind.ImageLocal, module.Value!.Kind);
+        Assert.Equal(4UL, module.Value.Template!.FileSize);
+        Assert.Equal(4UL, module.Value.Template.ZeroFillSize);
+        Assert.Equal(64, module.Value.Template.InitializedTemplateSha256.Length);
+
+        var fact = Assert.Single(file.TlsMetadata.StaticRelocations);
+        var projected = TlsStructuralAdapter.ProjectRelocationSite(file, module.Value, fact, 0);
+        Assert.True(projected.IsSuccess, string.Join(Environment.NewLine, projected.Diagnostics));
+        Assert.Equal(TlsRelocationFamily.GotTprel, projected.Value!.Family);
+        Assert.Equal(ElfConstants.RArm64TlsIeAdrGottprelPage21, projected.Value.Binding.RelocationType);
+        Assert.Equal("tls_value", projected.Value.Binding.SymbolName);
+    }
+
+    [Fact]
+    public void ParsesSectionOwnedEightByteTlsRelocationFacts()
+    {
+        var bytes = ElfFixture.TlsStaticRelocationPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            bytes.AsSpan(ElfFixture.FirstProgramHeaderOffset + ElfProgramHeaderOffsets.Flags),
+            ElfConstants.PfR | ElfConstants.PfW);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(0x240), 0x100);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(0x248),
+            (1UL << 32) | ElfConstants.RArm64TlsTprel64);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var relocation = Assert.Single(result.File!.TlsMetadata.StaticRelocations);
+        Assert.Equal(ElfConstants.RArm64TlsTprel64, relocation.Relocation.Type);
+        Assert.Equal(8UL, relocation.WriteSize);
+        Assert.Equal(0x100UL, relocation.Relocation.Offset);
+    }
+
+    [Fact]
+    public void RejectsMalformedSectionOwnedTlsSymbolAndRelocationMetadata()
+    {
+        var malformedSymbol = ElfFixture.TlsStaticRelocationPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            malformedSymbol.AsSpan(0x248),
+            (4UL << 32) | ElfConstants.RArm64TlsIeAdrGottprelPage21);
+        var unresolved = ElfParser.Parse(malformedSymbol);
+        Assert.False(unresolved.IsSuccess);
+        Assert.Contains(unresolved.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsBindingUnresolved);
+
+        var malformedEntrySize = ElfFixture.TlsStaticRelocationPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(malformedEntrySize.AsSpan(0x300 + (5 * ElfConstants.SectionHeaderSize64) + 56), 8);
+        var malformedTable = ElfParser.Parse(malformedEntrySize);
+        Assert.False(malformedTable.IsSuccess);
+        Assert.Contains(malformedTable.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.RelocationTableMalformed);
+    }
+
+    [Fact]
+    public void RejectsPartialDuplicateAndUnmappedTlsRelocationTables()
+    {
+        var partial = ElfFixture.TlsRelocationPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(partial.AsSpan(ElfFixture.DynamicTableOffset + 16), ElfConstants.DtNull);
+        var partialResult = ElfParser.Parse(partial);
+        Assert.False(partialResult.IsSuccess);
+        Assert.Contains(partialResult.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.RelocationTableMalformed);
+
+        var entrySizeOnly = ElfFixture.TlsRelocationPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            entrySizeOnly.AsSpan(ElfFixture.DynamicTableOffset),
+            ElfConstants.DtRelaEnt);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            entrySizeOnly.AsSpan(ElfFixture.DynamicTableOffset + 16),
+            ElfConstants.DtNull);
+        var entrySizeOnlyResult = ElfParser.Parse(entrySizeOnly);
+        Assert.False(entrySizeOnlyResult.IsSuccess);
+        Assert.Contains(entrySizeOnlyResult.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.RelocationTableMalformed);
+
+        var duplicate = ElfFixture.TlsRelocationPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(duplicate.AsSpan(ElfFixture.DynamicTableOffset + 48), ElfConstants.DtRelaSz);
+        BinaryPrimitives.WriteUInt64LittleEndian(duplicate.AsSpan(ElfFixture.DynamicTableOffset + 56), ElfConstants.RelaEntrySize64);
+        var duplicateResult = ElfParser.Parse(duplicate);
+        Assert.False(duplicateResult.IsSuccess);
+        Assert.Contains(
+            duplicateResult.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.RelocationTableMalformed
+                && diagnostic.Message.Contains("duplicated", StringComparison.Ordinal));
+
+        var unmapped = ElfFixture.TlsRelocationPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(unmapped.AsSpan(ElfFixture.DynamicTableOffset + 8), 0xFFFF_FFFF);
+        var unmappedResult = ElfParser.Parse(unmapped);
+        Assert.False(unmappedResult.IsSuccess);
+        Assert.Contains(unmappedResult.Diagnostics, diagnostic => diagnostic.Code is
+            DiagnosticCode.DynamicPointerUnmapped or DiagnosticCode.RelocationTableMalformed);
+    }
+
+    [Fact]
+    public void RejectsSectionOwnedTlsRelocationWithUnboundedSymbolTableLink()
+    {
+        var bytes = ElfFixture.TlsStaticRelocationPie();
+        var relocationSectionHeader = 0x300 + (5 * ElfConstants.SectionHeaderSize64);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(relocationSectionHeader + 40), uint.MaxValue);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.SymbolTableMalformed);
     }
 
     [Fact]

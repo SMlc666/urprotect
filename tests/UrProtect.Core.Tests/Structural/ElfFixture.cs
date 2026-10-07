@@ -67,6 +67,324 @@ internal static class ElfFixture
         return bytes;
     }
 
+    public static byte[] TlsPie()
+    {
+        var bytes = MinimalPie();
+        Array.Resize(ref bytes, 0x220);
+        var phdrOffset = FirstProgramHeaderOffset + (4 * ElfConstants.ProgramHeaderSize64);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.ProgramHeaderCount, 5);
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            phdrOffset,
+            ElfConstants.PtTls,
+            ElfConstants.PfR,
+            0x1E0,
+            0x1E0,
+            4,
+            8,
+            4);
+        bytes[0x1E0] = 0x11;
+        bytes[0x1E1] = 0x22;
+        bytes[0x1E2] = 0x33;
+        bytes[0x1E3] = 0x44;
+        return bytes;
+    }
+
+    public static byte[] TlsRelocationPie(uint relocationType = ElfConstants.RArm64TlsLeMovwTprelG1)
+    {
+        var bytes = TlsPie();
+        var tlsHeaderOffset = FirstProgramHeaderOffset + (4 * ElfConstants.ProgramHeaderSize64);
+        WriteUInt64(bytes.AsSpan(), tlsHeaderOffset + ElfProgramHeaderOffsets.FileOffset, 0x1D8);
+        WriteUInt64(bytes.AsSpan(), tlsHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress, 0x1D8);
+        WriteUInt64(bytes.AsSpan(), tlsHeaderOffset + ElfProgramHeaderOffsets.Alignment, 4);
+        bytes.AsSpan(InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        WriteUInt64(bytes.AsSpan(), DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.FileSize, 5 * ElfConstants.DynamicEntrySize64);
+        WriteUInt64(bytes.AsSpan(), DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.MemorySize, 5 * ElfConstants.DynamicEntrySize64);
+        WriteDynamicEntry(bytes.AsSpan(), DynamicTableOffset, ElfConstants.DtRela, 0x1E0);
+        WriteDynamicEntry(bytes.AsSpan(), DynamicTableOffset + 16, ElfConstants.DtRelaSz, ElfConstants.RelaEntrySize64);
+        WriteDynamicEntry(bytes.AsSpan(), DynamicTableOffset + 32, ElfConstants.DtRelaEnt, ElfConstants.RelaEntrySize64);
+        WriteDynamicEntry(bytes.AsSpan(), DynamicTableOffset + 48, ElfConstants.DtFlags1, ElfConstants.Df1Pie);
+        WriteDynamicEntry(bytes.AsSpan(), DynamicTableOffset + 64, ElfConstants.DtNull, 0);
+        WriteUInt64(bytes.AsSpan(), 0x1E0, 0x1200);
+        WriteUInt64(bytes.AsSpan(), 0x1E8, relocationType);
+        WriteUInt64(bytes.AsSpan(), 0x1F0, 0);
+        return bytes;
+    }
+
+    public static byte[] TlsStaticRelocationPie()
+    {
+        var bytes = TlsPie();
+        Array.Resize(ref bytes, 0x480);
+        WriteUInt64(bytes.AsSpan(), ElfHeaderOffsets.SectionHeaderOffset, 0x300);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.SectionHeaderEntrySize, ElfConstants.SectionHeaderSize64);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.SectionHeaderCount, 6);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.SectionNameIndex, 0);
+
+        WriteSectionHeader(bytes.AsSpan(), 0x300 + ElfConstants.SectionHeaderSize64,
+            ElfConstants.ShtStrTab, 0, 0, 0x2A0, 11, 0, 0, 1, 0);
+        WriteSectionHeader(bytes.AsSpan(), 0x300 + (2 * ElfConstants.SectionHeaderSize64),
+            ElfConstants.ShtSymTab, 0, 0, 0x260, 48, 1, 0, 8, ElfConstants.SymbolEntrySize64);
+        WriteSectionHeader(bytes.AsSpan(), 0x300 + (3 * ElfConstants.SectionHeaderSize64),
+            1, 0x403, 0x1E0, 0x1E0, 4, 0, 0, 4, 0);
+        WriteSectionHeader(bytes.AsSpan(), 0x300 + (4 * ElfConstants.SectionHeaderSize64),
+            1, 6, 0x1200, 0x200, 4, 0, 0, 4, 0);
+        WriteSectionHeader(bytes.AsSpan(), 0x300 + (5 * ElfConstants.SectionHeaderSize64),
+            ElfConstants.ShtRela, 0, 0, 0x240, ElfConstants.RelaEntrySize64, 2, 4, 8, ElfConstants.RelaEntrySize64);
+
+        "\0tls_value\0"u8.CopyTo(bytes.AsSpan(0x2A0));
+        WriteUInt32(bytes.AsSpan(), 0x278, 1);
+        bytes[0x27C] = (byte)((1 << 4) | ElfConstants.SttTls);
+        WriteUInt16(bytes.AsSpan(), 0x27E, 3);
+        WriteUInt64(bytes.AsSpan(), 0x280, 0);
+        WriteUInt64(bytes.AsSpan(), 0x288, 4);
+        WriteUInt64(bytes.AsSpan(), 0x240, 0x1200);
+        WriteUInt64(bytes.AsSpan(), 0x248, (1UL << 32) | ElfConstants.RArm64TlsIeAdrGottprelPage21);
+        WriteUInt64(bytes.AsSpan(), 0x250, 0);
+        return bytes;
+    }
+
+    public static byte[] TlsLocalExecFunctionPie()
+    {
+        var bytes = TlsStaticRelocationPie();
+        Array.Resize(ref bytes, 0x700);
+        const int codeOffset = 0x200;
+        const int codeSize = 7 * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int stringTableOffset = 0x580;
+        const int symbolTableOffset = 0x500;
+        const int relocationTableOffset = 0x600;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (1 * ElfConstants.SectionHeaderSize64) + 24, stringTableOffset);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (1 * ElfConstants.SectionHeaderSize64) + 32, 23);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (2 * ElfConstants.SectionHeaderSize64) + 24, symbolTableOffset);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (2 * ElfConstants.SectionHeaderSize64) + 32, 3 * ElfConstants.SymbolEntrySize64);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (5 * ElfConstants.SectionHeaderSize64) + 24, relocationTableOffset);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (5 * ElfConstants.SectionHeaderSize64) + 32, 2 * ElfConstants.RelaEntrySize64);
+
+        // Preserve the existing TLS symbol as symbol 1 and add one selected STT_FUNC.
+        bytes.AsSpan(0x278, ElfConstants.SymbolEntrySize64).CopyTo(bytes.AsSpan(symbolTableOffset + ElfConstants.SymbolEntrySize64));
+        WriteUInt32(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64), 11);
+        bytes[symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 4] = (byte)((1 << 4) | 2);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            bytes.AsSpan(symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 6),
+            4);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 8, 0x1200);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+        "\0tls_value\0tls_fixture\0"u8.CopyTo(bytes.AsSpan(stringTableOffset));
+
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset, 0x1204);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + 8, (1UL << 32) | ElfConstants.RArm64TlsLeAddTprelHi12);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + 16, 0);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64, 0x1208);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64 + 8, (1UL << 32) | ElfConstants.RArm64TlsLeAddTprelLo12Nc);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64 + 16, 0);
+
+        var words = new uint[]
+        {
+            0xD53BD040, // MRS x0, TPIDR_EL0
+            0x91400000, // ADD x0, x0, #0, LSL #12 (HI12 relocation)
+            0x91000000, // ADD x0, x0, #0 (LO12 relocation)
+            0xB9400009, // LDR w9, [x0]
+            0xAA0903EA, // MOV x10, x9
+            0xAA0A03E9, // MOV x9, x10
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return bytes;
+    }
+
+    public static byte[] TlsLocalExecMovwFunctionPie(
+        long relocationAddend = 0,
+        bool useMovn = false,
+        bool interleavePair = false)
+    {
+        var bytes = TlsLocalExecFunctionPie();
+        const int codeOffset = 0x200;
+        var codeSize = (interleavePair ? 7 : 6) * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int relocationTableOffset = 0x600;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            (ulong)codeSize,
+            (ulong)codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, (ulong)codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, (ulong)codeSize);
+
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset, 0x1200);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + 8, (1UL << 32) | ElfConstants.RArm64TlsLeMovwTprelG1);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(relocationTableOffset + 16), relocationAddend);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64, interleavePair ? 0x1208UL : 0x1204UL);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64 + 8, (1UL << 32) | ElfConstants.RArm64TlsLeMovwTprelG0Nc);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(relocationTableOffset + ElfConstants.RelaEntrySize64 + 16), relocationAddend);
+
+        var words = interleavePair
+            ? new uint[]
+            {
+                useMovn ? 0x92A00009u : 0xD2A00009u, // MOVN/MOVZ x9, #imm, LSL #16 (G1)
+                0xD53BD04A, // MRS x10, TPIDR_EL0 (interleaved)
+                0xF2800009, // MOVK x9, #imm (G0_NC)
+                0x8B090149, // ADD x9, x10, x9
+                0xB9400120, // LDR w0, [x9]
+                0xAA0003EA, // MOV x10, x0
+                0xD65F03C0, // RET
+            }
+            : new uint[]
+            {
+                useMovn ? 0x92A00009u : 0xD2A00009u, // MOVN/MOVZ x9, #imm, LSL #16 (G1)
+                0xF2800009, // MOVK x9, #imm (G0_NC)
+                0xD53BD04A, // MRS x10, TPIDR_EL0
+                0x8B090149, // ADD x9, x10, x9
+                0xB9400120, // LDR w0, [x9]
+                0xD65F03C0, // RET
+            };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return bytes;
+    }
+
+    /// <summary>
+    /// GNU AArch64 TLSIE MOVW GOTTPREL shape with a source-preserved writable
+    /// GOT entry owned by R_AARCH64_TLS_TPREL64. The fixture is managed
+    /// semantic/layout evidence only; it is not a native runtime oracle.
+    /// </summary>
+    public static byte[] TlsInitialExecMovwFunctionPie(
+        long relocationAddend = 0,
+        bool useMovn = false)
+    {
+        var bytes = TlsLocalExecFunctionPie();
+        const int codeOffset = 0x200;
+        const int codeSize = 8 * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int relocationTableOffset = 0x600;
+
+        // The first load owns the PT_TLS template and the source-preserved GOT
+        // entry at 0x1D0; it must be writable for the loader-owned TPREL64 slot.
+        WriteUInt32(bytes.AsSpan(), FirstProgramHeaderOffset + ElfProgramHeaderOffsets.Flags, ElfConstants.PfR | ElfConstants.PfW);
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (5 * ElfConstants.SectionHeaderSize64) + 32, 3 * ElfConstants.RelaEntrySize64);
+
+        // GOT owner: R_AARCH64_TLS_TPREL64 tls_value + addend.
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset, 0x1D0);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + 8, (1UL << 32) | ElfConstants.RArm64TlsTprel64);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(relocationTableOffset + 16), relocationAddend);
+        // Exact adjacent TLSIE MOVW pair.
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64, 0x1200);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64 + 8, (1UL << 32) | ElfConstants.RArm64TlsIeMovwGottprelG1);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(relocationTableOffset + ElfConstants.RelaEntrySize64 + 16), relocationAddend);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + (2 * ElfConstants.RelaEntrySize64), 0x1204);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + (2 * ElfConstants.RelaEntrySize64) + 8, (1UL << 32) | ElfConstants.RArm64TlsIeMovwGottprelG0Nc);
+        BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(relocationTableOffset + (2 * ElfConstants.RelaEntrySize64) + 16), relocationAddend);
+
+        var words = new uint[]
+        {
+            useMovn ? 0x92A00009u : 0xD2A00009u, // MOVN/MOVZ x9, #imm, LSL #16 (G1)
+            0xF2800009, // MOVK x9, #imm (G0_NC)
+            0xD53BD04A, // MRS x10, TPIDR_EL0
+            0x8B090149, // ADD x9, x10, x9 (GOT address)
+            0xF9400129, // LDR x9, [x9] (GOT TPREL value)
+            0x8B090149, // ADD x9, x10, x9 (TLS address)
+            0xB9400120, // LDR w0, [x9]
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return bytes;
+    }
+
+    /// <summary>
+    /// GNU AArch64 emits this local-exec form as ADD_TPREL_HI12 followed by
+    /// LDST32_TPREL_LO12_NC. The symbol is placed at byte offset four so the
+    /// unsigned-immediate encoding exercises its scale-four low-12 field.
+    /// </summary>
+    public static byte[] TlsLocalExecLdst32FunctionPie(bool useStore = false)
+    {
+        var bytes = TlsLocalExecFunctionPie();
+        const int codeOffset = 0x200;
+        const int codeSize = 4 * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int relocationTableOffset = 0x600;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+
+        // The STT_TLS symbol resides in the initialized PT_TLS template at
+        // byte offset four, keeping the LDST32 offset aligned to its scale.
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + ElfConstants.SymbolEntrySize64 + 8, 4);
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            bytes.AsSpan(symbolTableOffset + ElfConstants.SymbolEntrySize64 + 6),
+            3);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset, 0x1204);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + 8, (1UL << 32) | ElfConstants.RArm64TlsLeAddTprelHi12);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64, 0x1208);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64 + 8, (1UL << 32) | ElfConstants.RArm64TlsLeLdst32TprelLo12Nc);
+
+        var words = new uint[]
+        {
+            0xD53BD04A, // MRS x10, TPIDR_EL0
+            0x91400149, // ADD x9, x10, #0, LSL #12 (HI12)
+            useStore ? 0xB9000520u : 0xB9400520u, // STR/LDR w0, [x9, #4] (LO12_NC, scale 4)
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return bytes;
+    }
+
     public static byte[] CongruentNonPageSizedLoadAlignmentPie()
     {
         var bytes = MinimalPie();
@@ -167,6 +485,30 @@ internal static class ElfFixture
         return bytes;
     }
 
+    private static void WriteSectionHeader(
+        Span<byte> destination,
+        int offset,
+        uint type,
+        ulong flags,
+        ulong address,
+        ulong fileOffset,
+        ulong size,
+        uint link,
+        uint info,
+        ulong alignment,
+        ulong entrySize)
+    {
+        WriteUInt32(destination, offset + 4, type);
+        WriteUInt64(destination, offset + 8, flags);
+        WriteUInt64(destination, offset + 16, address);
+        WriteUInt64(destination, offset + 24, fileOffset);
+        WriteUInt64(destination, offset + 32, size);
+        WriteUInt32(destination, offset + 40, link);
+        WriteUInt32(destination, offset + 44, info);
+        WriteUInt64(destination, offset + 48, alignment);
+        WriteUInt64(destination, offset + 56, entrySize);
+    }
+
     private static void WriteProgramHeader(
         Span<byte> destination,
         int offset,
@@ -186,6 +528,12 @@ internal static class ElfFixture
         WriteUInt64(destination, offset + 32, fileSize);
         WriteUInt64(destination, offset + 40, memorySize);
         WriteUInt64(destination, offset + 48, alignment);
+    }
+
+    private static void WriteDynamicEntry(Span<byte> destination, int offset, ulong tag, ulong value)
+    {
+        WriteUInt64(destination, offset, tag);
+        WriteUInt64(destination, offset + sizeof(ulong), value);
     }
 
     private static void WriteUInt16(Span<byte> destination, int offset, ushort value) =>

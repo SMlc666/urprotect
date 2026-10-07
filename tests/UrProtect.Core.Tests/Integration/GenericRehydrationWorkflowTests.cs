@@ -6,6 +6,7 @@ using UrProtect.Core.StructuralElf;
 using UrProtect.Core.Application.Protection;
 using UrProtect.Core.Application.Rehydration;
 using UrProtect.Core.Infrastructure.Rehydration;
+using UrProtect.Core.Tests.Structural;
 
 namespace UrProtect.Core.Tests.Integration;
 
@@ -77,6 +78,55 @@ public sealed class GenericRehydrationTests
         Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.NotNull(result.NativeImage);
         Assert.NotNull(result.NativeImage!.LayoutEvidence);
+    }
+
+    [Fact]
+    [Trait("Category", "Rehydration")]
+    public void RejectsTransformedTlsRelocationWhenSemanticSnapshotIsMissing()
+    {
+        var source = ElfFixture.TlsStaticRelocationPie();
+        var selectors = new[] { "tls-fixture" };
+        var passes = new[] { ProtectionPass.ControlFlowFlattening };
+        var requestSha256 = ProtectedImageCodec.ComputeRequestSha256(selectors, passes);
+        var sourceSha256 = Sha256(source);
+        var image = new ProtectedImageDocument(
+            "tls-fixture",
+            ProtectedImageProfile.OuterExecveat,
+            sourceSha256,
+            "tls-test-producer",
+            ProducerBuild,
+            ConsumerId,
+            requestSha256,
+            selectors,
+            passes,
+            new ProtectedImageOperation[]
+            {
+                new ProtectedImageEmitRegion(1, new VirtualAddress(0x1200), sizeof(uint), new byte[] { 0, 0, 0, 0 }),
+                new ProtectedImageEntryBranchFixup(
+                    1,
+                    1,
+                    new VirtualAddress(0x1200),
+                    0,
+                    0,
+                    ProtectedImageFixupKind.Aarch64Branch26),
+            });
+        var artifact = ProtectedImageCodec.Encode(image);
+        Assert.True(artifact.IsSuccess, string.Join(Environment.NewLine, artifact.Diagnostics));
+        var options = new RehydrationOptions(
+            sourceSha256,
+            requestSha256,
+            image.UnitId,
+            image.Profile,
+            image.ProducerId,
+            ProducerBuild,
+            ConsumerId,
+            ConsumerBuild);
+
+        var result = GenericRehydrationEngine.Rehydrate(source, artifact.ArtifactBytes!, options);
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.NativeImage);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsBindingUnresolved);
     }
 
     [Fact]

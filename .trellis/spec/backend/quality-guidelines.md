@@ -268,3 +268,106 @@ Wrong: accept a schema-1 result because its directory and JSON are non-empty.
 Correct: require schema-2 fields, all layer results, cleanup marker, and a
          target-consistent aggregate before upload can pass.
 ```
+
+
+## Scenario: Managed TLS semantic rewrite and current artifact handoff
+
+### 1. Scope / Trigger
+
+This contract applies when selected-function protection encounters AArch64 TLS
+relocations. Structural PT_TLS facts, typed TLS bindings, semantic fixups, the
+canonical Protected Image v1 snapshot operation, and shared layout/materializer
+validation must remain one flow. The current managed rewrite slice is bounded
+and does not by itself promote a native runtime claim.
+
+### 2. Signatures
+
+```text
+FunctionProtectionService.Plan(ELF_BYTES, FunctionProtectionOptions)
+  -> FunctionProtectionPlanResult
+
+SemanticPlanSnapshotCodec.Create(SemanticRewritePlan)
+  -> SemanticPlanSnapshotResult
+
+ProtectedImageSemanticPlanSnapshot(canonicalBytes, planSha256)
+
+TlsSemanticFixupPlanner.Build(SemanticRewritePlan)
+  -> TlsSemanticFixupPlanResult
+```
+
+The current managed positive forms are:
+
+- local-exec `ADD_TPREL_HI12 + ADD_TPREL_LO12/LO12_NC`;
+- local-exec `ADD_TPREL_HI12 + LDST32_TPREL_LO12_NC`;
+- local-exec `MOVW_TPREL_G1 + MOVW_TPREL_G0_NC`;
+- initial-exec `MOVW_GOTTPREL_G1 + MOVW_GOTTPREL_G0_NC` with one preserved
+  `R_AARCH64_TLS_TPREL64` GOT owner.
+
+### 3. Contracts
+
+- `TlsBinding` carries the typed access model, relocation family, image-local
+  module/template facts, defined `STT_TLS` symbol, addend, ordered relocation
+  sites, instruction sequence, address expression, and profile/runtime needs.
+- The producer emits exactly one bounded `ProtectedImageSemanticPlanSnapshot`
+  operation whenever transformed TLS fixups are present. It uses
+  `SemanticPlanSnapshotCodec` and does not change Protected Image ABI v1 or
+  Payload Frame v3.
+- Layout and rehydration apply TLS fixups only through the shared
+  `ElfLayoutPlanner` and `ElfLayoutMaterializer`. PT_TLS template, zero-fill,
+  alignment, relocation identity, and initial-exec GOT ownership are reparsed
+  and compared before publication.
+- A decoder may report zero optional operand-width metadata. The semantic
+  projector fills missing widths from a decoded register or memory base and
+  uses bounded scalar defaults for non-register operands; nonzero decoder widths
+  are preserved. Snapshot validation still rejects zero or out-of-range widths.
+- Native adapter/baseline evidence, managed semantic evidence, and transformed
+  runtime evidence remain separate. A local environment or one runtime never
+  promotes another runtime.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| missing snapshot for transformed TLS operations | reject before materialization/publication |
+| model, family, symbol, pair order, addend, or register mismatch | stable TLS semantic diagnostic; no artifact |
+| incomplete ADD/MOVW/LDST32 pair or non-supported TLS form | fail closed before layout |
+| initial-exec GOT missing, duplicated, overlapping, non-writable, or unmapped | stable GOT/TLS diagnostic; no output |
+| source/output range, opcode, width, scale, or address-map mismatch | layout diagnostic; no Native Image |
+| PT_TLS/template/zero-fill/relocation reparse mismatch | output validation failure; no publication |
+| zero or unbounded canonical operand width | snapshot malformed diagnostic |
+| unavailable native toolchain/runtime | explicit `environment-unavailable`; no promotion |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a selected TLS function produces a canonical typed snapshot, shared
+  layout fixups preserve PT_TLS/GOT facts, output reparses equivalently, and
+  publication is atomic.
+- Base: managed semantic/layout tests pass while transformed glibc, musl, or
+  bionic execution evidence is still absent; the runtime claim remains open.
+- Bad: a producer carries only raw TLS bytes, rescans unrelated code, accepts a
+  missing GOT owner, or treats native adapter acceptance as managed rewrite
+  support.
+
+### 6. Tests Required
+
+- Structural tests cover PT_TLS ranges, template/zero-fill, TLS relocation
+  identity, GOT ownership, truncation, overlap, and malformed metadata.
+- Semantic tests cover each accepted pair, nearest unsupported pair, opcode and
+  register ownership, addend/symbol identity, canonical snapshot round-trip,
+  digest/tamper rejection, and bounded operand widths.
+- Integration tests cover producer snapshot emission, rehydration, shared layout
+  output reparse, PT_TLS/GOT equivalence, incomplete pairs, source mismatch,
+  mapping conflicts, and no-partial-publication.
+- Native matrix tests must separately retain baseline/transformed status,
+  streams, per-thread values, lifecycle order, toolchain/runtime identity, and
+  rollback evidence for every promoted model/profile/runtime row.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: copy a TLS relocation into an artifact and let rehydration infer its
+       model or GOT ownership from unrelated output bytes.
+Correct: recognize a bounded typed sequence, carry its canonical snapshot,
+        map every source site through the shared layout plan, reparse the
+        output, and publish only after identity and TLS facts match.
+```

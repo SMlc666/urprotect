@@ -65,6 +65,44 @@ public sealed class ElfLayoutTests
 
     [Fact]
     [Trait("Category", "ElfLayout")]
+    public void MaterializerPreservesTlsTemplateZeroFillAndSectionOwnedRelocations()
+    {
+        var source = ElfFixture.TlsStaticRelocationPie();
+        source.AsSpan(ElfFixture.InterpreterProgramHeaderOffset, ElfConstants.ProgramHeaderSize64).Clear();
+        var parsed = ElfParser.Parse(source);
+        Assert.True(parsed.IsSuccess, string.Join(Environment.NewLine, parsed.Diagnostics));
+        Assert.Single(parsed.File!.TlsMetadata.Segments);
+        Assert.Single(parsed.File.TlsMetadata.StaticRelocations);
+
+        var region = new ElfLayoutRegionRequest(
+            "region:tls-preservation",
+            "function:tls-fixture",
+            new VirtualAddress(0x1200),
+            sizeof(uint),
+            new byte[] { 0x1F, 0x20, 0x03, 0xD5 });
+        var planning = ElfLayoutPlanner.Plan(
+            source,
+            parsed.File,
+            new[] { region },
+            Array.Empty<ElfLayoutBranchRequest>(),
+            new ElfLayoutOptions(RequestedStrategy: ElfLayoutStrategy.AvailableProgramHeaderSlot));
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+
+        var materialized = ElfLayoutMaterializer.Materialize(source, parsed.File, planning.Plan!);
+        Assert.True(materialized.IsSuccess, string.Join(Environment.NewLine, materialized.Diagnostics));
+        var sourceTls = Assert.Single(parsed.File.TlsMetadata.Segments);
+        var outputTls = Assert.Single(materialized.ParsedOutput!.TlsMetadata.Segments);
+        Assert.Equal(sourceTls.FileSize, outputTls.FileSize);
+        Assert.Equal(sourceTls.ZeroFillSize, outputTls.ZeroFillSize);
+        Assert.Equal(sourceTls.Alignment, outputTls.Alignment);
+        Assert.Equal(sourceTls.InitializedTemplate.ToArray(), outputTls.InitializedTemplate.ToArray());
+        Assert.Equal(
+            parsed.File.TlsMetadata.StaticRelocations,
+            materialized.ParsedOutput.TlsMetadata.StaticRelocations);
+    }
+
+    [Fact]
+    [Trait("Category", "ElfLayout")]
     public void OccupiedTableUsesRelocatedProgramHeaderTableAndPreservesSectionMetadata()
     {
         var source = ElfFixture.MinimalPie();

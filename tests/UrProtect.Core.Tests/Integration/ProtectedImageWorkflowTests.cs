@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
+using UrProtect.Core.SemanticPlanning;
 using UrProtect.Core.Application.Protection;
 using UrProtect.Core.Infrastructure.ProtectedImage;
 
@@ -40,6 +41,62 @@ public sealed class ProtectedImageTests
         Assert.Equal(image.UnitId, decoded.Image!.UnitId);
         Assert.Equal(image.Operations.Count, decoded.Image.Operations.Count);
         Assert.Equal(image.RequestSha256, decoded.Image.RequestSha256);
+    }
+
+    [Fact]
+    [Trait("Category", "ProtectedImage")]
+    public void CodecCarriesAndValidatesTheCanonicalSemanticPlanSnapshot()
+    {
+        var mapResult = AddressMap.Create(Array.Empty<AddressMapEntry>());
+        Assert.True(mapResult.IsSuccess, string.Join(Environment.NewLine, mapResult.Diagnostics));
+        var semanticPlan = new SemanticRewritePlan(
+            mapResult.Map!,
+            Array.Empty<SemanticInstruction>(),
+            Array.Empty<SemanticFixup>());
+        var snapshotResult = SemanticPlanSnapshotCodec.Create(semanticPlan);
+        Assert.True(snapshotResult.IsSuccess, string.Join(Environment.NewLine, snapshotResult.Diagnostics));
+        var snapshotOperation = new ProtectedImageSemanticPlanSnapshot(snapshotResult.Snapshot!);
+        var image = CreateImage() with
+        {
+            Operations = CreateImage().Operations
+                .Append(snapshotOperation)
+                .ToArray(),
+        };
+
+        var encoded = ProtectedImageCodec.Encode(image);
+        Assert.True(encoded.IsSuccess, string.Join(Environment.NewLine, encoded.Diagnostics));
+        var decoded = ProtectedImageCodec.Decode(encoded.ArtifactBytes!);
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        var decodedSnapshot = Assert.Single(decoded.Image!.Operations.OfType<ProtectedImageSemanticPlanSnapshot>());
+        Assert.Equal(snapshotOperation.PlanSha256, decodedSnapshot.PlanSha256);
+        Assert.Equal(snapshotOperation.CanonicalBytes, decodedSnapshot.CanonicalBytes);
+        Assert.Equal(ProtectedImageDocument.AbiVersion, BinaryPrimitives.ReadUInt16LittleEndian(encoded.ArtifactBytes!.AsSpan(4)));
+
+        var tamperedSnapshotDigest = encoded.ArtifactBytes!.ToArray();
+        var snapshotOperationMarker = new byte[8];
+        snapshotOperationMarker[0] = (byte)ProtectedImageOperationCode.SemanticPlanSnapshot;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            snapshotOperationMarker.AsSpan(4),
+            checked((uint)(8 + sizeof(uint) + 32 + snapshotOperation.CanonicalBytes.Length)));
+        var snapshotOperationOffset = tamperedSnapshotDigest.AsSpan().IndexOf(snapshotOperationMarker);
+        Assert.True(snapshotOperationOffset >= 0);
+        tamperedSnapshotDigest[snapshotOperationOffset + 12] ^= 0x01;
+        RecomputeCanonicalDigest(tamperedSnapshotDigest);
+        var tamperedDecode = ProtectedImageCodec.Decode(tamperedSnapshotDigest);
+        Assert.False(tamperedDecode.IsSuccess);
+        Assert.Contains(tamperedDecode.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.ProtectedImageIntegrityMismatch);
+
+        var mismatchedDigest = CreateImage() with
+        {
+            Operations = CreateImage().Operations
+                .Append(new ProtectedImageSemanticPlanSnapshot(
+                    snapshotOperation.CanonicalBytes,
+                    new string('f', 64)))
+                .ToArray(),
+        };
+        var rejected = ProtectedImageCodec.Encode(mismatchedDigest);
+        Assert.False(rejected.IsSuccess);
+        Assert.Contains(rejected.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.ProtectedImageIntegrityMismatch);
     }
 
     [Fact]

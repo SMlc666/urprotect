@@ -41,6 +41,9 @@ public static class SemanticPlanSnapshotLimits
     public const int MaximumRelaxationOptions = 8;
     public const int MaximumTargetsPerJumpTable = 65536;
     public const int MaximumCfiRegisterEffects = 256;
+    public const int MaximumTlsInstructions = 1024;
+    public const int MaximumTlsRelocationSites = 64;
+    public const int MaximumTlsRequirements = 16;
 }
 
 /// <summary>

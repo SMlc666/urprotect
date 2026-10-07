@@ -998,28 +998,13 @@ public static partial class SemanticPlanSnapshotCodec
                     relocationDiagnostic);
                 return true;
             case SemanticPlanExtensionKind.TlsBinding:
-                if (!TryReadEntityId(reader, out var tlsSource)
-                    || !TryReadRange(reader, out var tlsRange)
-                    || !reader.TryReadUtf8String(out var tlsModel)
-                    || !TryReadRelocation(reader, out var tlsBinding)
+                if (!TryReadTlsBinding(reader, out var tlsBinding)
                     || !reader.TryReadOptionalString(out var tlsDiagnostic))
                 {
                     return false;
                 }
 
-                if (tlsBinding is null || string.IsNullOrWhiteSpace(tlsModel))
-                {
-                    return reader.Fail(
-                        DiagnosticCode.SemanticPlanSnapshotMalformed,
-                        "The TLS extension has no relocation binding or model.");
-                }
-
-                extension = new SemanticTlsBindingExtension(
-                    tlsSource,
-                    tlsRange,
-                    tlsBinding,
-                    tlsModel,
-                    tlsDiagnostic);
+                extension = new SemanticTlsBindingExtension(tlsBinding!, tlsDiagnostic);
                 return true;
             case SemanticPlanExtensionKind.JumpTable:
                 if (!TryReadEntityId(reader, out var tableIdentity)
@@ -1102,6 +1087,371 @@ public static partial class SemanticPlanSnapshotCodec
                     DiagnosticCode.SemanticPlanSnapshotUnsupported,
                     "The semantic-plan snapshot extension kind is not supported.");
         }
+    }
+
+    private static bool TryReadTlsBinding(SnapshotReader reader, out TlsBinding? binding)
+    {
+        binding = null;
+        if (!reader.TryReadByte(out var model)
+            || !reader.TryReadByte(out var family)
+            || !TryReadEntityId(reader, out var sourceIdentity)
+            || !TryReadRange(reader, out var sourceRange)
+            || !TryReadRange(reader, out var sequenceRange)
+            || !reader.TryReadByte(out var resolverKind)
+            || !TryReadOptionalTarget(reader, out var resolverTarget)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTlsInstructions, out var instructionCount))
+        {
+            return false;
+        }
+
+        var instructions = new List<TlsInstructionRecord>(instructionCount);
+        for (var index = 0; index < instructionCount; index++)
+        {
+            if (!TryReadRange(reader, out var instructionRange)
+                || !reader.TryReadUInt32(out var encoding)
+                || !reader.TryReadUtf8String(out var mnemonic)
+                || !reader.TryReadByte(out var role)
+                || !TryReadTlsRegisters(reader, out var inputRegisters)
+                || !TryReadTlsRegisters(reader, out var outputRegisters)
+                || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumRegisterEffectsPerInstruction, out var effectCount))
+            {
+                return false;
+            }
+
+            var effects = new List<SemanticRegisterEffect>(effectCount);
+            for (var effectIndex = 0; effectIndex < effectCount; effectIndex++)
+            {
+                if (!TryReadRegisterEffect(reader, out var effect))
+                {
+                    return false;
+                }
+
+                effects.Add(effect);
+            }
+
+            if (!reader.TryReadBool(out var isCall) || !reader.TryReadBool(out var isResolverCall))
+            {
+                return false;
+            }
+
+            if (!Enum.IsDefined(typeof(TlsInstructionRole), (TlsInstructionRole)role))
+            {
+                return reader.Fail(
+                    DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                    "The TLS instruction contains an unsupported role enum value.");
+            }
+
+            instructions.Add(new TlsInstructionRecord(
+                instructionRange,
+                encoding,
+                mnemonic,
+                (TlsInstructionRole)role,
+                inputRegisters,
+                outputRegisters,
+                effects,
+                isCall,
+                isResolverCall));
+        }
+
+        if (!TryReadTlsModule(reader, out var module)
+            || !TryReadOptionalTlsSymbol(reader, out var symbol)
+            || !reader.TryReadInt64(out var addend)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTlsRelocationSites, out var siteCount))
+        {
+            return false;
+        }
+
+        var sites = new List<TlsRelocationSite>(siteCount);
+        for (var index = 0; index < siteCount; index++)
+        {
+            if (!reader.TryReadByte(out var siteFamily)
+                || !TryReadRange(reader, out var siteRange)
+                || !TryReadRelocation(reader, out var relocation)
+                || !reader.TryReadInt32(out var pairOrdinal)
+                || !reader.TryReadBool(out var isGotOrDescriptorOwned))
+            {
+                return false;
+            }
+
+            if (!Enum.IsDefined(typeof(TlsRelocationFamily), (TlsRelocationFamily)siteFamily)
+                || relocation is null)
+            {
+                return reader.Fail(
+                    DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                    "The TLS relocation site contains an unsupported family or missing binding.");
+            }
+
+            sites.Add(new TlsRelocationSite(
+                (TlsRelocationFamily)siteFamily,
+                siteRange,
+                relocation,
+                pairOrdinal,
+                isGotOrDescriptorOwned));
+        }
+
+        TlsGotEntryBinding? gotEntry = null;
+        if ((TlsAccessModel)model == TlsAccessModel.InitialExec)
+        {
+            if (!reader.TryReadBool(out var hasGotEntry))
+            {
+                return false;
+            }
+
+            if (hasGotEntry && !TryReadTlsGotEntry(reader, out gotEntry))
+            {
+                return false;
+            }
+        }
+
+        if (!reader.TryReadInt32(out var accessSize)
+            || !reader.TryReadByte(out var expressionKind)
+            || !TryReadTlsModule(reader, out var expressionModule)
+            || !TryReadOptionalTlsSymbol(reader, out var expressionSymbol)
+            || !TryReadOptionalRegister(reader, out var baseRegister)
+            || !TryReadOptionalRegister(reader, out var valueRegister)
+            || !reader.TryReadInt64(out var expressionAddend)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTlsRequirements, out var profileCount))
+        {
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(TlsAccessModel), (TlsAccessModel)model)
+            || !Enum.IsDefined(typeof(TlsRelocationFamily), (TlsRelocationFamily)family)
+            || !Enum.IsDefined(typeof(TlsResolverKind), (TlsResolverKind)resolverKind)
+            || !Enum.IsDefined(typeof(TlsAddressExpressionKind), (TlsAddressExpressionKind)expressionKind))
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                "The TLS binding contains an unsupported model, family, resolver, or address expression enum value.");
+        }
+
+        var profiles = new List<TlsProfileRequirement>(profileCount);
+        for (var index = 0; index < profileCount; index++)
+        {
+            if (!reader.TryReadByte(out var profile)
+                || !reader.TryReadBool(out var required))
+            {
+                return false;
+            }
+
+            if (!Enum.IsDefined(typeof(TlsProfile), (TlsProfile)profile))
+            {
+                return reader.Fail(
+                    DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                    "The TLS binding contains an unsupported profile requirement.");
+            }
+
+            profiles.Add(new TlsProfileRequirement((TlsProfile)profile, required));
+        }
+
+        if (!reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTlsRequirements, out var runtimeCount))
+        {
+            return false;
+        }
+
+        var runtimes = new List<TlsRuntimeRequirement>(runtimeCount);
+        for (var index = 0; index < runtimeCount; index++)
+        {
+            if (!reader.TryReadByte(out var runtime)
+                || !reader.TryReadByte(out var requirement)
+                || !reader.TryReadBool(out var required))
+            {
+                return false;
+            }
+
+            if (!Enum.IsDefined(typeof(TlsRuntime), (TlsRuntime)runtime)
+                || !Enum.IsDefined(typeof(TlsRuntimeRequirementKind), (TlsRuntimeRequirementKind)requirement))
+            {
+                return reader.Fail(
+                    DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                    "The TLS binding contains an unsupported runtime or runtime requirement.");
+            }
+
+            runtimes.Add(new TlsRuntimeRequirement(
+                (TlsRuntime)runtime,
+                (TlsRuntimeRequirementKind)requirement,
+                required));
+        }
+
+        binding = new TlsBinding(
+            (TlsAccessModel)model,
+            (TlsRelocationFamily)family,
+            sourceIdentity,
+            sourceRange,
+            new TlsInstructionSequence(
+                sequenceRange,
+                instructions,
+                (TlsResolverKind)resolverKind,
+                resolverTarget),
+            module!,
+            symbol,
+            addend,
+            sites,
+            accessSize,
+            new TlsAddressExpression(
+                (TlsAddressExpressionKind)expressionKind,
+                expressionModule!,
+                expressionSymbol,
+                baseRegister,
+                valueRegister,
+                expressionAddend),
+            profiles,
+            runtimes,
+            gotEntry);
+        return true;
+    }
+
+    private static bool TryReadTlsGotEntry(
+        SnapshotReader reader,
+        out TlsGotEntryBinding? gotEntry)
+    {
+        gotEntry = null;
+        if (!TryReadEntityId(reader, out var sourceIdentity)
+            || !TryReadRange(reader, out var sourceRange)
+            || !TryReadRelocation(reader, out var relocation)
+            || !TryReadOptionalTlsSymbol(reader, out var symbol)
+            || !reader.TryReadInt64(out var addend)
+            || relocation is null
+            || symbol is null)
+        {
+            return false;
+        }
+
+        gotEntry = new TlsGotEntryBinding(
+            sourceIdentity,
+            sourceRange,
+            relocation,
+            symbol,
+            addend);
+        return true;
+    }
+
+    private static bool TryReadTlsRegisters(
+        SnapshotReader reader,
+        out IReadOnlyList<Aarch64RegisterView> registers)
+    {
+        registers = Array.Empty<Aarch64RegisterView>();
+        if (!reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumCandidates, out var count))
+        {
+            return false;
+        }
+
+        var values = new List<Aarch64RegisterView>(count);
+        for (var index = 0; index < count; index++)
+        {
+            if (!TryReadRegister(reader, out var register))
+            {
+                return false;
+            }
+
+            values.Add(register);
+        }
+
+        registers = Array.AsReadOnly(values.ToArray());
+        return true;
+    }
+
+    private static bool TryReadTlsModule(SnapshotReader reader, out TlsModuleIdentity? module)
+    {
+        module = null;
+        if (!reader.TryReadByte(out var kind)
+            || !reader.TryReadUtf8String(out var identity)
+            || !reader.TryReadOptionalString(out var soname)
+            || !TryReadOptionalUInt32(reader, out var runtimeModuleIndex)
+            || !reader.TryReadBool(out var hasTemplate))
+        {
+            return false;
+        }
+
+        TlsTemplateContract? template = null;
+        if (hasTemplate)
+        {
+            if (!TryReadTlsTemplate(reader, out template))
+            {
+                return false;
+            }
+        }
+
+        if (!Enum.IsDefined(typeof(TlsModuleIdentityKind), (TlsModuleIdentityKind)kind))
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                "The TLS module identity contains an unsupported identity kind.");
+        }
+
+        module = new TlsModuleIdentity(
+            (TlsModuleIdentityKind)kind,
+            identity,
+            soname,
+            runtimeModuleIndex,
+            template);
+        return true;
+    }
+
+    private static bool TryReadTlsTemplate(SnapshotReader reader, out TlsTemplateContract? template)
+    {
+        template = null;
+        if (!reader.TryReadUInt64(out var fileOffset)
+            || !reader.TryReadUInt64(out var virtualAddress)
+            || !reader.TryReadUInt64(out var fileSize)
+            || !reader.TryReadUInt64(out var memorySize)
+            || !reader.TryReadUInt64(out var alignment)
+            || !reader.TryReadUInt32(out var permissions)
+            || !reader.TryReadInt32(out var owningLoadIndex)
+            || !reader.TryReadUtf8String(out var templateDigest))
+        {
+            return false;
+        }
+
+        template = new TlsTemplateContract(
+            new FileOffset(fileOffset),
+            new VirtualAddress(virtualAddress),
+            fileSize,
+            memorySize,
+            alignment,
+            permissions,
+            owningLoadIndex,
+            templateDigest);
+        return true;
+    }
+
+    private static bool TryReadOptionalTlsSymbol(SnapshotReader reader, out TlsSymbolIdentity? symbol)
+    {
+        symbol = null;
+        if (!reader.TryReadBool(out var present))
+        {
+            return false;
+        }
+
+        if (!present)
+        {
+            return true;
+        }
+
+        if (!reader.TryReadUInt32(out var index)
+            || !reader.TryReadUtf8String(out var name)
+            || !reader.TryReadByte(out var binding)
+            || !reader.TryReadByte(out var type)
+            || !reader.TryReadByte(out var visibility)
+            || !reader.TryReadUInt16(out var sectionIndex)
+            || !reader.TryReadUInt64(out var value)
+            || !reader.TryReadUInt64(out var size)
+            || !reader.TryReadBool(out var defined))
+        {
+            return false;
+        }
+
+        symbol = new TlsSymbolIdentity(
+            index,
+            name,
+            binding,
+            type,
+            visibility,
+            sectionIndex,
+            value,
+            size,
+            defined);
+        return true;
     }
 
     private static bool TryReadDiagnostic(

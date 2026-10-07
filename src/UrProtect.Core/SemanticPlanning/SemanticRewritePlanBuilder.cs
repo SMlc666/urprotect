@@ -190,7 +190,7 @@ public static class SemanticRewritePlanBuilder
                         fixup.SourceFileOffset.Value);
                 }
 
-                var writeSize = SemanticFixup.GetRelocationWriteSize(relocation.Kind);
+                var writeSize = SemanticFixup.GetRelocationWriteSize(relocation);
                 if (writeSize == 0)
                 {
                     diagnostics.Error(

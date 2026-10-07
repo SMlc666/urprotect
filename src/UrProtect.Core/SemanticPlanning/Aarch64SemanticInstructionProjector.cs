@@ -402,6 +402,35 @@ public static class Aarch64SemanticInstructionProjector
         ulong diagnosticOffset,
         out SemanticOperand? projected)
     {
+        var fallbackWidth = operand.Register?.Width
+            ?? (operand.Registers.Count > 0 ? operand.Registers[0].Width : (byte)0);
+        if (fallbackWidth == 0 && operand.Memory is { } memory)
+        {
+            fallbackWidth = memory.Base.Width;
+        }
+
+        if (fallbackWidth == 0)
+        {
+            fallbackWidth = 1;
+        }
+
+        var projectedRegisterWidth = operand.RegisterWidth > 0
+            ? operand.RegisterWidth
+            : fallbackWidth;
+        var projectedFieldWidth = operand.FieldWidth > 0
+            ? operand.FieldWidth
+            : operand.Kind is Aarch64OperandKind.Register
+                or Aarch64OperandKind.RegisterPair
+                or Aarch64OperandKind.RegisterList
+                ? projectedRegisterWidth
+                : 1;
+        var projectedElementWidth = operand.ElementWidth > 0
+            ? operand.ElementWidth
+            : operand.Kind is Aarch64OperandKind.Register
+                or Aarch64OperandKind.RegisterPair
+                or Aarch64OperandKind.RegisterList
+                ? projectedRegisterWidth
+                : 1;
         projected = null;
         if (string.IsNullOrWhiteSpace(operand.Name)
             || string.IsNullOrWhiteSpace(operand.Codec)
@@ -427,9 +456,9 @@ public static class Aarch64SemanticInstructionProjector
             operand.Immediate,
             operand.Target,
             operand.RegisterConstraint,
-            operand.RegisterWidth,
-            operand.FieldWidth,
-            operand.ElementWidth,
+            projectedRegisterWidth,
+            projectedFieldWidth,
+            projectedElementWidth,
             operand.AllowsStackPointer,
             operand.AllowsZeroRegister,
             operand.IsPageRelative,

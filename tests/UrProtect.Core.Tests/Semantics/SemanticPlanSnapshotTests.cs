@@ -241,14 +241,7 @@ public sealed class SemanticPlanSnapshotTests
                     SemanticTarget.Exact(new VirtualAddress(0x1010)),
                     RelocationType: ElfConstants.RArm64Abs64),
                 "relocation site is owned by the layout child"),
-            new SemanticTlsBindingExtension(
-                SemanticEntityId.RelocationSite("tls-site"),
-                Range(0x3000, 0x600, sizeof(ulong)),
-                new RelocationBinding(
-                    Aarch64RelocationKind.ThreadLocal,
-                    SemanticTarget.RuntimeResolved("tls:module"),
-                    RelocationType: ElfConstants.RArm64TlsTprel64),
-                "initial-exec"),
+            new SemanticTlsBindingExtension(CreateTlsBinding(TlsAccessModel.InitialExec)),
             new SemanticJumpTableExtension(
                 SemanticEntityId.Table("jump-table"),
                 Range(0x4000, 0x700, 16),
@@ -293,10 +286,46 @@ public sealed class SemanticPlanSnapshotTests
                 SemanticPlanExtensionKind.UnresolvedReference,
             },
             decoded.Snapshot!.Extensions.Select(extension => extension.Kind));
-        Assert.Equal("initial-exec", Assert.IsType<SemanticTlsBindingExtension>(
+        Assert.Equal(TlsAccessModel.InitialExec, Assert.IsType<SemanticTlsBindingExtension>(
             decoded.Snapshot.Extensions.Single(extension => extension.Kind == SemanticPlanExtensionKind.TlsBinding)).Model);
         Assert.Equal("cfa=sp+16", Assert.IsType<SemanticCfiEffectExtension>(
             decoded.Snapshot.Extensions.Single(extension => extension.Kind == SemanticPlanExtensionKind.CfiEffect)).Effect);
+    }
+
+    [Theory]
+    [InlineData(TlsAccessModel.LocalExec)]
+    [InlineData(TlsAccessModel.InitialExec)]
+    [InlineData(TlsAccessModel.LocalDynamic)]
+    [InlineData(TlsAccessModel.GeneralDynamic)]
+    [InlineData(TlsAccessModel.TlsDesc)]
+    public void EveryTlsModelHasTypedCanonicalSnapshotCoverage(TlsAccessModel model)
+    {
+        var result = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[]
+            {
+                new SemanticTlsBindingExtension(CreateTlsBinding(model)),
+            }));
+
+        Assert.True(result.IsSuccess, Describe(result.Diagnostics));
+        var decoded = SemanticPlanSnapshotCodec.Decode(result.CanonicalBytes!);
+        Assert.True(decoded.IsSuccess, Describe(decoded.Diagnostics));
+        var binding = Assert.IsType<SemanticTlsBindingExtension>(
+            Assert.Single(decoded.Snapshot!.Extensions, extension => extension.Kind == SemanticPlanExtensionKind.TlsBinding));
+        Assert.Equal(model, binding.Model);
+        Assert.Equal(result.PlanSha256, decoded.PlanSha256);
+        Assert.Equal(result.CanonicalBytes, decoded.CanonicalBytes);
+
+        var mappingPlan = CreateTlsMappingPlan(binding.Binding);
+        var fixupPlan = TlsSemanticFixupPlanner.Build(mappingPlan);
+        Assert.True(fixupPlan.IsSuccess, Describe(fixupPlan.Diagnostics));
+        Assert.Equal(binding.Binding.RelocationSites.Count, fixupPlan.Fixups.Count);
+        Assert.All(fixupPlan.Fixups, fixup =>
+        {
+            Assert.Equal(model, fixup.AccessModel);
+            Assert.Equal(binding.Binding.Symbol, fixup.Symbol);
+            Assert.Equal(binding.Binding.AddressExpression, fixup.AddressExpression);
+            Assert.NotEqual(fixup.RelocationSourceRange, fixup.RelocationOutputRange);
+        });
     }
 
     [Fact]
@@ -383,22 +412,8 @@ public sealed class SemanticPlanSnapshotTests
         var plan = CreatePlan(
             extensions: new ISemanticPlanExtension[]
             {
-                new SemanticTlsBindingExtension(
-                    SemanticEntityId.RelocationSite("tls-site"),
-                    Range(0x3000, 0x600, 8),
-                    new RelocationBinding(
-                        Aarch64RelocationKind.ThreadLocal,
-                        SemanticTarget.RuntimeResolved("tls:module"),
-                        RelocationType: ElfConstants.RArm64TlsTprel64),
-                    "initial-exec"),
-                new SemanticTlsBindingExtension(
-                    SemanticEntityId.RelocationSite("tls-site"),
-                    Range(0x3000, 0x600, 8),
-                    new RelocationBinding(
-                        Aarch64RelocationKind.ThreadLocal,
-                        SemanticTarget.RuntimeResolved("tls:module"),
-                        RelocationType: ElfConstants.RArm64TlsTprel64),
-                    "initial-exec"),
+                new SemanticTlsBindingExtension(CreateTlsBinding(TlsAccessModel.InitialExec)),
+                new SemanticTlsBindingExtension(CreateTlsBinding(TlsAccessModel.InitialExec)),
             });
 
         var result = SemanticPlanSnapshotCodec.Create(plan);
@@ -502,6 +517,270 @@ public sealed class SemanticPlanSnapshotTests
             extensions);
         Assert.True(planResult.IsSuccess, Describe(planResult.Diagnostics));
         return planResult.Plan!;
+    }
+
+    private static SemanticRewritePlan CreateTlsMappingPlan(TlsBinding binding)
+    {
+        var mapEntries = new List<AddressMapEntry>
+        {
+            new(
+                SemanticEntityId.Function("tls-function"),
+                binding.SourceRange,
+                Range(
+                    binding.SourceRange.VirtualAddress.Value + 0x1000,
+                    binding.SourceRange.FileOffset.Value + 0x1000,
+                    binding.SourceRange.Size)),
+        };
+        for (var index = 0; index < binding.RelocationSites.Count; index++)
+        {
+            var site = binding.RelocationSites[index];
+            mapEntries.Add(new AddressMapEntry(
+                SemanticEntityId.RelocationSite($"tls-site-{index}"),
+                site.SourceRange,
+                Range(
+                    site.SourceRange.VirtualAddress.Value + 0x2000,
+                    site.SourceRange.FileOffset.Value + 0x2000,
+                    site.SourceRange.Size)));
+        }
+
+        var map = AddressMap.Create(mapEntries);
+        Assert.True(map.IsSuccess, Describe(map.Diagnostics));
+        Assert.True(map.Map!.TryMapSourceRange(binding.SourceRange, out _));
+        var plan = SemanticRewritePlanBuilder.Build(
+            map.Map!,
+            Array.Empty<SemanticInstruction>(),
+            Array.Empty<SemanticFixup>(),
+            new[] { new SemanticTlsBindingExtension(binding) });
+        Assert.True(plan.IsSuccess, Describe(plan.Diagnostics));
+        return plan.Plan!;
+    }
+
+    private static TlsBinding CreateTlsBinding(TlsAccessModel model)
+    {
+        var module = new TlsModuleIdentity(
+            TlsModuleIdentityKind.ImageLocal,
+            "image:tls-fixture",
+            "libtls-fixture.so",
+            null,
+            new TlsTemplateContract(
+                new FileOffset(0x700),
+                new VirtualAddress(0x4000),
+                4,
+                12,
+                4,
+                ElfConstants.PfR | ElfConstants.PfW,
+                0,
+                new string('0', 64)));
+        var symbol = new TlsSymbolIdentity(1, "tls_value", 1, ElfConstants.SttTls, 0, 1, 4, 4, true);
+        var x0 = new Aarch64RegisterView(Aarch64RegisterClass.General, 0, 64, Aarch64RegisterRole.None);
+        var x1 = new Aarch64RegisterView(Aarch64RegisterClass.General, 1, 64, Aarch64RegisterRole.None);
+        var roles = model switch
+        {
+            TlsAccessModel.LocalExec => new[]
+            {
+                TlsInstructionRole.ThreadPointerRead,
+                TlsInstructionRole.AddressFormation,
+                TlsInstructionRole.AddressFormation,
+                TlsInstructionRole.TlsMemoryAccess,
+            },
+            TlsAccessModel.InitialExec => new[]
+            {
+                TlsInstructionRole.SequencePreservation,
+                TlsInstructionRole.SequencePreservation,
+                TlsInstructionRole.ThreadPointerRead,
+                TlsInstructionRole.AddressFormation,
+                TlsInstructionRole.GotEntryLoad,
+                TlsInstructionRole.AddressFormation,
+                TlsInstructionRole.TlsMemoryAccess,
+                TlsInstructionRole.SequencePreservation,
+            },
+            TlsAccessModel.LocalDynamic => new[]
+            {
+                TlsInstructionRole.ModuleLookup,
+                TlsInstructionRole.ResolverCall,
+                TlsInstructionRole.SymbolOffsetFormation,
+            },
+            TlsAccessModel.GeneralDynamic => new[]
+            {
+                TlsInstructionRole.ModuleLookup,
+                TlsInstructionRole.ResolverCall,
+                TlsInstructionRole.TlsMemoryAccess,
+            },
+            TlsAccessModel.TlsDesc => new[]
+            {
+                TlsInstructionRole.AddressFormation,
+                TlsInstructionRole.DescriptorLoad,
+                TlsInstructionRole.AddressFormation,
+                TlsInstructionRole.DescriptorCall,
+                TlsInstructionRole.AddressFinalization,
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(model)),
+        };
+        var sourceRange = Range(0x3000, 0x600, checked((ulong)roles.Length * sizeof(uint)));
+        var resolverKind = model switch
+        {
+            TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic => TlsResolverKind.TlsGetAddr,
+            TlsAccessModel.TlsDesc => TlsResolverKind.TlsDesc,
+            _ => TlsResolverKind.None,
+        };
+        var instructionRecords = roles.Select((role, index) =>
+        {
+            var (encoding, mnemonic) = model switch
+            {
+                TlsAccessModel.LocalExec => role switch
+                {
+                    TlsInstructionRole.ThreadPointerRead => (0xD53BD040u, "mrs"),
+                    TlsInstructionRole.AddressFormation => (index == 1 ? 0x91400000u : 0x91000000u, "add"),
+                    TlsInstructionRole.TlsMemoryAccess => (0xB9400009u, "ldr"),
+                    _ => (0xD503201Fu, "nop"),
+                },
+                TlsAccessModel.InitialExec => index switch
+                {
+                    0 => (0xD2A00009u, "movz"),
+                    1 => (0xF2800009u, "movk"),
+                    2 => (0xD53BD04Au, "mrs"),
+                    3 => (0x8B090149u, "add"),
+                    4 => (0xF9400129u, "ldr"),
+                    5 => (0x8B090149u, "add"),
+                    6 => (0xB9400120u, "ldr"),
+                    _ => (0xD65F03C0u, "ret"),
+                },
+                _ => (0xD503201Fu, "nop"),
+            };
+            return new TlsInstructionRecord(
+                Range(sourceRange.VirtualAddress.Value + checked((ulong)index * sizeof(uint)),
+                    sourceRange.FileOffset.Value + checked((ulong)index * sizeof(uint)), sizeof(uint)),
+                encoding,
+                mnemonic,
+                role,
+                role == TlsInstructionRole.TlsMemoryAccess ? new[] { x0 } : Array.Empty<Aarch64RegisterView>(),
+                role == TlsInstructionRole.ThreadPointerRead ? new[] { x1 } : Array.Empty<Aarch64RegisterView>(),
+                Array.Empty<SemanticRegisterEffect>(),
+                IsCall: role == TlsInstructionRole.ResolverCall || role == TlsInstructionRole.DescriptorCall,
+                IsResolverCall: role == TlsInstructionRole.ResolverCall || role == TlsInstructionRole.DescriptorCall);
+        }).ToArray();
+        var relocationSpecs = model switch
+        {
+            TlsAccessModel.LocalExec => new[]
+            {
+                (ElfConstants.RArm64TlsLeAddTprelHi12, TlsRelocationFamily.Tprel, 0x3004UL, 0x604UL),
+                (ElfConstants.RArm64TlsLeAddTprelLo12Nc, TlsRelocationFamily.Tprel, 0x3008UL, 0x608UL),
+            },
+            TlsAccessModel.InitialExec => new[]
+            {
+                (ElfConstants.RArm64TlsIeMovwGottprelG1, TlsRelocationFamily.GotTprel, 0x3000UL, 0x600UL),
+                (ElfConstants.RArm64TlsIeMovwGottprelG0Nc, TlsRelocationFamily.GotTprel, 0x3004UL, 0x604UL),
+            },
+            TlsAccessModel.LocalDynamic => new[]
+            {
+                (ElfConstants.RArm64TlsLdAdrPage21, TlsRelocationFamily.Dtpmod, 0x3000UL, 0x600UL),
+                (ElfConstants.RArm64TlsLdAddLo12Nc, TlsRelocationFamily.Dtpmod, 0x3004UL, 0x604UL),
+                (ElfConstants.RArm64TlsLdMovwDtprelG0, TlsRelocationFamily.Dtprel, 0x3008UL, 0x608UL),
+            },
+            TlsAccessModel.GeneralDynamic => new[]
+            {
+                (ElfConstants.RArm64TlsGdAdrPage21, TlsRelocationFamily.Dtpmod, 0x3000UL, 0x600UL),
+                (ElfConstants.RArm64TlsGdAddLo12Nc, TlsRelocationFamily.Dtpmod, 0x3004UL, 0x604UL),
+                (ElfConstants.RArm64TlsDtpMod64, TlsRelocationFamily.Dtpmod, 0x4000UL, 0x700UL),
+                (ElfConstants.RArm64TlsDtpRel64, TlsRelocationFamily.Dtprel, 0x4008UL, 0x708UL),
+            },
+            TlsAccessModel.TlsDesc => new[]
+            {
+                (ElfConstants.RArm64TlsDescAdrPage21, TlsRelocationFamily.TlsDesc, 0x3000UL, 0x600UL),
+                (ElfConstants.RArm64TlsDescLd64Lo12, TlsRelocationFamily.TlsDesc, 0x3004UL, 0x604UL),
+                (ElfConstants.RArm64TlsDescAddLo12, TlsRelocationFamily.TlsDesc, 0x3008UL, 0x608UL),
+                (ElfConstants.RArm64TlsDescCall, TlsRelocationFamily.TlsDesc, 0x300CUL, 0x60CUL),
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(model)),
+        };
+        var sites = relocationSpecs.Select((spec, index) =>
+        {
+            var relocationTarget = SemanticTarget.RuntimeResolved($"tls:{symbol.Name}");
+            var relocation = new RelocationBinding(
+                Aarch64RelocationKind.ThreadLocal,
+                relocationTarget,
+                SymbolIndex: 1,
+                SymbolName: symbol.Name,
+                RelocationType: spec.Item1,
+                RelocationAddress: new VirtualAddress(spec.Item3),
+                RelocationTableAddress: new VirtualAddress(0x4800));
+            return new TlsRelocationSite(
+                spec.Item2,
+                Range(spec.Item3, spec.Item4, TlsRelocationClassifier.GetWriteSize(spec.Item1)),
+                relocation,
+                index,
+                model is TlsAccessModel.InitialExec or TlsAccessModel.TlsDesc);
+        }).ToArray();
+        var primaryFamily = model switch
+        {
+            TlsAccessModel.LocalExec => TlsRelocationFamily.Tprel,
+            TlsAccessModel.InitialExec => TlsRelocationFamily.GotTprel,
+            TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic => TlsRelocationFamily.Dtpmod,
+            TlsAccessModel.TlsDesc => TlsRelocationFamily.TlsDesc,
+            _ => throw new ArgumentOutOfRangeException(nameof(model)),
+        };
+        var expressionKind = model switch
+        {
+            TlsAccessModel.LocalExec or TlsAccessModel.InitialExec => TlsAddressExpressionKind.ThreadPointerRelative,
+            TlsAccessModel.LocalDynamic => TlsAddressExpressionKind.ModuleRelative,
+            TlsAccessModel.GeneralDynamic => TlsAddressExpressionKind.ResolverReturned,
+            TlsAccessModel.TlsDesc => TlsAddressExpressionKind.DescriptorMediated,
+            _ => throw new ArgumentOutOfRangeException(nameof(model)),
+        };
+        var resolverTarget = resolverKind switch
+        {
+            TlsResolverKind.TlsGetAddr => SemanticTarget.RuntimeResolved("symbol:__tls_get_addr"),
+            TlsResolverKind.TlsDesc => SemanticTarget.RuntimeResolved("tlsdesc:resolver"),
+            _ => null,
+        };
+        TlsGotEntryBinding? gotEntry = null;
+        if (model == TlsAccessModel.InitialExec)
+        {
+            var gotRelocation = new RelocationBinding(
+                Aarch64RelocationKind.ThreadLocal,
+                SemanticTarget.RuntimeResolved("tls-got:image:tls-fixture:tls_value"),
+                SymbolIndex: symbol.SymbolIndex,
+                SymbolName: symbol.Name,
+                RelocationType: ElfConstants.RArm64TlsTprel64,
+                RelocationAddress: new VirtualAddress(0x5000),
+                RelocationTableAddress: new VirtualAddress(0x4800))
+            {
+                RawInfo = ((ulong)symbol.SymbolIndex << 32) | ElfConstants.RArm64TlsTprel64,
+            };
+            gotEntry = new TlsGotEntryBinding(
+                SemanticEntityId.RelocationSite("tls-got:5000"),
+                Range(0x5000, 0x900, sizeof(ulong)),
+                gotRelocation,
+                symbol,
+                0);
+        }
+
+        return new TlsBinding(
+            model,
+            primaryFamily,
+            SemanticEntityId.RelocationSite("tls-site"),
+            sourceRange,
+            new TlsInstructionSequence(sourceRange, instructionRecords, resolverKind, resolverTarget),
+            module,
+            symbol,
+            0,
+            sites,
+            4,
+            new TlsAddressExpression(expressionKind, module, symbol, x1, x0, 0),
+            new[]
+            {
+                new TlsProfileRequirement(TlsProfile.OuterExecveat, false),
+                new TlsProfileRequirement(TlsProfile.HostContextEntry, true),
+            },
+            Enum.GetValues<TlsRuntime>()
+                .Where(runtime => runtime != TlsRuntime.Aarch64SystemLoader)
+                .SelectMany(runtime => new[]
+                {
+                    new TlsRuntimeRequirement(runtime, TlsRuntimeRequirementKind.LoaderAllocatedTlsModule, true),
+                    new TlsRuntimeRequirement(runtime, TlsRuntimeRequirementKind.CurrentThreadLifecycle, true),
+                    new TlsRuntimeRequirement(runtime, TlsRuntimeRequirementKind.RegisteredWorkerLifecycle, false),
+                }),
+            gotEntry);
     }
 
     private static SemanticRewritePlan CreateFixupPlan(SemanticTarget target)
