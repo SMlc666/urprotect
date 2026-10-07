@@ -116,6 +116,27 @@ jobs:
             ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
             --tier "${tier}" --runtime glibc \
             --unit compat.protection-symbolized-fixture.glibc.outer-execveat
+      - name: Run HostContext Generic Rehydration and Native Image handoff (additive)
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-rehydration-e2e.sh --tier "${tier}" --runtime glibc --profile host-context-entry
+      - name: Check retained HostContext Generic Rehydration evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-rehydration-evidence.py \
+            ".artifacts/protected-image/${tier}/glibc/compat.protection-host-context-fixture.glibc.host-context-entry" \
+            --tier "${tier}" --runtime glibc \
+            --unit compat.protection-host-context-fixture.glibc.host-context-entry
       - name: Run strict compatibility corpus growth evidence
         if: always()
         run: |

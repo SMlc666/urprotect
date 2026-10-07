@@ -54,6 +54,10 @@ public sealed record ProtectedImageStageRecord(
     long? AnalysisDurationMilliseconds = null,
     long? EmissionDurationMilliseconds = null)
 {
+    public string WorkflowOwner { get; init; } = ProtectionWorkflowIdentity.Owner;
+
+    public string? FirstFailureStage { get; init; }
+
     public const int CurrentSchemaVersion = 1;
     public const string ProducerStage = "protected-image-producer";
     public const string PassedStatus = "passed";
@@ -116,7 +120,11 @@ public sealed record ProtectedImageStageRecord(
             publicationComplete ? ProtectedImageAbiV1.AbiVersion : null,
             publicationComplete,
             analysisDurationMilliseconds,
-            emissionDurationMilliseconds);
+            emissionDurationMilliseconds)
+        {
+            WorkflowOwner = ProtectionWorkflowIdentity.Owner,
+            FirstFailureStage = status == FailedStatus ? ProducerStage : null,
+        };
 
     public bool Validate(DiagnosticBag diagnostics)
     {
@@ -128,10 +136,27 @@ public sealed record ProtectedImageStageRecord(
             valid = false;
         }
 
+        if (!string.Equals(WorkflowOwner, ProtectionWorkflowIdentity.Owner, StringComparison.Ordinal))
+        {
+            diagnostics.Error(DiagnosticCode.ProtectedImageRoleMismatch, "Protected Image stage workflow owner is unsupported.");
+            valid = false;
+        }
+
         if (!string.Equals(Stage, ProducerStage, StringComparison.Ordinal)
             || Status is not (PassedStatus or FailedStatus))
         {
             diagnostics.Error(DiagnosticCode.ProtectedImageMalformed, "Protected Image stage identity or status is invalid.");
+            valid = false;
+        }
+
+        var failureStageValid = IsPassed
+            ? FirstFailureStage is null
+            : FirstFailureStage is not null
+                && (string.Equals(FirstFailureStage, ProducerStage, StringComparison.Ordinal)
+                    || Enum.TryParse<ProtectionWorkflowStage>(FirstFailureStage, out _));
+        if (!failureStageValid)
+        {
+            diagnostics.Error(DiagnosticCode.ProtectedImageMalformed, "Protected Image stage first-failure binding is invalid.");
             valid = false;
         }
 

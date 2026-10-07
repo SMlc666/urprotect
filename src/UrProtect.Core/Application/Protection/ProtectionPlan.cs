@@ -59,6 +59,8 @@ public sealed record ProtectedImageRoleRecord(
     bool RawArtifactRetained)
 {
     public string Architecture { get; init; } = ProtectedImageAbiV1.Architecture;
+
+    public string WorkflowOwner { get; init; } = ProtectionWorkflowIdentity.Owner;
 }
 
 public sealed record ProtectedImageEmissionResult(
@@ -93,11 +95,11 @@ public static class ProtectedImageAbiV1
 /// </summary>
 public sealed class ProtectedImageProducer
 {
-    private readonly FunctionProtectionService protectionService;
+    private readonly ProtectionWorkflow workflow;
 
-    public ProtectedImageProducer(FunctionProtectionService? protectionService = null)
+    public ProtectedImageProducer(ProtectionWorkflow? workflow = null)
     {
-        this.protectionService = protectionService ?? new FunctionProtectionService();
+        this.workflow = workflow ?? new ProtectionWorkflow();
     }
 
     public ProtectedImageEmissionResult Emit(
@@ -185,12 +187,13 @@ public sealed class ProtectedImageProducer
         }
 
         var analysisStarted = Stopwatch.GetTimestamp();
-        var planResult = protectionService.Plan(
+        var workflowPlan = workflow.Plan(
             sourceSnapshot,
             new FunctionProtectionOptions(selectors, passes));
         var analysisDurationMilliseconds = (long)Stopwatch.GetElapsedTime(analysisStarted).TotalMilliseconds;
+        var planResult = workflowPlan.FunctionPlan;
         functions = planResult.Functions.ToArray();
-        diagnostics.AddRange(planResult.Diagnostics);
+        diagnostics.AddRange(workflowPlan.Diagnostics);
         if (!planResult.IsSuccess || planResult.Plan is null)
         {
             return new ProtectedImageEmissionResult(
@@ -300,7 +303,10 @@ public sealed class ProtectedImageProducer
             document.Selectors,
             document.Passes.Select(ProtectionPassOrdering.Describe).ToArray(),
             string.Empty,
-            false);
+            false)
+        {
+            WorkflowOwner = ProtectionWorkflowIdentity.Owner,
+        };
         return new ProtectedImageEmissionResult(
             role,
             artifactBytes,

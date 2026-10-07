@@ -45,6 +45,7 @@ THREADED_TLS_TRACE_TEST := $(BUILD_DIR)/host-context-threaded-tls-trace-test
 THREADED_TLS_RUNTIME_TEST := $(BUILD_DIR)/host-context-threaded-tls-runtime-test
 THREAD_ADAPTER_TEST := $(BUILD_DIR)/host-context-thread-adapter-test
 NATIVE_IMAGE_HANDOFF := $(BUILD_DIR)/native-image-handoff
+HOST_CONTEXT_IMAGE_HANDOFF := $(BUILD_DIR)/host-context-image-handoff
 DYNAMIC_TLS_FIXTURE := $(BUILD_DIR)/host-context-dynamic-tls-fixture.so
 DYNAMIC_TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-dynamic-tls-fixture.o
 PROPERTY_FIXTURE := $(BUILD_DIR)/host-context-property-fixture.so
@@ -55,7 +56,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl -pthread
 
-.PHONY: all test runtime self-test host-context-launcher symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
+.PHONY: all test runtime self-test host-context-launcher host-context-image-handoff symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -110,8 +111,9 @@ graph-self-test: $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(GRAPH_SELF_TEST)" "$(GRAPH_REVERSED_FIXTURE)" "$(DEPENDENCY_FIXTURE)" "$(GRAPH_LOADER_FAILURE_FIXTURE)"
 
-test: check-host $(SELF_TEST) $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(THREADED_TLS_TRACE_TEST) $(DYNAMIC_TLS_FIXTURE) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE) $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE) $(NATIVE_IMAGE_HANDOFF)
+test: check-host $(SELF_TEST) $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(THREADED_TLS_TRACE_TEST) $(DYNAMIC_TLS_FIXTURE) $(PLT_SELF_TEST) $(PLT_FIXTURE) $(VERSION_SELF_TEST) $(DEPENDENCY_FIXTURE) $(GRAPH_SELF_TEST) $(GRAPH_FIXTURE) $(GRAPH_REVERSED_FIXTURE) $(GRAPH_LOADER_FAILURE_FIXTURE) $(FAKE_LOADER_FIXTURE) $(NATIVE_IMAGE_HANDOFF) $(HOST_CONTEXT_IMAGE_HANDOFF)
 	"$(SELF_TEST)" "$(ENTRY_FIXTURE)"
+	@set +e; "$(HOST_CONTEXT_IMAGE_HANDOFF)" "$(ENTRY_FIXTURE)" urp_entry "$(BUILD_DIR)/host-context-image-handoff.json"; status=$$?; set -e; test "$$status" -eq 23
 	"$(THREAD_ADAPTER_TEST)" "$(THREADED_TLS_FIXTURE)" "$(DYNAMIC_TLS_FIXTURE)"
 	"$(THREADED_TLS_TRACE_TEST)"
 	"$(PLT_SELF_TEST)" "$(PLT_FIXTURE)"
@@ -127,12 +129,18 @@ contract-check: contract-probe
 
 native-image-handoff: $(NATIVE_IMAGE_HANDOFF)
 
+host-context-image-handoff: $(HOST_CONTEXT_IMAGE_HANDOFF)
+
 native-handoff-test: $(NATIVE_IMAGE_HANDOFF)
 	./test_native_image_handoff.sh "$(NATIVE_IMAGE_HANDOFF)"
 
 $(NATIVE_IMAGE_HANDOFF): native_image_handoff.c ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) native_image_handoff.c ../urprotect-launcher/sha256.c -o "$@"
+
+$(HOST_CONTEXT_IMAGE_HANDOFF): host_context_image_handoff.c ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) host_context_image_handoff.c ../urprotect-launcher/sha256.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o $(LDLIBS) -o "$@"
 
 $(SELF_TEST): $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(ENTRY_FIXTURE)
 	@mkdir -p "$(BUILD_DIR)"

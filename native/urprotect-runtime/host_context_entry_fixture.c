@@ -3,6 +3,12 @@
 static int host_context_result = 23;
 static int *volatile host_context_result_pointer = &host_context_result;
 
+__attribute__((visibility("default")))
+int32_t urp_transform_target(int32_t value)
+{
+    return value + 1;
+}
+
 int32_t urp_entry(
     const urp_host_context_v1 *host,
     const urp_launch_args_v1 *args)

@@ -38,6 +38,9 @@ public sealed class GenericRehydrationTests
         Assert.Equal(first.Record.NativeImageSha256, first.NativeImage.Descriptor.NativeImageSha256);
         Assert.Equal(UnitId, first.Record.UnitId);
         Assert.Equal("outer-execveat", first.Record.Profile);
+        Assert.Equal("outer-execveat-validated", first.Record.ProfileValidationStatus);
+        Assert.Equal("kernel.execveat-at-empty-path", first.Record.LoaderIdentity);
+        Assert.Equal("kernel.execveat-at-empty-path", first.NativeImage.Descriptor.LoaderIdentity);
         Assert.Equal(ConsumerId, first.Record.ConsumerId);
         Assert.Equal("passed", first.Record.Status);
         Assert.True(ElfParser.Parse(first.NativeImage.Bytes).IsSuccess);

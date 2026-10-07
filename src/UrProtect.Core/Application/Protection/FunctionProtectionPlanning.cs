@@ -38,11 +38,9 @@ public sealed partial class FunctionProtectionService
             return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
         }
 
-        var parse = selectedPlan.File;
         var analyses = selectedPlan.Analyses;
         var orderedPasses = ProtectionPassOrdering.Normalize(passSnapshot);
         if (!TryBuildProtectedCode(
-                parse,
                 analyses,
                 orderedPasses,
                 out var protectedCode,

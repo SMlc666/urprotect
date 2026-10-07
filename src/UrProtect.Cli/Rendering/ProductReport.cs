@@ -116,6 +116,10 @@ public sealed record ProductProtectionReport(
     IReadOnlyList<ProductDiagnosticReport> Diagnostics)
 {
     public IReadOnlyList<string> Selectors { get; init; } = Array.Empty<string>();
+
+    public string WorkflowOwner { get; init; } = ProtectionWorkflowIdentity.Owner;
+
+    public string? FirstFailureStage { get; init; }
 }
 
 public sealed record ProductProtectionInputReport(long? ByteLength, string? Sha256);
@@ -282,6 +286,8 @@ public static class ProductReportFactory
             result.Diagnostics.Select(ProductDiagnosticReport.From).ToArray())
         {
             Selectors = options.Selectors.Select(selector => selector.ToDisplayString()).ToArray(),
+            WorkflowOwner = result.WorkflowOwner,
+            FirstFailureStage = result.FirstFailureStage,
         };
     }
 

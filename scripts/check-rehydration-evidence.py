@@ -171,7 +171,7 @@ def check_producer(root: Path, unit: str) -> tuple[dict[str, Any], dict[str, Any
         fail("producer role ABI identity is unsupported")
     if role.get("unitId") != unit or stage.get("unitId") != role.get("unitId"):
         fail("producer stage/role unit binding mismatch")
-    if role.get("profile") != "outer-execveat" or stage.get("profile") != role.get("profile"):
+    if role.get("profile") not in {"outer-execveat", "host-context-entry"} or stage.get("profile") != role.get("profile"):
         fail("producer stage/role profile binding mismatch")
     for field in ("sourceSha256", "requestSha256", "producerBuildSha256", "artifactSha256"):
         require_digest(role.get(field), f"producer role {field}")
@@ -324,6 +324,20 @@ def check_rehydration(
 
 def check_handoff(root: Path, rehydration: dict[str, Any], native_hash: str | None) -> tuple[dict[str, Any], str | None]:
     record = read_json(require_file(root, "handoff.json"))
+    if record.get("schemaVersion") == 1 and record.get("stage") == "host-context-handoff":
+        if record.get("status") != "passed" or rehydration.get("status") != "passed" or native_hash is None:
+            fail("HostContext handoff did not pass after Native Image materialization")
+        if record.get("loaderId") != "host-context.sealed-memfd.dlopen":
+            fail("HostContext handoff used an unsupported loader identity")
+        if record.get("nativeImageSha256") != native_hash:
+            fail("HostContext handoff image hash does not match the Native Image")
+        if not isinstance(record.get("entryStatus"), int):
+            fail("HostContext handoff entry status is malformed")
+        if record.get("releaseStatus") != "passed" or record.get("releaseOrder") != "entry-dispatch-before-release-image":
+            fail("HostContext handoff release order did not pass")
+        if record.get("rehydrationRecordSha256") != rehydration.get("preHandoffRecordSha256"):
+            fail("HostContext handoff does not bind the pre-handoff rehydration record")
+        return record, native_hash
     if record.get("schemaVersion") != 1 or record.get("stage") != "native-handoff":
         fail("native handoff record schema or stage is unsupported")
     if record.get("status") not in {"passed", "failed", "not-run"}:
@@ -391,11 +405,13 @@ def check_target_loader(root: Path, handoff: dict[str, Any], handoff_hash: str |
     if record.get("status") == "passed":
         if handoff.get("status") != "passed" or native_hash is None or handoff_hash is None:
             fail("target loader passed without a successful handoff")
-        if record.get("loaderId") != "kernel.execveat-at-empty-path":
+        expected_loader = "host-context.sealed-memfd.dlopen" if handoff.get("stage") == "host-context-handoff" else "kernel.execveat-at-empty-path"
+        if record.get("loaderId") != expected_loader:
             fail("target loader record names an unsupported loader")
         if record.get("nativeImageSha256") != native_hash or record.get("evidenceSha256") != handoff_hash:
             fail("target loader does not bind the exact Native Image and handoff record")
-        if record.get("targetStatus") != handoff.get("targetStatus") or record.get("targetSignal") != handoff.get("targetSignal"):
+        expected_target_status = handoff.get("targetStatus", handoff.get("entryStatus"))
+        if record.get("targetStatus") != expected_target_status or record.get("targetSignal") != handoff.get("targetSignal"):
             fail("target loader target status differs from the handoff record")
         for stream_name, field in (("target.stdout", "stdoutSha256"), ("target.stderr", "stderrSha256")):
             if record.get(field) != digest(require_file(root, stream_name, allow_empty=True, max_bytes=MAX_STREAM_BYTES)):
@@ -423,6 +439,12 @@ def check_behavior(
     if oracle.get("status") == "passed":
         if target_loader.get("status") != "passed" or native_hash is None:
             fail("behavior oracle passed without a target loader pass")
+        if oracle.get("oracleId") == "fixture.host-context-entry.v1":
+            if oracle.get("sourceSha256") != source_hash or oracle.get("nativeImageSha256") != native_hash:
+                fail("HostContext behavior oracle source or Native Image binding mismatch")
+            if oracle.get("entryStatus") != target_loader.get("targetStatus"):
+                fail("HostContext behavior oracle entry status differs from target loader")
+            return oracle
         if oracle.get("oracleId") != "fixture.process-oracle.v1":
             fail("behavior oracle identity differs from the frozen fixture oracle")
         if oracle.get("sourceSha256") != source_hash or oracle.get("nativeImageSha256") != native_hash:

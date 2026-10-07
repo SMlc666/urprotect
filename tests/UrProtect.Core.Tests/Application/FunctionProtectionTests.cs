@@ -43,7 +43,7 @@ public sealed class FunctionProtectionTests
         var untouched = Assert.Single(parse.File.FunctionSymbols, function =>
             function.Table == ElfSymbolTableKind.Static && function.TableIndex == 21);
 
-        var result = new FunctionProtectionService().Protect(
+        var result = new ProtectionWorkflow().ExecuteFinal(
             source,
             new FunctionProtectionOptions(
                 new[] { FunctionSelector.ByIdentity(ElfSymbolTableKind.Static, 23) },
@@ -118,7 +118,7 @@ public sealed class FunctionProtectionTests
     {
         var source = WithProgramHeaderSlot(ReadVersionedFixture());
 
-        var result = new FunctionProtectionService().Protect(
+        var result = new ProtectionWorkflow().ExecuteFinal(
             source,
             new FunctionProtectionOptions(
                 new[] { FunctionSelector.ByIdentity(ElfSymbolTableKind.Static, 23) },
@@ -137,7 +137,7 @@ public sealed class FunctionProtectionTests
     {
         var source = ReadVersionedFixture();
 
-        var result = new FunctionProtectionService().Protect(
+        var result = new ProtectionWorkflow().ExecuteFinal(
             source,
             new FunctionProtectionOptions(
                 new[] { FunctionSelector.ByIdentity(ElfSymbolTableKind.Static, 23) },

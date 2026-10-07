@@ -175,6 +175,24 @@
       ]
     },
     {
+      "id": "native.managed-rehydration-host-context-e2e",
+      "class": "host-context",
+      "command": "./scripts/run-rehydration-e2e.sh --tier pr --runtime glibc --profile host-context-entry",
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
+      "platform": "native-arm64",
+      "budgetSeconds": 300,
+      "memoryMb": 2048,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/protected-image/*/glibc/compat.protection-host-context-fixture.glibc.host-context-entry/"
+      ]
+    },
+    {
       "id": "native.host-context-dependency-graph",
       "class": "host-context",
       "command": "native/urprotect-runtime/test_managed_host_context.sh",

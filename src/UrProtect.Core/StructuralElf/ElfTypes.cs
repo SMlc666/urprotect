@@ -58,6 +58,7 @@ public static class ElfConstants
     public const ulong DtSoname = 14;
     public const ulong DtRpath = 15;
     public const ulong DtSymbolic = 16;
+    public const ulong DtTextRel = 22;
     public const ulong DtRel = 17;
     public const ulong DtRelSz = 18;
     public const ulong DtRelEnt = 19;

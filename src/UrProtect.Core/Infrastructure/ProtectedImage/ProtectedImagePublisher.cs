@@ -340,6 +340,11 @@ public static class ProtectedImagePublisher
             RoleMismatch("Protected Image role schema version is unsupported.");
         }
 
+        if (!string.Equals(role.WorkflowOwner, ProtectionWorkflowIdentity.Owner, StringComparison.Ordinal))
+        {
+            RoleMismatch("Protected Image role is not bound to the current workflow owner.");
+        }
+
         if (!string.Equals(role.ArtifactRole, ProtectedImageAbiV1.ArtifactRole, StringComparison.Ordinal)
             || !string.Equals(role.AbiId, ProtectedImageAbiV1.AbiId, StringComparison.Ordinal)
             || role.AbiVersion != ProtectedImageAbiV1.AbiVersion
@@ -409,6 +414,11 @@ public static class ProtectedImagePublisher
             || !string.Equals(stage.RawEvidenceManifestPath, manifestPath, StringComparison.Ordinal))
         {
             Mismatch("Protected Image stage paths do not match the publication destinations.");
+        }
+
+        if (!string.Equals(stage.WorkflowOwner, ProtectionWorkflowIdentity.Owner, StringComparison.Ordinal))
+        {
+            Mismatch("Protected Image stage is not bound to the current workflow owner.");
         }
 
         if (!stage.PublicationComplete

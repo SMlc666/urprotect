@@ -1,5 +1,6 @@
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Infrastructure;
+using UrProtect.Core.Application.Protection;
 using UrProtect.Core.Infrastructure.Rehydration;
 
 namespace UrProtect.Core.Application.Rehydration;
@@ -60,7 +61,7 @@ public static class RehydrationCommandWorkflow
             return Failure(readDiagnostics);
         }
 
-        var result = GenericRehydrationEngine.Rehydrate(source.Bytes, artifact.Bytes, request.Options);
+        var result = new ProtectionWorkflow().Materialize(source.Bytes, artifact.Bytes, request.Options);
         var publication = RehydrationPublisher.Publish(
             result,
             request.NativeImagePath,

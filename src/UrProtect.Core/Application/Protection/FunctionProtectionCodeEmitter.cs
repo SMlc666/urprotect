@@ -11,7 +11,6 @@ namespace UrProtect.Core.Application.Protection;
 public sealed partial class FunctionProtectionService
 {
     private bool TryBuildProtectedCode(
-        ElfFile file,
         IReadOnlyList<Aarch64FunctionAnalysis> analyses,
         IReadOnlyList<ProtectionPass> passes,
         out ProtectedCode code,
@@ -74,18 +73,7 @@ public sealed partial class FunctionProtectionService
             return false;
         }
 
-        if (codeBaseOverride is not { } codeBase
-            && !TryGetCodeBase(file, out codeBase))
-        {
-            diagnosticBag.Error(
-                DiagnosticCode.ProtectionLayoutUnavailable,
-                "The executable load-map virtual range cannot be represented by the protection layout planner.");
-            code = default!;
-            results = resultList;
-            diagnostics = diagnosticBag.ToArray();
-            return false;
-        }
-
+        var codeBase = codeBaseOverride ?? 0UL;
         var emitter = new CodeEmitter(codeBase);
         foreach (var builder in builders)
         {

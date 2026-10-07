@@ -27,11 +27,11 @@ public sealed record FunctionProtectionCommandResult(
 /// </summary>
 public sealed class FunctionProtectionWorkflow
 {
-    private readonly FunctionProtectionService protectionService;
+    private readonly ProtectionWorkflow workflow;
 
-    public FunctionProtectionWorkflow(FunctionProtectionService? protectionService = null)
+    public FunctionProtectionWorkflow(ProtectionWorkflow? workflow = null)
     {
-        this.protectionService = protectionService ?? new FunctionProtectionService();
+        this.workflow = workflow ?? new ProtectionWorkflow();
     }
 
     public FunctionProtectionCommandResult Execute(FunctionProtectionCommandRequest request)
@@ -58,7 +58,7 @@ public sealed class FunctionProtectionWorkflow
                 inputBytes: null);
         }
 
-        var protection = protectionService.Protect(input.Bytes, request.Options);
+        var protection = workflow.ExecuteFinal(input.Bytes, request.Options);
         if (!protection.IsSuccess || protection.OutputBytes is null)
         {
             return new FunctionProtectionCommandResult(input.Bytes, request.Options, protection, false);
@@ -75,6 +75,7 @@ public sealed class FunctionProtectionWorkflow
             {
                 OutputBytes = null,
                 Diagnostics = diagnostics,
+                FirstFailureStage = ProtectionWorkflowStage.Publication.ToString(),
             };
             return new FunctionProtectionCommandResult(input.Bytes, request.Options, protection, false);
         }

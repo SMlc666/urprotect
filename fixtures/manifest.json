@@ -348,6 +348,25 @@
       ]
     },
     {
+      "id": "runtime.host-context.protected-image-rehydration",
+      "status": "validated",
+      "obligation": "The shared protection workflow emits and rehydrates a profile-bound Protected Image into a HostContext Native Image, then retains sealed-memfd entry, release-order, hash, and first-failure evidence on the native AArch64 glibc lane.",
+      "witness": "scripts/run-host-context-rehydration-e2e.sh",
+      "oracle": "scripts/check-rehydration-evidence.py",
+      "evidence": [
+        "scripts/run-rehydration-e2e.sh",
+        "scripts/run-host-context-rehydration-e2e.sh",
+        "scripts/check-rehydration-evidence.py",
+        "native/urprotect-runtime/host_context_image_handoff.c",
+        ".artifacts/protected-image/pr/glibc/compat.protection-host-context-fixture.glibc.host-context-entry"
+      ],
+      "constraints": [
+        "The current Protected Image profile is host-context-entry and the rehydrated source is a bounded AArch64 ET_DYN shared-object entry image without PT_INTERP.",
+        "The retained positive handoff is native AArch64 glibc evidence only; musl and bionic remain independent lanes and are not promoted by this row.",
+        "Profile mismatch, malformed operation stream, materialization, native-image, and publication failures remain fail-closed with no successful partial Native Image publication."
+      ]
+    },
+    {
       "id": "runtime.host-context.bionic-handoff",
       "status": "validated",
       "obligation": "The pinned native ARM64 Termux userspace builds and runs the HostContext adapter oracle, verifying sealed memfd image loading, real entry dispatch, release, and no executable temporary pathname",

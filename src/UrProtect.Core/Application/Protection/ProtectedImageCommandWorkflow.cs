@@ -99,7 +99,7 @@ public static class ProtectedImageCommandWorkflow
             request.RehydratorConsumerId,
             request.ExpectedSourceSha256,
             request.ExpectedRequestSha256);
-        var emission = new ProtectedImageProducer().Emit(
+        var emission = new ProtectionWorkflow().Emit(
             input.Bytes,
             new FunctionProtectionOptions(request.Functions, request.Passes),
             producerOptions);
@@ -163,6 +163,7 @@ public static class ProtectedImageCommandWorkflow
                 AbiVersion = null,
                 PublicationComplete = false,
                 TransformationStatus = "publication-failed",
+                FirstFailureStage = ProtectionWorkflowStage.Publication.ToString(),
                 Diagnostics = diagnostics.Select(ProtectedImageStageDiagnostic.From).ToArray(),
             };
             var stageDiagnostics = WriteStage(request.StagePath, failedStage);

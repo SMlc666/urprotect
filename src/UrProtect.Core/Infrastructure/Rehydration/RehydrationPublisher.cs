@@ -65,6 +65,34 @@ public static class RehydrationPublisher
             return new RehydrationPublicationResult(false, diagnostics.ToArray());
         }
 
+        var imageDescriptor = image.Descriptor;
+        if (!string.Equals(image.WorkflowOwner, ProtectionWorkflowIdentity.Owner, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.WorkflowOwner, ProtectionWorkflowIdentity.Owner, StringComparison.Ordinal)
+            || imageDescriptor.ArtifactRole != "native-image"
+            || imageDescriptor.AbiId != "urprotect.native-image.v1"
+            || imageDescriptor.AbiVersion != 1
+            || imageDescriptor.Architecture != ProtectedImageAbiV1.Architecture
+            || !string.Equals(imageDescriptor.UnitId, result.Record.UnitId, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.Profile, result.Record.Profile, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.SourceSha256, result.Record.SourceSha256, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.ProtectedImageSha256, result.Record.ProtectedImageSha256, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.ProducerId, result.Record.ProducerId, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.ProducerBuildSha256, result.Record.ProducerBuildSha256, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.ConsumerId, result.Record.ConsumerId, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.ConsumerBuildSha256, result.Record.ConsumerBuildSha256, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.WorkflowOwner, result.Record.WorkflowOwner, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.LoaderIdentity, result.Record.LoaderIdentity, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.ProfileValidationStatus, result.Record.ProfileValidationStatus, StringComparison.Ordinal)
+            || !string.Equals(imageDescriptor.EntrySymbol, result.Record.EntrySymbol, StringComparison.Ordinal)
+            || imageDescriptor.HostContextAbiVersion != result.Record.HostContextAbiVersion
+            || imageDescriptor.RequiredCapabilities != result.Record.RequiredCapabilities
+            || !string.Equals(image.LoaderIdentity, result.Record.LoaderIdentity, StringComparison.Ordinal)
+            || !string.Equals(image.EntrySymbol, result.Record.EntrySymbol, StringComparison.Ordinal))
+        {
+            diagnostics.Error(DiagnosticCode.OutputIdentityMismatch, "Native Image role metadata does not match the rehydration evidence bindings.");
+            return new RehydrationPublicationResult(false, diagnostics.ToArray());
+        }
+
         try
         {
             var imageFullPath = Path.GetFullPath(nativeImagePath);
@@ -190,6 +218,35 @@ public static class RehydrationPublisher
             || record.MaterializationStatus is not ("passed" or "failed"))
         {
             Invalid("Rehydration record schema, stage, or status is unsupported.");
+        }
+
+        if (!string.Equals(record.WorkflowOwner, ProtectionWorkflowIdentity.Owner, StringComparison.Ordinal))
+        {
+            Invalid("Rehydration record is not bound to the current workflow owner.");
+        }
+
+        var isHostContext = string.Equals(
+            record.Profile,
+            ProtectedImageProfile.HostContextEntry.ToCliValue(),
+            StringComparison.Ordinal);
+        var isOuterExecveat = string.Equals(
+            record.Profile,
+            ProtectedImageProfile.OuterExecveat.ToCliValue(),
+            StringComparison.Ordinal);
+        var expectedLoaderIdentity = isHostContext
+            ? "host-context.sealed-memfd.dlopen"
+            : "kernel.execveat-at-empty-path";
+        var expectedValidationStatus = isHostContext
+            ? "host-context-entry-validated"
+            : "outer-execveat-validated";
+        if (!isHostContext && !isOuterExecveat)
+        {
+            Invalid("Rehydration record profile is unsupported.");
+        }
+        else if (record.LoaderIdentity != expectedLoaderIdentity
+            || record.ProfileValidationStatus != (record.IsPassed ? expectedValidationStatus : "failed"))
+        {
+            Invalid("Rehydration record is missing current profile validation or loader identity evidence.");
         }
 
         foreach (var digest in new[]

@@ -28,6 +28,8 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         self.assertIn("if: always()", self.workflow[run:check])
         self.assertIn("if: always()", self.workflow[check:upload])
         self.assertIn(".artifacts/protected-image/", self.workflow[upload : upload + 800])
+        self.assertIn("--profile host-context-entry", self.workflow)
+        self.assertIn("compat.protection-host-context-fixture.glibc.host-context-entry", self.workflow)
 
     def test_runner_retains_all_stage_records_and_closes_manifest(self) -> None:
         for marker in (
@@ -42,6 +44,8 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.runner)
         self.assertIn("run-protected-image-e2e.sh", self.runner)
+        self.assertIn("run-host-context-rehydration-e2e.sh", self.runner)
+        self.assertIn("host-context-entry", self.runner)
         self.assertIn("execveat", self.runner)
 
     def test_checker_requires_stage_specific_bindings_and_closed_evidence(self) -> None:

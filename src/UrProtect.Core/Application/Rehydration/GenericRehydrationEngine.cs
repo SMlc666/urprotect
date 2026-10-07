@@ -25,7 +25,10 @@ public sealed record RehydrationOptions(
     string ExpectedProducerId,
     string ExpectedProducerBuildSha256,
     string ExpectedConsumerId,
-    string ConsumerBuildSha256);
+    string ConsumerBuildSha256,
+    string? ExpectedEntrySymbol = null,
+    uint HostContextAbiVersion = HostContextContract.AbiVersion,
+    HostContextCapability HostContextRequiredCapabilities = HostContextContract.MandatoryCapabilities);
 
 public sealed record NativeImageDescriptor(
     int SchemaVersion,
@@ -43,7 +46,20 @@ public sealed record NativeImageDescriptor(
     string ProducerBuildSha256,
     string ConsumerId,
     string ConsumerBuildSha256,
-    string RehydrationRecordSha256);
+    string RehydrationRecordSha256)
+{
+    public string WorkflowOwner { get; init; } = ProtectionWorkflowIdentity.Owner;
+
+    public string? EntrySymbol { get; init; }
+
+    public uint? HostContextAbiVersion { get; init; }
+
+    public HostContextCapability? RequiredCapabilities { get; init; }
+
+    public string? ProfileValidationStatus { get; init; }
+
+    public string LoaderIdentity { get; init; } = "kernel.execveat-at-empty-path";
+}
 
 public sealed record NativeImage(
     byte[] Bytes,
@@ -51,6 +67,16 @@ public sealed record NativeImage(
     ElfFile ParsedImage)
 {
     public ElfLayoutEvidence? LayoutEvidence { get; init; }
+
+    public string WorkflowOwner { get; init; } = ProtectionWorkflowIdentity.Owner;
+
+    public string? EntrySymbol { get; init; }
+
+    public string? EntryStatus { get; init; }
+
+    public string? ReleaseOrder { get; init; }
+
+    public string LoaderIdentity { get; init; } = "host-context.sealed-memfd.dlopen";
 }
 
 public sealed record RehydrationRecord(
@@ -86,6 +112,22 @@ public sealed record RehydrationRecord(
     string? PreHandoffRecordSha256 = null,
     ElfLayoutEvidence? LayoutEvidence = null)
 {
+    public string WorkflowOwner { get; init; } = ProtectionWorkflowIdentity.Owner;
+
+    public string? EntrySymbol { get; init; }
+
+    public string? EntryStatus { get; init; }
+
+    public string? ReleaseOrder { get; init; }
+
+    public string LoaderIdentity { get; init; } = "host-context.sealed-memfd.dlopen";
+
+    public string ProfileValidationStatus { get; init; } = "not-run";
+
+    public uint? HostContextAbiVersion { get; init; }
+
+    public HostContextCapability? RequiredCapabilities { get; init; }
+
     public const int CurrentSchemaVersion = 1;
     public const string StageName = "rehydration";
     public const string PassedStatus = "passed";
@@ -141,6 +183,11 @@ public static class GenericRehydrationEngine
         ElfLayoutStrategy? layoutStrategy = null;
 
         ValidateOptions(options, diagnostics);
+        IProfileMaterializationPolicy? profilePolicy = null;
+        if (!ProfileMaterializationPolicies.TryGet(options.ExpectedProfile, out profilePolicy, diagnostics))
+        {
+            profilePolicy = null;
+        }
         if (source.Length is 0 or > RehydrationLimits.MaximumSourceBytes)
         {
             diagnostics.Error(DiagnosticCode.RehydrationMalformed, "Source Image size is outside the rehydration bounds.");
@@ -186,16 +233,20 @@ public static class GenericRehydrationEngine
             }
         }
 
-        if (document is not null && sourceFile is not null && !diagnostics.HasErrors)
+        if (document is not null && sourceFile is not null && profilePolicy is not null && !diagnostics.HasErrors)
         {
-            var layoutResult = Materialize(sourceBytes, sourceFile, document, diagnostics);
+            var sourceValid = profilePolicy.ValidateSource(sourceFile, options, diagnostics);
+            var layoutResult = sourceValid
+                ? Materialize(sourceBytes, sourceFile, document, profilePolicy, diagnostics)
+                : null;
             layoutEvidence = layoutResult?.Evidence;
             layoutStrategy = layoutResult?.Plan?.Strategy;
             if (layoutResult?.Bytes is not null
                 && layoutResult.ParsedOutput is not null
                 && layoutResult.Plan is not null
                 && !diagnostics.HasErrors
-                && ValidateNativeImage(sourceFile, layoutResult.ParsedOutput, layoutResult.Bytes, layoutResult.Plan, diagnostics))
+                && ValidateNativeImage(sourceFile, layoutResult.ParsedOutput, layoutResult.Bytes, layoutResult.Plan, diagnostics)
+                && profilePolicy.ValidateOutput(layoutResult.ParsedOutput, options, diagnostics))
             {
                 output = layoutResult.Bytes;
                 outputFile = layoutResult.ParsedOutput;
@@ -242,11 +293,38 @@ public static class GenericRehydrationEngine
             document.ProducerBuildSha256,
             document.RehydratorConsumerId,
             NormalizeSha256(options.ConsumerBuildSha256),
-            string.Empty);
+            string.Empty)
+        {
+            WorkflowOwner = ProtectionWorkflowIdentity.Owner,
+            EntrySymbol = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? options.ExpectedEntrySymbol ?? HostContextContract.EntrySymbol
+                : null,
+            HostContextAbiVersion = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? options.HostContextAbiVersion
+                : null,
+            RequiredCapabilities = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? options.HostContextRequiredCapabilities
+                : null,
+            ProfileValidationStatus = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? "host-context-entry-validated"
+                : "outer-execveat-validated",
+            LoaderIdentity = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? "host-context.sealed-memfd.dlopen"
+                : "kernel.execveat-at-empty-path",
+        };
         return new RehydrationResult(
             new NativeImage(output, descriptor, outputFile!)
             {
                 LayoutEvidence = layoutEvidence,
+                WorkflowOwner = ProtectionWorkflowIdentity.Owner,
+                EntrySymbol = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                    ? options.ExpectedEntrySymbol ?? HostContextContract.EntrySymbol
+                    : null,
+                EntryStatus = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry ? "not-run" : null,
+                ReleaseOrder = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry ? "not-run" : null,
+                LoaderIdentity = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                    ? "host-context.sealed-memfd.dlopen"
+                    : "kernel.execveat-at-empty-path",
             },
             record,
             diagnostics.ToArray());
@@ -264,6 +342,24 @@ public static class GenericRehydrationEngine
         if (options.ExpectedProfile is not (ProtectedImageProfile.OuterExecveat or ProtectedImageProfile.HostContextEntry))
         {
             diagnostics.Error(DiagnosticCode.ProtectedImageProfileMismatch, "Expected Protected Image profile is unsupported.");
+        }
+
+        if (options.ExpectedProfile == ProtectedImageProfile.HostContextEntry)
+        {
+            var entryName = options.ExpectedEntrySymbol ?? HostContextContract.EntrySymbol;
+            if (!HostContextContract.TryValidateEntryName(entryName, out var entryError))
+            {
+                diagnostics.Error(DiagnosticCode.ProtectedImageMalformed, entryError ?? "The HostContext entry symbol is invalid.");
+            }
+
+            if (options.HostContextAbiVersion != HostContextContract.AbiVersion
+                || !HostContextContract.HasRequiredCapabilities(
+                    options.HostContextRequiredCapabilities,
+                    HostContextContract.MandatoryCapabilities)
+                || !HostContextContract.HasOnlySupportedCapabilities(options.HostContextRequiredCapabilities))
+            {
+                diagnostics.Error(DiagnosticCode.ProtectedImageUnsupported, "The HostContext ABI or capability binding is unsupported.");
+            }
         }
     }
 
@@ -303,13 +399,14 @@ public static class GenericRehydrationEngine
         byte[] source,
         ElfFile sourceFile,
         ProtectedImageDocument image,
+        IProfileMaterializationPolicy profilePolicy,
         DiagnosticBag diagnostics)
     {
-        if (image.Profile != ProtectedImageProfile.OuterExecveat)
+        if (image.Profile != profilePolicy.Profile)
         {
             diagnostics.Error(
-                DiagnosticCode.RehydrationLayoutUnavailable,
-                "The current Native Image materializer supports the outer-execveat layout only.");
+                DiagnosticCode.ProtectedImageProfileMismatch,
+                "The Protected Image profile does not match the selected materialization policy.");
             return null;
         }
 
@@ -442,7 +539,29 @@ public static class GenericRehydrationEngine
             diagnostics.Take(RehydrationLimits.MaximumDiagnostics)
                 .Select(RehydrationDiagnostic.From)
                 .ToArray(),
-            LayoutEvidence: layoutEvidence);
+            LayoutEvidence: layoutEvidence)
+        {
+            WorkflowOwner = ProtectionWorkflowIdentity.Owner,
+            EntrySymbol = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? options.ExpectedEntrySymbol ?? HostContextContract.EntrySymbol
+                : null,
+            ProfileValidationStatus = diagnostics.HasErrors
+                ? "failed"
+                : options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                    ? "host-context-entry-validated"
+                    : "outer-execveat-validated",
+            HostContextAbiVersion = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? options.HostContextAbiVersion
+                : null,
+            RequiredCapabilities = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? options.HostContextRequiredCapabilities
+                : null,
+            LoaderIdentity = options.ExpectedProfile == ProtectedImageProfile.HostContextEntry
+                ? "host-context.sealed-memfd.dlopen"
+                : "kernel.execveat-at-empty-path",
+            EntryStatus = diagnostics.HasErrors ? "not-run" : "not-run",
+            ReleaseOrder = diagnostics.HasErrors ? "not-run" : "not-run",
+        };
 
     private static void ValidateDigest(string value, string label, DiagnosticBag diagnostics)
     {
