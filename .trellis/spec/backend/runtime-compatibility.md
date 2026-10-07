@@ -1311,6 +1311,30 @@ native-image-handoff IMAGE EXPECTED_SHA256 REHYDRATION_SHA256 EVIDENCE_JSON
 
 The managed result owns `NativeImage` bytes and `RehydrationRecord`. The native helper owns only sealed memfd creation, bounded streams/resource facts, and `execveat` invocation. The record fields `handoffRecordSha256`, `handoffStatus`, and `preHandoffRecordSha256` bind the completed handoff without creating a mutable hash cycle.
 
+### Current shared workflow and profile ownership
+
+The current `protect`, `protect-image`, and `rehydrate-image` commands use the
+same Core `ProtectionWorkflow` owner for request normalization, selected-function
+planning, semantic/protection plans, physical layout, profile materialization,
+validation, and publication. The commands differ only in which stage/result they
+publish. `FunctionProtectionService` is not a production writer.
+
+`OuterExecveat` and `HostContextEntry` select explicit materialization policies
+against the shared layout/materialization operations. The HostContext policy
+requires a current AArch64 `ET_DYN` entry image without `PT_INTERP`, a bounded
+executable declared entry, current v3 profile/ABI/capability metadata, and the
+sealed-memfd HostContext handoff. It never invokes or reinterprets the outer
+`execveat` policy. Both policies publish only after reparse, profile, digest,
+role/stage, and native-image validation succeed.
+
+Every published role, stage, Native Image descriptor, report, and rehydration
+record binds `workflowOwner`, profile, ABI, source/request/artifact/output
+hashes, and `firstFailureStage`. A failed stage may retain diagnostics and raw
+failure evidence, but it must remove or withhold successful artifact, role,
+stage, Native Image, report, and evidence publication. Runtime-specific evidence remains
+independent; an unavailable musl or bionic lane is recorded as
+`environment-unavailable` and never promoted by the glibc HostContext result.
+
 ### 3. Contracts
 
 - Rehydration authenticates the Protected Image canonical digest and verifies source/request/unit/profile/producer/consumer bindings before materialization. Unknown operations, invalid executable mappings, overflow, unsupported permission/layout transitions, and incomplete operation streams fail closed.

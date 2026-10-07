@@ -18,14 +18,14 @@ Make `protect`, `protect-image`, and `rehydrate-image` one current production wo
 
 ## Acceptance Criteria
 
-- [ ] `protect`, `protect-image`, and `rehydrate-image` invoke one current Core planning/layout/materialization/publication workflow.
-- [ ] No direct writer or alternate production implementation remains reachable.
-- [ ] Both current profiles produce valid profile-specific native images; HostContext rehydration passes native AArch64 HostContext handoff, entry-status, release-order, and hash evidence.
-- [ ] Profile mismatch, malformed operation stream, layout failure, native-image failure, and publication failure fail before partial output/evidence is visible.
-- [ ] Current reports, role/stage records, manifests, and evidence checkers agree on current profile, ABI, hashes, workflow owner, and first-failure stage.
-- [ ] Existing structural, selected-function, layout, artifact, CLI, native, and runtime tests pass through the shared owners.
-- [ ] Glibc, musl, and bionic evidence is independent for every promoted row; missing capability remains environment-unavailable and unpromoted.
-- [ ] No historical migration path, alias, retired frame data, or compatibility fallback is added.
+- [x] `protect`, `protect-image`, and `rehydrate-image` invoke one current Core planning/layout/materialization/publication workflow.
+- [x] No direct writer or alternate production implementation remains reachable.
+- [x] Both current profiles produce valid profile-specific native images; HostContext rehydration passes native AArch64 HostContext handoff, entry-status, release-order, and hash evidence.
+- [x] Profile mismatch, malformed operation stream, layout failure, native-image failure, and publication failure fail before partial output/evidence is visible.
+- [x] Current reports, role/stage records, manifests, and evidence checkers agree on current profile, ABI, hashes, workflow owner, and first-failure stage.
+- [x] Existing structural, selected-function, layout, artifact, CLI, native, and runtime tests pass through the shared owners.
+- [x] Glibc, musl, and bionic evidence is independent for every promoted row; missing capability remains environment-unavailable and unpromoted.
+- [x] No historical migration path, alias, retired frame data, or compatibility fallback is added.
 
 ## Out of Scope
 

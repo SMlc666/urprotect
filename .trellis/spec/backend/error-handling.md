@@ -58,6 +58,17 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 - `ElfPackService` validates source and launcher independently, validates the
   assembled wrapper and recovered payload, and publishes only after a final
   byte comparison.
+- `ProtectionWorkflow` is the single owner for current `protect`,
+  `protect-image`, and `rehydrate-image` planning/materialization decisions.
+  `OuterExecveat` and `HostContextEntry` use explicit profile policies over the
+  shared layout/materializer operations; profile mismatch, malformed operation,
+  reparse, native-image, handoff, or publication failure records a deterministic
+  first-failure stage and publishes no successful artifact, role, stage, report,
+  Native Image, or evidence set.
+- Rehydration records and Native Image descriptors bind the current workflow
+  owner, profile, ABI, source/request/artifact/output hashes, and handoff fields
+  before publication. An unavailable runtime remains explicit evidence and is not
+  promoted by a different runtime's result.
 - Catch only expected I/O, argument, and codec exceptions at boundaries. Do not
   catch all exceptions and continue with a partial model. The CLI top level
   maps an unexpected exception to `Internal` and includes a correlation id.
