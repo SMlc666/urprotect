@@ -519,7 +519,7 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertEqual(parser["status"], "proven")
         self.assertEqual(
             parser["witness"],
-            "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+            "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
         )
         self.assertIn(
             "liburp-versioned.so",

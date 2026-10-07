@@ -4,7 +4,7 @@
   "kind": "urprotect-independent-evaluator-protocol",
   "readOnly": true,
   "manifestDigests": {
-    "compatibilityCorpusSha256": "bb370c976d7f1e958f7cd500c4f3dadb150759d7e41574df4cc96f23241f0f97",
+    "compatibilityCorpusSha256": "011292c7cc7cacb923549d56d57ea341a9fb04a12d39e5021157a3601aaf8bde",
     "runtimeMatrixSha256": "8d778d22926ba5e2791f46821623700e0baccad3fce26201e10ba6cf0ea0dac5",
     "schemeAManifestSha256": "bece932bd38e8c3e1def844023e19306acd37583862f17c6e3943c4ecf57eacc",
     "oracleRegistrySha256": "91e8a867157808f839edbabaf6c766c00d86e10f10729130debab0ce640175a4",

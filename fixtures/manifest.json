@@ -20,11 +20,11 @@
       "id": "elf.identity.aarch64-et-dyn",
       "status": "proven",
       "obligation": "ELF64 little-endian AArch64 ET_DYN identity and bounded load map",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfValidator.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfValidator.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/BinaryPropertyTests.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/BinaryPropertyTests.cs"
       ]
     },
     {
@@ -32,15 +32,15 @@
       "status": "proven",
       "obligation": "The ELF parser classifies bounded AArch64 ET_EXEC images as observation data without implying outer launch or HostContext support.",
       "witness": "c-gcc-glibc-et-exec",
-      "oracle": "src/UrProtect.Core/Elf/ElfValidator.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfValidator.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/ElfFixture.cs",
-        "src/UrProtect.Core/Elf/ElfTypes.cs",
-        "src/UrProtect.Core/Elf/ElfValidator.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfFixture.cs",
+        "src/UrProtect.Core/StructuralElf/ElfTypes.cs",
+        "src/UrProtect.Core/StructuralElf/ElfValidator.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs",
+      "negativeOracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "constraints": [
         "This row proves parser/model observation only. Outer acceptance is separately recorded as elf.outer.dynamic-et-exec; static ET_EXEC remains un-packable and HostContext remains ET_DYN-only."
       ]
@@ -49,15 +49,15 @@
       "id": "elf.load-layout.alignment-congruence",
       "status": "proven",
       "obligation": "Each AArch64 ET_DYN PT_LOAD with p_align greater than one uses a power-of-two alignment and congruent p_offset and p_vaddr residues, including non-page-sized alignment",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/ElfFixture.cs",
-        "src/UrProtect.Core/Elf/ElfParser.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfFixture.cs",
+        "src/UrProtect.Core/StructuralElf/ElfParser.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "negativeOracle": "tests/UrProtect.Core.Tests/ElfParserTests.cs"
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs"
     },
     {
       "id": "elf.outer.dynamic-et-exec",
@@ -70,8 +70,8 @@
         "scripts/run-packed-fixture-matrix.sh",
         ".artifacts/packed/pr/c-gcc-glibc-et-exec"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
+      "negativeOracle": "src/UrProtect.Core/Application/Pack/ElfPackService.cs",
       "constraints": [
         "Accepted predicate: AArch64 ELF64 little-endian ET_EXEC, executable entry in PT_LOAD, PT_DYNAMIC, PT_INTERP with an absolute path ending in ld-linux-aarch64.so.1 or ld-musl-aarch64.so.1, and no RPATH/RUNPATH.",
         "Shared objects, static ET_EXEC, missing PT_INTERP, and unrecognized interpreters remain rejected.",
@@ -82,29 +82,29 @@
       "id": "elf.dynamic",
       "status": "proven",
       "obligation": "PT_DYNAMIC and dynamic metadata are mapped and bounded",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs"
       ]
     },
     {
       "id": "elf.symbol-version.definitions",
       "status": "proven",
       "obligation": "The managed ELF parser bounds and models DT_VERDEF/DT_VERDEFNUM records and their dynamic-string-table auxiliaries as parser observation only.",
-      "witness": "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
         "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so",
         "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/README.md",
-        "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
-        "src/UrProtect.Core/Elf/ElfTypes.cs",
-        "src/UrProtect.Core/Elf/ElfParserUtilities.cs",
-        "src/UrProtect.Cli/ProductReport.cs"
+        "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
+        "src/UrProtect.Core/StructuralElf/ElfTypes.cs",
+        "src/UrProtect.Core/StructuralElf/ElfParserUtilities.cs",
+        "src/UrProtect.Cli/Rendering/ProductReport.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
+      "negativeOracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "constraints": [
         "The registry-baseline declaredFeatureCoverage cue is symbol-versions: 7; it is expected-tag coverage, not confirmed ELF prevalence or product support evidence.",
         "The checked-in positive fixture path is tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so with SHA-256 4fb8ffa362ce8a18590eff735c971aaf217eb4dcd338bf071810fe0b3c971ae8.",
@@ -116,16 +116,16 @@
       "id": "elf.symbol-version.requirements",
       "status": "proven",
       "obligation": "The managed ELF model bounds and records DT_VERNEED/DT_VERNEEDNUM records, their dynamic-string-table filenames, and version auxiliaries without inferring runtime resolution",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
-        "src/UrProtect.Core/Elf/ElfTypes.cs",
-        "src/UrProtect.Core/Elf/ElfParserUtilities.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
+        "src/UrProtect.Core/StructuralElf/ElfTypes.cs",
+        "src/UrProtect.Core/StructuralElf/ElfParserUtilities.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "negativeOracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "constraints": [
         "The positive parser oracle asserts the version-need file name and bounded auxiliary name/index; malformed, unmapped, truncated, or inconsistent chains report VersionNeedTableMalformed or SymbolVersionTableMalformed.",
         "This is parser/model evidence only. It does not define loader resolution or HostContext acceptance; runtime acceptance is limited to runtime.host-context.dependency-symbol-version-requirements."
@@ -201,14 +201,14 @@
       "id": "elf.sectionless-program-headers",
       "status": "proven",
       "obligation": "A valid ET_DYN remains parseable when section headers are absent; program headers remain authoritative",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs",
-      "negativeOracle": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs"
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs"
     },
     {
       "id": "runtime.host-context.sectionless-image",
@@ -330,10 +330,10 @@
       "oracle": "native/urprotect-runtime/test_managed_host_context.sh",
       "evidence": [
         "native/urprotect-runtime/test_managed_host_context.sh",
-        "src/UrProtect.Core/Pack/ElfPackService.cs",
-        "src/UrProtect.Core/Pack/PayloadFrame.cs",
-        "src/UrProtect.Cli/CliApplication.cs",
-        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+        "src/UrProtect.Core/Application/Pack/ElfPackService.cs",
+        "src/UrProtect.Core/ArtifactProtocol/PayloadFrameCodecContracts.cs",
+        "src/UrProtect.Cli/Commands/CliApplication.cs",
+        "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
         "native/urprotect-runtime/host_context_launcher.c",
         "native/urprotect-runtime/runtime.c",
         ".artifacts/host-context/managed/host-context-packed.json",
@@ -375,7 +375,7 @@
       "witness": "native/urprotect-launcher/test_launcher.sh",
       "oracle": "native/urprotect-launcher/launcher_main.c",
       "evidence": [
-        "src/UrProtect.Cli/CliApplication.cs",
+        "src/UrProtect.Cli/Commands/CliApplication.cs",
         "native/urprotect-launcher/launcher_main.c",
         "native/urprotect-launcher/test_launcher.sh",
         "native/urprotect-launcher/test_managed_handoff.sh",
@@ -386,14 +386,14 @@
       "id": "elf.interpreter.unsupported",
       "status": "rejected",
       "obligation": "An interpreter outside the declared AArch64 host runtimes is refused",
-      "witness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-      "oracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "witness": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
+      "oracle": "src/UrProtect.Core/Application/Pack/ElfPackService.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs"
+        "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs"
       ],
       "reason": "The current no-path contract does not define dependency resolution for arbitrary interpreters.",
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-      "negativeOracle": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs"
+      "negativeWitness": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs"
     },
     {
       "id": "runtime.host-context.pt-tls",
@@ -507,7 +507,7 @@
         "native/urprotect-runtime/host_image_validation.c",
         "native/urprotect-runtime/host_adapter.c",
         "native/urprotect-runtime/test_managed_host_context.sh",
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
         ".artifacts/host-context/managed/dependency-version-metadata.txt",
         ".artifacts/host-context/managed/version-self-test.log",
         ".artifacts/host-context/managed/dependency-result.txt"

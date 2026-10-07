@@ -1,8 +1,8 @@
 using System.Buffers.Binary;
 using System.Text;
 using SharpFuzz;
-using UrProtect.Core.Elf;
-using UrProtect.Core.Pack;
+using UrProtect.Core.StructuralElf;
+using UrProtect.Core.ArtifactProtocol;
 
 namespace UrProtect.Fuzz;
 

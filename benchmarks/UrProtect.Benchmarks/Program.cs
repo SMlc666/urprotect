@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using UrProtect.Core.Elf;
-using UrProtect.Core.Pipeline;
+using UrProtect.Core.StructuralElf;
+using UrProtect.Core.Application.Validation;
 
 var input = CreateFixture();
-var pipeline = new NoOpPipeline();
+var pipeline = new ValidationWorkflow();
 var iterations = ReadIterations(args);
 var parsed = ElfParser.Parse(input);
 if (!parsed.IsSuccess || parsed.File is null)
@@ -76,7 +76,7 @@ static int ReadIterations(string[] args)
     throw new ArgumentException("Usage: --iterations <positive number <= 1000000>");
 }
 
-static void EnsureSuccess(NoOpValidationResult result)
+static void EnsureSuccess(ValidationResult result)
 {
     if (!result.IsSuccess)
     {

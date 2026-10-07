@@ -325,8 +325,8 @@ def derive_evaluator_environment_capabilities(environment: Mapping[str, Any]) ->
     )
     repository_root = Path(__file__).resolve().parent.parent
     producer_script = repository_root / "scripts/run-protected-image-e2e.sh"
-    producer_source = repository_root / "src/UrProtect.Core/Protect/ProtectionPlan.cs"
-    rehydrator_source = repository_root / "src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs"
+    producer_source = repository_root / "src/UrProtect.Core/Application/Protection/ProtectionPlan.cs"
+    rehydrator_source = repository_root / "src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs"
     try:
         source_hashes_match = (
             product.get("producerScriptSha256") == sha256_file(producer_script)
