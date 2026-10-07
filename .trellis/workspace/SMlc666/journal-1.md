@@ -363,3 +363,26 @@ Completed G1 responsibility-boundaries after two implementation passes and an in
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: Complete G2 unified protection workflow
+<!-- trellis-session: v=2 fp=8be22d35a71f7103 -->
+
+**Date**: 2026-10-07
+**Task**: Complete G2 unified protection workflow
+**Branch**: `main`
+
+### Summary
+
+Completed G2 unified current protection workflow. Added one ProtectionWorkflow owner for protect/protect-image/rehydrate-image, removed the reachable direct FunctionProtectionService.Protect writer path, connected shared planning/layout/materialization/publication, and added explicit OuterExecveat and HostContextEntry policies. Completed HostContext ET_DYN/no-interpreter/entry/ABI/profile validation, sealed-memfd handoff, entry status/release-order/hash evidence, rollback and first-failure binding. Updated current fixtures, CI/evidence checkers, regression coverage, and runtime contracts. Independent review passed: Release build, 269 managed tests, 287 Python tests plus 7 skips, fixtures, regression matrix, native runtime, protection E2E, outer and HostContext rehydration E2E/evidence. Native launcher remained environment-unavailable because musl-gcc is absent; no substitute was used.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd62e7e` | feat: unify protection workflow and HostContext materialization |
+| `6935b9d` | chore(task): record G2 workflow contract |
+
+### Status
+
+[OK] **Completed**
