@@ -214,7 +214,8 @@ public static class ElfLayoutMaterializer
                         || relocationType is not (ElfConstants.RArm64TlsIeMovwGottprelG1
                             or ElfConstants.RArm64TlsIeMovwGottprelG0Nc
                             or ElfConstants.RArm64TlsIeAdrGottprelPage21
-                            or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc))))
+                            or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+                            or ElfConstants.RArm64TlsIeLdGottprelPrel19))))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
@@ -318,6 +319,7 @@ public static class ElfLayoutMaterializer
             && ValidateLocalExecLdst32FixupPairs(sourceFile, outputFile, plan, output, diagnostics)
             && ValidateLocalExecMovwFixupPairs(sourceFile, outputFile, plan, output, diagnostics)
             && ValidateInitialExecMovwFixupPairs(sourceFile, plan, output, diagnostics)
+            && ValidateInitialExecLdGotPrel19FixupSites(sourceFile, outputFile, plan, output, diagnostics)
             && ValidateInitialExecAdrLd64FixupPairs(sourceFile, outputFile, plan, output, diagnostics);
     }
 
@@ -419,6 +421,143 @@ public static class ElfLayoutMaterializer
         return true;
     }
 
+    private static bool ValidateInitialExecLdGotPrel19FixupSites(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        ElfLayoutPlan plan,
+        byte[] output,
+        DiagnosticBag diagnostics)
+    {
+        var groups = plan.TlsFixups
+            .Where(decision => decision?.Fixup?.Relocation?.RelocationType
+                == ElfConstants.RArm64TlsIeLdGottprelPrel19)
+            .GroupBy(decision => (decision.RegionIdentity, decision.Fixup.SequenceSourceRange));
+        foreach (var group in groups)
+        {
+            var ordered = group.OrderBy(decision => decision.Fixup.PairOrdinal).ToArray();
+            var valid = ordered.Length == 1
+                && ordered[0].Fixup.PairOrdinal == 0
+                && ordered[0].Fixup.GotEntry is { } gotEntry
+                && ordered[0].Fixup.Relocation.SymbolIndex == gotEntry.Symbol.SymbolIndex
+                && string.Equals(
+                    ordered[0].Fixup.Relocation.SymbolName,
+                    gotEntry.Symbol.Name,
+                    StringComparison.Ordinal)
+                && ordered[0].Fixup.Relocation.Addend == gotEntry.Addend
+                && ordered[0].Fixup.SequenceSourceRange.Size >= 4 * sizeof(uint)
+                && ordered[0].Fixup.SequenceOutputRange.Size >= 4 * sizeof(uint)
+                && ordered[0].Fixup.SequenceSourceRange.FileOffset.Value % sizeof(uint) == 0
+                && ordered[0].Fixup.SequenceSourceRange.VirtualAddress.Value % sizeof(uint) == 0
+                && ordered[0].Fixup.SequenceOutputRange.FileOffset.Value % sizeof(uint) == 0
+                && ordered[0].Fixup.SequenceOutputRange.VirtualAddress.Value % sizeof(uint) == 0
+                && ordered[0].Fixup.RelocationSourceRange.FileOffset
+                    == ordered[0].Fixup.SequenceSourceRange.FileOffset
+                && ordered[0].Fixup.RelocationSourceRange.VirtualAddress
+                    == ordered[0].Fixup.SequenceSourceRange.VirtualAddress
+                && ordered[0].OutputFileOffset.Value <= ulong.MaxValue - sizeof(uint)
+                && ordered[0].OutputVirtualAddress.Value <= ulong.MaxValue - sizeof(uint);
+            var placement = valid
+                ? plan.Placements.SingleOrDefault(candidate => string.Equals(
+                    candidate.Identity,
+                    group.Key.RegionIdentity,
+                    StringComparison.Ordinal))
+                : null;
+            if (placement is null)
+            {
+                valid = false;
+            }
+
+            if (valid && placement is not null)
+            {
+                var first = ordered[0];
+                var sourceOffset = first.Fixup.RelocationSourceRange.FileOffset.Value;
+                var outputOffset = first.OutputFileOffset.Value;
+                valid = sourceOffset <= int.MaxValue
+                    && sourceOffset <= (ulong)sourceFile.Bytes.Length
+                    && sizeof(uint) <= (ulong)sourceFile.Bytes.Length - sourceOffset
+                    && outputOffset <= int.MaxValue
+                    && outputOffset <= (ulong)output.Length
+                    && sizeof(uint) <= (ulong)output.Length - outputOffset
+                    && first.Fixup.SequenceSourceRange.TryGetFileEnd(out _)
+                    && first.Fixup.SequenceSourceRange.TryGetVirtualEnd(out _)
+                    && first.Fixup.SequenceOutputRange.TryGetFileEnd(out _)
+                    && first.Fixup.SequenceOutputRange.TryGetVirtualEnd(out _)
+                    && sourceOffset == first.Fixup.SequenceSourceRange.FileOffset.Value
+                    && first.OutputVirtualAddress.Value >= placement.VirtualAddress.Value
+                    && outputOffset >= placement.FileOffset.Value
+                    && outputOffset - placement.FileOffset.Value <= first.Fixup.SequenceOutputRange.Size
+                    && sizeof(uint) <= first.Fixup.SequenceOutputRange.Size
+                        - (outputOffset - placement.FileOffset.Value)
+                    && first.OutputVirtualAddress.Value >= placement.VirtualAddress.Value
+                    && first.OutputVirtualAddress.Value - placement.VirtualAddress.Value
+                        == outputOffset - placement.FileOffset.Value
+                    && first.OutputVirtualAddress.Value - placement.VirtualAddress.Value <= placement.Size
+                    && outputOffset - placement.FileOffset.Value <= ulong.MaxValue - (4UL * sizeof(uint))
+                    && outputOffset - placement.FileOffset.Value + (4UL * sizeof(uint)) <= placement.Size;
+                if (valid)
+                {
+                    var sourceEncoding = BinaryPrimitives.ReadUInt32LittleEndian(
+                        sourceFile.Bytes.Span.Slice(checked((int)sourceOffset), sizeof(uint)));
+                    var outputEncoding = BinaryPrimitives.ReadUInt32LittleEndian(
+                        output.AsSpan(checked((int)outputOffset), sizeof(uint)));
+                    var outputSequenceOffset = outputOffset - placement.FileOffset.Value;
+                    var outputSequenceSize = Math.Max(
+                        first.Fixup.SequenceOutputRange.Size,
+                        checked(outputSequenceOffset + (4UL * sizeof(uint))));
+                    valid = Aarch64TlsInstructionSemantics.IsSupportedInitialExecLdGotPrel19Sequence(
+                        ReadWords(sourceFile.Bytes.Span, first.Fixup.SequenceSourceRange),
+                        checked((int)((sourceOffset - first.Fixup.SequenceSourceRange.FileOffset.Value) / sizeof(uint))),
+                        requireZeroSourceImmediate: true)
+                        && Aarch64TlsInstructionSemantics.IsSupportedInitialExecLdGotPrel19Sequence(
+                            ReadWords(output, new SemanticSourceRange(
+                                new FileOffset(placement.FileOffset.Value),
+                                placement.VirtualAddress,
+                                outputSequenceSize)),
+                            checked((int)(outputSequenceOffset / sizeof(uint))))
+                        && Aarch64TlsInstructionSemantics.TryEncodeInitialExecLdGotPrel19(
+                            sourceEncoding,
+                            outputEncoding,
+                            first.OutputVirtualAddress.Value,
+                            first.Fixup.GotEntry!.SourceRange.VirtualAddress.Value,
+                            first.Fixup.Addend,
+                            out var expectedEncoding)
+                        && outputEncoding == expectedEncoding;
+                }
+            }
+
+            if (!valid)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The reparsed TLSIE LD_GOTTPREL_PREL19 literal does not retain its source GOT owner, signed PC-relative range, register chain, or output mapping.",
+                    ordered.Length == 0 ? null : ordered[0].Fixup.RelocationSourceRange.FileOffset.Value);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static uint[] ReadWords(ReadOnlySpan<byte> bytes, SemanticSourceRange range)
+    {
+        if (range.Size == 0 || range.Size % sizeof(uint) != 0 || range.Size > int.MaxValue
+            || range.FileOffset.Value > int.MaxValue
+            || range.FileOffset.Value > (ulong)bytes.Length
+            || range.Size > (ulong)bytes.Length - range.FileOffset.Value)
+        {
+            return Array.Empty<uint>();
+        }
+
+        var words = new uint[checked((int)(range.Size / sizeof(uint)))];
+        for (var index = 0; index < words.Length; index++)
+        {
+            words[index] = BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(
+                checked((int)(range.FileOffset.Value + ((ulong)index * sizeof(uint)))),
+                sizeof(uint)));
+        }
+
+        return words;
+    }
     private static bool ValidateInitialExecAdrLd64FixupPairs(
         ElfFile sourceFile,
         ElfFile outputFile,

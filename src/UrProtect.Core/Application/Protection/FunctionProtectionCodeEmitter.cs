@@ -209,9 +209,22 @@ public sealed partial class FunctionProtectionService
                 && analysis.Function.TryGetEnd(out var functionEnd)
                 && fact.Relocation.Offset < functionEnd)
             .ToArray();
-        var supportsTlsIeAdrLd64 = Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64EmitterSequence(
+        var hasTlsIeAdrLd64 = Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64EmitterSequence(
             analysis.Instructions,
             tlsFacts);
+        var hasTlsIeLdGotPrel19 = Aarch64TlsInstructionSemantics.IsSupportedInitialExecLdGotPrel19EmitterSequence(
+            analysis.Instructions,
+            tlsFacts);
+        var tlsIePcRelativeLoadAddress = tlsFacts.Length switch
+        {
+            1 when hasTlsIeLdGotPrel19 => tlsFacts[0].Relocation.Offset,
+            2 when hasTlsIeAdrLd64 => tlsFacts
+                .OrderBy(fact => fact.Relocation.Offset)
+                .First()
+                .Relocation.Offset,
+            _ => (ulong?)null,
+        };
+        var supportsTlsIePcRelativeLoad = tlsIePcRelativeLoadAddress is not null;
         foreach (var instruction in analysis.Instructions)
         {
             if (decoder.UsesGeneralRegister(instruction.Encoding, instruction.Address, StateRegister)
@@ -233,8 +246,9 @@ public sealed partial class FunctionProtectionService
                 or Aarch64ControlFlowKind.ConditionalBranch;
             if ((instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true
                     && !isTerminalBranch
-                    && !(supportsTlsIeAdrLd64
-                        && instruction.Address == tlsFacts[0].Relocation.Offset))
+                    && !(supportsTlsIePcRelativeLoad
+                        && tlsIePcRelativeLoadAddress is { } pcRelativeLoadAddress
+                        && instruction.Address == pcRelativeLoadAddress))
                 || controlFlow is Aarch64ControlFlowKind.DirectCall
                     or Aarch64ControlFlowKind.IndirectBranch)
             {
@@ -324,8 +338,8 @@ public sealed partial class FunctionProtectionService
             analysis,
             flatten,
             permutation,
-            supportsTlsIeAdrLd64,
-            supportsTlsIeAdrLd64 ? tlsFacts[0].Relocation.Offset : null);
+            supportsTlsIePcRelativeLoad,
+            tlsIePcRelativeLoadAddress);
         return true;
     }
 
@@ -335,14 +349,14 @@ public sealed partial class FunctionProtectionService
             Aarch64FunctionAnalysis source,
             bool flatten,
             bool permutation,
-            bool supportsTlsIeAdrLd64,
-            ulong? tlsIeAdrLd64PairAddress)
+            bool supportsTlsIePcRelativeLoad,
+            ulong? tlsIePcRelativeLoadAddress)
         {
             Source = source;
             Flatten = flatten;
             Permutation = permutation;
-            SupportsTlsIeAdrLd64 = supportsTlsIeAdrLd64;
-            TlsIeAdrLd64PairAddress = tlsIeAdrLd64PairAddress;
+            SupportsTlsIePcRelativeLoad = supportsTlsIePcRelativeLoad;
+            TlsIePcRelativeLoadAddress = tlsIePcRelativeLoadAddress;
         }
 
         public Aarch64FunctionAnalysis Source { get; }
@@ -351,9 +365,9 @@ public sealed partial class FunctionProtectionService
 
         public bool Permutation { get; }
 
-        public bool SupportsTlsIeAdrLd64 { get; }
+        public bool SupportsTlsIePcRelativeLoad { get; }
 
-        public ulong? TlsIeAdrLd64PairAddress { get; }
+        public ulong? TlsIePcRelativeLoadAddress { get; }
 
         public ulong OutputAddress { get; set; }
 
@@ -409,7 +423,9 @@ public sealed partial class FunctionProtectionService
                     var instruction = block.Instructions[index];
                     if (instruction.Decode.Instruction!.ControlFlow != Aarch64ControlFlowKind.None
                         || (instruction.Decode.Instruction.Properties.HasFlag(Aarch64InstructionProperties.PcRelative)
-                            && !(SupportsTlsIeAdrLd64 && instruction.Address == TlsIeAdrLd64PairAddress)))
+                            && !(SupportsTlsIePcRelativeLoad
+                                && TlsIePcRelativeLoadAddress is { } pcRelativeLoadAddress
+                                && instruction.Address == pcRelativeLoadAddress)))
                     {
                         diagnostics.Error(
                             DiagnosticCode.ProtectionUnsupportedInstruction,

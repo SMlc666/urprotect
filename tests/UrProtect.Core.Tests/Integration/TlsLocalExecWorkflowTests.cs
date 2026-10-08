@@ -140,6 +140,259 @@ public sealed class TlsLocalExecWorkflowTests
 
     [Fact]
     [Trait("Category", "TlsInitialExec")]
+    public void SelectedInitialExecLdGotPrel19FlowsThroughSnapshotSharedLayoutGotPreservationAndReparse()
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsInitialExecLdGotPrel19FunctionPie(),
+            "tls.initial-exec.ld-gottprel-prel19.fixture",
+            "tls.initial-exec.ld-gottprel-prel19.producer");
+        var planning = new FunctionProtectionService().Plan(setup.Source, setup.Request);
+
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var snapshot = Assert.IsType<SemanticPlanSnapshot>(planning.Plan!.SemanticSnapshot);
+        var binding = Assert.IsType<SemanticTlsBindingExtension>(Assert.Single(
+            snapshot.Extensions.OfType<SemanticTlsBindingExtension>())).Binding;
+        Assert.Equal(TlsAccessModel.InitialExec, binding.AccessModel);
+        Assert.Equal(
+            new[] { ElfConstants.RArm64TlsIeLdGottprelPrel19 },
+            binding.RelocationSites.Select(site => site.Binding.RelocationType!.Value));
+        Assert.Equal(0, binding.RelocationSites[0].PairOrdinal);
+        Assert.NotNull(binding.GotEntry);
+        Assert.Equal(ElfConstants.RArm64TlsTprel64, binding.GotEntry!.Relocation.RelocationType);
+        Assert.Single(TlsSemanticFixupPlanner.Build(snapshot.Plan).Fixups);
+
+        var rehydration = GenericRehydrationEngine.Rehydrate(
+            setup.Source,
+            setup.Emission.ArtifactBytes!,
+            setup.RehydrationOptions);
+        Assert.True(rehydration.IsSuccess, string.Join(Environment.NewLine, rehydration.Diagnostics));
+        var outputFixup = Assert.Single(rehydration.NativeImage!.LayoutEvidence!.TlsFixups);
+        Assert.Equal(ElfConstants.RArm64TlsIeLdGottprelPrel19, outputFixup.Fixup.Relocation.RelocationType);
+        Assert.Equal(ElfConstants.RArm64TlsTprel64, outputFixup.Fixup.GotEntry!.Relocation.RelocationType);
+
+        var sourceFile = Assert.IsType<ElfFile>(ElfParser.Parse(setup.Source).File);
+        var outputFile = rehydration.NativeImage.ParsedImage;
+        Assert.Equal(sourceFile.TlsMetadata.StaticRelocations, outputFile.TlsMetadata.StaticRelocations);
+        Assert.Equal(sourceFile.TlsMetadata.Dynamic.Relocations, outputFile.TlsMetadata.Dynamic.Relocations);
+        var sourceTls = Assert.Single(sourceFile.TlsMetadata.Segments);
+        var outputTls = Assert.Single(outputFile.TlsMetadata.Segments);
+        Assert.Equal(sourceTls.FileSize, outputTls.FileSize);
+        Assert.Equal(sourceTls.MemorySize, outputTls.MemorySize);
+        Assert.Equal(sourceTls.ZeroFillSize, outputTls.ZeroFillSize);
+        Assert.Equal(sourceTls.Alignment, outputTls.Alignment);
+        Assert.Equal(sourceTls.InitializedTemplate.ToArray(), outputTls.InitializedTemplate.ToArray());
+
+        var outputEncoding = outputFixup.OutputEncoding;
+        Assert.True(Aarch64TlsInstructionSemantics.TryEncodeInitialExecLdGotPrel19(
+            BinaryPrimitives.ReadUInt32LittleEndian(setup.Source.AsSpan(0x200, sizeof(uint))),
+            outputEncoding,
+            outputFixup.OutputVirtualAddress.Value,
+            binding.GotEntry.SourceRange.VirtualAddress.Value,
+            binding.Addend,
+            out var expectedEncoding));
+        Assert.Equal(expectedEncoding, outputEncoding);
+        Assert.True(outputFile.LoadMap.TryVirtualAddressToFileOffset(
+            binding.GotEntry.SourceRange.VirtualAddress,
+            sizeof(ulong),
+            out var outputGotOffset));
+        Assert.Equal(binding.GotEntry.SourceRange.FileOffset, outputGotOffset);
+        Assert.Equal(
+            setup.Source.AsSpan(checked((int)binding.GotEntry.SourceRange.FileOffset.Value), sizeof(ulong)).ToArray(),
+            rehydration.NativeImage.Bytes.AsSpan(checked((int)outputGotOffset.Value), sizeof(ulong)).ToArray());
+        Assert.Single(outputFile.TlsMetadata.StaticRelocations, fact =>
+            fact.Relocation.Type == ElfConstants.RArm64TlsTprel64
+            && fact.Relocation.Offset == binding.GotEntry.SourceRange.VirtualAddress.Value
+            && fact.Relocation.Info == binding.GotEntry.Relocation.RawInfo
+            && fact.Relocation.Addend == binding.GotEntry.Addend);
+    }
+
+    [Theory]
+    [InlineData(0x58000008u)]
+    [InlineData(0x18000009u)]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19WrongLiteralWidthOrRegister(uint encoding)
+    {
+        var source = ElfFixture.TlsInitialExecLdGotPrel19FunctionPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(0x200), encoding);
+        var plan = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByName("tls_fixture") },
+                new[] { ProtectionPass.RegisterPermutation }));
+
+        Assert.False(plan.IsSuccess);
+        Assert.Null(plan.Plan);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code is
+            DiagnosticCode.ProtectionUnsupportedInstruction
+            or DiagnosticCode.TlsSequenceMalformed
+            or DiagnosticCode.TlsSemanticsUnsupported);
+    }
+
+    [Theory]
+    [InlineData(0x58000029u, 0x1FFE0UL)]
+    [InlineData(0x58000009u, 0x1FFE2UL)]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19NonRelocatableImmediateOrMisalignedOwner(
+        uint sourceEncoding,
+        ulong gotAddress)
+    {
+        Assert.False(Aarch64TlsInstructionSemantics.TryEncodeInitialExecLdGotPrel19(
+            sourceEncoding,
+            0x58000009u,
+            0x1200,
+            gotAddress,
+            0,
+            out _));
+    }
+
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19MissingGotOwner()
+    {
+        var source = ElfFixture.TlsInitialExecLdGotPrel19FunctionPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(source.AsSpan(0x608), (1UL << 32) | ElfConstants.RArm64Abs64);
+        var plan = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByName("tls_fixture") },
+                new[] { ProtectionPass.RegisterPermutation }));
+
+        Assert.False(plan.IsSuccess);
+        Assert.Null(plan.Plan);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code is
+            DiagnosticCode.TlsBindingUnresolved
+            or DiagnosticCode.TlsMetadataMalformed
+            or DiagnosticCode.TlsSemanticsUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19WrongAddendIdentity()
+    {
+        var source = ElfFixture.TlsInitialExecLdGotPrel19FunctionPie();
+        BinaryPrimitives.WriteInt64LittleEndian(source.AsSpan(0x628), 1);
+        var plan = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByName("tls_fixture") },
+                new[] { ProtectionPass.RegisterPermutation }));
+
+        Assert.False(plan.IsSuccess);
+        Assert.Null(plan.Plan);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code is
+            DiagnosticCode.TlsSequenceMalformed
+            or DiagnosticCode.TlsBindingUnresolved
+            or DiagnosticCode.TlsSemanticsUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19MismatchedSymbolIdentity()
+    {
+        var source = ElfFixture.TlsInitialExecLdGotPrel19FunctionPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            source.AsSpan(0x618),
+            (2UL << 32) | ElfConstants.RArm64TlsIeLdGottprelPrel19);
+        var plan = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByName("tls_fixture") },
+                new[] { ProtectionPass.RegisterPermutation }));
+
+        Assert.False(plan.IsSuccess);
+        Assert.Null(plan.Plan);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code is
+            DiagnosticCode.TlsBindingUnresolved
+            or DiagnosticCode.TlsMetadataMalformed
+            or DiagnosticCode.TlsSemanticsUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19OutsideSignedRangeAfterLayoutPlanning()
+    {
+        var source = ElfFixture.TlsInitialExecLdGotPrel19FunctionPie();
+        const ulong distantCodeAddress = 0x501200;
+        BinaryPrimitives.WriteUInt64LittleEndian(source.AsSpan(ElfHeaderOffsets.Entry), distantCodeAddress);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            source.AsSpan(ElfFixture.SecondProgramHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress),
+            distantCodeAddress);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            source.AsSpan(0x300 + (4 * ElfConstants.SectionHeaderSize64) + 16),
+            distantCodeAddress);
+        BinaryPrimitives.WriteUInt64LittleEndian(source.AsSpan(0x538), distantCodeAddress);
+        BinaryPrimitives.WriteUInt64LittleEndian(source.AsSpan(0x618), distantCodeAddress);
+
+        var setup = CreateEmission(source, "tls.initial-exec.ld-gottprel-prel19.range", "tls.initial-exec.range.producer");
+        var result = GenericRehydrationEngine.Rehydrate(
+            setup.Source,
+            setup.Emission.ArtifactBytes!,
+            setup.RehydrationOptions);
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.NativeImage);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsLayoutMismatch);
+    }
+
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19WithAnExtraOutOfOrderPairRelocation()
+    {
+        var source = ElfFixture.TlsInitialExecLdGotPrel19FunctionPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            source.AsSpan(0x300 + (5 * ElfConstants.SectionHeaderSize64) + 32),
+            3 * ElfConstants.RelaEntrySize64);
+        BinaryPrimitives.WriteUInt64LittleEndian(source.AsSpan(0x630), 0x1204);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            source.AsSpan(0x638),
+            (1UL << 32) | ElfConstants.RArm64TlsIeAdrGottprelPage21);
+        BinaryPrimitives.WriteInt64LittleEndian(source.AsSpan(0x640), 0);
+        var plan = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByName("tls_fixture") },
+                new[] { ProtectionPass.RegisterPermutation }));
+
+        Assert.False(plan.IsSuccess);
+        Assert.Null(plan.Plan);
+        Assert.Contains(plan.Diagnostics, diagnostic => diagnostic.Code is
+            DiagnosticCode.ProtectionUnsupportedInstruction
+            or DiagnosticCode.TlsSequenceMalformed
+            or DiagnosticCode.TlsSemanticsUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
+    public void RejectsInitialExecLdGotPrel19AddressMapConflictBeforeNativeImagePublication()
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsInitialExecLdGotPrel19FunctionPie(),
+            "tls.initial-exec.ld-gottprel-prel19.mapping",
+            "tls.initial-exec.mapping.producer");
+        var image = ProtectedImageCodec.Decode(setup.Emission.ArtifactBytes!).Image!;
+        var conflictingSourceAddress = new VirtualAddress(
+            image.Operations.OfType<ProtectedImageEmitRegion>().Single().SourceAddress.Value + sizeof(uint));
+        var conflictingOperations = image.Operations.Select(operation => operation switch
+        {
+            ProtectedImageEmitRegion region => region with { SourceAddress = conflictingSourceAddress },
+            ProtectedImageEntryBranchFixup branch => branch with { SourceAddress = conflictingSourceAddress },
+            _ => operation,
+        }).ToArray();
+        var encoded = ProtectedImageCodec.Encode(image with { Operations = conflictingOperations });
+        Assert.True(encoded.IsSuccess, string.Join(Environment.NewLine, encoded.Diagnostics));
+
+        var result = GenericRehydrationEngine.Rehydrate(
+            setup.Source,
+            encoded.ArtifactBytes!,
+            setup.RehydrationOptions);
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.NativeImage);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.IsError);
+    }
+
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
     public void SelectedInitialExecAdrLd64PairFlowsThroughSnapshotSharedLayoutGotPreservationAndReparse()
     {
         var setup = CreateEmission(

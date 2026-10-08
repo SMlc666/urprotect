@@ -4,5 +4,6 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/prd.md","reason":"Check all-five-model semantic-first acceptance criteria and no-history constraints."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/design.md","reason":"Review typed TLS IR, sequence recognition, rewrite/layout, snapshot, lifecycle, and matrix contracts."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-semantic-baseline.md","reason":"Verify implementation claims against current source, fixtures, and archived TLS lifecycle evidence."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsie-ld-gottprel-prel19-oracle.md","reason":"Verify GNU TLSIE PREL19 literal-load shape, signed range, GOT ownership, hostile-range checks, and targeted emitter boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsie-adr-ld64-oracle.md","reason":"Verify exact TLSIE ADRP/LD64 ABI/toolchain shape, page/scale semantics, GOT ownership, and fail-closed boundaries."}
 {"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/design.md","reason":"Check dependency ordering and reuse of shared semantic/layout/artifact owners."}

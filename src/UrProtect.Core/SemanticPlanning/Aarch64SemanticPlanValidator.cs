@@ -403,6 +403,28 @@ public static class Aarch64SemanticPlanValidator
             return false;
         }
 
+        if (relocation.RelocationType == ElfConstants.RArm64TlsIeLdGottprelPrel19)
+        {
+            if (!Aarch64TlsInstructionSemantics.TryGetInitialExecLdGotPrel19Register(encoding, out _)
+                || !Aarch64TlsInstructionSemantics.TryGetInitialExecLdGotPrel19Register(
+                    fixup.OriginalEncoding,
+                    out _)
+                || outputTargetAddress.Value % sizeof(uint) != 0
+                || !Aarch64TlsInstructionSemantics.TryGetInitialExecLdGotPrel19Relocation(
+                    relocation.RelocationType.Value,
+                    fixup.SourceAddress.Value,
+                    0))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticFixupMalformed,
+                    "The TLSIE LD_GOTTPREL_PREL19 relocation does not retain its 64-bit literal-load width or bounded source identity.",
+                    fixup.SourceFileOffset.Value);
+                return false;
+            }
+
+            return true;
+        }
+
         if (relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21)
         {
             if (!Aarch64TlsInstructionSemantics.TryGetInitialExecAdrRegister(encoding, out _))
@@ -519,7 +541,8 @@ public static class Aarch64SemanticPlanValidator
                 or Aarch64RelocationKind.LoadStore
             || relocation?.RelocationType is
                 ElfConstants.RArm64TlsIeAdrGottprelPage21
-                or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc;
+                or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+                or ElfConstants.RArm64TlsIeLdGottprelPrel19;
 
     private static void ValidateRelocationOnly(
         SemanticRewritePlan plan,
@@ -941,9 +964,13 @@ public static class Aarch64SemanticPlanValidator
             };
         }
 
-        if (fixup.Relocation?.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21)
+        if (fixup.Relocation?.RelocationType is
+            ElfConstants.RArm64TlsIeAdrGottprelPage21
+            or ElfConstants.RArm64TlsIeLdGottprelPrel19)
         {
-            return PcRelativeExpressionKind.AdrPrelPgHi21;
+            return fixup.Relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
+                ? PcRelativeExpressionKind.AdrPrelPgHi21
+                : PcRelativeExpressionKind.Literal19;
         }
 
         return fixup.Relocation?.Kind switch

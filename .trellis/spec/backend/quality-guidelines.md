@@ -295,7 +295,7 @@ TlsSemanticFixupPlanner.Build(SemanticRewritePlan)
   -> TlsSemanticFixupPlanResult
 ```
 
-The current managed positive forms are:
+The current managed positive forms include:
 
 - local-exec `ADD_TPREL_HI12 + ADD_TPREL_LO12/LO12_NC`;
 - local-exec `ADD_TPREL_HI12 + LDST32_TPREL_LO12_NC`;
@@ -303,7 +303,9 @@ The current managed positive forms are:
 - initial-exec `MOVW_GOTTPREL_G1 + MOVW_GOTTPREL_G0_NC` with one preserved
   `R_AARCH64_TLS_TPREL64` GOT owner;
 - initial-exec `ADR_GOTTPREL_PAGE21 + LD64_GOTTPREL_LO12_NC` with the same
-  preserved GOT owner and validated page/scale semantics.
+  preserved GOT owner and validated page/scale semantics;
+- initial-exec standalone `LD_GOTTPREL_PREL19` with one preserved
+  `R_AARCH64_TLS_TPREL64` GOT owner and a signed, 4-byte-scaled literal range.
 
 ### 3. Contracts
 
@@ -321,6 +323,9 @@ The current managed positive forms are:
 - TLSIE ADRP/LD64 requires an adjacent pair, page-congruent ADRP target,
   signed page-range validity, scaled 64-bit LD64 low-12 offset, and a TP-relative
   ADD that does not overwrite the GOT-loaded value before the final access.
+- TLSIE LD_GOTTPREL_PREL19 requires one standalone 64-bit literal load, a unique
+  writable `R_AARCH64_TLS_TPREL64` GOT owner, and a signed 19-bit displacement
+  scaled by four; no ADR/ADRP instruction pair is part of this form.
 - Planner and materializer bind all relocation/source/output offsets through
   checked bounded ranges before subtraction or integer conversion.
 - A decoder may report zero optional operand-width metadata. The semantic
@@ -337,7 +342,7 @@ The current managed positive forms are:
 | --- | --- |
 | missing snapshot for transformed TLS operations | reject before materialization/publication |
 | model, family, symbol, pair order, addend, or register mismatch | stable TLS semantic diagnostic; no artifact |
-| incomplete ADD/MOVW/LDST32/ADRP-LD64 pair or non-supported TLS form | fail closed before layout |
+| incomplete ADD/MOVW/LDST32/ADRP-LD64/LD_GOTTPREL_PREL19 sequence or non-supported TLS form | fail closed before layout |
 | initial-exec GOT missing, duplicated, overlapping, non-writable, or unmapped | stable GOT/TLS diagnostic; no output |
 | source/output range, opcode, width, scale, or address-map mismatch | layout diagnostic; no Native Image |
 | PT_TLS/template/zero-fill/relocation reparse mismatch | output validation failure; no publication |

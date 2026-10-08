@@ -68,6 +68,8 @@ nearest-negative pairs belong in the design and implementation artifacts and
 must be checked against the ABI/toolchain fixtures rather than inferred from
 model names.
 
+The managed positive forms are documented in `.trellis/spec/backend/quality-guidelines.md`. The GNU TLSIE standalone `LD_GOTTPREL_PREL19` form is also bounded by the research oracle at `aarch64-tlsie-ld-gottprel-prel19-oracle.md`; it remains semantic/layout evidence only, not runtime or lifecycle evidence.
+
 ## Boundary conclusion
 
 The correct order is:

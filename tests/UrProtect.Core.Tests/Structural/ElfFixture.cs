@@ -324,6 +324,56 @@ internal static class ElfFixture
         bytes.AsSpan(codeOffset + codeSize, sizeof(uint) * 2).Clear();
         return bytes;
     }
+    /// <summary>
+    /// GNU TLSIE standalone literal-load form: one PREL19 instruction relocation
+    /// targets the source-preserved writable TPREL64 GOT owner.
+    /// </summary>
+    public static byte[] TlsInitialExecLdGotPrel19FunctionPie(long relocationAddend = 0)
+    {
+        var bytes = TlsInitialExecMovwFunctionPie(relocationAddend);
+        const int codeOffset = 0x200;
+        const int codeSize = 5 * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int relocationTableOffset = 0x600;
+
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (5 * ElfConstants.SectionHeaderSize64) + 32,
+            2 * ElfConstants.RelaEntrySize64);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64, 0x1200);
+        WriteUInt64(bytes.AsSpan(), relocationTableOffset + ElfConstants.RelaEntrySize64 + 8,
+            (1UL << 32) | ElfConstants.RArm64TlsIeLdGottprelPrel19);
+        BinaryPrimitives.WriteInt64LittleEndian(
+            bytes.AsSpan(relocationTableOffset + ElfConstants.RelaEntrySize64 + 16),
+            relocationAddend);
+
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), 0x500 + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            codeSize,
+            codeSize,
+            0x1000);
+
+        var words = new uint[]
+        {
+            0x58000009, // LDR x9, :gottprel:tls_value (PREL19)
+            0xD53BD04A, // MRS x10, TPIDR_EL0
+            0x8B090149, // ADD x9, x10, x9
+            0xB9400120, // LDR w0, [x9]
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return bytes;
+    }
+
     public static byte[] TlsInitialExecMovwFunctionPie(
         long relocationAddend = 0,
         bool useMovn = false)

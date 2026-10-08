@@ -212,7 +212,7 @@ public static class Aarch64TlsSequenceRecognizer
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsBindingUnresolved,
-                    "The initial-exec TLSIE MOVW sequence has no uniquely owned source GOT entry.",
+                    "The initial-exec TLSIE sequence has no uniquely owned source GOT entry.",
                     sites[0].SourceRange.FileOffset.Value);
             }
             return Failure(diagnostics);
@@ -409,21 +409,29 @@ public static class Aarch64TlsSequenceRecognizer
 
         if (model == TlsAccessModel.InitialExec)
         {
-            var validPair = sites.Count == 2
+            var validPair = sites.Count == 1
                 && sites[0].PairOrdinal == 0
-                && sites[1].PairOrdinal == 1
                 && gotEntry is not null
-                && ((sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
-                        && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG0Nc
-                        && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(instructions, sites))
-                    || (sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
-                        && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
-                        && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(instructions, sites)));
+                && sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeLdGottprelPrel19
+                && Aarch64TlsInstructionSemantics.IsSupportedInitialExecLdGotPrel19Pair(instructions, sites);
+            if (!validPair)
+            {
+                validPair = sites.Count == 2
+                    && sites[0].PairOrdinal == 0
+                    && sites[1].PairOrdinal == 1
+                    && gotEntry is not null
+                    && ((sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
+                            && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG0Nc
+                            && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(instructions, sites))
+                        || (sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
+                            && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
+                            && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(instructions, sites)));
+            }
             if (!validPair)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSequenceMalformed,
-                    "The supported initial-exec rewrite requires the exact ordered TLSIE MOVW G1/G0_NC or ADRP/LD64 GOTTPREL pair and TP/GOT address chain.",
+                    "The supported initial-exec rewrite requires the standalone TLSIE LD_GOTTPREL_PREL19 chain or an exact ordered TLSIE MOVW G1/G0_NC or ADRP/LD64 GOTTPREL pair and TP/GOT address chain.",
                     sites[0].SourceRange.FileOffset.Value);
                 complete = false;
             }
@@ -526,13 +534,17 @@ public static class Aarch64TlsSequenceRecognizer
                 && memoryIndices.Length > 0
                 && (relocationSites[0].Binding.RelocationType != ElfConstants.RArm64TlsLeMovwTprelG1
                     || IsSupportedLocalExecMovwSequence(instructions, relocationSites, memoryIndices)),
-            TlsAccessModel.InitialExec => relocationSites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
-                ? Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(
+            TlsAccessModel.InitialExec => relocationSites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeLdGottprelPrel19
+                ? Aarch64TlsInstructionSemantics.IsSupportedInitialExecLdGotPrel19Pair(
                     instructions,
                     relocationSites)
-                : Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(
-                    instructions,
-                    relocationSites),
+                : relocationSites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeMovwGottprelG1
+                    ? Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(
+                        instructions,
+                        relocationSites)
+                    : Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(
+                        instructions,
+                        relocationSites),
             TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic => adrpIndex >= 0
                 && addIndex > adrpIndex
                 && resolverKind == TlsResolverKind.TlsGetAddr
@@ -663,6 +675,13 @@ public static class Aarch64TlsSequenceRecognizer
                 && index < instructions.ToList().FindIndex(candidate => IsResolverInstruction(model, candidate))
                 ? TlsInstructionRole.SymbolOffsetFormation
                 : TlsInstructionRole.AddressFormation;
+        }
+
+        if (model == TlsAccessModel.InitialExec
+            && (instruction.Encoding & 0xFF00_0000u) == 0x5800_0000u
+            && !ReferenceEquals(instruction, memoryAccess))
+        {
+            return TlsInstructionRole.GotEntryLoad;
         }
 
         if (model == TlsAccessModel.InitialExec

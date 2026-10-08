@@ -328,8 +328,11 @@ public static class TlsRelocationClassifier
                     || HasPair(types, ElfConstants.RArm64TlsLeAddTprelHi12, ElfConstants.RArm64TlsLeLdst32TprelLo12Nc)
                     || HasPair(types, ElfConstants.RArm64TlsLeMovwTprelG1, ElfConstants.RArm64TlsLeMovwTprelG0Nc)),
             TlsAccessModel.InitialExec => families.Contains(TlsRelocationFamily.GotTprel)
-                && (HasPair(types, ElfConstants.RArm64TlsIeMovwGottprelG1, ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
-                    || HasPair(types, ElfConstants.RArm64TlsIeAdrGottprelPage21, ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)),
+                && (relocationArray.Length == 1
+                    && relocationArray[0] == ElfConstants.RArm64TlsIeLdGottprelPrel19
+                    || relocationArray.Length == 2
+                    && (HasPair(types, ElfConstants.RArm64TlsIeMovwGottprelG1, ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
+                        || HasPair(types, ElfConstants.RArm64TlsIeAdrGottprelPage21, ElfConstants.RArm64TlsIeLd64GottprelLo12Nc))),
             TlsAccessModel.LocalDynamic => families.Contains(TlsRelocationFamily.Dtpmod)
                 && families.Contains(TlsRelocationFamily.Dtprel)
                 && (HasPair(types, ElfConstants.RArm64TlsLdAdrPage21, ElfConstants.RArm64TlsLdAddLo12Nc)
@@ -378,6 +381,8 @@ public static class Aarch64TlsInstructionSemantics
     private const uint AdrpImmediateMask = 0x60FF_FFE0;
     private const uint Ld64UnsignedOpcodeMask = 0xFFC0_0000;
     private const uint Ld64UnsignedOpcode = 0xF940_0000;
+    private const uint LdGotPrel19OpcodeMask = 0xFF00_0000;
+    private const uint LdGotPrel19Opcode = 0x5800_0000;
     private const uint AddRegisterOpcodeMask = 0xFF20_0000;
     private const uint AddRegisterOpcode = 0x8B00_0000;
     private const uint AddRegisterShiftMask = 0x00C0_FC00;
@@ -855,6 +860,148 @@ public static class Aarch64TlsInstructionSemantics
             && memoryIndices[1] == pairIndex + 4;
     }
 
+    /// <summary>
+    /// Validates the standalone TLSIE literal-load sequence emitted by GNU AArch64.
+    /// The literal load targets the preserved GOT TPREL64 owner, then the loaded
+    /// offset is combined with TP before the final scalar TLS access.
+    /// </summary>
+    public static bool IsSupportedInitialExecLdGotPrel19Pair(
+        IReadOnlyList<SemanticInstruction> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        if (relocationSites.Count != 1
+            || relocationSites[0] is null
+            || relocationSites[0].PairOrdinal != 0
+            || relocationSites[0].Binding.RelocationType != ElfConstants.RArm64TlsIeLdGottprelPrel19)
+        {
+            return false;
+        }
+
+        var index = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == relocationSites[0].SourceRange.VirtualAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        return index >= 0
+            && IsSupportedInitialExecLdGotPrel19Sequence(
+                instructions.Select(instruction => instruction.Encoding).ToArray(),
+                index,
+                requireZeroSourceImmediate: true)
+            && instructions
+                .Select((instruction, instructionIndex) => (instruction, instructionIndex))
+                .Where(item => item.instructionIndex != index)
+                .Count(item => IsMemoryInstruction(item.instruction)) == 1;
+    }
+
+    public static bool IsSupportedInitialExecLdGotPrel19Pair(
+        IReadOnlyList<TlsInstructionRecord> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        if (relocationSites.Count != 1
+            || relocationSites[0] is null
+            || relocationSites[0].PairOrdinal != 0
+            || relocationSites[0].Binding.RelocationType != ElfConstants.RArm64TlsIeLdGottprelPrel19)
+        {
+            return false;
+        }
+
+        var index = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceRange.VirtualAddress == relocationSites[0].SourceRange.VirtualAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        return index >= 0
+            && IsSupportedInitialExecLdGotPrel19Sequence(
+                instructions.Select(instruction => instruction.Encoding).ToArray(),
+                index,
+                requireZeroSourceImmediate: true)
+            && instructions.Count(item => item.Role == TlsInstructionRole.GotEntryLoad) == 1
+            && instructions.Count(item => item.Role == TlsInstructionRole.TlsMemoryAccess) == 1;
+    }
+
+    /// <summary>Validates the standalone TLSIE literal-load chain at a sequence index.</summary>
+    public static bool IsSupportedInitialExecLdGotPrel19Sequence(
+        IReadOnlyList<uint> encodings,
+        int loadIndex,
+        bool requireZeroSourceImmediate = false)
+    {
+        ArgumentNullException.ThrowIfNull(encodings);
+        return loadIndex >= 0
+            && loadIndex <= encodings.Count - 4
+            && (!requireZeroSourceImmediate || (encodings[loadIndex] & (0x7FFFFu << 5)) == 0)
+            && TryGetInitialExecLdGotPrel19Register(encodings[loadIndex], out var gotValueRegister)
+            && TryGetThreadPointerRegister(encodings[loadIndex + 1], out var threadPointerRegister)
+            && threadPointerRegister != gotValueRegister
+            && TryGetLocalExecAddressRegister(
+                encodings[loadIndex + 2],
+                threadPointerRegister,
+                gotValueRegister,
+                out var tlsAddressRegister)
+            && TryGetInitialExecTlsAccessRegisters(
+                encodings[loadIndex + 3],
+                out var tlsBaseRegister,
+                out _)
+            && tlsBaseRegister == tlsAddressRegister
+            && IsLoadStoreEncoding(encodings[loadIndex + 3])
+            && encodings
+                .Select((encoding, index) => (encoding, index))
+                .Count(item => IsLoadStoreEncoding(item.encoding)) == 1;
+    }
+
+    /// <summary>Encodes a TLSIE literal load against the preserved GOT owner.</summary>
+    public static bool TryEncodeInitialExecLdGotPrel19(
+        uint sourceEncoding,
+        uint outputEncoding,
+        ulong outputAddress,
+        ulong gotAddress,
+        long addend,
+        out uint encoded)
+    {
+        encoded = 0;
+        if (!TryGetInitialExecLdGotPrel19Register(sourceEncoding, out _)
+            || !TryGetInitialExecLdGotPrel19Register(outputEncoding, out _)
+            || (sourceEncoding & (0x7FFFFu << 5)) != 0
+            || outputAddress % sizeof(uint) != 0
+            || !TryAddSigned(gotAddress, addend, out var targetAddress)
+            || targetAddress % sizeof(uint) != 0
+            || !TryGetScaledSignedImmediate(targetAddress, outputAddress, sizeof(uint), 19, out var immediate))
+        {
+            return false;
+        }
+
+        encoded = (outputEncoding & ~(0x7FFFFu << 5))
+            | ((unchecked((uint)immediate) & 0x7FFFFu) << 5);
+        return true;
+    }
+
+    public static bool TryGetInitialExecLdGotPrel19Register(uint encoding, out byte register)
+    {
+        register = 0;
+        if ((encoding & LdGotPrel19OpcodeMask) != LdGotPrel19Opcode)
+        {
+            return false;
+        }
+
+        register = (byte)(encoding & 0x1F);
+        return register != 31;
+    }
+
+    public static bool TryGetInitialExecLdGotPrel19Relocation(
+        uint relocationType,
+        ulong address,
+        int pairOrdinal) =>
+        relocationType == ElfConstants.RArm64TlsIeLdGottprelPrel19
+        && pairOrdinal == 0
+        && address % sizeof(uint) == 0
+        && address <= ulong.MaxValue - sizeof(uint);
+
+
     public static bool IsSupportedInitialExecRelocationInstruction(uint relocationType, uint encoding) =>
         relocationType switch
         {
@@ -865,6 +1012,9 @@ public static class Aarch64TlsInstructionSemantics
                 encoding,
                 out _,
                 out _,
+                out _),
+            ElfConstants.RArm64TlsIeLdGottprelPrel19 => TryGetInitialExecLdGotPrel19Register(
+                encoding,
                 out _),
             _ => false,
         };
@@ -1043,6 +1193,37 @@ public static class Aarch64TlsInstructionSemantics
                 requireSourceLow12Zero: true);
     }
 
+    public static bool IsSupportedInitialExecLdGotPrel19EmitterSequence(
+        IReadOnlyList<Aarch64FunctionInstruction> instructions,
+        IReadOnlyList<TlsRelocationFacts> relocationFacts)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationFacts);
+        var relocations = relocationFacts
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsIeLdGottprelPrel19)
+            .ToArray();
+        if (relocations.Length != 1
+            || relocations[0].Symbol is null
+            || !TryGetInitialExecLdGotPrel19Relocation(
+                relocations[0].Relocation.Type,
+                relocations[0].Relocation.Offset,
+                pairOrdinal: 0))
+        {
+            return false;
+        }
+
+        var instructionIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.Address == relocations[0].Relocation.Offset)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        return instructionIndex >= 0
+            && IsSupportedInitialExecLdGotPrel19Sequence(
+                instructions.Select(instruction => instruction.Encoding).ToArray(),
+                instructionIndex,
+                requireZeroSourceImmediate: true);
+    }
     private static bool TryValidateInitialExecAdrLd64PairRelocations(
         IReadOnlyList<TlsRelocationSite> relocationSites,
         out VirtualAddress firstAddress,
@@ -1087,6 +1268,64 @@ public static class Aarch64TlsInstructionSemantics
             or 0x7900_0000u or 0x7940_0000u
             or 0xB900_0000u or 0xB940_0000u
             or 0xF900_0000u or 0xF940_0000u;
+
+    private static bool IsMemoryInstruction(SemanticInstruction instruction) =>
+        instruction.Operands.Any(operand => operand.Memory is not null)
+        || instruction.Mnemonic.StartsWith("ldr", StringComparison.OrdinalIgnoreCase)
+        || instruction.Mnemonic.StartsWith("str", StringComparison.OrdinalIgnoreCase);
+    private static bool TryGetScaledSignedImmediate(
+        ulong target,
+        ulong place,
+        ulong scale,
+        int width,
+        out long immediate)
+    {
+        immediate = default;
+        if (scale == 0 || width <= 0 || width >= 63)
+        {
+            return false;
+        }
+
+        long delta;
+        if (target >= place)
+        {
+            var positive = target - place;
+            if (positive > long.MaxValue)
+            {
+                return false;
+            }
+
+            delta = (long)positive;
+        }
+        else
+        {
+            var negative = place - target;
+            if (negative > (1UL << 63))
+            {
+                return false;
+            }
+
+            delta = negative == (1UL << 63)
+                ? long.MinValue
+                : -(long)negative;
+        }
+
+        if (delta % (long)scale != 0)
+        {
+            return false;
+        }
+
+        var scaled = delta / (long)scale;
+        var minimum = -(1L << (width - 1));
+        var maximum = (1L << (width - 1)) - 1;
+        if (scaled < minimum || scaled > maximum)
+        {
+            return false;
+        }
+
+        immediate = scaled;
+        return true;
+    }
 
     private static bool TryGetPageImmediate(ulong target, ulong place, out long immediate)
     {
@@ -1618,11 +1857,6 @@ public static class Aarch64TlsInstructionSemantics
         && firstAddress <= ulong.MaxValue - sizeof(uint)
         && secondAddress == firstAddress + sizeof(uint)
         && firstAddend == secondAddend;
-
-    private static bool IsMemoryInstruction(SemanticInstruction instruction) =>
-        instruction.Operands.Any(operand => operand.Memory is not null)
-        || instruction.Mnemonic.StartsWith("ldr", StringComparison.OrdinalIgnoreCase)
-        || instruction.Mnemonic.StartsWith("str", StringComparison.OrdinalIgnoreCase);
 
     private static int FindInstructionIndex(
         IReadOnlyList<TlsInstructionRecord> instructions,
