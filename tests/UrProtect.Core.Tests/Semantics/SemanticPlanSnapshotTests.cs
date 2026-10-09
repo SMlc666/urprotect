@@ -624,7 +624,10 @@ public sealed class SemanticPlanSnapshotTests
                 TlsInstructionRole.DescriptorLoad,
                 TlsInstructionRole.AddressFormation,
                 TlsInstructionRole.DescriptorCall,
+                TlsInstructionRole.ThreadPointerRead,
                 TlsInstructionRole.AddressFinalization,
+                TlsInstructionRole.TlsMemoryAccess,
+                TlsInstructionRole.SequencePreservation,
             },
             _ => throw new ArgumentOutOfRangeException(nameof(model)),
         };
@@ -667,16 +670,52 @@ public sealed class SemanticPlanSnapshotTests
                     5 => (0xB9400000u, "ldr"),
                     _ => (0xD503201Fu, "nop"),
                 },
+                TlsAccessModel.TlsDesc => index switch
+                {
+                    0 => (0x90000020u, "adrp"),
+                    1 => (0xF9400001u, "ldr"),
+                    2 => (0x91000000u, "add"),
+                    3 => (0xD63F0020u, "blr"),
+                    4 => (0xD53BD041u, "mrs"),
+                    5 => (0x8B010000u, "add"),
+                    6 => (0xB9400000u, "ldr"),
+                    _ => (0xD65F03C0u, "ret"),
+                },
                 _ => (0xD503201Fu, "nop"),
             };
+            var inputRegisters = model == TlsAccessModel.TlsDesc
+                ? role switch
+                {
+                    TlsInstructionRole.DescriptorLoad => new[] { x0 },
+                    TlsInstructionRole.DescriptorCall => new[] { x1 },
+                    TlsInstructionRole.AddressFinalization => new[] { x0, x1 },
+                    TlsInstructionRole.TlsMemoryAccess => new[] { x0 },
+                    _ => Array.Empty<Aarch64RegisterView>(),
+                }
+                : role == TlsInstructionRole.TlsMemoryAccess
+                    ? new[] { x0 }
+                    : Array.Empty<Aarch64RegisterView>();
+            var outputRegisters = model == TlsAccessModel.TlsDesc
+                ? role switch
+                {
+                    TlsInstructionRole.AddressFormation => new[] { x0 },
+                    TlsInstructionRole.DescriptorLoad => new[] { x1 },
+                    TlsInstructionRole.ThreadPointerRead => new[] { x1 },
+                    TlsInstructionRole.AddressFinalization => new[] { x0 },
+                    TlsInstructionRole.TlsMemoryAccess => new[] { x0 },
+                    _ => Array.Empty<Aarch64RegisterView>(),
+                }
+                : role == TlsInstructionRole.ThreadPointerRead
+                    ? new[] { x1 }
+                    : Array.Empty<Aarch64RegisterView>();
             return new TlsInstructionRecord(
                 Range(sourceRange.VirtualAddress.Value + checked((ulong)index * sizeof(uint)),
                     sourceRange.FileOffset.Value + checked((ulong)index * sizeof(uint)), sizeof(uint)),
                 encoding,
                 mnemonic,
                 role,
-                role == TlsInstructionRole.TlsMemoryAccess ? new[] { x0 } : Array.Empty<Aarch64RegisterView>(),
-                role == TlsInstructionRole.ThreadPointerRead ? new[] { x1 } : Array.Empty<Aarch64RegisterView>(),
+                inputRegisters,
+                outputRegisters,
                 Array.Empty<SemanticRegisterEffect>(),
                 IsCall: role == TlsInstructionRole.ResolverCall || role == TlsInstructionRole.DescriptorCall,
                 IsResolverCall: role == TlsInstructionRole.ResolverCall || role == TlsInstructionRole.DescriptorCall);
@@ -765,6 +804,7 @@ public sealed class SemanticPlanSnapshotTests
         TlsResolverCallBinding? resolverCall = null;
         TlsModuleOwnerBinding? moduleOwner = null;
         TlsDtpRelOwnerBinding? dtpRelOwner = null;
+        TlsDescriptorOwnerBinding? descriptorOwner = null;
         if (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
         {
             var callRelocation = new RelocationBinding(
@@ -835,6 +875,29 @@ public sealed class SemanticPlanSnapshotTests
                 0);
         }
 
+        if (model == TlsAccessModel.TlsDesc)
+        {
+            var descriptorRelocation = new RelocationBinding(
+                Aarch64RelocationKind.ThreadLocal,
+                SemanticTarget.RuntimeResolved($"tls-descriptor:{module.Identity}:{symbol.Name}"),
+                SymbolIndex: symbol.SymbolIndex,
+                IsPlt: true,
+                SymbolName: symbol.Name,
+                RelocationType: ElfConstants.RArm64TlsDesc,
+                RelocationAddress: new VirtualAddress(0x4000),
+                RelocationTableAddress: new VirtualAddress(0x4800));
+            descriptorOwner = new TlsDescriptorOwnerBinding(
+                SemanticEntityId.RelocationSite("tls-descriptor:4000"),
+                Range(0x4000, 0x800, 2 * sizeof(ulong)),
+                descriptorRelocation,
+                symbol,
+                0,
+                new VirtualAddress(0x5000),
+                new VirtualAddress(0x6000),
+                new VirtualAddress(0x7000),
+                Range(0x5000, 0x900, 6 * sizeof(uint)),
+                Range(0x6000, 0x920, sizeof(ulong)));
+        }
         return new TlsBinding(
             model,
             primaryFamily,
@@ -863,7 +926,8 @@ public sealed class SemanticPlanSnapshotTests
             gotEntry,
             resolverCall,
             moduleOwner,
-            dtpRelOwner);
+            dtpRelOwner,
+            descriptorOwner);
     }
 
     private static SemanticRewritePlan CreateFixupPlan(SemanticTarget target)

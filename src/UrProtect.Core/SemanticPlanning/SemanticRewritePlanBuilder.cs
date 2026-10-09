@@ -272,6 +272,7 @@ public static class SemanticRewritePlanBuilder
             ElfConstants.RArm64TlsIeAdrGottprelPage21
             or ElfConstants.RArm64TlsGdAdrPage21
             or ElfConstants.RArm64TlsLdAdrPage21
+            or ElfConstants.RArm64TlsDescAdrPage21
             or ElfConstants.RArm64TlsIeLdGottprelPrel19;
 
     private static void ValidateExpressionKind(

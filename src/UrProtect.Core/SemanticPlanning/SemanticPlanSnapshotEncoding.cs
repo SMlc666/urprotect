@@ -490,6 +490,15 @@ public static partial class SemanticPlanSnapshotCodec
             }
         }
 
+        if (binding.AccessModel == TlsAccessModel.TlsDesc)
+        {
+            context.Writer.Write(binding.DescriptorOwner is not null ? (byte)1 : (byte)0);
+            if (binding.DescriptorOwner is { } descriptorOwner)
+            {
+                WriteTlsDescriptorOwner(context, descriptorOwner);
+            }
+        }
+
         context.Writer.Write(binding.AccessSize);
         context.Writer.Write((byte)binding.AddressExpression.Kind);
         WriteTlsModule(context, binding.AddressExpression.Module);
@@ -520,6 +529,22 @@ public static partial class SemanticPlanSnapshotCodec
         }
     }
 
+    private static void WriteTlsDescriptorOwner(
+        CanonicalWriteContext context,
+        TlsDescriptorOwnerBinding owner)
+    {
+        WriteEntityId(context, owner.SourceIdentity);
+        WriteRange(context, owner.DescriptorRange);
+        WriteRelocation(context, owner.Relocation);
+        WriteOptionalTlsSymbol(context, owner.Symbol);
+        context.Writer.Write(owner.Addend);
+        context.Writer.Write(owner.DescriptorPlt.Value);
+        context.Writer.Write(owner.DescriptorGot.Value);
+        context.Writer.Write(owner.PltGot.Value);
+        WriteRange(context, owner.ResolverPltRange);
+        WriteRange(context, owner.ResolverGotRange);
+    }
+
     private static void WriteTlsGotEntry(
         CanonicalWriteContext context,
         TlsGotEntryBinding gotEntry)
@@ -530,6 +555,7 @@ public static partial class SemanticPlanSnapshotCodec
         WriteOptionalTlsSymbol(context, gotEntry.Symbol);
         context.Writer.Write(gotEntry.Addend);
     }
+
 
     private static void WriteTlsRegisters(
         CanonicalWriteContext context,

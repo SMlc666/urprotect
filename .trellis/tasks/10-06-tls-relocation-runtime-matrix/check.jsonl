@@ -3,7 +3,7 @@
 {"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Check current profile/ABI rules, existing initial-exec baselines, lifecycle ordering, and runtime independence."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/prd.md","reason":"Check all-five-model semantic-first acceptance criteria and no-history constraints."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/design.md","reason":"Review typed TLS IR, sequence recognition, rewrite/layout, snapshot, lifecycle, and matrix contracts."}
-{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-semantic-baseline.md","reason":"Verify implementation claims against current source, fixtures, and archived TLS lifecycle evidence."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-semantic-baseline.md","reason":"Verify implementation claims against current source, fixtures, and archived TLS lifecycle contracts."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsie-ld-gottprel-prel19-oracle.md","reason":"Verify GNU TLSIE PREL19 literal-load shape, signed range, GOT ownership, hostile-range checks, and targeted emitter boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsld-oracle.md","reason":"Audit exact TLSLD sequence, resolver ownership, DTPMOD64/DTPREL facts, PT_TLS preservation, fail-closed diagnostics, and runtime evidence boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsie-adr-ld64-oracle.md","reason":"Verify exact TLSIE ADRP/LD64 ABI/toolchain shape, page/scale semantics, GOT ownership, and fail-closed boundaries."}
@@ -12,3 +12,6 @@
 {"file":"src/UrProtect.Core/Aarch64Semantics/Aarch64Decoder.cs","reason":"Audit the project adapter boundary, current AsmStone decode/encode usage, and the required encoder extension point."}
 {"file":"tests/UrProtect.Core.Tests/Semantics/AsmStoneAdapterTests.cs","reason":"Require AsmStone decode/encode round-trip and register/operand behavior coverage for the corrected backend boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-encoder-ownership.md","reason":"Track the production manual-encoding inventory, AsmStone capability evidence, fixture correction rules, and migration acceptance gate."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-oracle.md","reason":"Audit exact TLSDESC site ordering, BLR marker ownership, full descriptor extent, DT_TLSDESC_PLT/GOT mapping, PT_TLS preservation, and no-runtime-promotion boundary."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-fixture.s","reason":"Check the retained GNU TLSDESC fixture source and its initialized/zero-fill TLS declarations."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-managed-status.md","reason":"Record the completed bounded managed TLSDESC producer/layout evidence, test witness, and explicit no-runtime-promotion boundary."}

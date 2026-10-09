@@ -163,6 +163,63 @@ public sealed class TlsLocalExecWorkflowTests
 
 
     [Fact]
+    [Trait("Category", "TlsDesc")]
+    public void SelectedTlsDescFunctionFlowsThroughSnapshotAndProducer()
+    {
+        var source = ElfFixture.TlsDescriptorFunctionPie();
+        var parsedFixture = ElfParser.Parse(source);
+        Assert.True(parsedFixture.IsSuccess, string.Join(Environment.NewLine, parsedFixture.Diagnostics));
+        var fixtureModule = TlsStructuralAdapter.CreateImageModule(parsedFixture.File!);
+        Assert.True(fixtureModule.IsSuccess, string.Join(Environment.NewLine, fixtureModule.Diagnostics));
+        var fixtureFact = parsedFixture.File!.TlsMetadata.StaticRelocations[0];
+        var fixtureSymbol = Assert.IsType<TlsSymbolIdentity>(TlsStructuralAdapter.ProjectSymbol(fixtureFact.Symbol));
+        var fixtureOwner = TlsStructuralAdapter.ProjectDescriptorOwner(
+            parsedFixture.File!,
+            fixtureModule.Value!,
+            fixtureSymbol,
+            fixtureFact.Relocation.Addend);
+        Assert.True(fixtureOwner.IsSuccess, string.Join(Environment.NewLine, fixtureOwner.Diagnostics));
+        var fixtureWords = Enumerable.Range(0, 8)
+            .Select(index => BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(0x600 + (index * sizeof(uint)), sizeof(uint))))
+            .ToArray();
+        Assert.True(
+            Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
+                fixtureWords,
+                fixtureOwner.Value!,
+                0x1600),
+            "The synthetic TLSDESC fixture words do not satisfy the exact sequence contract.");
+        var setup = CreateEmission(
+            source,
+            "tls.tlsdesc.fixture",
+            "tls.tlsdesc.producer",
+            new[] { ProtectionPass.ControlFlowFlattening },
+            functionName: "tlsdesc_entry");
+        var sourceFile = Assert.IsType<ElfFile>(ElfParser.Parse(source).File);
+        var sourceDescriptor = Assert.Single(sourceFile.TlsMetadata.Dynamic.Relocations);
+        Assert.Equal(ElfConstants.RArm64TlsDesc, sourceDescriptor.Relocation.Type);
+        Assert.True(sourceDescriptor.Relocation.IsPlt);
+
+        var planning = new FunctionProtectionService().Plan(source, setup.Request);
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var snapshot = Assert.IsType<SemanticPlanSnapshot>(planning.Plan!.SemanticSnapshot);
+        var binding = Assert.IsType<SemanticTlsBindingExtension>(Assert.Single(
+            snapshot.Extensions.OfType<SemanticTlsBindingExtension>())).Binding;
+        Assert.Equal(TlsAccessModel.TlsDesc, binding.AccessModel);
+        Assert.Equal(TlsRelocationFamily.TlsDesc, binding.RelocationFamily);
+        Assert.Equal(4, binding.RelocationSites.Count);
+        Assert.NotNull(binding.DescriptorOwner);
+        Assert.Equal(2UL * sizeof(ulong), binding.DescriptorOwner!.DescriptorRange.Size);
+        Assert.Equal(4, TlsSemanticFixupPlanner.Build(snapshot.Plan).Fixups.Count);
+
+        var artifact = ProtectedImageCodec.Decode(
+            setup.Emission.ArtifactBytes!,
+            setup.SourceHash,
+            setup.RequestHash);
+        Assert.True(artifact.IsSuccess, string.Join(Environment.NewLine, artifact.Diagnostics));
+        Assert.Single(artifact.Image!.Operations.OfType<ProtectedImageSemanticPlanSnapshot>());
+    }
+
+    [Fact]
     [Trait("Category", "TlsGeneralDynamic")]
     public void SelectedGeneralDynamicFunctionCarriesTypedOwnersThroughSnapshotAndRejectsMissingDtpRelOwner()
     {
@@ -1725,11 +1782,13 @@ public sealed class TlsLocalExecWorkflowTests
     private static (byte[] Source, FunctionProtectionOptions Request, ProtectedImageEmissionResult Emission, string SourceHash, string RequestHash, RehydrationOptions RehydrationOptions) CreateEmission(
         byte[]? sourceOverride = null,
         string unitId = "tls.local-exec.fixture",
-        string producerId = "tls.local-exec.producer")
+        string producerId = "tls.local-exec.producer",
+        IReadOnlyList<ProtectionPass>? passesOverride = null,
+        string functionName = "tls_fixture")
     {
         var source = sourceOverride ?? ElfFixture.TlsLocalExecFunctionPie();
-        var selectors = new[] { FunctionSelector.ByName("tls_fixture") };
-        var passes = new[] { ProtectionPass.RegisterPermutation };
+        var selectors = new[] { FunctionSelector.ByName(functionName) };
+        var passes = passesOverride ?? new[] { ProtectionPass.RegisterPermutation };
         var request = new FunctionProtectionOptions(selectors, passes);
         var sourceHash = Sha256(source);
         var requestHash = ProtectedImageCodec.ComputeRequestSha256(selectors, passes);

@@ -175,6 +175,25 @@ public sealed record TlsDtpRelOwnerBinding(
     SemanticSourceRange SourceRange,
     RelocationBinding Relocation);
 
+/// <summary>Loader-owned per-symbol TLSDESC descriptor and resolver metadata.</summary>
+/// <remarks>
+/// <see cref="DescriptorRange"/> is the complete 16-byte descriptor, while
+/// <see cref="Relocation"/> describes only the loader-owned first eight-byte
+/// word. <see cref="ResolverGotRange"/> is the distinct DT_TLSDESC_GOT
+/// resolver slot and is never treated as the per-symbol descriptor.
+/// </remarks>
+public sealed record TlsDescriptorOwnerBinding(
+    SemanticEntityId SourceIdentity,
+    SemanticSourceRange DescriptorRange,
+    RelocationBinding Relocation,
+    TlsSymbolIdentity Symbol,
+    long Addend,
+    VirtualAddress DescriptorPlt,
+    VirtualAddress DescriptorGot,
+    VirtualAddress PltGot,
+    SemanticSourceRange ResolverPltRange,
+    SemanticSourceRange ResolverGotRange);
+
 /// <summary>Typed thread- or module-relative value formation.</summary>
 public sealed record TlsAddressExpression(
     TlsAddressExpressionKind Kind,
@@ -214,7 +233,8 @@ public sealed record TlsBinding
         TlsGotEntryBinding? gotEntry = null,
         TlsResolverCallBinding? resolverCall = null,
         TlsModuleOwnerBinding? moduleOwner = null,
-        TlsDtpRelOwnerBinding? dtpRelOwner = null)
+        TlsDtpRelOwnerBinding? dtpRelOwner = null,
+        TlsDescriptorOwnerBinding? descriptorOwner = null)
     {
         ArgumentNullException.ThrowIfNull(instructionSequence);
         ArgumentNullException.ThrowIfNull(module);
@@ -249,6 +269,7 @@ public sealed record TlsBinding
         ResolverCall = resolverCall;
         ModuleOwner = moduleOwner;
         DtpRelOwner = dtpRelOwner;
+        DescriptorOwner = descriptorOwner;
     }
 
     public TlsAccessModel AccessModel { get; }
@@ -284,11 +305,21 @@ public sealed record TlsBinding
     public TlsModuleOwnerBinding? ModuleOwner { get; }
 
     public TlsDtpRelOwnerBinding? DtpRelOwner { get; }
+
+    public TlsDescriptorOwnerBinding? DescriptorOwner { get; }
 }
 
 /// <summary>Stable relocation-family classification for the AArch64 ELF ABI constants.</summary>
 public static class TlsRelocationClassifier
 {
+    private static readonly uint[] TlsDescRelocationPattern =
+    {
+        ElfConstants.RArm64TlsDescAdrPage21,
+        ElfConstants.RArm64TlsDescLd64Lo12,
+        ElfConstants.RArm64TlsDescAddLo12,
+        ElfConstants.RArm64TlsDescCall,
+    };
+
     /// <summary>
     /// Returns whether a relocation is a TLS relocation whose semantics must be
     /// explicitly carried or rejected. A null access model is intentional for
@@ -371,13 +402,8 @@ public static class TlsRelocationClassifier
                 && (HasPair(types, ElfConstants.RArm64TlsGdAdrPage21, ElfConstants.RArm64TlsGdAddLo12Nc)
                     || HasPair(types, ElfConstants.RArm64TlsGdAdrPrel21, ElfConstants.RArm64TlsGdAddLo12Nc)
                     || HasPair(types, ElfConstants.RArm64TlsGdMovwG1, ElfConstants.RArm64TlsGdMovwG0Nc)),
-            TlsAccessModel.TlsDesc => new[]
-            {
-                ElfConstants.RArm64TlsDescAdrPage21,
-                ElfConstants.RArm64TlsDescLd64Lo12,
-                ElfConstants.RArm64TlsDescAddLo12,
-                ElfConstants.RArm64TlsDescCall,
-            }.All(types.Contains),
+            TlsAccessModel.TlsDesc => relocationArray.Length == 4
+                && relocationArray.SequenceEqual(TlsDescRelocationPattern),
             _ => false,
         };
     }
@@ -418,6 +444,310 @@ public static class Aarch64TlsInstructionSemantics
     private const uint ThreadPointerMrsMask = 0xFFFF_FFE0;
     private const uint ThreadPointerMrsEncoding = 0xD53B_D040;
     private static readonly Aarch64InstructionEncoder InstructionEncoder = new();
+    private static readonly uint[] TlsDescRelocationOrder =
+    {
+        ElfConstants.RArm64TlsDescAdrPage21,
+        ElfConstants.RArm64TlsDescLd64Lo12,
+        ElfConstants.RArm64TlsDescAddLo12,
+        ElfConstants.RArm64TlsDescCall,
+    };
+    private static readonly int[] TlsDescPairOrdinals = { 0, 1, 2, 3 };
+
+
+
+    /// <summary>
+    /// Validates the exact linker-oracle TLSDESC page/LD64/ADD/BLR sequence.
+    /// The descriptor owner is separate from the DT_TLSDESC_GOT resolver slot;
+    /// no resolver target string is inferred from the indirect BLR.
+    /// </summary>
+    public static bool IsSupportedTlsDescSequence(
+        IReadOnlyList<SemanticInstruction> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites,
+        TlsDescriptorOwnerBinding descriptorOwner)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        ArgumentNullException.ThrowIfNull(descriptorOwner);
+        if (instructions.Count != 8
+            || relocationSites.Count != 4
+            || descriptorOwner.DescriptorRange.Size != 2 * sizeof(ulong)
+            || descriptorOwner.ResolverPltRange.Size != 6 * sizeof(uint)
+            || descriptorOwner.ResolverGotRange.Size != sizeof(ulong)
+            || descriptorOwner.Relocation.RelocationType != ElfConstants.RArm64TlsDesc
+            || descriptorOwner.Relocation.Kind != Aarch64RelocationKind.ThreadLocal
+            || descriptorOwner.Relocation.Addend != 0
+            || descriptorOwner.Addend != 0
+            || descriptorOwner.DescriptorRange.VirtualAddress.Value % sizeof(ulong) != 0
+            || descriptorOwner.DescriptorRange.FileOffset.Value % sizeof(ulong) != 0
+            || (descriptorOwner.DescriptorRange.VirtualAddress.Value & 0xFFF) != 0)
+        {
+            return false;
+        }
+
+        var orderedSites = relocationSites.OrderBy(site => site.PairOrdinal).ToArray();
+        if (!orderedSites.Select(site => site.PairOrdinal).SequenceEqual(TlsDescPairOrdinals)
+            || !orderedSites.Select(site => site.Binding.RelocationType).SequenceEqual(TlsDescRelocationOrder.Select(type => (uint?)type))
+            || orderedSites.Any(site => site.Binding.Addend != 0 || site.SourceRange.Size != sizeof(uint))
+            || orderedSites.Zip(orderedSites.Skip(1)).Any(pair => !IsAdjacentTlsSites(pair.First, pair.Second))
+            || orderedSites.Any(site => site.Binding.SymbolIndex != descriptorOwner.Symbol.SymbolIndex
+                || !string.Equals(site.Binding.SymbolName, descriptorOwner.Symbol.Name, StringComparison.Ordinal)
+                || site.Binding.RelocationAddress != site.SourceRange.VirtualAddress))
+        {
+            return false;
+        }
+
+        var siteIndices = orderedSites
+            .Select(site => FindInstructionIndex(instructions, site.SourceRange.VirtualAddress))
+            .ToArray();
+        if (!siteIndices.SequenceEqual(TlsDescPairOrdinals)
+            || instructions.Zip(instructions.Skip(1)).Any(pair =>
+                pair.Second.SourceVirtualAddress.Value != pair.First.SourceVirtualAddress.Value + sizeof(uint)
+                || pair.Second.SourceFileOffset.Value != pair.First.SourceFileOffset.Value + sizeof(uint)))
+        {
+            return false;
+        }
+
+        var descriptorAddress = descriptorOwner.DescriptorRange.VirtualAddress.Value;
+        var adrp = instructions[0];
+        var load = instructions[1];
+        var add = instructions[2];
+        var call = instructions[3];
+        var threadPointer = instructions[4];
+        var finalAdd = instructions[5];
+        var access = instructions[6];
+        var ret = instructions[7];
+        var loadMemory = GetMemory(load);
+        var accessMemory = GetMemory(access);
+        var adrpTarget = GetTarget(adrp);
+        var loadValueRegister = GetRegister(load, Aarch64OperandDirection.Output);
+        var addImmediate = GetImmediate(add);
+        var finalAddInputs = GetRegisters(finalAdd, Aarch64OperandDirection.Input);
+        var finalAddOutput = GetRegister(finalAdd, Aarch64OperandDirection.Output);
+        var accessBase = accessMemory?.Base;
+        return string.Equals(adrp.Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(adrp, Aarch64OperandDirection.Output, 0, 64)
+            && adrpTarget is { } target
+            && (target & ~0xFFFUL) == (descriptorAddress & ~0xFFFUL)
+            && string.Equals(load.Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
+            && loadValueRegister is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64, Role: Aarch64RegisterRole.None }
+            && loadMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64, Role: Aarch64RegisterRole.None }, Index: null, Offset: 0, AccessSize: 8, WritesBack: false }
+            && string.Equals(add.Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(add, Aarch64OperandDirection.Input, 0, 64)
+            && HasRegister(add, Aarch64OperandDirection.Output, 0, 64)
+            && addImmediate == 0
+            && string.Equals(call.Mnemonic, "blr", StringComparison.OrdinalIgnoreCase)
+            && call.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
+            && HasRegister(call, Aarch64OperandDirection.Input, 1, 64)
+            && IsThreadPointerMrs(threadPointer)
+            && HasRegister(threadPointer, Aarch64OperandDirection.Output, 1, 64)
+            && string.Equals(finalAdd.Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
+            && finalAddOutput is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64, Role: Aarch64RegisterRole.None }
+            && finalAddInputs.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64, Role: Aarch64RegisterRole.None })
+            && finalAddInputs.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64, Role: Aarch64RegisterRole.None })
+            && GetImmediate(finalAdd) is null
+            && accessMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64, Role: Aarch64RegisterRole.None }, Index: null, AccessSize: 1 or 2 or 4 or 8, WritesBack: false }
+            && string.Equals(access.Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(ret.Mnemonic, "ret", StringComparison.OrdinalIgnoreCase)
+            && ret.ControlFlow == Aarch64ControlFlowKind.Return;
+    }
+
+    /// <summary>Re-encodes one exact TLSDESC marker through the project encoder.</summary>
+    public static bool TryEncodeTlsDescInstruction(
+        uint relocationType,
+        uint sourceEncoding,
+        uint outputEncoding,
+        ulong sourceAddress,
+        ulong outputAddress,
+        TlsDescriptorOwnerBinding descriptorOwner,
+        out uint encoded)
+    {
+        ArgumentNullException.ThrowIfNull(descriptorOwner);
+        encoded = 0;
+        if (descriptorOwner.DescriptorRange.VirtualAddress.Value > ulong.MaxValue - (2 * sizeof(ulong))
+            || (descriptorOwner.DescriptorRange.VirtualAddress.Value & 0xFFF) != 0)
+        {
+            return false;
+        }
+
+        var descriptorAddress = descriptorOwner.DescriptorRange.VirtualAddress.Value;
+        var low12 = descriptorAddress & 0xFFFUL;
+        if (low12 != 0)
+        {
+            return false;
+        }
+
+        if (relocationType == ElfConstants.RArm64TlsDescCall)
+        {
+            var source = new AsmStoneAdapter().Decode(sourceEncoding, sourceAddress);
+            var output = new AsmStoneAdapter().Decode(outputEncoding, outputAddress);
+            encoded = outputEncoding;
+            return source.IsSuccess
+                && output.IsSuccess
+                && IsTlsDescCall(source.Instruction)
+                && IsTlsDescCall(output.Instruction);
+        }
+
+        var family = relocationType switch
+        {
+            ElfConstants.RArm64TlsDescAdrPage21 => Aarch64InstructionEncodingFamily.AdrPrelPgHi21,
+            ElfConstants.RArm64TlsDescLd64Lo12 => Aarch64InstructionEncodingFamily.LoadStoreUnsignedImmediate,
+            ElfConstants.RArm64TlsDescAddLo12 => Aarch64InstructionEncodingFamily.AddImmediate,
+            _ => (Aarch64InstructionEncodingFamily?)null,
+        };
+        if (family is null)
+        {
+            return false;
+        }
+
+        var sourceInstruction = new AsmStoneAdapter().Decode(sourceEncoding, sourceAddress);
+        if (!sourceInstruction.IsSuccess)
+        {
+            return false;
+        }
+
+        if (relocationType == ElfConstants.RArm64TlsDescLd64Lo12
+            && (GetMemory(sourceInstruction.Instruction!) is not { Offset: 0, AccessSize: 8 }))
+        {
+            return false;
+        }
+
+        if (relocationType == ElfConstants.RArm64TlsDescAddLo12
+            && GetImmediate(sourceInstruction.Instruction!) != 0)
+        {
+            return false;
+        }
+
+        var request = new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            sourceAddress,
+            outputAddress,
+            family.Value,
+            relocationType == ElfConstants.RArm64TlsDescAdrPage21 ? descriptorAddress : low12,
+            relocationType == ElfConstants.RArm64TlsDescLd64Lo12 ? 64 : 0,
+            outputEncoding);
+        var result = InstructionEncoder.TryEncode(request);
+        if (!result.IsSuccess)
+        {
+            return false;
+        }
+
+        encoded = result.Encoding;
+        return true;
+    }
+
+    private static bool IsTlsDescCall(Aarch64Instruction? instruction) =>
+        instruction is not null
+        && string.Equals(instruction.Mnemonic, "blr", StringComparison.OrdinalIgnoreCase)
+        && instruction.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
+        && HasRegister(instruction, Aarch64OperandDirection.Input, 1, 64);
+
+    private static Aarch64MemoryReference? GetMemory(Aarch64Instruction instruction) =>
+        instruction.Operands.Select(operand => operand.Memory).FirstOrDefault(memory => memory is not null);
+
+    private static Aarch64MemoryReference? GetMemory(SemanticInstruction instruction) =>
+        instruction.Operands.Select(operand => operand.Memory).FirstOrDefault(memory => memory is not null);
+
+    private static ulong? GetTarget(SemanticInstruction instruction) =>
+        instruction.Operands.Select(operand => operand.Target).FirstOrDefault(target => target.HasValue);
+
+    private static long? GetImmediate(Aarch64Instruction instruction) =>
+        instruction.Operands.Select(operand => operand.Immediate).FirstOrDefault(value => value.HasValue);
+
+    private static long? GetImmediate(SemanticInstruction instruction) =>
+        instruction.Operands.Select(operand => operand.Immediate).FirstOrDefault(value => value.HasValue);
+
+    private static bool HasRegister(
+        Aarch64Instruction instruction,
+        Aarch64OperandDirection direction,
+        byte index,
+        byte width) => instruction.Operands
+        .Where(operand => operand.Direction == direction
+            || (direction == Aarch64OperandDirection.Input
+                && operand.Direction == Aarch64OperandDirection.InputOutput)
+            || (direction == Aarch64OperandDirection.Output
+                && operand.Direction == Aarch64OperandDirection.InputOutput))
+        .SelectMany(operand =>
+        {
+            var registers = new List<Aarch64RegisterView>();
+            if (operand.Register is { } register)
+            {
+                registers.Add(register);
+            }
+
+            registers.AddRange(operand.Registers);
+            if (operand.Memory is { } memory)
+            {
+                registers.Add(memory.Base);
+                if (memory.Index is { } memoryIndex)
+                {
+                    registers.Add(memoryIndex);
+                }
+            }
+
+            return registers;
+        })
+        .Any(register => register.Class == Aarch64RegisterClass.General
+            && register.Role == Aarch64RegisterRole.None
+            && register.Index == index
+            && register.Width == width);
+
+    private static Aarch64RegisterView? GetRegister(
+        SemanticInstruction instruction,
+        Aarch64OperandDirection direction) =>
+        instruction.Operands
+            .Where(operand => operand.Direction == direction)
+            .Select(operand => operand.Register)
+            .FirstOrDefault(register => register.HasValue);
+
+    private static Aarch64RegisterView[] GetRegisters(
+        SemanticInstruction instruction,
+        Aarch64OperandDirection direction) => instruction.Operands
+        .Where(operand => operand.Direction == direction
+            || (direction == Aarch64OperandDirection.Input
+                && operand.Direction == Aarch64OperandDirection.InputOutput)
+            || (direction == Aarch64OperandDirection.Output
+                && operand.Direction == Aarch64OperandDirection.InputOutput))
+        .SelectMany(operand =>
+        {
+            var registers = new List<Aarch64RegisterView>();
+            if (operand.Register is { } register)
+            {
+                registers.Add(register);
+            }
+
+            registers.AddRange(operand.Registers);
+            if (operand.Memory is { } memory)
+            {
+                registers.Add(memory.Base);
+                if (memory.Index is { } index)
+                {
+                    registers.Add(index);
+                }
+            }
+
+            return registers;
+        })
+        .Distinct()
+        .ToArray();
+
+    private static bool HasRegister(
+        SemanticInstruction instruction,
+        Aarch64OperandDirection direction,
+        byte index,
+        byte width) => GetRegisters(instruction, direction).Any(register =>
+            register is
+            {
+                Class: Aarch64RegisterClass.General,
+                Role: Aarch64RegisterRole.None,
+            }
+            && register.Index == index
+            && register.Width == width);
+
+    private static bool IsThreadPointerMrs(SemanticInstruction instruction) =>
+        string.Equals(instruction.Mnemonic, "mrs", StringComparison.OrdinalIgnoreCase)
+        && (instruction.Encoding & ThreadPointerMrsMask) == ThreadPointerMrsEncoding;
+
+
 
     public static bool IsSupportedLocalExecRelocationInstruction(uint relocationType, uint encoding)
     {
@@ -1386,7 +1716,110 @@ public static class Aarch64TlsInstructionSemantics
                 .Count(item => IsLoadStoreEncoding(item.encoding)) == 1;
     }
 
-    /// <summary>Encodes a TLSIE literal load against the preserved GOT owner.</summary>
+    public static bool IsSupportedTlsDescWordSequence(
+        IReadOnlyList<uint> words,
+        TlsDescriptorOwnerBinding descriptorOwner,
+        ulong sequenceAddress = 0x1000)
+    {
+        ArgumentNullException.ThrowIfNull(words);
+        ArgumentNullException.ThrowIfNull(descriptorOwner);
+        if (words.Count != 8
+            || descriptorOwner.DescriptorRange.Size != 2 * sizeof(ulong)
+            || descriptorOwner.DescriptorRange.FileOffset.Value % sizeof(ulong) != 0
+            || descriptorOwner.DescriptorRange.VirtualAddress.Value % sizeof(ulong) != 0
+            || (descriptorOwner.DescriptorRange.VirtualAddress.Value & 0xFFF) != 0
+            || descriptorOwner.Relocation.Kind != Aarch64RelocationKind.ThreadLocal
+            || descriptorOwner.Relocation.RelocationType != ElfConstants.RArm64TlsDesc
+            || descriptorOwner.Relocation.Addend != 0
+            || descriptorOwner.Addend != 0
+            || descriptorOwner.ResolverPltRange.Size != 6 * sizeof(uint)
+            || descriptorOwner.ResolverGotRange.Size != sizeof(ulong)
+            || descriptorOwner.DescriptorPlt != descriptorOwner.ResolverPltRange.VirtualAddress
+            || descriptorOwner.DescriptorGot != descriptorOwner.ResolverGotRange.VirtualAddress
+            || sequenceAddress > ulong.MaxValue - (7 * sizeof(uint)))
+        {
+            return false;
+        }
+
+        var adapter = new AsmStoneAdapter();
+        var decoded = words
+            .Select((word, index) => adapter.Decode(word, sequenceAddress + ((ulong)index * sizeof(uint))))
+            .ToArray();
+        if (decoded.Any(result => !result.IsSuccess))
+        {
+            return false;
+        }
+
+        var instructions = decoded.Select(result => result.Instruction!).ToArray();
+        var loadMemory = GetMemory(instructions[1]);
+        var accessMemory = GetMemory(instructions[6]);
+        var descriptorAddress = descriptorOwner.DescriptorRange.VirtualAddress.Value;
+        return string.Equals(instructions[0].Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(instructions[0], Aarch64OperandDirection.Output, 0, 64)
+            && instructions[0].DirectTarget is { } adrpTarget
+            && (adrpTarget & ~0xFFFUL) == (descriptorAddress & ~0xFFFUL)
+            && string.Equals(instructions[1].Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(instructions[1], Aarch64OperandDirection.Output, 1, 64)
+            && loadMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 }, Offset: 0, AccessSize: 8, Index: null, WritesBack: false }
+            && string.Equals(instructions[2].Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(instructions[2], Aarch64OperandDirection.Input, 0, 64)
+            && HasRegister(instructions[2], Aarch64OperandDirection.Output, 0, 64)
+            && GetImmediate(instructions[2]) == 0
+            && IsTlsDescCall(instructions[3])
+            && IsThreadPointerMrs(words[4])
+            && HasRegister(instructions[4], Aarch64OperandDirection.Output, 1, 64)
+            && string.Equals(instructions[5].Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(instructions[5], Aarch64OperandDirection.Input, 0, 64)
+            && HasRegister(instructions[5], Aarch64OperandDirection.Input, 1, 64)
+            && HasRegister(instructions[5], Aarch64OperandDirection.Output, 0, 64)
+            && accessMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 }, Index: null, AccessSize: 1 or 2 or 4 or 8, WritesBack: false }
+            && string.Equals(instructions[6].Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(instructions[7].Mnemonic, "ret", StringComparison.OrdinalIgnoreCase)
+            && instructions[7].ControlFlow == Aarch64ControlFlowKind.Return;
+    }
+
+    private static bool IsThreadPointerMrs(uint encoding) =>
+        (encoding & ThreadPointerMrsMask) == ThreadPointerMrsEncoding;
+
+    public static bool IsSupportedTlsDescRecordSequence(
+        IReadOnlyList<TlsInstructionRecord> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites,
+        TlsDescriptorOwnerBinding descriptorOwner)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        ArgumentNullException.ThrowIfNull(descriptorOwner);
+        if (instructions.Count != 8
+            || relocationSites.Count != 4
+            || descriptorOwner.DescriptorRange.Size != 2 * sizeof(ulong))
+        {
+            return false;
+        }
+
+        var orderedSites = relocationSites.OrderBy(site => site.PairOrdinal).ToArray();
+        return orderedSites.Select(site => site.PairOrdinal).SequenceEqual(TlsDescPairOrdinals)
+            && orderedSites.Select(site => site.Binding.RelocationType).SequenceEqual(TlsDescRelocationOrder.Select(type => (uint?)type))
+            && orderedSites.Zip(orderedSites.Skip(1)).All(pair => IsAdjacentTlsSites(pair.First, pair.Second))
+            && instructions[0].Role == TlsInstructionRole.AddressFormation
+            && instructions[1].Role == TlsInstructionRole.DescriptorLoad
+            && instructions[2].Role == TlsInstructionRole.AddressFormation
+            && instructions[3].Role == TlsInstructionRole.DescriptorCall
+            && instructions[4].Role == TlsInstructionRole.ThreadPointerRead
+            && instructions[5].Role == TlsInstructionRole.AddressFinalization
+            && instructions[6].Role == TlsInstructionRole.TlsMemoryAccess
+            && instructions[7].Mnemonic.Equals("ret", StringComparison.OrdinalIgnoreCase)
+            && instructions[1].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[1].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
+            && instructions[3].IsCall
+            && instructions[3].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[4].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[5].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
+            && instructions[5].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[5].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
+            && instructions[6].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 });
+    }
+
+
     public static bool TryEncodeInitialExecLdGotPrel19(
         uint sourceEncoding,
         uint outputEncoding,

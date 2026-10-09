@@ -437,6 +437,10 @@ The current managed positive forms include:
   preserved GOT owner and validated page/scale semantics;
 - initial-exec standalone `LD_GOTTPREL_PREL19` with one preserved
   `R_AARCH64_TLS_TPREL64` GOT owner and a signed, 4-byte-scaled literal range.
+- the exact TLSDESC `ADRP + LD64 + ADD + BLR X1` form with four ordered static
+  markers, one preserved 16-byte descriptor owner, paired `DT_TLSDESC_PLT/GOT`
+  metadata, and a validated resolver PLT/GOT shape; the marker-owned fallthrough
+  block remains adjacent in emitted flattening output.
 
 ### 3. Contracts
 
@@ -473,8 +477,8 @@ The current managed positive forms include:
 | --- | --- |
 | missing snapshot for transformed TLS operations | reject before materialization/publication |
 | model, family, symbol, pair order, addend, or register mismatch | stable TLS semantic diagnostic; no artifact |
-| incomplete ADD/MOVW/LDST32/ADRP-LD64/LD_GOTTPREL_PREL19 sequence or non-supported TLS form | fail closed before layout |
-| initial-exec GOT missing, duplicated, overlapping, non-writable, or unmapped | stable GOT/TLS diagnostic; no output |
+| incomplete ADD/MOVW/LDST32/ADRP-LD64/LD_GOTTPREL_PREL19/TLSDESC sequence or non-supported TLS form | fail closed before layout |
+| initial-exec GOT or TLSDESC descriptor missing, duplicated, overlapping, non-writable, or unmapped | stable GOT/TLS diagnostic; no output |
 | source/output range, opcode, width, scale, or address-map mismatch | layout diagnostic; no Native Image |
 | PT_TLS/template/zero-fill/relocation reparse mismatch | output validation failure; no publication |
 | zero or unbounded canonical operand width | snapshot malformed diagnostic |

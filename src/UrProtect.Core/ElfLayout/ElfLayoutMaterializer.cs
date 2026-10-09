@@ -8,6 +8,15 @@ namespace UrProtect.Core.ElfLayout;
 
 public static class ElfLayoutMaterializer
 {
+    private static readonly int[] TlsDescPairOrdinals = { 0, 1, 2, 3 };
+    private static readonly uint?[] TlsDescRelocationTypes =
+    {
+        ElfConstants.RArm64TlsDescAdrPage21,
+        ElfConstants.RArm64TlsDescLd64Lo12,
+        ElfConstants.RArm64TlsDescAddLo12,
+        ElfConstants.RArm64TlsDescCall,
+    };
+
     public static ElfLayoutResult Materialize(
         ReadOnlyMemory<byte> sourceBytes,
         ElfFile sourceFile,
@@ -197,7 +206,7 @@ public static class ElfLayoutMaterializer
             var fixup = decision.Fixup;
             var relocation = fixup.Relocation;
             var relocationType = relocation.RelocationType;
-            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
+            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic or TlsAccessModel.TlsDesc)
                 || (fixup.AccessModel == TlsAccessModel.LocalExec
                     && (fixup.RelocationFamily != TlsRelocationFamily.Tprel
                         || fixup.AddressExpression.Kind != TlsAddressExpressionKind.ThreadPointerRelative
@@ -216,6 +225,14 @@ public static class ElfLayoutMaterializer
                             or ElfConstants.RArm64TlsIeAdrGottprelPage21
                             or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
                             or ElfConstants.RArm64TlsIeLdGottprelPrel19)))
+                || (fixup.AccessModel == TlsAccessModel.TlsDesc
+                    && (fixup.RelocationFamily != TlsRelocationFamily.TlsDesc
+                        || fixup.AddressExpression.Kind != TlsAddressExpressionKind.DescriptorMediated
+                        || fixup.DescriptorOwner is null
+                        || relocationType is not (ElfConstants.RArm64TlsDescAdrPage21
+                            or ElfConstants.RArm64TlsDescLd64Lo12
+                            or ElfConstants.RArm64TlsDescAddLo12
+                            or ElfConstants.RArm64TlsDescCall)))
                 || (fixup.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
                     && (fixup.ResolverCall is null
                         || fixup.ModuleOwner is null
@@ -312,9 +329,14 @@ public static class ElfLayoutMaterializer
             {
                 return false;
             }
-            if (fixup.AccessModel == TlsAccessModel.LocalDynamic
-                && (fixup.ModuleOwner is null
-                    || !ValidateLocalDynamicModuleOwnerPreserved(sourceFile, outputFile, output, fixup.ModuleOwner, diagnostics)))
+            if (fixup.AccessModel == TlsAccessModel.TlsDesc
+                && (fixup.DescriptorOwner is null
+                    || !ValidateTlsDescriptorOwnerPreserved(
+                        sourceFile,
+                        outputFile,
+                        output,
+                        fixup.DescriptorOwner,
+                        diagnostics)))
             {
                 return false;
             }
@@ -356,7 +378,8 @@ public static class ElfLayoutMaterializer
             && ValidateLocalExecMovwFixupPairs(sourceFile, outputFile, plan, output, diagnostics)
             && ValidateInitialExecMovwFixupPairs(sourceFile, plan, output, diagnostics)
             && ValidateInitialExecLdGotPrel19FixupSites(sourceFile, outputFile, plan, output, diagnostics)
-            && ValidateInitialExecAdrLd64FixupPairs(sourceFile, outputFile, plan, output, diagnostics);
+            && ValidateInitialExecAdrLd64FixupPairs(sourceFile, outputFile, plan, output, diagnostics)
+            && ValidateTlsDescFixupSequences(sourceFile, plan, output, diagnostics);
     }
 
     private static bool ValidateLocalExecAddFixupPairs(
@@ -574,6 +597,66 @@ public static class ElfLayoutMaterializer
         return true;
     }
 
+    private static bool ValidateTlsDescFixupSequences(
+        ElfFile sourceFile,
+        ElfLayoutPlan plan,
+        byte[] output,
+        DiagnosticBag diagnostics)
+    {
+        var groups = plan.TlsFixups
+            .Where(decision => decision?.Fixup?.AccessModel == TlsAccessModel.TlsDesc)
+            .GroupBy(decision => (decision.RegionIdentity, decision.Fixup.SequenceSourceRange));
+        foreach (var group in groups)
+        {
+            var ordered = group.OrderBy(decision => decision.Fixup.PairOrdinal).ToArray();
+            var valid = ordered.Length == 4
+                && ordered.Select(decision => decision.Fixup.PairOrdinal).SequenceEqual(TlsDescPairOrdinals)
+                && ordered.Select(decision => decision.Fixup.Relocation.RelocationType).SequenceEqual(TlsDescRelocationTypes)
+                && ordered.All(decision => decision.Fixup.DescriptorOwner is not null)
+                && ordered.Zip(ordered.Skip(1)).All(pair =>
+                    pair.Second.Fixup.RelocationSourceRange.VirtualAddress.Value
+                        == pair.First.Fixup.RelocationSourceRange.VirtualAddress.Value + sizeof(uint)
+                    && pair.Second.OutputVirtualAddress.Value
+                        == pair.First.OutputVirtualAddress.Value + sizeof(uint)
+                    && pair.Second.OutputFileOffset.Value
+                        == pair.First.OutputFileOffset.Value + sizeof(uint));
+
+            if (valid)
+            {
+                var first = ordered[0];
+                var sourceRange = first.Fixup.SequenceSourceRange;
+                var sourceOffset = sourceRange.FileOffset.Value;
+                var outputOffset = first.OutputFileOffset.Value;
+                valid = sourceRange.Size == 8 * sizeof(uint)
+                    && first.Fixup.SequenceOutputRange.Size == 8 * sizeof(uint)
+                    && sourceOffset <= (ulong)sourceFile.Bytes.Length
+                    && sourceRange.Size <= (ulong)sourceFile.Bytes.Length - sourceOffset
+                    && outputOffset <= (ulong)output.Length
+                    && first.Fixup.SequenceOutputRange.Size <= (ulong)output.Length - outputOffset
+                    && TryReadWords(sourceFile.Bytes.Span, sourceOffset, sourceRange.Size, out var sourceWords)
+                    && TryReadWords(output, outputOffset, first.Fixup.SequenceOutputRange.Size, out var outputWords)
+                    && Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
+                        sourceWords,
+                        first.Fixup.DescriptorOwner!,
+                        sourceRange.VirtualAddress.Value)
+                    && Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
+                        outputWords,
+                        first.Fixup.DescriptorOwner!,
+                        first.OutputVirtualAddress.Value);
+            }
+
+            if (!valid)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The reparsed TLSDESC fixup sequence does not retain its descriptor owner, ordered markers, exact register flow, or output mapping.",
+                    ordered.Length == 0 ? null : ordered[0].Fixup.RelocationSourceRange.FileOffset.Value);
+                return false;
+            }
+        }
+
+        return true;
+    }
     private static uint[] ReadWords(ReadOnlySpan<byte> bytes, SemanticSourceRange range)
     {
         if (range.Size == 0 || range.Size % sizeof(uint) != 0 || range.Size > int.MaxValue
@@ -828,6 +911,148 @@ public static class ElfLayoutMaterializer
         return true;
     }
 
+    private static bool ValidateTlsDescriptorOwnerPreserved(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        byte[] output,
+        TlsDescriptorOwnerBinding owner,
+        DiagnosticBag diagnostics)
+    {
+        var sourceFacts = sourceFile.TlsMetadata.Dynamic.Relocations
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsDesc
+                && fact.Relocation.Offset == owner.DescriptorRange.VirtualAddress.Value
+                && fact.Relocation.Info == owner.Relocation.RawInfo
+                && fact.Relocation.IsPlt == owner.Relocation.IsPlt
+                && fact.Relocation.Addend == owner.Relocation.Addend
+                && fact.Relocation.SourceAddress == owner.Relocation.RelocationTableAddress?.Value
+                && string.Equals(fact.Symbol?.Name, owner.Symbol.Name, StringComparison.Ordinal)
+                && fact.WriteSize == sizeof(ulong))
+            .ToArray();
+        var outputFacts = outputFile.TlsMetadata.Dynamic.Relocations
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsDesc
+                && fact.Relocation.Offset == owner.DescriptorRange.VirtualAddress.Value
+                && fact.Relocation.Info == owner.Relocation.RawInfo
+                && fact.Relocation.IsPlt == owner.Relocation.IsPlt
+                && fact.Relocation.Addend == owner.Relocation.Addend
+                && fact.Relocation.SourceAddress == owner.Relocation.RelocationTableAddress?.Value
+                && string.Equals(fact.Symbol?.Name, owner.Symbol.Name, StringComparison.Ordinal)
+                && fact.WriteSize == sizeof(ulong))
+            .ToArray();
+        var valid = sourceFacts.Length == 1
+            && outputFacts.Length == 1
+            && owner.DescriptorRange.Size == 2 * sizeof(ulong)
+            && sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+                owner.DescriptorRange.VirtualAddress,
+                owner.DescriptorRange.Size,
+                out var sourceDescriptorOffset)
+            && sourceDescriptorOffset == owner.DescriptorRange.FileOffset
+            && outputFile.LoadMap.TryVirtualAddressToFileOffset(
+                owner.DescriptorRange.VirtualAddress,
+                owner.DescriptorRange.Size,
+                out var outputDescriptorOffset)
+            && outputDescriptorOffset == owner.DescriptorRange.FileOffset
+            && sourceDescriptorOffset.Value <= int.MaxValue
+            && outputDescriptorOffset.Value <= int.MaxValue
+            && sourceDescriptorOffset.Value <= (ulong)sourceFile.Bytes.Length
+            && outputDescriptorOffset.Value <= (ulong)output.Length
+            && owner.DescriptorRange.Size <= (ulong)sourceFile.Bytes.Length - sourceDescriptorOffset.Value
+            && owner.DescriptorRange.Size <= (ulong)output.Length - outputDescriptorOffset.Value
+            && sourceFile.LoadMap.Segments.Count(segment =>
+                segment.ContainsVirtualAddress(owner.DescriptorRange.VirtualAddress.Value, owner.DescriptorRange.Size)
+                && segment.ContainsFileOffset(owner.DescriptorRange.FileOffset.Value, owner.DescriptorRange.Size)
+                && (segment.Flags & ElfConstants.PfW) != 0) == 1
+            && outputFile.LoadMap.Segments.Count(segment =>
+                segment.ContainsVirtualAddress(owner.DescriptorRange.VirtualAddress.Value, owner.DescriptorRange.Size)
+                && segment.ContainsFileOffset(owner.DescriptorRange.FileOffset.Value, owner.DescriptorRange.Size)
+                && (segment.Flags & ElfConstants.PfW) != 0) == 1
+            && sourceFile.Bytes.Span.Slice(
+                checked((int)sourceDescriptorOffset.Value), checked((int)owner.DescriptorRange.Size))
+                .SequenceEqual(output.AsSpan(
+                    checked((int)outputDescriptorOffset.Value), checked((int)owner.DescriptorRange.Size)));
+        if (!valid)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsLayoutMismatch,
+                "The TLSDESC descriptor owner moved, changed, lost writable ownership, or no longer has one matching loader relocation.",
+                owner.DescriptorRange.FileOffset.Value);
+            return false;
+        }
+
+        return ValidateTlsOwnedRangePreserved(
+                sourceFile,
+                outputFile,
+                output,
+                owner.ResolverPltRange,
+                owner.ResolverPltRange.Size,
+                executable: true,
+                diagnostics)
+            && ValidateTlsOwnedRangePreserved(
+                sourceFile,
+                outputFile,
+                output,
+                owner.ResolverGotRange,
+                owner.ResolverGotRange.Size,
+                executable: false,
+                diagnostics);
+    }
+
+    private static bool ValidateTlsOwnedRangePreserved(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        byte[] output,
+        SemanticSourceRange range,
+        ulong size,
+        bool executable,
+        DiagnosticBag diagnostics)
+    {
+        var sourceMapped = sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+            range.VirtualAddress,
+            size,
+            out var sourceOffset);
+        var outputMapped = outputFile.LoadMap.TryVirtualAddressToFileOffset(
+            range.VirtualAddress,
+            size,
+            out var outputOffset);
+        var segmentCheck = executable
+            ? sourceFile.LoadMap.Segments.Count(segment =>
+                segment.ContainsVirtualAddress(range.VirtualAddress.Value, size)
+                && segment.ContainsFileOffset(range.FileOffset.Value, size)
+                && segment.IsExecutable) == 1
+                && outputFile.LoadMap.Segments.Count(segment =>
+                    segment.ContainsVirtualAddress(range.VirtualAddress.Value, size)
+                    && segment.ContainsFileOffset(range.FileOffset.Value, size)
+                    && segment.IsExecutable) == 1
+            : sourceFile.LoadMap.Segments.Count(segment =>
+                segment.ContainsVirtualAddress(range.VirtualAddress.Value, size)
+                && segment.ContainsFileOffset(range.FileOffset.Value, size)
+                && (segment.Flags & ElfConstants.PfW) != 0) == 1
+                && outputFile.LoadMap.Segments.Count(segment =>
+                    segment.ContainsVirtualAddress(range.VirtualAddress.Value, size)
+                    && segment.ContainsFileOffset(range.FileOffset.Value, size)
+                    && (segment.Flags & ElfConstants.PfW) != 0) == 1;
+        var valid = sourceMapped
+            && outputMapped
+            && sourceOffset == range.FileOffset
+            && outputOffset == range.FileOffset
+            && sourceOffset.Value <= int.MaxValue
+            && outputOffset.Value <= int.MaxValue
+            && sourceOffset.Value <= (ulong)sourceFile.Bytes.Length
+            && outputOffset.Value <= (ulong)output.Length
+            && size <= (ulong)sourceFile.Bytes.Length - sourceOffset.Value
+            && size <= (ulong)output.Length - outputOffset.Value
+            && segmentCheck
+            && sourceFile.Bytes.Span.Slice(checked((int)sourceOffset.Value), checked((int)size))
+                .SequenceEqual(output.AsSpan(checked((int)outputOffset.Value), checked((int)size)));
+        if (!valid)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsLayoutMismatch,
+                "A TLSDESC resolver PLT/GOT owned range moved, changed, or lost its required segment permissions.",
+                range.FileOffset.Value);
+        }
+
+        return valid;
+    }
     private static bool ValidateDynamicOwnerPairPreserved(
         ElfFile sourceFile,
         ElfFile outputFile,

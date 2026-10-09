@@ -543,6 +543,7 @@ public static class Aarch64SemanticPlanValidator
                 ElfConstants.RArm64TlsIeAdrGottprelPage21
                 or ElfConstants.RArm64TlsGdAdrPage21
                 or ElfConstants.RArm64TlsLdAdrPage21
+                or ElfConstants.RArm64TlsDescAdrPage21
                 or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
                 or ElfConstants.RArm64TlsIeLdGottprelPrel19;
 
@@ -970,11 +971,13 @@ public static class Aarch64SemanticPlanValidator
             ElfConstants.RArm64TlsIeAdrGottprelPage21
             or ElfConstants.RArm64TlsGdAdrPage21
             or ElfConstants.RArm64TlsLdAdrPage21
+            or ElfConstants.RArm64TlsDescAdrPage21
             or ElfConstants.RArm64TlsIeLdGottprelPrel19)
         {
             return fixup.Relocation.RelocationType is ElfConstants.RArm64TlsIeAdrGottprelPage21
                 or ElfConstants.RArm64TlsGdAdrPage21
                 or ElfConstants.RArm64TlsLdAdrPage21
+                or ElfConstants.RArm64TlsDescAdrPage21
                 ? PcRelativeExpressionKind.AdrPrelPgHi21
                 : PcRelativeExpressionKind.Literal19;
         }

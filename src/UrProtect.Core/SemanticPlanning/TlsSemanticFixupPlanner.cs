@@ -24,7 +24,8 @@ public sealed record TlsSemanticFixup(
     TlsResolverCallBinding? ResolverCall = null,
     SemanticSourceRange? ResolverCallOutputRange = null,
     TlsModuleOwnerBinding? ModuleOwner = null,
-    TlsDtpRelOwnerBinding? DtpRelOwner = null);
+    TlsDtpRelOwnerBinding? DtpRelOwner = null,
+    TlsDescriptorOwnerBinding? DescriptorOwner = null);
 
 /// <summary>Bounded TLS semantic fixup planning result; it never writes image bytes.</summary>
 public sealed record TlsSemanticFixupPlanResult(
@@ -136,7 +137,8 @@ public static class TlsSemanticFixupPlanner
                     binding.ResolverCall,
                     resolverCallOutputRange,
                     binding.ModuleOwner,
-                    binding.DtpRelOwner));
+                    binding.DtpRelOwner,
+                    binding.DescriptorOwner));
             }
             if (binding.ResolverCall is { } callBinding
                 && resolverCallOutputRange is { } resolverOutputRange)
@@ -161,7 +163,8 @@ public static class TlsSemanticFixupPlanner
                     ResolverCall: callBinding,
                     ResolverCallOutputRange: resolverOutputRange,
                     ModuleOwner: binding.ModuleOwner,
-                    DtpRelOwner: binding.DtpRelOwner));
+                    DtpRelOwner: binding.DtpRelOwner,
+                    DescriptorOwner: binding.DescriptorOwner));
             }
         }
 

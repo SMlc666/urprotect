@@ -159,11 +159,11 @@ public sealed partial class FunctionProtectionService
                 .Distinct()
                 .ToArray();
             if (models.Length != 1
-                || models[0] is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic))
+                || models[0] is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic or TlsAccessModel.TlsDesc))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "The selected function contains TLS relocations from more than one model or outside the implemented local-exec, initial-exec, and exact TLSLD rewrite slices.",
+                    "The selected function contains TLS relocations from more than one model or outside the bounded local-exec, initial-exec, local-dynamic, general-dynamic, and exact TLSDESC rewrite slices.",
                     facts[0].Relocation.Offset);
                 continue;
             }
@@ -198,6 +198,14 @@ public sealed partial class FunctionProtectionService
                         ElfConstants.RArm64TlsGdAdrPage21,
                         ElfConstants.RArm64TlsGdAddLo12Nc,
                     }),
+                TlsAccessModel.TlsDesc => facts.Length == 4
+                    && facts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
+                    {
+                        ElfConstants.RArm64TlsDescAdrPage21,
+                        ElfConstants.RArm64TlsDescLd64Lo12,
+                        ElfConstants.RArm64TlsDescAddLo12,
+                        ElfConstants.RArm64TlsDescCall,
+                    }),
                 _ => false,
             };
             if (!supported)
@@ -209,6 +217,7 @@ public sealed partial class FunctionProtectionService
                         TlsAccessModel.InitialExec => "The current initial-exec layout slice accepts only the standalone TLSIE LD_GOTTPREL_PREL19 relocation or ordered TLSIE MOVW G1/G0_NC and ADRP/LD64 GOTTPREL pairs.",
                         TlsAccessModel.LocalDynamic => "The current local-dynamic layout slice accepts only the exact TLSLD ADRP/ADD, direct __tls_get_addr, DTPREL ADD/ADD sequence.",
                         TlsAccessModel.GeneralDynamic => "The current general-dynamic layout slice accepts only the exact TLSGD ADRP/ADD, direct __tls_get_addr, and paired DTPMOD64/DTPREL64 owners.",
+                        TlsAccessModel.TlsDesc => "The current TLSDESC layout slice accepts only the exact adjacent ADRP/LD64/ADD/TLSDESC_CALL marker sequence and one validated descriptor owner.",
                         _ => "The current local-exec layout slice accepts only ADD TPREL HI12/LO12, ADD TPREL HI12/LDST32 LO12_NC, or MOVW TPREL G1/G0_NC pairs.",
                     },
                     facts[0].Relocation.Offset);
@@ -291,6 +300,30 @@ public sealed partial class FunctionProtectionService
             TlsResolverCallBinding? resolverCall = null;
             TlsModuleOwnerBinding? moduleOwner = null;
             TlsDtpRelOwnerBinding? dtpRelOwner = null;
+            TlsDescriptorOwnerBinding? descriptorOwner = null;
+            if (model == TlsAccessModel.TlsDesc)
+            {
+                if (symbol is null)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsBindingUnresolved,
+                        "The selected TLSDESC function has no resolved defined TLS symbol for descriptor ownership.",
+                        facts[0].Relocation.Offset);
+                    continue;
+                }
+
+                var descriptorProjection = TlsStructuralAdapter.ProjectDescriptorOwner(
+                    file,
+                    moduleResult.Value,
+                    symbol,
+                    facts[0].Relocation.Addend);
+                diagnostics.AddRange(descriptorProjection.Diagnostics);
+                descriptorOwner = descriptorProjection.Value;
+                if (!descriptorProjection.IsSuccess || descriptorOwner is null)
+                {
+                    continue;
+                }
+            }
             if (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
             {
                 var resolverCandidates = analysis.Instructions
@@ -368,7 +401,8 @@ public sealed partial class FunctionProtectionService
                 gotEntry: gotEntry,
                 resolverCall: resolverCall,
                 moduleOwner: moduleOwner,
-                dtpRelOwner: dtpRelOwner);
+                dtpRelOwner: dtpRelOwner,
+                descriptorOwner: descriptorOwner);
             diagnostics.AddRange(recognition.Diagnostics);
             if (!recognition.IsSuccess || recognition.Binding is null)
             {

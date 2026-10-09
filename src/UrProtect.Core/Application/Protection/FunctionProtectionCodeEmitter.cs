@@ -238,6 +238,44 @@ public sealed partial class FunctionProtectionService
                 ElfConstants.RArm64TlsGdAdrPage21,
                 ElfConstants.RArm64TlsGdAddLo12Nc,
             });
+        var orderedTlsDescFacts = tlsFacts
+            .OrderBy(fact => fact.Relocation.Offset)
+            .ToArray();
+        var hasTlsDescShape = orderedTlsDescFacts.Length == 4
+            && orderedTlsDescFacts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
+            {
+                ElfConstants.RArm64TlsDescAdrPage21,
+                ElfConstants.RArm64TlsDescLd64Lo12,
+                ElfConstants.RArm64TlsDescAddLo12,
+                ElfConstants.RArm64TlsDescCall,
+            });
+        TlsDescriptorOwnerBinding? tlsDescOwner = null;
+        if (hasTlsDescShape
+            && TlsStructuralAdapter.CreateImageModule(sourceFile).Value is { } tlsModule
+            && TlsStructuralAdapter.ProjectSymbol(orderedTlsDescFacts[0].Symbol) is { } tlsSymbol)
+        {
+            var descriptorProjection = TlsStructuralAdapter.ProjectDescriptorOwner(
+                sourceFile,
+                tlsModule,
+                tlsSymbol,
+                orderedTlsDescFacts[0].Relocation.Addend);
+            if (descriptorProjection.IsSuccess)
+            {
+                tlsDescOwner = descriptorProjection.Value;
+            }
+        }
+        var supportsTlsDesc = hasTlsDescShape
+            && tlsDescOwner is { } descriptorOwner
+            && Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
+                analysis.Instructions.Select(instruction => instruction.Encoding).ToArray(),
+                descriptorOwner,
+                analysis.Function.Value);
+        var tlsDescModuleAddress = supportsTlsDesc
+            ? orderedTlsDescFacts[0].Relocation.Offset
+            : (ulong?)null;
+        var tlsDescCallAddress = supportsTlsDesc
+            ? orderedTlsDescFacts[3].Relocation.Offset
+            : (ulong?)null;
         var dynamicTlsShape = hasTlsLdShape || hasTlsGdShape;
         var exactResolverCallAddresses = dynamicTlsShape
             ? analysis.Instructions
@@ -293,15 +331,22 @@ public sealed partial class FunctionProtectionService
             var isTlsLdModuleAddress = tlsLdModuleAddress is { } moduleAddress
                 && instruction.Address == moduleAddress
                 && instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true;
+            var isTlsDescCall = tlsDescCallAddress is { } descriptorCallAddress
+                && instruction.Address == descriptorCallAddress
+                && controlFlow == Aarch64ControlFlowKind.IndirectBranch;
+            var isTlsDescModuleAddress = tlsDescModuleAddress is { } descriptorModuleAddress
+                && instruction.Address == descriptorModuleAddress
+                && instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true;
             if ((instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true
                     && !isTerminalBranch
                     && !(supportsTlsIePcRelativeLoad
                         && tlsIePcRelativeLoadAddress is { } pcRelativeLoadAddress
                         && instruction.Address == pcRelativeLoadAddress)
                     && !isTlsLdResolverCall
-                    && !isTlsLdModuleAddress)
+                    && !isTlsLdModuleAddress
+                    && !isTlsDescModuleAddress)
                 || (controlFlow is Aarch64ControlFlowKind.DirectCall && !isTlsLdResolverCall)
-                || controlFlow == Aarch64ControlFlowKind.IndirectBranch)
+                || (controlFlow == Aarch64ControlFlowKind.IndirectBranch && !isTlsDescCall))
             {
                 diagnostic = new Diagnostic(
                     DiagnosticSeverity.Error,
@@ -392,7 +437,9 @@ public sealed partial class FunctionProtectionService
             supportsTlsIePcRelativeLoad,
             tlsIePcRelativeLoadAddress,
             tlsLdResolverCallAddress,
-            tlsLdModuleAddress);
+            tlsLdModuleAddress,
+            tlsDescCallAddress,
+            tlsDescModuleAddress);
         return true;
     }
 
@@ -405,7 +452,9 @@ public sealed partial class FunctionProtectionService
             bool supportsTlsIePcRelativeLoad,
             ulong? tlsIePcRelativeLoadAddress,
             ulong? tlsLdResolverCallAddress,
-            ulong? tlsLdModuleAddress)
+            ulong? tlsLdModuleAddress,
+            ulong? tlsDescCallAddress,
+            ulong? tlsDescModuleAddress)
         {
             Source = source;
             Flatten = flatten;
@@ -414,6 +463,8 @@ public sealed partial class FunctionProtectionService
             TlsIePcRelativeLoadAddress = tlsIePcRelativeLoadAddress;
             TlsLdResolverCallAddress = tlsLdResolverCallAddress;
             TlsLdModuleAddress = tlsLdModuleAddress;
+            TlsDescCallAddress = tlsDescCallAddress;
+            TlsDescModuleAddress = tlsDescModuleAddress;
         }
 
         public Aarch64FunctionAnalysis Source { get; }
@@ -427,6 +478,8 @@ public sealed partial class FunctionProtectionService
         public ulong? TlsIePcRelativeLoadAddress { get; }
         public ulong? TlsLdResolverCallAddress { get; }
         public ulong? TlsLdModuleAddress { get; }
+        public ulong? TlsDescCallAddress { get; }
+        public ulong? TlsDescModuleAddress { get; }
 
         public ulong OutputAddress { get; set; }
 
@@ -486,14 +539,22 @@ public sealed partial class FunctionProtectionService
                     var isTlsLdModuleAddress = TlsLdModuleAddress is { } moduleAddress
                         && instruction.Address == moduleAddress
                         && instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true;
+                    var isTlsDescCall = TlsDescCallAddress is { } descriptorCallAddress
+                        && instruction.Address == descriptorCallAddress
+                        && instruction.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.IndirectBranch;
+                    var isTlsDescModuleAddress = TlsDescModuleAddress is { } descriptorModuleAddress
+                        && instruction.Address == descriptorModuleAddress
+                        && instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true;
                     if ((instruction.Decode.Instruction!.ControlFlow != Aarch64ControlFlowKind.None
-                            && !isTlsLdResolverCall)
+                            && !isTlsLdResolverCall
+                            && !isTlsDescCall)
                         || (instruction.Decode.Instruction.Properties.HasFlag(Aarch64InstructionProperties.PcRelative)
                             && !(SupportsTlsIePcRelativeLoad
                                 && TlsIePcRelativeLoadAddress is { } pcRelativeLoadAddress
                                 && instruction.Address == pcRelativeLoadAddress)
                             && !isTlsLdResolverCall
-                            && !isTlsLdModuleAddress))
+                            && !isTlsLdModuleAddress
+                            && !isTlsDescModuleAddress))
                     {
                         diagnostics.Error(
                             DiagnosticCode.ProtectionUnsupportedInstruction,
@@ -506,6 +567,33 @@ public sealed partial class FunctionProtectionService
                     {
                         return false;
                     }
+                }
+
+                var isTlsDescCallTerminator = TlsDescCallAddress is { } terminatorAddress
+                    && last.Address == terminatorAddress
+                    && last.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.IndirectBranch;
+                if (isTlsDescCallTerminator)
+                {
+                    var fallthrough = block.Successors.SingleOrDefault(edge =>
+                        edge.Kind == Aarch64ControlFlowEdgeKind.Fallthrough);
+                    if (fallthrough?.TargetAddress is not { } fallthroughTarget
+                        || !blockIds.ContainsKey(fallthroughTarget))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.ProtectionUnsupportedInstruction,
+                            "The TLSDESC resolver call does not have one in-function fallthrough successor.",
+                            last.FileOffset);
+                        return false;
+                    }
+
+                    if (!EmitSourceInstruction(emitter, decoder, last, diagnostics))
+                    {
+                        return false;
+                    }
+
+                    // BLR returns to the next emitted word; keep the fallthrough
+                    // block adjacent so the TLSDESC eight-word sequence remains contiguous.
+                    continue;
                 }
 
                 if (last.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.Return)

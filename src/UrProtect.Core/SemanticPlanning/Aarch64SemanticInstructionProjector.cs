@@ -653,7 +653,8 @@ public static class Aarch64SemanticInstructionProjector
                     relocation.Kind == Aarch64RelocationKind.AdrPrelPgHi21
                     || relocation.RelocationType is ElfConstants.RArm64TlsIeAdrGottprelPage21
                         or ElfConstants.RArm64TlsLdAdrPage21
-                        or ElfConstants.RArm64TlsGdAdrPage21,
+                        or ElfConstants.RArm64TlsGdAdrPage21
+                        or ElfConstants.RArm64TlsDescAdrPage21,
                 PcRelativeExpressionKind.Literal19 =>
                     relocation.Kind == Aarch64RelocationKind.Literal19
                     || (relocation.Kind == Aarch64RelocationKind.ThreadLocal
@@ -853,7 +854,8 @@ public static class Aarch64SemanticInstructionProjector
             (PcRelativeExpressionKind.AdrPrelPgHi21, Aarch64RelocationKind.ThreadLocal) =>
                 relocation.RelocationType is ElfConstants.RArm64TlsIeAdrGottprelPage21
                     or ElfConstants.RArm64TlsLdAdrPage21
-                    or ElfConstants.RArm64TlsGdAdrPage21,
+                    or ElfConstants.RArm64TlsGdAdrPage21
+                    or ElfConstants.RArm64TlsDescAdrPage21,
             (PcRelativeExpressionKind.Literal19, Aarch64RelocationKind.Literal19) => true,
             (PcRelativeExpressionKind.Literal19, Aarch64RelocationKind.ThreadLocal) =>
                 relocation.RelocationType == ElfConstants.RArm64TlsIeLdGottprelPrel19,

@@ -9,6 +9,14 @@ namespace UrProtect.Core.ElfLayout;
 public static class ElfLayoutPlanner
 {
     private const uint GeneratedSegmentPermissions = ElfConstants.PfR | ElfConstants.PfX;
+    private static readonly int[] TlsDescPairOrdinals = { 0, 1, 2, 3 };
+    private static readonly uint?[] TlsDescRelocationTypes =
+    {
+        ElfConstants.RArm64TlsDescAdrPage21,
+        ElfConstants.RArm64TlsDescLd64Lo12,
+        ElfConstants.RArm64TlsDescAddLo12,
+        ElfConstants.RArm64TlsDescCall,
+    };
 
     public static ElfLayoutPlanningResult Plan(
         ReadOnlyMemory<byte> sourceBytes,
@@ -1237,7 +1245,7 @@ public static class ElfLayoutPlanner
                 || fixup.Module is null
                 || region is null
                 || !seen.Add((request.RegionIdentity, request.OutputOffset))
-                || model is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
+                || model is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic or TlsAccessModel.TlsDesc)
                 || (model == TlsAccessModel.LocalExec
                     && (fixup.RelocationFamily != TlsRelocationFamily.Tprel
                         || fixup.AddressExpression.Kind != TlsAddressExpressionKind.ThreadPointerRelative
@@ -1256,9 +1264,16 @@ public static class ElfLayoutPlanner
                             or ElfConstants.RArm64TlsIeAdrGottprelPage21
                             or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
                             or ElfConstants.RArm64TlsIeLdGottprelPrel19)))
+                || (model == TlsAccessModel.TlsDesc
+                    && (fixup.RelocationFamily != TlsRelocationFamily.TlsDesc
+                        || fixup.AddressExpression.Kind != TlsAddressExpressionKind.DescriptorMediated
+                        || fixup.DescriptorOwner is null
+                        || type is not (ElfConstants.RArm64TlsDescAdrPage21
+                            or ElfConstants.RArm64TlsDescLd64Lo12
+                            or ElfConstants.RArm64TlsDescAddLo12
+                            or ElfConstants.RArm64TlsDescCall)))
                 || (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
-                    && (fixup.ResolverCall is null
-                        || fixup.ModuleOwner is null
+                    && (fixup.ModuleOwner is null
                         || (model == TlsAccessModel.GeneralDynamic && fixup.DtpRelOwner is null)
                         || (fixup.Relocation.Kind == Aarch64RelocationKind.Call26
                             ? fixup.PairOrdinal != -1
@@ -1276,7 +1291,9 @@ public static class ElfLayoutPlanner
                 || fixup.SequenceSourceRange.Size > region.SourceSize
                 || (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
                     ? fixup.PairOrdinal is < -1 or > 3
-                    : fixup.PairOrdinal is < 0 or > 1)
+                    : model == TlsAccessModel.TlsDesc
+                        ? fixup.PairOrdinal is < 0 or > 3
+                        : fixup.PairOrdinal is < 0 or > 1)
                 || fixup.RelocationSourceRange.VirtualAddress.Value < region.SourceAddress.Value
                 || fixup.RelocationSourceRange.VirtualAddress.Value - region.SourceAddress.Value > region.SourceSize
                 || fixup.RelocationSourceRange.Size > region.SourceSize
@@ -1329,7 +1346,65 @@ public static class ElfLayoutPlanner
         ValidateInitialExecAdrLd64RequestPairs(sourceFile, regions, fixups, diagnostics);
         ValidateInitialExecLdGotPrel19RequestSites(sourceFile, regions, fixups, diagnostics);
         ValidateLocalExecMovwRequestPairs(sourceFile, fixups, diagnostics);
+        ValidateTlsDescRequestSequences(sourceFile, regions, fixups, diagnostics);
     }
+
+    private static void ValidateTlsDescRequestSequences(
+        ElfFile sourceFile,
+        IReadOnlyList<ElfLayoutRegionRequest> regions,
+        IReadOnlyList<ElfLayoutTlsFixupRequest> fixups,
+        DiagnosticBag diagnostics)
+    {
+        var groups = fixups
+            .Where(request => request?.Fixup?.AccessModel == TlsAccessModel.TlsDesc)
+            .GroupBy(request => (request.RegionIdentity, request.Fixup.SequenceSourceRange));
+        foreach (var group in groups)
+        {
+            var ordered = group.OrderBy(request => request.Fixup.PairOrdinal).ToArray();
+            var region = regions.SingleOrDefault(candidate => string.Equals(
+                candidate.Identity,
+                group.Key.RegionIdentity,
+                StringComparison.Ordinal));
+            var valid = region is not null
+                && ordered.Length == 4
+                && ordered.Select(request => request.Fixup.PairOrdinal).SequenceEqual(TlsDescPairOrdinals)
+                && ordered.Select(request => request.Fixup.Relocation.RelocationType).SequenceEqual(TlsDescRelocationTypes)
+                && ordered.All(request => request.Fixup.DescriptorOwner is not null)
+                && ordered.Zip(ordered.Skip(1)).All(pair =>
+                    pair.Second.Fixup.RelocationSourceRange.VirtualAddress.Value
+                        == pair.First.Fixup.RelocationSourceRange.VirtualAddress.Value + sizeof(uint)
+                    && pair.Second.OutputOffset == pair.First.OutputOffset + sizeof(uint));
+            if (valid && region is not null)
+            {
+                var first = ordered[0].Fixup;
+                var sourceOffset = first.RelocationSourceRange.FileOffset.Value;
+                var outputOffset = ordered[0].OutputOffset;
+                valid = sourceOffset <= (ulong)sourceFile.Bytes.Length
+                    && 8 * sizeof(uint) <= (ulong)sourceFile.Bytes.Length - sourceOffset
+                    && outputOffset <= (ulong)region.CodeBytes.Length
+                    && 8 * sizeof(uint) <= (ulong)region.CodeBytes.Length - outputOffset
+                    && TryReadWords(sourceFile.Bytes.Span, sourceOffset, 8 * sizeof(uint), out var sourceWords)
+                    && TryReadWords(region.CodeBytes, outputOffset, 8 * sizeof(uint), out var outputWords)
+                    && Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
+                        sourceWords,
+                        first.DescriptorOwner!,
+                        first.SequenceSourceRange.VirtualAddress.Value)
+                    && Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
+                        outputWords,
+                        first.DescriptorOwner!,
+                        first.SequenceOutputRange.VirtualAddress.Value);
+            }
+
+            if (!valid)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLSDESC fixup sequence is incomplete, reordered, or inconsistent with its descriptor owner and output mapping.",
+                    ordered.Length == 0 ? null : ordered[0].Fixup.RelocationSourceRange.FileOffset.Value);
+            }
+        }
+    }
+
 
     private static void ValidateLocalExecAddRequestPairs(
         ElfFile sourceFile,
@@ -2033,6 +2108,30 @@ public static class ElfLayoutPlanner
                 diagnostics.Error(
                     DiagnosticCode.TlsLayoutMismatch,
                     "The TLS dynamic resolver CALL26 conflicts with its source target, output range, or direct-call encoding contract.",
+                    sourceOffset);
+                return false;
+            }
+        }
+        else if (fixup.AccessModel == TlsAccessModel.TlsDesc
+            && relocationType is ElfConstants.RArm64TlsDescAdrPage21
+                or ElfConstants.RArm64TlsDescLd64Lo12
+                or ElfConstants.RArm64TlsDescAddLo12
+                or ElfConstants.RArm64TlsDescCall)
+        {
+            if (fixup.DescriptorOwner is null
+                || !TryAdd(placement.VirtualAddress.Value, (ulong)outputIndex, out var tlsDescOutputAddress)
+                || !Aarch64TlsInstructionSemantics.TryEncodeTlsDescInstruction(
+                    relocationType,
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    tlsDescOutputAddress,
+                    fixup.DescriptorOwner,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLSDESC output instruction conflicts with its descriptor owner, marker family, operand shape, or output mapping.",
                     sourceOffset);
                 return false;
             }

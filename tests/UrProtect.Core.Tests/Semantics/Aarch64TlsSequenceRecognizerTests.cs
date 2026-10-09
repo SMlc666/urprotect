@@ -27,7 +27,8 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             moduleOwner: expectedModel == TlsAccessModel.LocalDynamic
                 ? CreateModuleOwner()
                 : expectedModel == TlsAccessModel.GeneralDynamic ? CreateGeneralDynamicModuleOwner() : null,
-            dtpRelOwner: expectedModel == TlsAccessModel.GeneralDynamic ? CreateDtpRelOwner() : null);
+            dtpRelOwner: expectedModel == TlsAccessModel.GeneralDynamic ? CreateDtpRelOwner() : null,
+            descriptorOwner: expectedModel == TlsAccessModel.TlsDesc ? CreateDescriptorOwner() : null);
 
         Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
         var binding = result.Binding!;
@@ -48,6 +49,48 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             Assert.Contains(requirement.Runtime, new[] { TlsRuntime.Glibc, TlsRuntime.Musl, TlsRuntime.Bionic }));
     }
 
+    [Fact]
+    public void RejectsTlsDescSequenceWithoutDescriptorOwner()
+    {
+        var (instructions, sites, resolver) = CreateAccess(TlsAccessModel.TlsDesc);
+        var result = Aarch64TlsSequenceRecognizer.Recognize(
+            instructions,
+            sites,
+            CreateModule(),
+            CreateSymbol(),
+            resolver);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, item => item.Code == DiagnosticCode.TlsBindingUnresolved);
+    }
+
+    [Fact]
+    public void ReencodesTlsDescMarkersThroughAsmStoneBackedEncoder()
+    {
+        var owner = CreateDescriptorOwner();
+        var markers = new[]
+        {
+            (ElfConstants.RArm64TlsDescAdrPage21, 0x90000000u, 0x90000020u, 0x3000UL, 0x4000UL),
+            (ElfConstants.RArm64TlsDescLd64Lo12, 0xF9400001u, 0xF9400001u, 0x3004UL, 0x4004UL),
+            (ElfConstants.RArm64TlsDescAddLo12, 0x91000000u, 0x91000000u, 0x3008UL, 0x4008UL),
+            (ElfConstants.RArm64TlsDescCall, 0xD63F0020u, 0xD63F0020u, 0x300CUL, 0x400CUL),
+        };
+
+        foreach (var marker in markers)
+        {
+            Assert.True(
+                Aarch64TlsInstructionSemantics.TryEncodeTlsDescInstruction(
+                    marker.Item1,
+                    marker.Item2,
+                    marker.Item3,
+                    marker.Item4,
+                    marker.Item5,
+                    owner,
+                    out var encoded),
+                $"Relocation {marker.Item1} was not re-encoded.");
+            Assert.NotEqual(0u, encoded);
+        }
+    }
     [Fact]
     public void RejectsSequencesThatExceedTheBoundedInstructionLimit()
     {
@@ -181,12 +224,14 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             },
             TlsAccessModel.TlsDesc => new[]
             {
-                Op(0x3000, 0x600, 0x90000000, "adrp"),
-                Memory(0x3004, 0x604, "ldr", 8, x0),
-                Op(0x3008, 0x608, 0x91000000, "add"),
-                Call(0x300C, 0x60C, "blr"),
-                Op(0x3010, 0x610, 0x8B000020, "add"),
-                Memory(0x3014, 0x614, "ldr", 4, x0),
+                Adrp(0x3000, 0x600, x0, 0x4000),
+                Memory(0x3004, 0x604, "ldr", 8, x0, x1),
+                RegisterAdd(0x3008, 0x608, x0, x0, immediate: 0),
+                IndirectCall(0x300C, 0x60C, x1),
+                Mrs(0x3010, 0x610, x1),
+                RegisterAdd(0x3014, 0x614, x0, x0, x1),
+                Memory(0x3018, 0x618, "ldr", 4, x0, x0),
+                Ret(0x301C, 0x61C),
             },
             _ => throw new ArgumentOutOfRangeException(nameof(model)),
         };
@@ -233,6 +278,118 @@ public sealed class Aarch64TlsSequenceRecognizerTests
         };
         return (instructions, sites, resolver);
     }
+
+    private static SemanticInstruction Adrp(
+        ulong address,
+        ulong fileOffset,
+        Aarch64RegisterView destination,
+        ulong target) =>
+        new(
+            new VirtualAddress(address),
+            new FileOffset(fileOffset),
+            0x90000020u,
+            "adrp",
+            Range(address, fileOffset),
+            new[]
+            {
+                RegisterOperand("rd", destination, Aarch64OperandDirection.Output),
+                TargetOperand("target", target),
+            });
+
+    private static SemanticInstruction RegisterAdd(
+        ulong address,
+        ulong fileOffset,
+        Aarch64RegisterView destination,
+        Aarch64RegisterView firstInput,
+        Aarch64RegisterView? secondInput = null,
+        long? immediate = null)
+    {
+        var operands = new List<SemanticOperand>
+        {
+            RegisterOperand("rd", destination, Aarch64OperandDirection.Output),
+            RegisterOperand("rn", firstInput, Aarch64OperandDirection.Input),
+        };
+        if (secondInput is { } register)
+        {
+            operands.Add(RegisterOperand("rm", register, Aarch64OperandDirection.Input));
+        }
+        if (immediate is { } value)
+        {
+            operands.Add(ImmediateOperand("imm", value));
+        }
+
+        return new SemanticInstruction(
+            new VirtualAddress(address),
+            new FileOffset(fileOffset),
+            secondInput is null ? 0x91000000u : 0x8B010000u,
+            "add",
+            Range(address, fileOffset),
+            operands);
+    }
+
+    private static SemanticInstruction IndirectCall(
+        ulong address,
+        ulong fileOffset,
+        Aarch64RegisterView targetRegister) =>
+        new(
+            new VirtualAddress(address),
+            new FileOffset(fileOffset),
+            0xD63F0020u,
+            "blr",
+            Range(address, fileOffset),
+            new[] { RegisterOperand("rn", targetRegister, Aarch64OperandDirection.Input) },
+            controlFlow: Aarch64ControlFlowKind.IndirectBranch);
+
+    private static SemanticInstruction Ret(ulong address, ulong fileOffset) =>
+        new(
+            new VirtualAddress(address),
+            new FileOffset(fileOffset),
+            0xD65F03C0u,
+            "ret",
+            Range(address, fileOffset),
+            controlFlow: Aarch64ControlFlowKind.Return);
+
+    private static SemanticOperand ImmediateOperand(string name, long value) => new(
+        name,
+        Aarch64OperandKind.Immediate,
+        Aarch64OperandDirection.Input,
+        false,
+        "immediate",
+        null,
+        null,
+        Array.Empty<Aarch64RegisterView>(),
+        null,
+        value,
+        null,
+        new Aarch64RegisterConstraint(0, 31, 1, uint.MaxValue),
+        0,
+        12,
+        12,
+        false,
+        false,
+        false,
+        "immediate");
+
+    private static SemanticOperand TargetOperand(string name, ulong target) => new(
+        name,
+        Aarch64OperandKind.Target,
+        Aarch64OperandDirection.Input,
+        false,
+        "target",
+        null,
+        null,
+        Array.Empty<Aarch64RegisterView>(),
+        null,
+        null,
+        target,
+        new Aarch64RegisterConstraint(0, 31, 1, uint.MaxValue),
+        0,
+        21,
+        21,
+        false,
+        false,
+        true,
+        "target");
 
     private static SemanticInstruction Mrs(ulong address, ulong fileOffset, Aarch64RegisterView destination) =>
         new(
@@ -446,6 +603,30 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             relocation);
     }
 
+    private static TlsDescriptorOwnerBinding CreateDescriptorOwner()
+    {
+        var symbol = CreateSymbol();
+        var relocation = new RelocationBinding(
+            Aarch64RelocationKind.ThreadLocal,
+            SemanticTarget.RuntimeResolved("tls-descriptor:image:tls-fixture:tls_value"),
+            SymbolIndex: symbol.SymbolIndex,
+            IsPlt: true,
+            SymbolName: symbol.Name,
+            RelocationType: ElfConstants.RArm64TlsDesc,
+            RelocationAddress: new VirtualAddress(0x4000),
+            RelocationTableAddress: new VirtualAddress(0x4800));
+        return new TlsDescriptorOwnerBinding(
+            SemanticEntityId.RelocationSite("tls-descriptor:4000"),
+            Range(0x4000, 0x800, 2 * sizeof(ulong)),
+            relocation,
+            symbol,
+            0,
+            new VirtualAddress(0x5000),
+            new VirtualAddress(0x6000),
+            new VirtualAddress(0x7000),
+            Range(0x5000, 0x900, 6 * sizeof(uint)),
+            Range(0x6000, 0x920, sizeof(ulong)));
+    }
     private static TlsGotEntryBinding CreateGotEntry()
     {
         var symbol = CreateSymbol();

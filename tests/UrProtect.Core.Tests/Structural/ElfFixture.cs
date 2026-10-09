@@ -5,7 +5,7 @@ using UrProtect.Core.ArtifactProtocol;
 
 namespace UrProtect.Core.Tests.Structural;
 
-internal static class ElfFixture
+internal static partial class ElfFixture
 {
     public const int MinimalSize = 0x204;
     public const int FirstProgramHeaderOffset = ElfConstants.HeaderSize64;

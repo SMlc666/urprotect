@@ -59,6 +59,7 @@ The first local-dynamic recognizer fixture is bounded to the TLSLD ADRP/ADD + re
 
 ## Phase 4 — Rewrite and shared layout/materialization
 The first rewrite/materialization vertical slice is local-dynamic TLSLD only. It must re-encode the owned ADRP/ADD, exact `__tls_get_addr` `CALL26`, and DTPREL ADD/ADD sites through the existing semantic/address-map path while preserving the loader-owned DTPMOD64 GOT relocation, PT_TLS template/zero-fill, and dynamic relocation tables. Publication fails closed on resolver, range, register, addend, source/output map, GOT, or PT_TLS mismatch.
+The bounded TLSDESC producer slice is now implemented as a second exact vertical slice. It admits only the four-site ADRP/LD64/ADD/TLSDESC_CALL form with one validated 16-byte descriptor owner and paired resolver tags/stub. Marker-owned `BLR X1` fallthrough remains physically adjacent under flattening so shared layout validation can prove the eight-word sequence. Relaxed TLSDESC forms and all native runtime rows remain separate evidence work.
 
 14. Build TLS semantic fixups that preserve thread-relative/module-relative
     expressions, symbol/module identity, access width, and addend.

@@ -1262,6 +1262,20 @@ public static partial class SemanticPlanSnapshotCodec
             }
         }
 
+        TlsDescriptorOwnerBinding? descriptorOwner = null;
+        if ((TlsAccessModel)model == TlsAccessModel.TlsDesc)
+        {
+            if (!reader.TryReadBool(out var hasDescriptorOwner))
+            {
+                return false;
+            }
+
+            if (hasDescriptorOwner && !TryReadTlsDescriptorOwner(reader, out descriptorOwner))
+            {
+                return false;
+            }
+        }
+
         if (!reader.TryReadInt32(out var accessSize)
             || !reader.TryReadByte(out var expressionKind)
             || !TryReadTlsModule(reader, out var expressionModule)
@@ -1359,9 +1373,46 @@ public static partial class SemanticPlanSnapshotCodec
             gotEntry,
             resolverCall,
             moduleOwner,
-            dtpRelOwner);
+            dtpRelOwner,
+            descriptorOwner);
         return true;
     }
+
+    private static bool TryReadTlsDescriptorOwner(
+        SnapshotReader reader,
+        out TlsDescriptorOwnerBinding? owner)
+    {
+        owner = null;
+        if (!TryReadEntityId(reader, out var sourceIdentity)
+            || !TryReadRange(reader, out var descriptorRange)
+            || !TryReadRelocation(reader, out var relocation)
+            || !TryReadOptionalTlsSymbol(reader, out var symbol)
+            || !reader.TryReadInt64(out var addend)
+            || !reader.TryReadUInt64(out var descriptorPlt)
+            || !reader.TryReadUInt64(out var descriptorGot)
+            || !reader.TryReadUInt64(out var pltGot)
+            || !TryReadRange(reader, out var resolverPltRange)
+            || !TryReadRange(reader, out var resolverGotRange)
+            || relocation is null
+            || symbol is null)
+        {
+            return false;
+        }
+
+        owner = new TlsDescriptorOwnerBinding(
+            sourceIdentity,
+            descriptorRange,
+            relocation,
+            symbol,
+            addend,
+            new VirtualAddress(descriptorPlt),
+            new VirtualAddress(descriptorGot),
+            new VirtualAddress(pltGot),
+            resolverPltRange,
+            resolverGotRange);
+        return true;
+    }
+
 
     private static bool TryReadTlsGotEntry(
         SnapshotReader reader,

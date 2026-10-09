@@ -260,8 +260,13 @@ public static class Aarch64SemanticFixupEncoder
             Aarch64RelocationKind.ThreadLocal when relocation.RelocationType is
                 ElfConstants.RArm64TlsIeAdrGottprelPage21
                 or ElfConstants.RArm64TlsLdAdrPage21
-                or ElfConstants.RArm64TlsGdAdrPage21 =>
+                or ElfConstants.RArm64TlsGdAdrPage21
+                or ElfConstants.RArm64TlsDescAdrPage21 =>
                 ResolveRelocationAdrp(fixup, outputSourceAddress, outputPlaceAddress, value.Value, targetAddress, diagnostics),
+            Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsDescLd64Lo12 =>
+                ResolveLoadStoreLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
+            Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsDescAddLo12 =>
+                ResolveAddLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
             Aarch64RelocationKind.AddAbsLo12 =>
                 ResolveAddLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
             Aarch64RelocationKind.LoadStore =>

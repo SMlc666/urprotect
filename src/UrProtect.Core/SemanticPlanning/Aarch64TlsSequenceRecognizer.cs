@@ -32,7 +32,8 @@ public static class Aarch64TlsSequenceRecognizer
         TlsGotEntryBinding? gotEntry = null,
         TlsResolverCallBinding? resolverCall = null,
         TlsModuleOwnerBinding? moduleOwner = null,
-        TlsDtpRelOwnerBinding? dtpRelOwner = null)
+        TlsDtpRelOwnerBinding? dtpRelOwner = null,
+        TlsDescriptorOwnerBinding? descriptorOwner = null)
     {
         ArgumentNullException.ThrowIfNull(instructions);
         ArgumentNullException.ThrowIfNull(relocationSites);
@@ -223,18 +224,43 @@ public static class Aarch64TlsSequenceRecognizer
             return Failure(diagnostics);
         }
 
+        if (model == TlsAccessModel.TlsDesc
+            && (descriptorOwner is null
+                || symbol is null
+                || descriptorOwner.Symbol != symbol
+                || descriptorOwner.Addend != sites[0].Binding.Addend))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "The TLSDESC sequence has no unique descriptor owner for its defined TLS symbol and addend.",
+                sites[0].SourceRange.FileOffset.Value);
+            return Failure(diagnostics);
+        }
+
         if (diagnostics.HasErrors)
         {
             return Failure(diagnostics);
         }
 
-        if (!ValidateRelocationPattern(model, instructionArray, sites, symbol, gotEntry, resolverCall, moduleOwner, dtpRelOwner, diagnostics))
+        if (!ValidateRelocationPattern(
+                model,
+                instructionArray,
+                sites,
+                symbol,
+                gotEntry,
+                resolverCall,
+                moduleOwner,
+                dtpRelOwner,
+                descriptorOwner,
+                diagnostics))
         {
             return Failure(diagnostics);
         }
 
         var resolverKind = GetResolverKind(model);
-        if (resolverKind != TlsResolverKind.None && !IsResolvedResolverTarget(model, resolverTarget))
+        if (resolverKind != TlsResolverKind.None
+            && model != TlsAccessModel.TlsDesc
+            && !IsResolvedResolverTarget(model, resolverTarget))
         {
             diagnostics.Error(
                 DiagnosticCode.TlsBindingUnresolved,
@@ -245,7 +271,13 @@ public static class Aarch64TlsSequenceRecognizer
             return Failure(diagnostics);
         }
 
-        if (!ValidateInstructionPattern(model, instructionArray, sites, resolverKind, diagnostics))
+        if (!ValidateInstructionPattern(
+                model,
+                instructionArray,
+                sites,
+                resolverKind,
+                descriptorOwner,
+                diagnostics))
         {
             return Failure(diagnostics);
         }
@@ -355,7 +387,8 @@ public static class Aarch64TlsSequenceRecognizer
             gotEntry,
             resolverCall,
             moduleOwner,
-            dtpRelOwner);
+            dtpRelOwner,
+            descriptorOwner);
         return new TlsSequenceRecognitionResult(binding, diagnostics.ToArray());
     }
 
@@ -404,6 +437,7 @@ public static class Aarch64TlsSequenceRecognizer
         TlsResolverCallBinding? resolverCall,
         TlsModuleOwnerBinding? moduleOwner,
         TlsDtpRelOwnerBinding? dtpRelOwner,
+        TlsDescriptorOwnerBinding? descriptorOwner,
         DiagnosticBag diagnostics)
     {
         var relocationTypes = sites.Where(site => site.Binding.RelocationType.HasValue)
@@ -520,6 +554,16 @@ public static class Aarch64TlsSequenceRecognizer
                 complete = false;
             }
         }
+        else if (model == TlsAccessModel.TlsDesc
+            && (descriptorOwner is null
+                || !Aarch64TlsInstructionSemantics.IsSupportedTlsDescSequence(instructions, sites, descriptorOwner)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The supported TLSDESC rewrite requires the exact adjacent page/LD64/ADD/CALL marker sequence, BLR X1 ownership, post-call TP flow, and final X0 scalar access.",
+                sites[0].SourceRange.FileOffset.Value);
+            complete = false;
+        }
         else if (model == TlsAccessModel.LocalDynamic
             && !Aarch64TlsInstructionSemantics.IsSupportedLocalDynamicTlsLdSequence(instructions, sites, resolverCall, moduleOwner))
         {
@@ -552,6 +596,7 @@ public static class Aarch64TlsSequenceRecognizer
         IReadOnlyList<SemanticInstruction> instructions,
         IReadOnlyList<TlsRelocationSite> relocationSites,
         TlsResolverKind resolverKind,
+        TlsDescriptorOwnerBinding? descriptorOwner,
         DiagnosticBag diagnostics)
     {
         var hasThreadPointer = instructions.Any(IsThreadPointerMrs);
@@ -591,15 +636,8 @@ public static class Aarch64TlsSequenceRecognizer
                 && resolverIndex.Length == 1
                 && resolverIndex[0] > addIndex
                 && memoryIndices.Any(index => index > resolverIndex[0]),
-            TlsAccessModel.TlsDesc => adrpIndex >= 0
-                && FindMnemonic(instructions, "ldr") > adrpIndex
-                && addIndex > adrpIndex
-                && resolverKind == TlsResolverKind.TlsDesc
-                && resolverIndex.Length == 1
-                && resolverIndex[0] > addIndex
-                && instructions.Skip(resolverIndex[0] + 1).Any(instruction =>
-                    string.Equals(instruction.Mnemonic, "add", StringComparison.OrdinalIgnoreCase))
-                && memoryIndices.Any(index => index > resolverIndex[0]),
+            TlsAccessModel.TlsDesc => descriptorOwner is not null
+                && Aarch64TlsInstructionSemantics.IsSupportedTlsDescSequence(instructions, relocationSites, descriptorOwner),
             _ => false,
         };
         if (!valid)

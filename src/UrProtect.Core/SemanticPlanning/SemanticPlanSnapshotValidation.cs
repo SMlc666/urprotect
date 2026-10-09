@@ -792,7 +792,7 @@ public static partial class SemanticPlanSnapshotCodec
             or TlsAccessModel.TlsDesc;
         if ((needsResolver && (sequence.ResolverKind == TlsResolverKind.None
                 || resolverCallCount != 1
-                || sequence.ResolverTarget is null))
+                || (binding.AccessModel != TlsAccessModel.TlsDesc && sequence.ResolverTarget is null)))
             || (!needsResolver && (sequence.ResolverKind != TlsResolverKind.None
                 || resolverCallCount != 0
                 || sequence.ResolverTarget is not null)))
@@ -967,6 +967,19 @@ public static partial class SemanticPlanSnapshotCodec
                 offset);
         }
 
+        if (binding.AccessModel == TlsAccessModel.TlsDesc
+            && (binding.DescriptorOwner is null
+                || !Aarch64TlsInstructionSemantics.IsSupportedTlsDescRecordSequence(
+                    binding.InstructionSequence.Instructions,
+                    binding.RelocationSites,
+                    binding.DescriptorOwner)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The TLSDESC snapshot does not retain the exact decoded sequence and descriptor owner contract.",
+                offset);
+        }
+
         if (!familySet.Contains(binding.RelocationFamily))
         {
             diagnostics.Error(
@@ -988,6 +1001,17 @@ public static partial class SemanticPlanSnapshotCodec
         if (binding.AccessModel == TlsAccessModel.LocalDynamic)
         {
             ValidateTlsDynamicOwners(binding, diagnostics, offset);
+        }
+        if (binding.AccessModel == TlsAccessModel.TlsDesc)
+        {
+            ValidateTlsDescriptorOwner(binding, diagnostics, offset);
+        }
+        else if (binding.DescriptorOwner is not null)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "Only a TLSDESC binding may carry a descriptor owner.",
+                offset);
         }
 
 
@@ -1434,6 +1458,55 @@ public static partial class SemanticPlanSnapshotCodec
     }
 
 
+    private static void ValidateTlsDescriptorOwner(
+        TlsBinding binding,
+        DiagnosticBag diagnostics,
+        ulong offset)
+    {
+        var owner = binding.DescriptorOwner;
+        var valid = owner is not null
+            && binding.Symbol is not null
+            && owner.Symbol == binding.Symbol
+            && owner.Addend == binding.Addend
+            && owner.DescriptorRange.Size == 2 * sizeof(ulong)
+            && owner.DescriptorRange.FileOffset.Value % sizeof(ulong) == 0
+            && owner.DescriptorRange.VirtualAddress.Value % sizeof(ulong) == 0
+            && owner.Relocation.Kind == Aarch64RelocationKind.ThreadLocal
+            && owner.Relocation.RelocationType == ElfConstants.RArm64TlsDesc
+            && owner.Relocation.IsPlt
+            && owner.Relocation.Addend == 0
+            && string.Equals(owner.Relocation.SymbolName, owner.Symbol.Name, StringComparison.Ordinal)
+            && owner.Relocation.RelocationAddress == owner.DescriptorRange.VirtualAddress
+            && owner.Relocation.Target.Resolution == SemanticTargetResolution.RuntimeResolved
+            && owner.Relocation.Target.RuntimeBinding == $"tls-descriptor:{binding.Module.Identity}:{owner.Symbol.Name}"
+            && owner.DescriptorPlt == owner.ResolverPltRange.VirtualAddress
+            && owner.DescriptorGot == owner.ResolverGotRange.VirtualAddress
+            && owner.ResolverPltRange.Size == 6 * sizeof(uint)
+            && owner.ResolverGotRange.Size == sizeof(ulong)
+            && owner.ResolverGotRange.FileOffset.Value % sizeof(ulong) == 0
+            && owner.ResolverGotRange.VirtualAddress.Value % sizeof(ulong) == 0
+            && owner.DescriptorGot != owner.DescriptorRange.VirtualAddress
+            && !RangesOverlap(
+                owner.DescriptorGot.Value,
+                sizeof(ulong),
+                owner.DescriptorRange.VirtualAddress.Value,
+                owner.DescriptorRange.Size)
+            && owner.Relocation.IsKindConsistent;
+        if (!valid)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A TLSDESC binding has no exact 16-byte descriptor owner, paired resolver tag ranges, or matching symbol/addend.",
+                offset);
+            return;
+        }
+
+        ValidateEntityId(owner!.SourceIdentity, "TLSDESC descriptor-owner identity", diagnostics, offset);
+        ValidateRange(owner.DescriptorRange, "TLSDESC descriptor range", diagnostics, offset);
+        ValidateRange(owner.ResolverPltRange, "TLSDESC resolver PLT range", diagnostics, offset);
+        ValidateRange(owner.ResolverGotRange, "TLSDESC resolver GOT range", diagnostics, offset);
+        ValidateRelocation(owner.Relocation, diagnostics, offset);
+    }
     private static void ValidateTlsModule(
         TlsModuleIdentity module,
         DiagnosticBag diagnostics,
@@ -1545,7 +1618,10 @@ public static partial class SemanticPlanSnapshotCodec
                     || binding.DtpRelOwner is not null),
             TlsAccessModel.TlsDesc => roles.Contains(TlsInstructionRole.DescriptorLoad)
                 && roles.Contains(TlsInstructionRole.DescriptorCall)
-                && roles.Contains(TlsInstructionRole.AddressFinalization),
+                && roles.Contains(TlsInstructionRole.ThreadPointerRead)
+                && roles.Contains(TlsInstructionRole.AddressFinalization)
+                && roles.Contains(TlsInstructionRole.TlsMemoryAccess)
+                && binding.DescriptorOwner is not null,
             _ => false,
         };
         if (!valid)
@@ -1558,6 +1634,12 @@ public static partial class SemanticPlanSnapshotCodec
     }
 
     private static bool IsSnapshotPowerOfTwo(ulong value) => value != 0 && (value & (value - 1)) == 0;
+
+    private static bool RangesOverlap(ulong leftStart, ulong leftSize, ulong rightStart, ulong rightSize) =>
+        leftStart <= rightStart
+            ? rightStart - leftStart < leftSize
+            : leftStart - rightStart < rightSize;
+
 
     private static bool TryAdd(ulong value, ulong amount, out ulong result)
     {

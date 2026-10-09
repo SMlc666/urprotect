@@ -125,6 +125,13 @@ public sealed class Aarch64FunctionAnalyzer
 {
     private const ulong InstructionSize = sizeof(uint);
     private const ulong MaxInstructionsPerFunction = 1_000_000;
+    private static readonly uint[] TlsDescInstructionRelocationOrder =
+    {
+        ElfConstants.RArm64TlsDescAdrPage21,
+        ElfConstants.RArm64TlsDescLd64Lo12,
+        ElfConstants.RArm64TlsDescAddLo12,
+        ElfConstants.RArm64TlsDescCall,
+    };
     private readonly AsmStoneAdapter decoder;
 
     public Aarch64FunctionAnalyzer(AsmStoneAdapter? decoder = null)
@@ -266,8 +273,10 @@ public sealed class Aarch64FunctionAnalyzer
             }
 
             var last = blockInstructions[^1];
-            var successors = GetSuccessors(last, functionEnd);
-            if (successors.Any(edge => edge.Kind == Aarch64ControlFlowEdgeKind.Indirect))
+            var isTlsDescCall = IsTlsDescCallMarker(file, last, function.Value, functionEnd);
+            var successors = GetSuccessors(last, functionEnd, isTlsDescCall);
+            if (successors.Any(edge => edge.Kind == Aarch64ControlFlowEdgeKind.Indirect)
+                && !isTlsDescCall)
             {
                 diagnostics.Error(
                     DiagnosticCode.FunctionAnalysisIncomplete,
@@ -424,7 +433,8 @@ public sealed class Aarch64FunctionAnalyzer
 
     private static Aarch64ControlFlowEdge[] GetSuccessors(
         Aarch64FunctionInstruction instruction,
-        ulong functionEnd)
+        ulong functionEnd,
+        bool isTlsDescCall)
     {
         var decoded = instruction.Decode.Instruction!;
         var next = instruction.Address + InstructionSize;
@@ -432,6 +442,10 @@ public sealed class Aarch64FunctionAnalyzer
         {
             Aarch64ControlFlowKind.Return =>
                 new[] { new Aarch64ControlFlowEdge(instruction.Address, null, Aarch64ControlFlowEdgeKind.Return) },
+            Aarch64ControlFlowKind.IndirectBranch when isTlsDescCall =>
+                next < functionEnd
+                    ? new[] { new Aarch64ControlFlowEdge(instruction.Address, next, Aarch64ControlFlowEdgeKind.Fallthrough) }
+                    : Array.Empty<Aarch64ControlFlowEdge>(),
             Aarch64ControlFlowKind.IndirectBranch =>
                 new[] { new Aarch64ControlFlowEdge(instruction.Address, null, Aarch64ControlFlowEdgeKind.Indirect) },
             Aarch64ControlFlowKind.DirectCall =>
@@ -466,6 +480,44 @@ public sealed class Aarch64FunctionAnalyzer
             blocks ?? Array.Empty<Aarch64BasicBlock>(),
             instructions ?? Array.Empty<Aarch64FunctionInstruction>(),
             diagnostics.ToArray());
+
+    private static bool IsTlsDescCallMarker(
+        ElfFile file,
+        Aarch64FunctionInstruction instruction,
+        ulong functionStart,
+        ulong functionEnd)
+    {
+        var decoded = instruction.Decode.Instruction;
+        if (decoded is null
+            || !string.Equals(decoded.Mnemonic, "blr", StringComparison.OrdinalIgnoreCase)
+            || decoded.ControlFlow != Aarch64ControlFlowKind.IndirectBranch
+            || !decoded.Operands.Any(operand =>
+                operand.Direction is Aarch64OperandDirection.Input or Aarch64OperandDirection.InputOutput
+                && operand.Register is
+                {
+                    Class: Aarch64RegisterClass.General,
+                    Index: 1,
+                    Width: 64,
+                    Role: Aarch64RegisterRole.None,
+                }))
+        {
+            return false;
+        }
+
+        var markers = file.TlsMetadata.StaticRelocations
+            .Concat(file.TlsMetadata.Dynamic.Relocations)
+            .Where(fact => fact.Relocation.Offset >= functionStart
+                && fact.Relocation.Offset < functionEnd
+                && TlsDescInstructionRelocationOrder.Contains(fact.Relocation.Type))
+            .OrderBy(fact => fact.Relocation.Offset)
+            .ToArray();
+        return markers.Length == TlsDescInstructionRelocationOrder.Length
+            && markers.Select(fact => fact.Relocation.Type).SequenceEqual(TlsDescInstructionRelocationOrder)
+            && markers.Select(fact => fact.Relocation.Offset).SequenceEqual(
+                Enumerable.Range(0, TlsDescInstructionRelocationOrder.Length)
+                    .Select(index => instruction.Address - ((ulong)(TlsDescInstructionRelocationOrder.Length - 1 - index) * InstructionSize)))
+            && markers[^1].Relocation.Offset == instruction.Address;
+    }
 
     private static bool TryAdd(ulong left, ulong right, out ulong result)
     {

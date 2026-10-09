@@ -392,11 +392,11 @@ public static class GenericRehydrationEngine
 
         foreach (var binding in tlsBindings)
         {
-            if (binding.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic))
+            if (binding.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic or TlsAccessModel.TlsDesc))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "The current transformed TLS semantic slice accepts only local-exec, exact TLSIE, or exact TLSLD model bindings.",
+                    "The current transformed TLS semantic slice accepts only bounded local-exec, initial-exec, local-dynamic, general-dynamic, or exact TLSDESC model bindings.",
                     binding.SourceRange.FileOffset.Value);
                 valid = false;
             }
@@ -714,11 +714,11 @@ public static class GenericRehydrationEngine
         var requests = new List<ElfLayoutTlsFixupRequest>(semanticFixups.Fixups.Count);
         foreach (var fixup in semanticFixups.Fixups)
         {
-            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic))
+            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic or TlsAccessModel.TlsDesc))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "Rehydration currently materializes only local-exec, exact TLSIE, or exact TLSLD semantic fixups.",
+                    "Rehydration currently materializes only bounded local-exec, initial-exec, local-dynamic, general-dynamic, or exact TLSDESC semantic fixups.",
                     fixup.RelocationSourceRange.FileOffset.Value);
                 continue;
             }

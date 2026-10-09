@@ -424,6 +424,9 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
                     value.Ordering.ToString(),
                     value.WritesBack);
                 return Aarch64OperandKind.Memory;
+            case global::AsmStone.Model.SystemRegisterOperand value:
+                immediate = value.Encoding;
+                return Aarch64OperandKind.EncodedField;
             case global::AsmStone.Model.TargetOperand value:
                 target = value.Address;
                 return Aarch64OperandKind.Target;
