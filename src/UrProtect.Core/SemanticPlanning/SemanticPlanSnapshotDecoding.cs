@@ -1189,6 +1189,65 @@ public static partial class SemanticPlanSnapshotCodec
                 isGotOrDescriptorOwned));
         }
 
+        TlsResolverCallBinding? resolverCall = null;
+        if (!reader.TryReadBool(out var hasResolverCall))
+        {
+            return false;
+        }
+
+        if (hasResolverCall)
+        {
+            if (!TryReadRange(reader, out var resolverRange)
+                || !TryReadRelocation(reader, out var resolverRelocation)
+                || resolverRelocation is null)
+            {
+                return false;
+            }
+
+            resolverCall = new TlsResolverCallBinding(resolverRange, resolverRelocation);
+        }
+
+        TlsModuleOwnerBinding? moduleOwner = null;
+        if (!reader.TryReadBool(out var hasModuleOwner))
+        {
+            return false;
+        }
+
+        if (hasModuleOwner)
+        {
+            if (!TryReadEntityId(reader, out var ownerIdentity)
+                || !TryReadRange(reader, out var ownerRange)
+                || !TryReadRelocation(reader, out var ownerRelocation)
+                || ownerRelocation is null)
+            {
+                return false;
+            }
+
+            moduleOwner = new TlsModuleOwnerBinding(ownerIdentity, ownerRange, ownerRelocation);
+        }
+
+        TlsDtpRelOwnerBinding? dtpRelOwner = null;
+        if ((TlsAccessModel)model == TlsAccessModel.GeneralDynamic)
+        {
+            if (!reader.TryReadBool(out var hasDtpRelOwner))
+            {
+                return false;
+            }
+
+            if (hasDtpRelOwner)
+            {
+                if (!TryReadEntityId(reader, out var ownerIdentity)
+                    || !TryReadRange(reader, out var ownerRange)
+                    || !TryReadRelocation(reader, out var ownerRelocation)
+                    || ownerRelocation is null)
+                {
+                    return false;
+                }
+
+                dtpRelOwner = new TlsDtpRelOwnerBinding(ownerIdentity, ownerRange, ownerRelocation);
+            }
+        }
+
         TlsGotEntryBinding? gotEntry = null;
         if ((TlsAccessModel)model == TlsAccessModel.InitialExec)
         {
@@ -1297,7 +1356,10 @@ public static partial class SemanticPlanSnapshotCodec
                 expressionAddend),
             profiles,
             runtimes,
-            gotEntry);
+            gotEntry,
+            resolverCall,
+            moduleOwner,
+            dtpRelOwner);
         return true;
     }
 

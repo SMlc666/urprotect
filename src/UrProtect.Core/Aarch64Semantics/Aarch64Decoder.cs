@@ -174,7 +174,7 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
     {
     }
 
-    public AsmStoneAdapter(A64FeatureSet features)
+    internal AsmStoneAdapter(A64FeatureSet features)
         : this(features, null)
     {
     }
@@ -219,47 +219,8 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
         IReadOnlyDictionary<byte, byte> mapping)
     {
         ArgumentNullException.ThrowIfNull(mapping);
-        if (!global::AsmStone.AsmStoneApi.TryDecode(
-                encoding,
-                address,
-                features,
-                out var instruction,
-                out var decodeDiagnostic))
-        {
-            return new Aarch64EncodeResult(false, 0, decodeDiagnostic.ToString());
-        }
-
-        var mappedOperands = instruction.Operands
-            .Select(operand => MapGeneralRegisters(operand, mapping))
-            .ToArray();
-        var mappedInstruction = instruction with { Operands = mappedOperands };
-        if (!global::AsmStone.AsmStoneApi.TryEncode(
-                mappedInstruction,
-                features,
-                out var mappedEncoding,
-                out var encodeDiagnostic))
-        {
-            return new Aarch64EncodeResult(false, 0, encodeDiagnostic.ToString());
-        }
-
-        if (!global::AsmStone.AsmStoneApi.TryDecode(
-                mappedEncoding,
-                address,
-                features,
-                out var roundTrip,
-                out var roundTripDiagnostic)
-            || !string.Equals(
-                roundTrip.Mnemonic,
-                instruction.Mnemonic,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return new Aarch64EncodeResult(
-                false,
-                0,
-                $"AsmStone register permutation did not round-trip: {roundTripDiagnostic}");
-        }
-
-        return new Aarch64EncodeResult(true, mappedEncoding, encodeDiagnostic.Message);
+        return new Aarch64InstructionEncoder(features)
+            .TryPermuteGeneralRegisters(encoding, address, mapping);
     }
 
     public bool UsesGeneralRegister(uint encoding, ulong address, byte registerIndex)
@@ -279,48 +240,6 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
                 .Select(operand => operand.Operand)
                 .Where(operand => operand is not null)
                 .Any(operand => ContainsGeneralRegister(operand!, registerIndex));
-    }
-
-    private static A64Operand MapGeneralRegisters(
-        A64Operand operand,
-        IReadOnlyDictionary<byte, byte> mapping)
-    {
-        return operand switch
-        {
-            global::AsmStone.Model.RegisterOperand register =>
-                register with { Register = MapGeneralRegister(register.Register, mapping) },
-            global::AsmStone.Model.ModifiedRegisterOperand modified =>
-                modified with { Register = MapGeneralRegister(modified.Register, mapping) },
-            global::AsmStone.Model.RegisterPairOperand pair =>
-                pair with
-                {
-                    First = MapGeneralRegister(pair.First, mapping),
-                    Second = MapGeneralRegister(pair.Second, mapping),
-                },
-            global::AsmStone.Model.VectorRegisterListOperand list =>
-                list with
-                {
-                    Registers = list.Registers
-                        .Select(register => MapGeneralRegister(register, mapping))
-                        .ToArray(),
-                },
-            global::AsmStone.Model.RegisterGroupOperand group =>
-                group with
-                {
-                    Registers = group.Registers
-                        .Select(register => MapGeneralRegister(register, mapping))
-                        .ToArray(),
-                },
-            global::AsmStone.Model.MemoryOperand memory =>
-                memory with
-                {
-                    Base = MapGeneralRegister(memory.Base, mapping),
-                    Index = memory.Index is { } index
-                        ? MapGeneralRegister(index, mapping)
-                        : null,
-                },
-            _ => operand,
-        };
     }
 
     private static bool ContainsGeneralRegister(A64Operand operand, byte index)
@@ -353,20 +272,6 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
         register.Class == global::AsmStone.Model.A64RegisterClass.General
         && register.Role == global::AsmStone.Model.A64RegisterRole.None
         && register.Index == index;
-
-    private static A64Register MapGeneralRegister(
-        A64Register register,
-        IReadOnlyDictionary<byte, byte> mapping)
-    {
-        if (register.Class != global::AsmStone.Model.A64RegisterClass.General
-            || register.Role != global::AsmStone.Model.A64RegisterRole.None
-            || !mapping.TryGetValue(register.Index, out var mappedIndex))
-        {
-            return register;
-        }
-
-        return register with { Index = mappedIndex };
-    }
 
     private static Aarch64Instruction CreateInstruction(global::AsmStone.Model.A64Instruction instruction)
     {

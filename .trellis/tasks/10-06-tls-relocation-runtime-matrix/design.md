@@ -45,6 +45,29 @@ the managed transformer preserves TLS behavior.
    alias, parallel TLS codec, or fallback writer is added. A transformed TLS plan
    without that operation is incomplete and fails before publication.
 
+
+## AArch64 encoding boundary and test correction
+
+AsmStone is already capable of encoding the AArch64 instruction families used by the current protection and TLS slices (`ADRP`, `ADR`, `B`, `BL`, conditional branches, `RET`, `BR`, `MRS`, `MOVZ/MOVN/MOVK`, immediate/register `ADD`, and `LDR/STR`). The current gap is UrProtect integration: production currently calls AsmStone for decode and register permutation, but does not call `TryEncodeFields` and still hand-builds multiple instruction words.
+
+The managed architecture therefore uses one project-owned `Aarch64InstructionEncoder` adapter behind `Aarch64Semantics`. Its public contract accepts project-owned registers, widths, offsets, addresses, and instruction-family requests, and returns project-owned encoded words and diagnostics. AsmStone model types and generated field names do not escape this adapter.
+
+The adapter is the only production owner for final instruction encoding. `Aarch64SemanticFixupEncoder`, `TlsSemanticModels`, `ElfLayoutPlanner`, `ElfLayoutMaterializer`, and `FunctionProtectionCodeEmitter` may calculate relocation values, range-check them, preserve non-relocation fields, and select semantic forms, but they delegate final instruction encoding to the adapter. The adapter must round-trip every emitted word through AsmStone decode before returning success.
+
+TLS relocation-aware encoding remains split deliberately:
+
+```text
+UrProtect calculates and validates:
+  relocation family, symbol/module, addend, GOT/TLSDESC owner,
+  source/output address map, target address, page delta, scale, and range
+
+AsmStone encodes and validates:
+  the final AArch64 instruction operands and instruction word
+```
+
+A TLS model recognizer may use AsmStone-projected operand and register semantics, but it must also validate ELF relocation pairing and loader ownership. AsmStone is not made responsible for `R_AARCH64_TLS*`, PT_TLS, GOT, TLSDESC, `__tls_get_addr`, or runtime lifecycle policy.
+
+The test contract is equally strict. `ElfFixture` and semantic fixture helpers must build instruction words through the adapter or retain a named GNU assembler/linker oracle. Negative fixtures mutate structured fields or relocation records from a valid encoded fixture. Golden instruction values are independent checks, not the implementation mechanism, and must decode successfully through AsmStone. Tests must include at least one production-path differential check for each migrated instruction family and one rejection proving that malformed TLS metadata is rejected by UrProtect even when each individual instruction is encodable by AsmStone.
 ## Ownership and data flow
 
 ```text
@@ -128,6 +151,7 @@ validated against linker-produced fixtures. The design categories are:
 - current-thread and registered-worker lifecycle contracts remain separate rows.
 
 ### Local-dynamic
+The first bounded implementation slice is the exact linker-produced TLSLD sequence recorded in `research/aarch64-tlsld-oracle.md`: adjacent `R_AARCH64_TLSLD_ADR_PAGE21` + `R_AARCH64_TLSLD_ADD_LO12_NC`, an exact `CALL26` to `__tls_get_addr`, then adjacent `R_AARCH64_TLSLD_ADD_DTPREL_HI12` + `R_AARCH64_TLSLD_ADD_DTPREL_LO12_NC`. The slice carries the loader-owned `R_AARCH64_TLS_DTPMOD64` GOT owner and preserves PT_TLS template, zero-fill, dynamic relocation identity, GOT range/permissions, resolver ownership, and register flow. TLSLD MOVW/literal/LDST forms remain rejected until separately evidenced.
 
 - local module identity;
 - DTPMOD/DTPREL and TLSLD sequence ownership;

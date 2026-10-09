@@ -5,5 +5,10 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/design.md","reason":"Review typed TLS IR, sequence recognition, rewrite/layout, snapshot, lifecycle, and matrix contracts."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-semantic-baseline.md","reason":"Verify implementation claims against current source, fixtures, and archived TLS lifecycle evidence."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsie-ld-gottprel-prel19-oracle.md","reason":"Verify GNU TLSIE PREL19 literal-load shape, signed range, GOT ownership, hostile-range checks, and targeted emitter boundary."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsld-oracle.md","reason":"Audit exact TLSLD sequence, resolver ownership, DTPMOD64/DTPREL facts, PT_TLS preservation, fail-closed diagnostics, and runtime evidence boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsie-adr-ld64-oracle.md","reason":"Verify exact TLSIE ADRP/LD64 ABI/toolchain shape, page/scale semantics, GOT ownership, and fail-closed boundaries."}
 {"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/design.md","reason":"Check dependency ordering and reuse of shared semantic/layout/artifact owners."}
+{"file":"third_party/AsmStone/README.md","reason":"Confirm the pinned backend's generated instruction encoding, TryEncodeFields boundary, and intentional absence of TLS/ELF text parsing."}
+{"file":"src/UrProtect.Core/Aarch64Semantics/Aarch64Decoder.cs","reason":"Audit the project adapter boundary, current AsmStone decode/encode usage, and the required encoder extension point."}
+{"file":"tests/UrProtect.Core.Tests/Semantics/AsmStoneAdapterTests.cs","reason":"Require AsmStone decode/encode round-trip and register/operand behavior coverage for the corrected backend boundary."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-encoder-ownership.md","reason":"Track the production manual-encoding inventory, AsmStone capability evidence, fixture correction rules, and migration acceptance gate."}

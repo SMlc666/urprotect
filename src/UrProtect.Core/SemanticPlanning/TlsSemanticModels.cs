@@ -158,6 +158,23 @@ public sealed record TlsGotEntryBinding(
     TlsSymbolIdentity Symbol,
     long Addend);
 
+
+/// <summary>Source-owned resolver call and its exact relocation identity.</summary>
+public sealed record TlsResolverCallBinding(
+    SemanticSourceRange SourceRange,
+    RelocationBinding Relocation);
+
+/// <summary>Loader-owned TLS module-ID storage retained outside the instruction sequence.</summary>
+public sealed record TlsModuleOwnerBinding(
+    SemanticEntityId SourceIdentity,
+    SemanticSourceRange SourceRange,
+    RelocationBinding Relocation);
+/// <summary>Loader-owned TLS symbol-offset storage retained outside the instruction sequence.</summary>
+public sealed record TlsDtpRelOwnerBinding(
+    SemanticEntityId SourceIdentity,
+    SemanticSourceRange SourceRange,
+    RelocationBinding Relocation);
+
 /// <summary>Typed thread- or module-relative value formation.</summary>
 public sealed record TlsAddressExpression(
     TlsAddressExpressionKind Kind,
@@ -194,7 +211,10 @@ public sealed record TlsBinding
         TlsAddressExpression addressExpression,
         IEnumerable<TlsProfileRequirement> profileRequirements,
         IEnumerable<TlsRuntimeRequirement> runtimeRequirements,
-        TlsGotEntryBinding? gotEntry = null)
+        TlsGotEntryBinding? gotEntry = null,
+        TlsResolverCallBinding? resolverCall = null,
+        TlsModuleOwnerBinding? moduleOwner = null,
+        TlsDtpRelOwnerBinding? dtpRelOwner = null)
     {
         ArgumentNullException.ThrowIfNull(instructionSequence);
         ArgumentNullException.ThrowIfNull(module);
@@ -226,6 +246,9 @@ public sealed record TlsBinding
         ProfileRequirements = Array.AsReadOnly(profileRequirements.ToArray());
         RuntimeRequirements = Array.AsReadOnly(runtimeRequirements.ToArray());
         GotEntry = gotEntry;
+        ResolverCall = resolverCall;
+        ModuleOwner = moduleOwner;
+        DtpRelOwner = dtpRelOwner;
     }
 
     public TlsAccessModel AccessModel { get; }
@@ -255,6 +278,12 @@ public sealed record TlsBinding
     public IReadOnlyList<TlsRuntimeRequirement> RuntimeRequirements { get; }
 
     public TlsGotEntryBinding? GotEntry { get; }
+
+    public TlsResolverCallBinding? ResolverCall { get; }
+
+    public TlsModuleOwnerBinding? ModuleOwner { get; }
+
+    public TlsDtpRelOwnerBinding? DtpRelOwner { get; }
 }
 
 /// <summary>Stable relocation-family classification for the AArch64 ELF ABI constants.</summary>
@@ -388,6 +417,7 @@ public static class Aarch64TlsInstructionSemantics
     private const uint AddRegisterShiftMask = 0x00C0_FC00;
     private const uint ThreadPointerMrsMask = 0xFFFF_FFE0;
     private const uint ThreadPointerMrsEncoding = 0xD53B_D040;
+    private static readonly Aarch64InstructionEncoder InstructionEncoder = new();
 
     public static bool IsSupportedLocalExecRelocationInstruction(uint relocationType, uint encoding)
     {
@@ -415,6 +445,408 @@ public static class Aarch64TlsInstructionSemantics
         };
     }
 
+    /// <summary>
+    /// Validates the exact TLSGD ADRP/ADD module-ID formation, direct resolver
+    /// call, final TLS access, and paired loader-owned GOT words.
+    /// </summary>
+    public static bool IsSupportedGeneralDynamicTlsGdSequence(
+        IReadOnlyList<SemanticInstruction> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites,
+        TlsResolverCallBinding? resolverCall,
+        TlsModuleOwnerBinding? moduleOwner,
+        TlsDtpRelOwnerBinding? dtpRelOwner)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        if (relocationSites.Count != 2 || resolverCall is null || moduleOwner is null || dtpRelOwner is null)
+        {
+            return false;
+        }
+
+        var orderedSites = relocationSites.OrderBy(site => site.PairOrdinal).ToArray();
+        if (orderedSites[0].PairOrdinal != 0
+            || orderedSites[1].PairOrdinal != 1
+            || orderedSites[0].Binding.RelocationType != ElfConstants.RArm64TlsGdAdrPage21
+            || orderedSites[1].Binding.RelocationType != ElfConstants.RArm64TlsGdAddLo12Nc
+            || orderedSites[0].Binding.Addend != 0
+            || orderedSites[1].Binding.Addend != 0
+            || !IsAdjacentTlsSites(orderedSites[0], orderedSites[1])
+            || !IsAdjacentTlsOwner(moduleOwner, dtpRelOwner)
+            || moduleOwner.Relocation.RelocationType != ElfConstants.RArm64TlsDtpMod64
+            || dtpRelOwner.Relocation.RelocationType != ElfConstants.RArm64TlsDtpRel64
+            || moduleOwner.Relocation.SymbolIndex != dtpRelOwner.Relocation.SymbolIndex
+            || moduleOwner.Relocation.SymbolName != dtpRelOwner.Relocation.SymbolName
+            || moduleOwner.Relocation.Addend != 0
+            || resolverCall.SourceRange.Size != sizeof(uint)
+            || resolverCall.Relocation.RelocationType != ElfConstants.RArm64Call26
+            || resolverCall.Relocation.Kind != Aarch64RelocationKind.Call26
+            || resolverCall.Relocation.SymbolName != "__tls_get_addr"
+            || resolverCall.Relocation.IsPlt)
+        {
+            return false;
+        }
+
+        var moduleIndex = FindInstructionIndex(instructions, orderedSites[0].SourceRange.VirtualAddress);
+        var moduleAddIndex = FindInstructionIndex(instructions, orderedSites[1].SourceRange.VirtualAddress);
+        var resolverIndex = FindInstructionIndex(instructions, resolverCall.SourceRange.VirtualAddress);
+        if (moduleIndex < 0
+            || moduleAddIndex != moduleIndex + 1
+            || resolverIndex != moduleIndex + 2
+            || moduleIndex + 3 >= instructions.Count
+            || !TryGetInitialExecAdrRegister(instructions[moduleIndex].Encoding, out var moduleRegister)
+            || moduleRegister != 0
+            || !TryGetTlsDynamicAddImmediateRegisters(
+                ElfConstants.RArm64TlsGdAddLo12Nc,
+                instructions[moduleAddIndex].Encoding,
+                out var addSource,
+                out var addDestination)
+            || addSource != moduleRegister
+            || addDestination != moduleRegister
+            || !IsDirectTlsResolverCall(instructions[resolverIndex]))
+        {
+            return false;
+        }
+
+        var memoryIndices = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => IsMemoryInstruction(item.instruction))
+            .Select(item => item.index)
+            .ToArray();
+        if (memoryIndices.Length != 1 || memoryIndices[0] != moduleIndex + 3)
+        {
+            return false;
+        }
+
+        var memoryBase = instructions[memoryIndices[0]].Operands
+            .Select(operand => operand.Memory?.Base)
+            .FirstOrDefault(register => register.HasValue);
+        return memoryBase is { } baseRegister
+            && baseRegister.Class == Aarch64RegisterClass.General
+            && baseRegister.Role == Aarch64RegisterRole.None
+            && baseRegister.Width == 64
+            && baseRegister.Index == moduleRegister;
+    }
+
+    private static int FindInstructionIndex(
+        IReadOnlyList<SemanticInstruction> instructions,
+        VirtualAddress address) => instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == address)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+
+    private static bool IsAdjacentTlsOwner(
+        TlsModuleOwnerBinding moduleOwner,
+        TlsDtpRelOwnerBinding dtpRelOwner) =>
+        moduleOwner.SourceRange.Size == sizeof(ulong)
+        && dtpRelOwner.SourceRange.Size == sizeof(ulong)
+        && moduleOwner.SourceRange.VirtualAddress.Value <= ulong.MaxValue - sizeof(ulong)
+        && moduleOwner.SourceRange.FileOffset.Value <= ulong.MaxValue - sizeof(ulong)
+        && dtpRelOwner.SourceRange.VirtualAddress.Value == moduleOwner.SourceRange.VirtualAddress.Value + sizeof(ulong)
+        && dtpRelOwner.SourceRange.FileOffset.Value == moduleOwner.SourceRange.FileOffset.Value + sizeof(ulong);
+
+    /// <summary>
+    /// Validates the first bounded TLSLD sequence: an adjacent module-ID ADRP/ADD
+    /// pair, direct resolver call, adjacent DTPREL ADD pair, and one final access.
+    /// The loader-owned DTPMOD64 owner is carried as the fifth site.
+    /// </summary>
+    public static bool IsSupportedLocalDynamicTlsLdSequence(
+        IReadOnlyList<SemanticInstruction> instructions,
+        IReadOnlyList<TlsRelocationSite> relocationSites,
+        TlsResolverCallBinding? resolverCall = null,
+        TlsModuleOwnerBinding? moduleOwner = null)
+    {
+        ArgumentNullException.ThrowIfNull(instructions);
+        ArgumentNullException.ThrowIfNull(relocationSites);
+        if (relocationSites.Count != 4 || resolverCall is null || moduleOwner is null)
+        {
+            return false;
+        }
+
+        var moduleSites = relocationSites
+            .Where(site => site.Binding.RelocationType is
+                ElfConstants.RArm64TlsLdAdrPage21
+                or ElfConstants.RArm64TlsLdAddLo12Nc)
+            .OrderBy(site => site.PairOrdinal)
+            .ToArray();
+        var dtpRelSites = relocationSites
+            .Where(site => site.Binding.RelocationType is
+                ElfConstants.RArm64TlsLdAddDtprelHi12
+                or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
+            .OrderBy(site => site.PairOrdinal)
+            .ToArray();
+        if (moduleSites.Length != 2
+            || dtpRelSites.Length != 2
+            || moduleSites.Length + dtpRelSites.Length != relocationSites.Count
+            || moduleSites[0].PairOrdinal != 0
+            || moduleSites[1].PairOrdinal != 1
+            || dtpRelSites[0].PairOrdinal != 2
+            || dtpRelSites[1].PairOrdinal != 3
+            || !IsAdjacentTlsSites(moduleSites[0], moduleSites[1])
+            || !IsAdjacentTlsSites(dtpRelSites[0], dtpRelSites[1])
+            || moduleSites[0].Binding.Addend != 0
+            || moduleSites[1].Binding.Addend != 0
+            || dtpRelSites[0].Binding.Addend != dtpRelSites[1].Binding.Addend
+            || moduleOwner.Relocation.Addend != 0
+            || moduleOwner.SourceRange.Size != sizeof(ulong)
+            || moduleOwner.SourceRange.FileOffset.Value % sizeof(ulong) != 0
+            || moduleOwner.SourceRange.VirtualAddress.Value % sizeof(ulong) != 0
+            || moduleOwner.Relocation.RelocationType != ElfConstants.RArm64TlsDtpMod64
+            || moduleOwner.Relocation.SymbolIndex != 0
+            || moduleOwner.Relocation.SymbolName is not null
+            || moduleOwner.Relocation.RelocationAddress != moduleOwner.SourceRange.VirtualAddress
+            || moduleOwner.Relocation.Kind != Aarch64RelocationKind.ThreadLocal
+            || resolverCall.SourceRange.Size != sizeof(uint)
+            || resolverCall.Relocation.RelocationType != ElfConstants.RArm64Call26
+            || resolverCall.Relocation.Kind != Aarch64RelocationKind.Call26
+            || resolverCall.Relocation.SymbolName != "__tls_get_addr"
+            || resolverCall.Relocation.IsPlt)
+        {
+            return false;
+        }
+
+        var moduleIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == moduleSites[0].SourceRange.VirtualAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        var moduleAddIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == moduleSites[1].SourceRange.VirtualAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        var dtpRelHighIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == dtpRelSites[0].SourceRange.VirtualAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        var dtpRelLowIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceVirtualAddress == dtpRelSites[1].SourceRange.VirtualAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        if (moduleIndex < 0
+            || moduleAddIndex != moduleIndex + 1
+            || dtpRelHighIndex != moduleIndex + 3
+            || dtpRelLowIndex != moduleIndex + 4
+            || moduleIndex > instructions.Count - 6
+            || !TryGetInitialExecAdrRegister(instructions[moduleIndex].Encoding, out var moduleRegister)
+            || moduleRegister != 0
+            || !TryGetTlsDynamicAddImmediateRegisters(
+                moduleSites[1].Binding.RelocationType!.Value,
+                instructions[moduleAddIndex].Encoding,
+                out var moduleAddSource,
+                out var moduleAddDestination)
+            || moduleAddSource != moduleRegister
+            || moduleAddDestination != moduleRegister
+            || !IsDirectTlsResolverCall(instructions[moduleIndex + 2])
+            || !TryGetTlsDynamicAddImmediateRegisters(
+                dtpRelSites[0].Binding.RelocationType!.Value,
+                instructions[dtpRelHighIndex].Encoding,
+                out var dtpRelHighSource,
+                out var dtpRelHighDestination)
+            || !TryGetTlsDynamicAddImmediateRegisters(
+                dtpRelSites[1].Binding.RelocationType!.Value,
+                instructions[dtpRelLowIndex].Encoding,
+                out var dtpRelLowSource,
+                out var dtpRelLowDestination)
+            || dtpRelHighSource != moduleRegister
+            || dtpRelHighDestination != moduleRegister
+            || dtpRelLowSource != dtpRelHighDestination
+            || dtpRelLowDestination != moduleRegister)
+        {
+            return false;
+        }
+
+        var memoryIndices = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => IsMemoryInstruction(item.instruction))
+            .Select(item => item.index)
+            .ToArray();
+        if (memoryIndices.Length != 1 || memoryIndices[0] != moduleIndex + 5)
+        {
+            return false;
+        }
+
+        var memoryBase = instructions[memoryIndices[0]].Operands
+            .Select(operand => operand.Memory?.Base)
+            .FirstOrDefault(register => register.HasValue);
+        return memoryBase is { } baseRegister
+            && baseRegister.Class == Aarch64RegisterClass.General
+            && baseRegister.Role == Aarch64RegisterRole.None
+            && baseRegister.Width == 64
+            && baseRegister.Index == moduleRegister;
+    }
+    public static bool TryEncodeLocalDynamicModulePair(
+        uint sourceAdrEncoding,
+        uint sourceAddEncoding,
+        uint outputAdrEncoding,
+        uint outputAddEncoding,
+        uint moduleAddRelocationType,
+        ulong sourceAdrAddress,
+        ulong outputAdrAddress,
+        ulong moduleOwnerAddress,
+        long addend,
+        out uint encodedAdr,
+        out uint encodedAdd)
+    {
+        encodedAdr = 0;
+        encodedAdd = 0;
+        var sourceAdrValid = TryGetInitialExecAdrRegister(sourceAdrEncoding, out var sourceAdrRegister);
+        var sourceAddValid = TryGetTlsDynamicAddImmediateRegisters(
+            moduleAddRelocationType,
+            sourceAddEncoding,
+            out var sourceAddSource,
+            out var sourceAddDestination);
+        var outputAdrValid = TryGetInitialExecAdrRegister(outputAdrEncoding, out var outputAdrRegister);
+        var outputAddValid = TryGetTlsDynamicAddImmediateRegisters(
+            moduleAddRelocationType,
+            outputAddEncoding,
+            out var outputAddSource,
+            out var outputAddDestination);
+        var targetValid = TryAddSigned(moduleOwnerAddress, addend, out var targetAddress);
+        var sourceAddAddressValid = TryAdd(sourceAdrAddress, sizeof(uint), out var sourceAddAddress);
+        var outputAddAddressValid = TryAdd(outputAdrAddress, sizeof(uint), out var outputAddAddress);
+        if (!sourceAdrValid
+            || !sourceAddValid
+            || sourceAddSource != sourceAdrRegister
+            || sourceAddDestination != sourceAdrRegister
+            || !outputAdrValid
+            || !outputAddValid
+            || outputAddSource != outputAdrRegister
+            || outputAddDestination != outputAdrRegister
+            || !targetValid
+            || !sourceAddAddressValid
+            || !outputAddAddressValid)
+        {
+            return false;
+        }
+
+        var encodedAdrp = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceAdrEncoding,
+            sourceAdrAddress,
+            outputAdrAddress,
+            Aarch64InstructionEncodingFamily.AdrPrelPgHi21,
+            targetAddress,
+            OutputTemplateEncoding: outputAdrEncoding));
+        if (!encodedAdrp.IsSuccess)
+        {
+            return false;
+        }
+
+        var low12 = targetAddress & 0xFFFUL;
+        var encodedAddResult = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceAddEncoding,
+            sourceAddAddress,
+            outputAddAddress,
+            Aarch64InstructionEncodingFamily.AddImmediate,
+            low12,
+            OutputTemplateEncoding: outputAddEncoding));
+        if (!encodedAddResult.IsSuccess)
+        {
+            return false;
+        }
+
+        encodedAdr = encodedAdrp.Encoding;
+        encodedAdd = encodedAddResult.Encoding;
+        return true;
+    }
+
+    public static bool TryEncodeLocalDynamicDtprel(
+        uint relocationType,
+        uint sourceEncoding,
+        uint outputEncoding,
+        ulong sourceAddress,
+        ulong outputAddress,
+        out uint encoded)
+    {
+        encoded = 0;
+        if (relocationType is not (
+                ElfConstants.RArm64TlsLdAddDtprelHi12
+                or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
+            || !TryGetTlsDynamicAddImmediateRegisters(
+                relocationType,
+                sourceEncoding,
+                out var sourceRegister,
+                out var sourceDestination)
+            || !TryGetTlsDynamicAddImmediateRegisters(
+                relocationType,
+                outputEncoding,
+                out var outputRegister,
+                out var outputDestination)
+            || sourceRegister == 31
+            || sourceDestination == 31
+            || outputRegister == 31
+            || outputDestination == 31)
+        {
+            return false;
+        }
+
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            sourceAddress,
+            outputAddress,
+            Aarch64InstructionEncodingFamily.AddImmediate,
+            TargetOrImmediate: 0,
+            OutputTemplateEncoding: outputEncoding,
+            PreserveSourceImmediate: true));
+        if (!result.IsSuccess)
+        {
+            return false;
+        }
+
+        encoded = result.Encoding;
+        return true;
+    }
+
+    public static bool TryEncodeLocalDynamicResolverCall(
+        uint sourceEncoding,
+        uint outputEncoding,
+        ulong sourceAddress,
+        ulong outputAddress,
+        out uint encoded)
+    {
+        encoded = 0;
+        var source = new AsmStoneAdapter().Decode(sourceEncoding, sourceAddress);
+        if (!source.IsSuccess
+            || source.Instruction?.ControlFlow != Aarch64ControlFlowKind.DirectCall
+            || source.Instruction.DirectTarget is not { } targetAddress)
+        {
+            return false;
+        }
+
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            sourceAddress,
+            outputAddress,
+            Aarch64InstructionEncodingFamily.Call26,
+            targetAddress,
+            OutputTemplateEncoding: outputEncoding));
+        if (!result.IsSuccess)
+        {
+            return false;
+        }
+
+        encoded = result.Encoding;
+        return true;
+    }
+
+    private static bool TryAdd(ulong left, ulong right, out ulong result)
+    {
+        if (right > ulong.MaxValue - left)
+        {
+            result = 0;
+            return false;
+        }
+
+        result = left + right;
+        return true;
+    }
     public static bool IsSupportedLocalExecAddPair(
         IReadOnlyList<TlsInstructionRecord> instructions,
         IReadOnlyList<TlsRelocationSite> relocationSites)
@@ -1844,6 +2276,47 @@ public static class Aarch64TlsInstructionSemantics
             && secondSource == firstDestination
             && memoryBase == secondDestination;
     }
+
+    private static bool IsAdjacentTlsSites(TlsRelocationSite first, TlsRelocationSite second) =>
+        first.SourceRange.Size == sizeof(uint)
+        && second.SourceRange.Size == sizeof(uint)
+        && first.SourceRange.VirtualAddress.Value <= ulong.MaxValue - sizeof(uint)
+        && first.SourceRange.FileOffset.Value <= ulong.MaxValue - sizeof(uint)
+        && second.SourceRange.VirtualAddress.Value == first.SourceRange.VirtualAddress.Value + sizeof(uint)
+        && second.SourceRange.FileOffset.Value == first.SourceRange.FileOffset.Value + sizeof(uint);
+
+    private static bool TryGetTlsDynamicAddImmediateRegisters(
+        uint relocationType,
+        uint encoding,
+        out byte sourceRegister,
+        out byte destinationRegister)
+    {
+        sourceRegister = 0;
+        destinationRegister = 0;
+        var expectedShift = relocationType switch
+        {
+            ElfConstants.RArm64TlsLdAddLo12Nc
+                or ElfConstants.RArm64TlsGdAddLo12Nc
+                or ElfConstants.RArm64TlsLdAddDtprelLo12Nc => 0u,
+            ElfConstants.RArm64TlsLdAddDtprelHi12 => 1u,
+            _ => uint.MaxValue,
+        };
+        if (expectedShift == uint.MaxValue
+            || (encoding & 0x8000_0000u) == 0
+            || (encoding & AddImmediateOpcodeMask) != AddImmediateOpcode
+            || ((encoding >> 22) & 1) != expectedShift)
+        {
+            return false;
+        }
+
+        sourceRegister = (byte)((encoding >> 5) & 0x1F);
+        destinationRegister = (byte)(encoding & 0x1F);
+        return sourceRegister != 31 && destinationRegister != 31;
+    }
+
+    private static bool IsDirectTlsResolverCall(SemanticInstruction instruction) =>
+        string.Equals(instruction.Mnemonic, "bl", StringComparison.OrdinalIgnoreCase)
+        && instruction.ControlFlow == Aarch64ControlFlowKind.DirectCall;
 
     private static bool TryValidateLocalExecLdst32PairRelocations(
         uint firstType,

@@ -69,6 +69,8 @@ must be checked against the ABI/toolchain fixtures rather than inferred from
 model names.
 
 The managed positive forms are documented in `.trellis/spec/backend/quality-guidelines.md`. The GNU TLSIE standalone `LD_GOTTPREL_PREL19` form is also bounded by the research oracle at `aarch64-tlsie-ld-gottprel-prel19-oracle.md`; it remains semantic/layout evidence only, not runtime or lifecycle evidence.
+The exact TLSLD ADRP/ADD + `BL __tls_get_addr` + DTPREL ADD/ADD candidate is documented in `.trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsld-oracle.md`. It is semantic/layout evidence only; its loader-owned DTPMOD64 GOT relocation, resolver call ownership, PT_TLS template, and zero-fill must be preserved before runtime evaluation.
+The task also records an encoding-boundary correction in `research/aarch64-encoder-ownership.md`: AsmStone already covers the required final AArch64 instruction families, while UrProtect retains ELF/TLS relocation and sequence semantics. The current implementation gap is incomplete AsmStone encoder integration and duplicated manual instruction-word construction. Production migration and fixture/golden test correction are semantic-gate requirements, not optional cleanup.
 
 ## Boundary conclusion
 

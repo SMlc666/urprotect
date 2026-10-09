@@ -55,3 +55,28 @@ incomplete streams are rejected before publication.
 ## Prerequisite and current-contract rule
 
 Implementation is blocked until `10-06-architecture-boundary-refactor` Gates G0-G2 pass. TLS work must consume the established semantic/layout/artifact workflow and current HostContext materialization owner. It must not add a second model, compatibility alias, migration frame path, direct writer, or fallback. Runtime unavailability is never promoted as support.
+
+## Architecture and test correction: AsmStone-backed instruction encoding
+
+This task has an explicit encoding-boundary correction. AsmStone is the project's pinned AArch64 instruction decoder/encoder backend, not only a decode and register-permutation helper. The managed pipeline must use a project-owned AArch64 encoder adapter backed by AsmStone for every final AArch64 instruction word that it generates or re-encodes.
+
+The boundary is:
+
+- AsmStone owns instruction encodings, operands, register/width/scale legality, and generic PC-relative target encoding.
+- StructuralElf owns ELF relocation records, symbols, PT_TLS, GOT/TLSDESC ranges, and bounded address facts.
+- SemanticPlanning owns TLS models, relocation pairing, sequence recognition, addends, module/symbol ownership, and TLS address expressions.
+- ElfLayout owns source/output placement, target calculation, materialization, reparse, and publication validation.
+- GNU assembler/linker fixtures remain independent ABI/toolchain oracles; they do not replace the managed AsmStone-backed encoder.
+
+ELF/TLS relocation-aware semantics and TLS sequence-level semantics remain UrProtect responsibilities. They must calculate and validate the target, addend, relocation family, ownership, and sequence contract, then pass structured operands or resolved PC-relative targets to the AsmStone-backed encoder. They must not reconstruct instruction words through local opcode constants and bitfield masks.
+
+The existing manual AArch64 instruction writers in protection emission, semantic fixup encoding, TLS encoding, and layout branch encoding are migration debt. No new production manual opcode/bitfield writer is permitted. Existing raw-field recognition may remain only as a bounded transition implementation and must be paired with AsmStone decode/operand validation; new recognizers must consume project-owned records projected from AsmStone rather than duplicate its instruction catalog.
+
+Test fixtures and golden tests follow the same boundary. Positive fixture instruction words are produced by an AsmStone-backed builder or by a retained GNU assembler oracle. Nearest-negative tests mutate structured operands or relocation metadata from a valid AsmStone-produced instruction; they do not introduce unexplained hand-written opcode literals. Golden bytes remain allowed as independent expected values only when they also pass AsmStone decode and, where applicable, GNU differential verification.
+
+Add these criteria to the semantic gate:
+
+- [ ] Final generated/re-encoded AArch64 instruction words flow through the AsmStone-backed project encoder adapter; no new manual opcode/bitfield writer is introduced.
+- [ ] TLS semantic tests prove the separation between UrProtect relocation/sequence decisions and AsmStone instruction encoding.
+- [ ] Positive, nearest-negative, fixture, and golden tests use AsmStone-backed construction or an explicitly named GNU assembler oracle and retain round-trip evidence.
+- [ ] The task records every remaining manual production encoder as migration debt with an owner and a focused replacement test.

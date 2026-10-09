@@ -455,6 +455,32 @@ public static partial class SemanticPlanSnapshotCodec
             context.EnsureWithinCanonicalLimit();
         }
 
+        context.Writer.Write(binding.ResolverCall is not null ? (byte)1 : (byte)0);
+        if (binding.ResolverCall is { } resolverCall)
+        {
+            WriteRange(context, resolverCall.SourceRange);
+            WriteRelocation(context, resolverCall.Relocation);
+        }
+
+        context.Writer.Write(binding.ModuleOwner is not null ? (byte)1 : (byte)0);
+        if (binding.ModuleOwner is { } moduleOwner)
+        {
+            WriteEntityId(context, moduleOwner.SourceIdentity);
+            WriteRange(context, moduleOwner.SourceRange);
+            WriteRelocation(context, moduleOwner.Relocation);
+        }
+
+        if (binding.AccessModel == TlsAccessModel.GeneralDynamic)
+        {
+            context.Writer.Write(binding.DtpRelOwner is not null ? (byte)1 : (byte)0);
+            if (binding.DtpRelOwner is { } dtpRelOwner)
+            {
+                WriteEntityId(context, dtpRelOwner.SourceIdentity);
+                WriteRange(context, dtpRelOwner.SourceRange);
+                WriteRelocation(context, dtpRelOwner.Relocation);
+            }
+        }
+
         if (binding.AccessModel == TlsAccessModel.InitialExec)
         {
             context.Writer.Write(binding.GotEntry is not null ? (byte)1 : (byte)0);

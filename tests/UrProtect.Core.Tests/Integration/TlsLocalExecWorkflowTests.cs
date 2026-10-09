@@ -87,7 +87,136 @@ public sealed class TlsLocalExecWorkflowTests
                 rehydration.NativeImage.Bytes.AsSpan(checked((int)outputOffset.Value), sizeof(uint))));
         }
     }
+    [Fact]
+    [Trait("Category", "TlsLocalDynamic")]
+    public void SelectedLocalDynamicFunctionFlowsThroughSnapshotSharedLayoutResolverAndModuleOwnerPreservation()
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsLocalDynamicFunctionPie(),
+            "tls.local-dynamic.fixture",
+            "tls.local-dynamic.producer");
+        var sourceFile = Assert.IsType<ElfFile>(ElfParser.Parse(setup.Source).File);
+        var sourceOwner = Assert.Single(sourceFile.TlsMetadata.Dynamic.Relocations);
+        Assert.Equal(ElfConstants.RArm64TlsDtpMod64, sourceOwner.Relocation.Type);
+        Assert.Single(sourceFile.RelaRelocations, relocation =>
+            relocation.IsPlt
+            && relocation.Type == ElfConstants.RArm64JumpSlot
+            && relocation.SymbolIndex == 1);
 
+        var planning = new FunctionProtectionService().Plan(setup.Source, setup.Request);
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var snapshot = Assert.IsType<SemanticPlanSnapshot>(planning.Plan!.SemanticSnapshot);
+        var binding = Assert.IsType<SemanticTlsBindingExtension>(Assert.Single(
+            snapshot.Extensions.OfType<SemanticTlsBindingExtension>())).Binding;
+        Assert.Equal(TlsAccessModel.LocalDynamic, binding.AccessModel);
+        Assert.Equal(
+            new[]
+            {
+                ElfConstants.RArm64TlsLdAdrPage21,
+                ElfConstants.RArm64TlsLdAddLo12Nc,
+                ElfConstants.RArm64TlsLdAddDtprelHi12,
+                ElfConstants.RArm64TlsLdAddDtprelLo12Nc,
+            },
+            binding.RelocationSites.Select(site => site.Binding.RelocationType!.Value));
+        Assert.Equal(0x1608UL, binding.ResolverCall!.SourceRange.VirtualAddress.Value);
+        Assert.Equal(0x2A0UL, binding.ModuleOwner!.SourceRange.VirtualAddress.Value);
+        Assert.Equal("__tls_get_addr", binding.ResolverCall.Relocation.SymbolName);
+        Assert.Equal(5, TlsSemanticFixupPlanner.Build(snapshot.Plan).Fixups.Count);
+
+        var artifact = ProtectedImageCodec.Decode(
+            setup.Emission.ArtifactBytes!,
+            setup.SourceHash,
+            setup.RequestHash);
+        Assert.True(artifact.IsSuccess, string.Join(Environment.NewLine, artifact.Diagnostics));
+        Assert.Single(artifact.Image!.Operations.OfType<ProtectedImageSemanticPlanSnapshot>());
+
+        var rehydration = GenericRehydrationEngine.Rehydrate(
+            setup.Source,
+            setup.Emission.ArtifactBytes!,
+            setup.RehydrationOptions);
+        Assert.True(rehydration.IsSuccess, string.Join(Environment.NewLine, rehydration.Diagnostics));
+        var outputFile = rehydration.NativeImage!.ParsedImage;
+        Assert.Equal(sourceFile.TlsMetadata.StaticRelocations, outputFile.TlsMetadata.StaticRelocations);
+        Assert.Equal(sourceFile.TlsMetadata.Dynamic.Relocations, outputFile.TlsMetadata.Dynamic.Relocations);
+        Assert.Equal(sourceFile.RelaRelocations, outputFile.RelaRelocations);
+
+        var outputOwner = Assert.Single(outputFile.TlsMetadata.Dynamic.Relocations);
+        Assert.True(outputFile.LoadMap.TryVirtualAddressToFileOffset(
+            binding.ModuleOwner.SourceRange.VirtualAddress,
+            sizeof(ulong),
+            out var outputOwnerOffset));
+        Assert.Equal(binding.ModuleOwner.SourceRange.FileOffset, outputOwnerOffset);
+        Assert.Equal(
+            setup.Source.AsSpan(checked((int)binding.ModuleOwner.SourceRange.FileOffset.Value), sizeof(ulong)).ToArray(),
+            rehydration.NativeImage.Bytes.AsSpan(checked((int)outputOwnerOffset.Value), sizeof(ulong)).ToArray());
+        Assert.Equal(sourceOwner.Relocation, outputOwner.Relocation);
+
+        var evidence = rehydration.NativeImage.LayoutEvidence!;
+        Assert.Equal(5, evidence.TlsFixups.Count);
+        Assert.Contains(evidence.TlsFixups, fixup =>
+            fixup.Fixup.Relocation.Kind == Aarch64RelocationKind.Call26
+            && fixup.Fixup.PairOrdinal == -1
+            && fixup.Fixup.ResolverCall is not null);
+        Assert.All(evidence.TlsFixups, fixup =>
+            Assert.Equal(TlsAccessModel.LocalDynamic, fixup.Fixup.AccessModel));
+    }
+
+
+    [Fact]
+    [Trait("Category", "TlsGeneralDynamic")]
+    public void SelectedGeneralDynamicFunctionCarriesTypedOwnersThroughSnapshotAndRejectsMissingDtpRelOwner()
+    {
+        var source = ElfFixture.TlsGeneralDynamicFunctionPie();
+        var parsedSource = ElfParser.Parse(source);
+        Assert.True(parsedSource.IsSuccess, string.Join(Environment.NewLine, parsedSource.Diagnostics));
+        Assert.True(TlsStructuralAdapter.IsExactResolverCall(
+            parsedSource.File!,
+            new SemanticSourceRange(new FileOffset(0x608), new VirtualAddress(0x1608), sizeof(uint))));
+        var request = new FunctionProtectionOptions(
+            new[] { FunctionSelector.ByName("tls_fixture") },
+            new[] { ProtectionPass.RegisterPermutation });
+        var planning = new FunctionProtectionService().Plan(source, request);
+
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var snapshot = Assert.IsType<SemanticPlanSnapshot>(planning.Plan!.SemanticSnapshot);
+        var binding = Assert.IsType<SemanticTlsBindingExtension>(Assert.Single(
+            snapshot.Extensions.OfType<SemanticTlsBindingExtension>())).Binding;
+        Assert.Equal(TlsAccessModel.GeneralDynamic, binding.AccessModel);
+        Assert.Equal(ElfConstants.RArm64TlsDtpMod64, binding.ModuleOwner!.Relocation.RelocationType);
+        Assert.Equal(ElfConstants.RArm64TlsDtpRel64, binding.DtpRelOwner!.Relocation.RelocationType);
+        Assert.Equal(3, TlsSemanticFixupPlanner.Build(snapshot.Plan).Fixups.Count);
+
+        var setup = CreateEmission(
+            source,
+            "tls.general-dynamic.fixture",
+            "tls.general-dynamic.producer");
+        var artifact = ProtectedImageCodec.Decode(
+            setup.Emission.ArtifactBytes!,
+            setup.SourceHash,
+            setup.RequestHash);
+        Assert.True(artifact.IsSuccess, string.Join(Environment.NewLine, artifact.Diagnostics));
+        Assert.Single(artifact.Image!.Operations.OfType<ProtectedImageSemanticPlanSnapshot>());
+
+        var rehydration = GenericRehydrationEngine.Rehydrate(
+            setup.Source,
+            setup.Emission.ArtifactBytes!,
+            setup.RehydrationOptions);
+        Assert.True(rehydration.IsSuccess, string.Join(Environment.NewLine, rehydration.Diagnostics));
+        Assert.Equal(3, rehydration.NativeImage!.LayoutEvidence!.TlsFixups.Count);
+        Assert.All(rehydration.NativeImage.LayoutEvidence.TlsFixups, fixup =>
+            Assert.Equal(TlsAccessModel.GeneralDynamic, fixup.Fixup.AccessModel));
+
+        var missingOwner = source.ToArray();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            missingOwner.AsSpan(0x320),
+            (2UL << 32) | ElfConstants.RArm64Abs64);
+        var rejected = new FunctionProtectionService().Plan(missingOwner, request);
+        Assert.False(rejected.IsSuccess);
+        Assert.Contains(rejected.Diagnostics, diagnostic => diagnostic.Code is
+            DiagnosticCode.TlsBindingUnresolved
+            or DiagnosticCode.TlsMetadataMalformed
+            or DiagnosticCode.TlsSemanticsUnsupported);
+    }
     [Fact]
     [Trait("Category", "TlsInitialExec")]
     public void SelectedInitialExecMovwPairFlowsThroughSnapshotSharedLayoutGotPreservationAndReparse()

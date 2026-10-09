@@ -392,11 +392,23 @@ public static class GenericRehydrationEngine
 
         foreach (var binding in tlsBindings)
         {
-            if (binding.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec))
+            if (binding.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "The current transformed TLS semantic slice accepts only local-exec or exact TLSIE MOVW/ADRP/LD_GOTTPREL_PREL19 model bindings.",
+                    "The current transformed TLS semantic slice accepts only local-exec, exact TLSIE, or exact TLSLD model bindings.",
+                    binding.SourceRange.FileOffset.Value);
+                valid = false;
+            }
+
+            if (binding.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                && (binding.ResolverCall is null
+                    || binding.ModuleOwner is null
+                    || (binding.AccessModel == TlsAccessModel.GeneralDynamic && binding.DtpRelOwner is null)))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsBindingUnresolved,
+                    "The transformed TLSLD binding has no exact resolver-call and module-owner carriers.",
                     binding.SourceRange.FileOffset.Value);
                 valid = false;
             }
@@ -702,11 +714,11 @@ public static class GenericRehydrationEngine
         var requests = new List<ElfLayoutTlsFixupRequest>(semanticFixups.Fixups.Count);
         foreach (var fixup in semanticFixups.Fixups)
         {
-            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec))
+            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "Rehydration currently materializes only local-exec or exact TLSIE MOVW/ADRP/LD_GOTTPREL_PREL19 TLS semantic fixups.",
+                    "Rehydration currently materializes only local-exec, exact TLSIE, or exact TLSLD semantic fixups.",
                     fixup.RelocationSourceRange.FileOffset.Value);
                 continue;
             }
@@ -735,7 +747,7 @@ public static class GenericRehydrationEngine
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsLayoutMismatch,
-                    "The local-exec TLS output relocation site has inconsistent file and virtual address-map deltas.",
+                    "The TLS output relocation site has inconsistent file and virtual address-map deltas.",
                     fixup.RelocationSourceRange.FileOffset.Value);
                 continue;
             }

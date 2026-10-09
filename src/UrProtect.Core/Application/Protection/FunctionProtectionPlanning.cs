@@ -159,38 +159,58 @@ public sealed partial class FunctionProtectionService
                 .Distinct()
                 .ToArray();
             if (models.Length != 1
-                || models[0] is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec))
+                || models[0] is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "The selected function contains a TLS relocation outside the current local-exec or exact TLSIE MOVW/ADRP/LD_GOTTPREL_PREL19 rewrite slices.",
+                    "The selected function contains TLS relocations from more than one model or outside the implemented local-exec, initial-exec, and exact TLSLD rewrite slices.",
                     facts[0].Relocation.Offset);
                 continue;
             }
-
             var model = models[0]!.Value;
-            var supported = model == TlsAccessModel.LocalExec
-                ? facts.All(fact => fact.Relocation.Type is
+            var supported = model switch
+            {
+                TlsAccessModel.LocalExec => facts.All(fact => fact.Relocation.Type is
                     ElfConstants.RArm64TlsLeAddTprelHi12
                     or ElfConstants.RArm64TlsLeAddTprelLo12
                     or ElfConstants.RArm64TlsLeAddTprelLo12Nc
                     or ElfConstants.RArm64TlsLeMovwTprelG1
                     or ElfConstants.RArm64TlsLeMovwTprelG0Nc
-                    or ElfConstants.RArm64TlsLeLdst32TprelLo12Nc)
-                : (facts.Length == 1
+                    or ElfConstants.RArm64TlsLeLdst32TprelLo12Nc),
+                TlsAccessModel.InitialExec => facts.Length == 1
                     && facts[0].Relocation.Type == ElfConstants.RArm64TlsIeLdGottprelPrel19
                     || facts.Length == 2
                     && ((facts[0].Relocation.Type == ElfConstants.RArm64TlsIeMovwGottprelG1
                             && facts[1].Relocation.Type == ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
                         || (facts[0].Relocation.Type == ElfConstants.RArm64TlsIeAdrGottprelPage21
-                            && facts[1].Relocation.Type == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)));
+                            && facts[1].Relocation.Type == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)),
+                TlsAccessModel.LocalDynamic => facts.Length == 4
+                    && facts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
+                    {
+                        ElfConstants.RArm64TlsLdAdrPage21,
+                        ElfConstants.RArm64TlsLdAddLo12Nc,
+                        ElfConstants.RArm64TlsLdAddDtprelHi12,
+                        ElfConstants.RArm64TlsLdAddDtprelLo12Nc,
+                    }),
+                TlsAccessModel.GeneralDynamic => facts.Length == 2
+                    && facts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
+                    {
+                        ElfConstants.RArm64TlsGdAdrPage21,
+                        ElfConstants.RArm64TlsGdAddLo12Nc,
+                    }),
+                _ => false,
+            };
             if (!supported)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    model == TlsAccessModel.InitialExec
-                        ? "The current initial-exec layout slice accepts only the standalone TLSIE LD_GOTTPREL_PREL19 relocation or ordered TLSIE MOVW G1/G0_NC and ADRP/LD64 GOTTPREL pairs."
-                        : "The current local-exec layout slice accepts only ADD TPREL HI12/LO12, ADD TPREL HI12/LDST32 LO12_NC, or MOVW TPREL G1/G0_NC pairs.",
+                    model switch
+                    {
+                        TlsAccessModel.InitialExec => "The current initial-exec layout slice accepts only the standalone TLSIE LD_GOTTPREL_PREL19 relocation or ordered TLSIE MOVW G1/G0_NC and ADRP/LD64 GOTTPREL pairs.",
+                        TlsAccessModel.LocalDynamic => "The current local-dynamic layout slice accepts only the exact TLSLD ADRP/ADD, direct __tls_get_addr, DTPREL ADD/ADD sequence.",
+                        TlsAccessModel.GeneralDynamic => "The current general-dynamic layout slice accepts only the exact TLSGD ADRP/ADD, direct __tls_get_addr, and paired DTPMOD64/DTPREL64 owners.",
+                        _ => "The current local-exec layout slice accepts only ADD TPREL HI12/LO12, ADD TPREL HI12/LDST32 LO12_NC, or MOVW TPREL G1/G0_NC pairs.",
+                    },
                     facts[0].Relocation.Offset);
                 continue;
             }
@@ -268,13 +288,87 @@ public sealed partial class FunctionProtectionService
                     continue;
                 }
             }
+            TlsResolverCallBinding? resolverCall = null;
+            TlsModuleOwnerBinding? moduleOwner = null;
+            TlsDtpRelOwnerBinding? dtpRelOwner = null;
+            if (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
+            {
+                var resolverCandidates = analysis.Instructions
+                    .Where(instruction => instruction.Decode.Instruction?.ControlFlow == Aarch64ControlFlowKind.DirectCall)
+                    .Where(instruction => TlsStructuralAdapter.IsExactResolverCall(
+                        file,
+                        new SemanticSourceRange(
+                            new FileOffset(instruction.FileOffset),
+                            new VirtualAddress(instruction.Address),
+                            sizeof(uint))))
+                    .ToArray();
+                if (resolverCandidates.Length != 1)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsBindingUnresolved,
+                        "The selected dynamic TLS sequence does not have exactly one direct __tls_get_addr call owned by its PLT binding.",
+                        analysis.Function.Value);
+                    continue;
+                }
+
+                var resolverSourceInstruction = resolverCandidates[0];
+                var resolverProjection = TlsStructuralAdapter.ProjectResolverCall(
+                    file,
+                    new SemanticSourceRange(
+                        new FileOffset(resolverSourceInstruction.FileOffset),
+                        new VirtualAddress(resolverSourceInstruction.Address),
+                        sizeof(uint)));
+                diagnostics.AddRange(resolverProjection.Diagnostics);
+                resolverCall = resolverProjection.Value;
+                if (model == TlsAccessModel.LocalDynamic)
+                {
+                    var ownerProjection = TlsStructuralAdapter.ProjectModuleOwner(file, moduleResult.Value);
+                    diagnostics.AddRange(ownerProjection.Diagnostics);
+                    moduleOwner = ownerProjection.Value;
+                    if (!resolverProjection.IsSuccess || resolverCall is null
+                        || !ownerProjection.IsSuccess || moduleOwner is null)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    var ownerProjection = symbol is null
+                        ? new TlsStructuralProjectionResult<TlsStructuralAdapter.TlsGeneralDynamicOwnerBinding>(null, new[]
+                        {
+                            new Diagnostic(
+                                DiagnosticSeverity.Error,
+                                DiagnosticCode.TlsBindingUnresolved,
+                                "The selected general-dynamic function has no resolved TLS symbol for GOT owner projection.")
+                        })
+                        : TlsStructuralAdapter.ProjectGeneralDynamicOwners(file, moduleResult.Value, symbol, facts[0].Relocation.Addend);
+                    diagnostics.AddRange(ownerProjection.Diagnostics);
+                    if (ownerProjection.Value is { } generalOwners)
+                    {
+                        moduleOwner = generalOwners.ModuleOwner;
+                        dtpRelOwner = generalOwners.DtpRelOwner;
+                    }
+
+                    if (!resolverProjection.IsSuccess || resolverCall is null
+                        || !ownerProjection.IsSuccess || moduleOwner is null || dtpRelOwner is null)
+                    {
+                        continue;
+                    }
+                }
+            }
 
             var recognition = Aarch64TlsSequenceRecognizer.Recognize(
                 projectedInstructions,
                 sites,
                 moduleResult.Value,
                 symbol,
-                gotEntry: gotEntry);
+                resolverTarget: model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                    ? SemanticTarget.RuntimeResolved("symbol:__tls_get_addr")
+                    : null,
+                gotEntry: gotEntry,
+                resolverCall: resolverCall,
+                moduleOwner: moduleOwner,
+                dtpRelOwner: dtpRelOwner);
             diagnostics.AddRange(recognition.Diagnostics);
             if (!recognition.IsSuccess || recognition.Binding is null)
             {
@@ -363,6 +457,23 @@ public sealed partial class FunctionProtectionService
                     sourceInstruction.Encoding,
                     site.Binding,
                     site.SourceRange));
+            }
+            if (resolverCall is { } call
+                && sourceInstructionsByAddress.TryGetValue(call.SourceRange.VirtualAddress.Value, out var resolverInstruction))
+            {
+                fixups.Add(SemanticFixup.FromRelocation(
+                    call.SourceRange.VirtualAddress,
+                    call.SourceRange.FileOffset,
+                    resolverInstruction.Encoding,
+                    call.Relocation,
+                    call.SourceRange));
+            }
+            else if (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "The local-dynamic resolver call has no projected source instruction mapping.",
+                    binding.SourceRange.FileOffset.Value);
             }
         }
 

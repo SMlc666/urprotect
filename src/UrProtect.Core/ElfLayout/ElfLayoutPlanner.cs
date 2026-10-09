@@ -1225,16 +1225,19 @@ public static class ElfLayoutPlanner
                 StringComparison.Ordinal));
             var fixup = request.Fixup;
             var type = fixup?.Relocation?.RelocationType;
-            var model = type is { } relocationType
-                ? TlsRelocationClassifier.GetAccessModel(relocationType)
-                : null;
+            var model = fixup?.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                && fixup.Relocation?.Kind == Aarch64RelocationKind.Call26
+                ? fixup.AccessModel
+                : type is { } relocationType
+                    ? TlsRelocationClassifier.GetAccessModel(relocationType)
+                    : null;
             if (fixup is null
                 || fixup.Relocation is null
                 || fixup.AddressExpression is null
                 || fixup.Module is null
                 || region is null
                 || !seen.Add((request.RegionIdentity, request.OutputOffset))
-                || model is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec)
+                || model is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
                 || (model == TlsAccessModel.LocalExec
                     && (fixup.RelocationFamily != TlsRelocationFamily.Tprel
                         || fixup.AddressExpression.Kind != TlsAddressExpressionKind.ThreadPointerRelative
@@ -1253,12 +1256,27 @@ public static class ElfLayoutPlanner
                             or ElfConstants.RArm64TlsIeAdrGottprelPage21
                             or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
                             or ElfConstants.RArm64TlsIeLdGottprelPrel19)))
+                || (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                    && (fixup.ResolverCall is null
+                        || fixup.ModuleOwner is null
+                        || (model == TlsAccessModel.GeneralDynamic && fixup.DtpRelOwner is null)
+                        || (fixup.Relocation.Kind == Aarch64RelocationKind.Call26
+                            ? fixup.PairOrdinal != -1
+                            : model == TlsAccessModel.LocalDynamic
+                                ? type is not (ElfConstants.RArm64TlsLdAdrPage21
+                                    or ElfConstants.RArm64TlsLdAddLo12Nc
+                                    or ElfConstants.RArm64TlsLdAddDtprelHi12
+                                    or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
+                                : type is not (ElfConstants.RArm64TlsGdAdrPage21
+                                    or ElfConstants.RArm64TlsGdAddLo12Nc))))
                 || request.OutputOffset > (ulong)region.CodeBytes.Length
                 || sizeof(uint) > (ulong)region.CodeBytes.Length - request.OutputOffset
                 || (request.OutputOffset & 3) != 0
                 || !region.SourceAddress.Value.Equals(fixup.SequenceSourceRange.VirtualAddress.Value)
                 || fixup.SequenceSourceRange.Size > region.SourceSize
-                || fixup.PairOrdinal is < 0 or > 1
+                || (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                    ? fixup.PairOrdinal is < -1 or > 3
+                    : fixup.PairOrdinal is < 0 or > 1)
                 || fixup.RelocationSourceRange.VirtualAddress.Value < region.SourceAddress.Value
                 || fixup.RelocationSourceRange.VirtualAddress.Value - region.SourceAddress.Value > region.SourceSize
                 || fixup.RelocationSourceRange.Size > region.SourceSize
@@ -1999,6 +2017,93 @@ public static class ElfLayoutPlanner
         var outputIndex = checked((int)request.OutputOffset);
         var outputEncoding = BinaryPrimitives.ReadUInt32LittleEndian(outputCode.AsSpan(outputIndex, sizeof(uint)));
         uint fixedEncoding;
+        if (fixup.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+            && fixup.Relocation.Kind == Aarch64RelocationKind.Call26)
+        {
+            if (fixup.ResolverCall is null
+                || fixup.ModuleOwner is null
+                || !TryAdd(placement.VirtualAddress.Value, (ulong)outputIndex, out var outputAddress)
+                || !Aarch64TlsInstructionSemantics.TryEncodeLocalDynamicResolverCall(
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    outputAddress,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLS dynamic resolver CALL26 conflicts with its source target, output range, or direct-call encoding contract.",
+                    sourceOffset);
+                return false;
+            }
+        }
+        else if (relocationType is ElfConstants.RArm64TlsLdAdrPage21
+            or ElfConstants.RArm64TlsLdAddLo12Nc
+            or ElfConstants.RArm64TlsGdAdrPage21
+            or ElfConstants.RArm64TlsGdAddLo12Nc)
+        {
+            var isAdr = relocationType is ElfConstants.RArm64TlsLdAdrPage21 or ElfConstants.RArm64TlsGdAdrPage21;
+            var pairSourceOffset = isAdr ? sourceOffset : sourceOffset >= sizeof(uint) ? sourceOffset - sizeof(uint) : ulong.MaxValue;
+            var pairOutputOffset = isAdr ? (ulong)outputIndex : (ulong)outputIndex >= sizeof(uint) ? (ulong)outputIndex - sizeof(uint) : ulong.MaxValue;
+            var pairSourceAddress = isAdr
+                ? fixup.RelocationSourceRange.VirtualAddress.Value
+                : fixup.RelocationSourceRange.VirtualAddress.Value >= sizeof(uint)
+                    ? fixup.RelocationSourceRange.VirtualAddress.Value - sizeof(uint)
+                    : ulong.MaxValue;
+            if (fixup.ModuleOwner is null
+                || pairSourceOffset == ulong.MaxValue
+                || pairSourceAddress == ulong.MaxValue
+                || pairOutputOffset == ulong.MaxValue
+                || pairSourceOffset > int.MaxValue
+                || pairSourceOffset > (ulong)sourceFile.Bytes.Length
+                || 2 * sizeof(uint) > (ulong)sourceFile.Bytes.Length - pairSourceOffset
+                || pairOutputOffset > (ulong)outputCode.Length
+                || 2 * sizeof(uint) > (ulong)outputCode.Length - pairOutputOffset
+                || !TryAdd(placement.VirtualAddress.Value, pairOutputOffset, out var pairOutputAddress)
+                || !Aarch64TlsInstructionSemantics.TryEncodeLocalDynamicModulePair(
+                    BinaryPrimitives.ReadUInt32LittleEndian(sourceFile.Bytes.Span.Slice(checked((int)pairSourceOffset), sizeof(uint))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(sourceFile.Bytes.Span.Slice(checked((int)(pairSourceOffset + sizeof(uint))), sizeof(uint))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(outputCode.AsSpan(checked((int)pairOutputOffset), sizeof(uint))),
+                    BinaryPrimitives.ReadUInt32LittleEndian(outputCode.AsSpan(checked((int)(pairOutputOffset + sizeof(uint))), sizeof(uint))),
+                    relocationType == ElfConstants.RArm64TlsGdAdrPage21 || relocationType == ElfConstants.RArm64TlsGdAddLo12Nc
+                        ? ElfConstants.RArm64TlsGdAddLo12Nc
+                        : ElfConstants.RArm64TlsLdAddLo12Nc,
+                    pairSourceAddress,
+                    pairOutputAddress,
+                    fixup.ModuleOwner.SourceRange.VirtualAddress.Value,
+                    fixup.Addend,
+                    out var encodedAdr,
+                    out var encodedAdd))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLS dynamic module-ID ADRP/ADD output pair conflicts with its loader-owned DTPMOD64 slot or page/low-12 encoding.",
+                    sourceOffset);
+                return false;
+            }
+
+            fixedEncoding = isAdr ? encodedAdr : encodedAdd;
+        }
+        else if (fixup.AccessModel == TlsAccessModel.LocalDynamic
+            && relocationType is ElfConstants.RArm64TlsLdAddDtprelHi12 or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
+        {
+            if (!TryAdd(placement.VirtualAddress.Value, (ulong)outputIndex, out var dtpRelOutputAddress)
+                || !Aarch64TlsInstructionSemantics.TryEncodeLocalDynamicDtprel(
+                    relocationType,
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    dtpRelOutputAddress,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLSLD DTPREL output instruction conflicts with its typed ADD immediate or register contract.",
+                    sourceOffset);
+                return false;
+            }
+        }
+        else
         if (relocationType == ElfConstants.RArm64TlsIeLdGottprelPrel19)
         {
             if (fixup.GotEntry is null

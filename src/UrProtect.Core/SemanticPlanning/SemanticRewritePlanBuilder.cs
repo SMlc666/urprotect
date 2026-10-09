@@ -270,6 +270,8 @@ public static class SemanticRewritePlanBuilder
                 or Aarch64RelocationKind.Literal19
         || fixup.Relocation?.RelocationType is
             ElfConstants.RArm64TlsIeAdrGottprelPage21
+            or ElfConstants.RArm64TlsGdAdrPage21
+            or ElfConstants.RArm64TlsLdAdrPage21
             or ElfConstants.RArm64TlsIeLdGottprelPrel19;
 
     private static void ValidateExpressionKind(

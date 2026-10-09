@@ -922,13 +922,22 @@ public static partial class SemanticPlanSnapshotCodec
             }
         }
 
+        var snapshotRelocationTypes = binding.RelocationSites
+            .Where(site => site is not null
+                && site.Binding is not null
+                && site.Binding.RelocationType.HasValue)
+            .Select(site => site.Binding!.RelocationType!.Value)
+            .Concat(binding.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                && binding.ModuleOwner?.Relocation.RelocationType is { } ownerType
+                ? new[] { ownerType }
+                : Array.Empty<uint>())
+            .Concat(binding.AccessModel == TlsAccessModel.GeneralDynamic
+                && binding.DtpRelOwner?.Relocation.RelocationType is { } dtpRelType
+                ? new[] { dtpRelType }
+                : Array.Empty<uint>());
         if (!TlsRelocationClassifier.IsCompleteRelocationPattern(
                 binding.AccessModel,
-                binding.RelocationSites
-                    .Where(site => site is not null
-                        && site.Binding is not null
-                        && site.Binding.RelocationType.HasValue)
-                    .Select(site => site.Binding!.RelocationType!.Value)))
+                snapshotRelocationTypes))
         {
             diagnostics.Error(
                 DiagnosticCode.TlsSequenceMalformed,
@@ -971,6 +980,16 @@ public static partial class SemanticPlanSnapshotCodec
         {
             ValidateTlsGotEntry(gotEntry, binding.Module, binding.Symbol, binding.Addend, diagnostics, offset);
         }
+        if (binding.AccessModel == TlsAccessModel.GeneralDynamic)
+        {
+            ValidateTlsGeneralDynamicOwners(binding, diagnostics, offset);
+            ValidateTlsDtpRelOwner(binding, diagnostics, offset);
+        }
+        if (binding.AccessModel == TlsAccessModel.LocalDynamic)
+        {
+            ValidateTlsDynamicOwners(binding, diagnostics, offset);
+        }
+
 
         if (binding.AccessSize is not (1 or 2 or 4 or 8 or 16))
         {
@@ -1261,6 +1280,7 @@ public static partial class SemanticPlanSnapshotCodec
                 $"tls-got:{module.Identity}:{gotEntry.Symbol.Name}",
                 StringComparison.Ordinal)
             && gotEntry.Relocation.IsKindConsistent;
+
         if (!valid)
         {
             diagnostics.Error(
@@ -1269,6 +1289,150 @@ public static partial class SemanticPlanSnapshotCodec
                 offset);
         }
     }
+    private static void ValidateTlsDtpRelOwner(
+        TlsBinding binding,
+        DiagnosticBag diagnostics,
+        ulong offset)
+    {
+        var owner = binding.DtpRelOwner;
+        var valid = owner is not null
+            && owner.SourceRange.Size == sizeof(ulong)
+            && owner.SourceRange.FileOffset.Value % sizeof(ulong) == 0
+            && owner.SourceRange.VirtualAddress.Value % sizeof(ulong) == 0
+            && owner.Relocation.Kind == Aarch64RelocationKind.ThreadLocal
+            && owner.Relocation.RelocationType == ElfConstants.RArm64TlsDtpRel64
+            && binding.Symbol is not null
+            && (owner.Relocation.SymbolIndex == binding.Symbol.SymbolIndex
+                || owner.Relocation.SymbolName == binding.Symbol.Name)
+            && owner.Relocation.SymbolName == binding.Symbol.Name
+            && owner.Relocation.Addend == binding.Addend
+            && owner.Relocation.RelocationAddress == owner.SourceRange.VirtualAddress
+            && owner.Relocation.Target.Resolution == SemanticTargetResolution.RuntimeResolved
+            && owner.Relocation.Target.RuntimeBinding == $"tls-symbol:{binding.Module.Identity}:{binding.Symbol.Name}"
+            && owner.Relocation.IsKindConsistent;
+        if (!valid)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A general-dynamic TLS binding has no exact loader-owned DTPREL64 symbol owner.",
+                offset);
+            return;
+        }
+
+        ValidateEntityId(owner!.SourceIdentity, "TLS DTPREL-owner identity", diagnostics, offset);
+        ValidateRange(owner.SourceRange, "TLS DTPREL-owner source range", diagnostics, offset);
+        ValidateRelocation(owner.Relocation, diagnostics, offset);
+    }
+
+    private static void ValidateTlsGeneralDynamicOwners(
+        TlsBinding binding,
+        DiagnosticBag diagnostics,
+        ulong offset)
+    {
+        var resolverCall = binding.ResolverCall;
+        var moduleOwner = binding.ModuleOwner;
+        var validResolver = resolverCall is not null
+            && resolverCall.SourceRange.IsInstructionRange
+            && resolverCall.SourceRange.Size == sizeof(uint)
+            && resolverCall.Relocation.Kind == Aarch64RelocationKind.Call26
+            && resolverCall.Relocation.RelocationType == ElfConstants.RArm64Call26
+            && !resolverCall.Relocation.IsPlt
+            && resolverCall.Relocation.RelocationAddress == resolverCall.SourceRange.VirtualAddress
+            && resolverCall.Relocation.SymbolName == "__tls_get_addr"
+            && resolverCall.Relocation.Target.Resolution == SemanticTargetResolution.RuntimeResolved
+            && resolverCall.Relocation.Target.RuntimeBinding == "symbol:__tls_get_addr"
+            && resolverCall.Relocation.IsKindConsistent;
+        var validModule = moduleOwner is not null
+            && moduleOwner.SourceRange.Size == sizeof(ulong)
+            && moduleOwner.SourceRange.FileOffset.Value % sizeof(ulong) == 0
+            && moduleOwner.SourceRange.VirtualAddress.Value % sizeof(ulong) == 0
+            && moduleOwner.Relocation.Kind == Aarch64RelocationKind.ThreadLocal
+            && moduleOwner.Relocation.RelocationType == ElfConstants.RArm64TlsDtpMod64
+            && binding.Symbol is not null
+            && (moduleOwner.Relocation.SymbolIndex == binding.Symbol.SymbolIndex
+                || moduleOwner.Relocation.SymbolName == binding.Symbol.Name)
+            && moduleOwner.Relocation.SymbolName == binding.Symbol.Name
+            && moduleOwner.Relocation.Addend == 0
+            && moduleOwner.Relocation.RelocationAddress == moduleOwner.SourceRange.VirtualAddress
+            && moduleOwner.Relocation.Target.Resolution == SemanticTargetResolution.RuntimeResolved
+            && moduleOwner.Relocation.Target.RuntimeBinding == $"tls-module:{binding.Module.Identity}:{binding.Symbol.Name}"
+            && moduleOwner.Relocation.IsKindConsistent;
+        if (!validResolver || !validModule)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A general-dynamic TLS binding has no exact __tls_get_addr call or DTPMOD64 module owner.",
+                offset);
+            return;
+        }
+
+        ValidateEntityId(moduleOwner!.SourceIdentity, "TLS module-owner identity", diagnostics, offset);
+        ValidateRange(moduleOwner.SourceRange, "TLS module-owner source range", diagnostics, offset);
+        ValidateRelocation(moduleOwner.Relocation, diagnostics, offset);
+        ValidateRange(resolverCall!.SourceRange, "TLS resolver call source range", diagnostics, offset);
+        ValidateRelocation(resolverCall.Relocation, diagnostics, offset);
+    }
+
+    private static void ValidateTlsDynamicOwners(
+        TlsBinding binding,
+        DiagnosticBag diagnostics,
+        ulong offset)
+    {
+        TlsResolverCallBinding? resolverCall = binding.ResolverCall;
+        TlsModuleOwnerBinding? moduleOwner = binding.ModuleOwner;
+        TlsDtpRelOwnerBinding? dtpRelOwner = binding.DtpRelOwner;
+        var validResolverCall = resolverCall is not null
+            && resolverCall.SourceRange.IsInstructionRange
+            && resolverCall.SourceRange.Size == sizeof(uint)
+            && resolverCall.Relocation.Kind == Aarch64RelocationKind.Call26
+            && resolverCall.Relocation.RelocationType == ElfConstants.RArm64Call26
+            && !resolverCall.Relocation.IsPlt
+            && resolverCall.Relocation.RelocationAddress == resolverCall.SourceRange.VirtualAddress
+            && resolverCall.Relocation.SymbolName == "__tls_get_addr"
+            && resolverCall.Relocation.Target.Resolution == SemanticTargetResolution.RuntimeResolved
+            && resolverCall.Relocation.Target.RuntimeBinding == "symbol:__tls_get_addr"
+            && resolverCall.Relocation.IsKindConsistent;
+        if (!validResolverCall)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A local-dynamic TLS binding has no exact __tls_get_addr CALL26 carrier.",
+                offset);
+        }
+        else
+        {
+            ValidateRange(resolverCall!.SourceRange, "TLS resolver call source range", diagnostics, offset);
+            ValidateRelocation(resolverCall.Relocation, diagnostics, offset);
+        }
+
+        var validModuleOwner = moduleOwner is not null
+            && moduleOwner.SourceRange.Size == sizeof(ulong)
+            && moduleOwner.SourceRange.FileOffset.Value % sizeof(ulong) == 0
+            && moduleOwner.SourceRange.VirtualAddress.Value % sizeof(ulong) == 0
+            && moduleOwner.Relocation.Kind == Aarch64RelocationKind.ThreadLocal
+            && moduleOwner.Relocation.RelocationType == ElfConstants.RArm64TlsDtpMod64
+            && moduleOwner.Relocation.SymbolIndex == 0
+            && moduleOwner.Relocation.SymbolName is null
+            && moduleOwner.Relocation.Addend == 0
+            && moduleOwner.Relocation.RelocationAddress == moduleOwner.SourceRange.VirtualAddress
+            && moduleOwner.Relocation.Target.Resolution == SemanticTargetResolution.RuntimeResolved
+            && moduleOwner.Relocation.Target.RuntimeBinding == $"tls-module:{binding.Module.Identity}"
+            && moduleOwner.Relocation.IsKindConsistent;
+        if (!validModuleOwner)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "A local-dynamic TLS binding has no exact loader-owned DTPMOD64 module owner.",
+                offset);
+        }
+        else
+        {
+            ValidateEntityId(moduleOwner!.SourceIdentity, "TLS module-owner identity", diagnostics, offset);
+            ValidateRange(moduleOwner.SourceRange, "TLS module-owner source range", diagnostics, offset);
+            ValidateRelocation(moduleOwner.Relocation, diagnostics, offset);
+        }
+    }
+
 
     private static void ValidateTlsModule(
         TlsModuleIdentity module,
@@ -1375,8 +1539,10 @@ public static partial class SemanticPlanSnapshotCodec
                 && binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtprel),
             TlsAccessModel.GeneralDynamic => roles.Contains(TlsInstructionRole.ModuleLookup)
                 && roles.Contains(TlsInstructionRole.ResolverCall)
-                && binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtpmod)
-                && binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtprel),
+                && (binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtpmod)
+                    || binding.ModuleOwner is not null)
+                && (binding.RelocationSites.Any(site => site is not null && site.Family == TlsRelocationFamily.Dtprel)
+                    || binding.DtpRelOwner is not null),
             TlsAccessModel.TlsDesc => roles.Contains(TlsInstructionRole.DescriptorLoad)
                 && roles.Contains(TlsInstructionRole.DescriptorCall)
                 && roles.Contains(TlsInstructionRole.AddressFinalization),

@@ -11,6 +11,14 @@
 3. Define stable diagnostic categories, semantic snapshot fields, profile
    requirements, runtime requirements, and the matrix row schema before coding.
 
+
+## Phase 0A — AArch64 encoding ownership and test correction
+
+3a. Inventory every production manual instruction-word writer and every fixture/golden helper that constructs AArch64 words. Classify each occurrence as instruction encoding, ELF constant/relocation data, binary test data, or unrelated native/protocol data.
+3b. Add the project-owned AsmStone-backed AArch64 instruction encoder adapter with bounded project types, stable diagnostics, and mandatory decode round-trip validation.
+3c. Route branch, ADR/ADRP, literal, immediate, load/store, move-wide, register-move, compare, return, and resolver-call output encoding through the adapter. Keep relocation target calculation and TLS ownership validation in UrProtect.
+3d. Convert TLS and protection fixture builders to the adapter or to explicitly named GNU assembler/linker oracle inputs. Add nearest-negative mutations from structured valid encodings and remove unexplained new opcode literals.
+3e. Add a focused differential test matrix proving AsmStone output against GNU assembler/linker output for every promoted instruction family and proving that valid instruction encodings do not imply valid TLS relocation or sequence semantics.
 ## Phase 1 — Structural TLS facts
 
 4. Add bounded `TlsSegmentFacts` and `TlsDynamicFacts` under `StructuralElf`.
@@ -19,6 +27,7 @@
 6. Add valid, truncated, overflow, overlap, permission, malformed relocation,
    and model-confusion corpus cases. Structural parsing must remain independent
    of instruction decoding and runtime acceptance.
+The first local-dynamic recognizer fixture is bounded to the TLSLD ADRP/ADD + resolver CALL26 + DTPREL ADD/ADD sequence. It must retain exact source relocation ordering, resolver target, register ownership, dynamic DTPMOD64 GOT ownership, and PT_TLS facts; other TLSLD forms are nearest-negative cases.
 
 ## Phase 2 — Typed five-model semantic IR
 
@@ -49,6 +58,7 @@
     for every model and relocation family.
 
 ## Phase 4 — Rewrite and shared layout/materialization
+The first rewrite/materialization vertical slice is local-dynamic TLSLD only. It must re-encode the owned ADRP/ADD, exact `__tls_get_addr` `CALL26`, and DTPREL ADD/ADD sites through the existing semantic/address-map path while preserving the loader-owned DTPMOD64 GOT relocation, PT_TLS template/zero-fill, and dynamic relocation tables. Publication fails closed on resolver, range, register, addend, source/output map, GOT, or PT_TLS mismatch.
 
 14. Build TLS semantic fixups that preserve thread-relative/module-relative
     expressions, symbol/module identity, access width, and addend.
@@ -91,6 +101,15 @@
 
 ## Validation commands
 
+The encoding-boundary gate must also run the focused AsmStone-backed encoder and fixture checks. The grep audit is informational during migration and becomes a failure for any new production instruction-word writer:
+
+```sh
+rg -n 'TryEncodeFields|AsmStoneApi\\.TryEncode|Aarch64InstructionEncoder' src/UrProtect.Core tests/UrProtect.Core.Tests
+rg -n 'EmitWord\\(|words\\.Add\\(|0x[0-9A-Fa-f]{8}' src/UrProtect.Core/Application/Protection src/UrProtect.Core/SemanticPlanning src/UrProtect.Core/ElfLayout
+DOTNET_ROOT=/root/.dotnet PATH=/root/.dotnet:$PATH dotnet test UrProtect.sln --configuration Release --no-restore --filter 'FullyQualifiedName~AsmStoneAdapterTests|FullyQualifiedName~Aarch64InstructionEncoderTests|FullyQualifiedName~TlsLocalExecWorkflowTests'
+```
+
+The second audit must classify existing migration debt rather than blindly reject required ELF constants or relocation masks. New production instruction encoders and new fixture opcode literals fail review unless they use the adapter or name the independent GNU oracle.
 ```sh
 python3 ./.trellis/scripts/task.py validate .trellis/tasks/10-06-tls-relocation-runtime-matrix
 DOTNET_ROOT=/root/.dotnet PATH=/root/.dotnet:$PATH dotnet build UrProtect.sln --configuration Release --no-restore
@@ -118,6 +137,7 @@ and bionic lanes. The exact commands and retained artifact paths are added to
 - snapshot/artifact extension contract;
 - rewrite/fixup/layout integration;
 - lifecycle fixtures;
+- AArch64 encoding ownership and fixture/golden migration debt;
 - each independent runtime matrix lane.
 
 A failed phase is reverted or narrowed at its own boundary. No compatibility

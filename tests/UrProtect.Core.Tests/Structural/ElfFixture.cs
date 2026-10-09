@@ -486,6 +486,343 @@ internal static class ElfFixture
         return bytes;
     }
 
+    /// <summary>
+    /// Exact TLSLD ADRP/ADD, __tls_get_addr CALL26, and DTPREL ADD/ADD shape
+    /// with a loader-owned DTPMOD64 GOT slot and PLT resolver owner.
+    /// </summary>
+    public static byte[] TlsLocalDynamicFunctionPie(long dtprelAddend = 4)
+    {
+        var bytes = MinimalPie();
+        Array.Resize(ref bytes, 0xB00);
+        const int codeOffset = 0x600;
+        const int codeSize = 9 * sizeof(uint);
+        const int dynamicTableOffset = 0x180;
+        const int tlsOffset = 0x260;
+        const int moduleGotOffset = 0x2A0;
+        const int resolverGotOffset = 0x2A8;
+        const int relaOffset = 0x300;
+        const int pltRelaOffset = 0x318;
+        const int dynamicSymbolOffset = 0x360;
+        const int dynamicStringOffset = 0x3A0;
+        const int hashOffset = 0x3C0;
+        const int staticRelaOffset = 0x4E0;
+        const int staticSymbolOffset = 0x700;
+        const int staticStringOffset = 0x780;
+        const int sectionHeaderOffset = 0x900;
+
+        WriteUInt64(bytes.AsSpan(), ElfHeaderOffsets.Entry, 0x1600);
+        WriteUInt64(bytes.AsSpan(), ElfHeaderOffsets.SectionHeaderOffset, sectionHeaderOffset);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.SectionHeaderEntrySize, ElfConstants.SectionHeaderSize64);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.SectionHeaderCount, 7);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.SectionNameIndex, 0);
+        WriteUInt16(bytes.AsSpan(), ElfHeaderOffsets.ProgramHeaderCount, 5);
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            FirstProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfW,
+            0,
+            0,
+            0x600,
+            0x600,
+            0x1000);
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1600,
+            0x80,
+            0x80,
+            0x1000);
+
+        var dynamicEntries = new (ulong Tag, ulong Value)[]
+        {
+            (ElfConstants.DtHash, hashOffset),
+            (ElfConstants.DtStrTab, dynamicStringOffset),
+            (ElfConstants.DtStrSz, 16),
+            (ElfConstants.DtSymTab, dynamicSymbolOffset),
+            (ElfConstants.DtSymEnt, ElfConstants.SymbolEntrySize64),
+            (ElfConstants.DtRela, relaOffset),
+            (ElfConstants.DtRelaSz, ElfConstants.RelaEntrySize64),
+            (ElfConstants.DtRelaEnt, ElfConstants.RelaEntrySize64),
+            (ElfConstants.DtJmpRel, pltRelaOffset),
+            (ElfConstants.DtPltRelSz, ElfConstants.RelaEntrySize64),
+            (ElfConstants.DtPltRel, ElfConstants.DtRela),
+            (ElfConstants.DtFlags1, ElfConstants.Df1Pie),
+            (ElfConstants.DtNull, 0),
+        };
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            DynamicProgramHeaderOffset,
+            ElfConstants.PtDynamic,
+            ElfConstants.PfR,
+            dynamicTableOffset,
+            dynamicTableOffset,
+            checked((ulong)(dynamicEntries.Length * ElfConstants.DynamicEntrySize64)),
+            checked((ulong)(dynamicEntries.Length * ElfConstants.DynamicEntrySize64)),
+            8);
+        for (var index = 0; index < dynamicEntries.Length; index++)
+        {
+            WriteDynamicEntry(
+                bytes.AsSpan(),
+                dynamicTableOffset + (index * ElfConstants.DynamicEntrySize64),
+                dynamicEntries[index].Tag,
+                dynamicEntries[index].Value);
+        }
+
+        const string interpreter = "/lib/ld-linux-aarch64.so.1\0";
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            InterpreterProgramHeaderOffset,
+            ElfConstants.PtInterp,
+            ElfConstants.PfR,
+            0x580,
+            0x580,
+            (ulong)Encoding.ASCII.GetByteCount(interpreter),
+            (ulong)Encoding.ASCII.GetByteCount(interpreter),
+            1);
+        Encoding.ASCII.GetBytes(interpreter).CopyTo(bytes.AsSpan(0x580));
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            FirstProgramHeaderOffset + (4 * ElfConstants.ProgramHeaderSize64),
+            ElfConstants.PtTls,
+            ElfConstants.PfR | ElfConstants.PfW,
+            tlsOffset,
+            tlsOffset,
+            8,
+            24,
+            8);
+        WriteUInt64(bytes.AsSpan(), tlsOffset, 0x11223344AABBCCDD);
+        WriteUInt64(bytes.AsSpan(), moduleGotOffset, 0);
+        WriteUInt64(bytes.AsSpan(), resolverGotOffset, 0);
+
+        WriteUInt64(bytes.AsSpan(), relaOffset, moduleGotOffset);
+        WriteUInt64(bytes.AsSpan(), relaOffset + 8, ElfConstants.RArm64TlsDtpMod64);
+        WriteUInt64(bytes.AsSpan(), relaOffset + 16, 0);
+        WriteUInt64(bytes.AsSpan(), pltRelaOffset, resolverGotOffset);
+        WriteUInt64(bytes.AsSpan(), pltRelaOffset + 8, (1UL << 32) | ElfConstants.RArm64JumpSlot);
+        WriteUInt64(bytes.AsSpan(), pltRelaOffset + 16, 0);
+
+        WriteUInt32(bytes.AsSpan(), hashOffset, 1);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 4, 2);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 8, 1);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 12, 0);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 16, 1);
+        "\0__tls_get_addr\0"u8.CopyTo(bytes.AsSpan(dynamicStringOffset));
+        WriteUInt32(bytes.AsSpan(), dynamicSymbolOffset + ElfConstants.SymbolEntrySize64, 1);
+        bytes[dynamicSymbolOffset + ElfConstants.SymbolEntrySize64 + 4] = (byte)((1 << 4) | ElfConstants.SttFunc);
+        WriteUInt16(bytes.AsSpan(), dynamicSymbolOffset + ElfConstants.SymbolEntrySize64 + 6, 0);
+
+        var staticRelocations = new (ulong Address, uint Type, long Addend)[]
+        {
+            (0x1600, ElfConstants.RArm64TlsLdAdrPage21, 0),
+            (0x1604, ElfConstants.RArm64TlsLdAddLo12Nc, 0),
+            (0x160C, ElfConstants.RArm64TlsLdAddDtprelHi12, dtprelAddend),
+            (0x1610, ElfConstants.RArm64TlsLdAddDtprelLo12Nc, dtprelAddend),
+        };
+        for (var index = 0; index < staticRelocations.Length; index++)
+        {
+            var offset = staticRelaOffset + (index * ElfConstants.RelaEntrySize64);
+            WriteUInt64(bytes.AsSpan(), offset, staticRelocations[index].Address);
+            WriteUInt64(bytes.AsSpan(), offset + 8, (1UL << 32) | staticRelocations[index].Type);
+            WriteUInt64(bytes.AsSpan(), offset + 16, unchecked((ulong)staticRelocations[index].Addend));
+        }
+
+        "\0tls_value\0tls_fixture\0"u8.CopyTo(bytes.AsSpan(staticStringOffset));
+        var staticTlsSymbolOffset = staticSymbolOffset + ElfConstants.SymbolEntrySize64;
+        WriteUInt32(bytes.AsSpan(), staticTlsSymbolOffset, 1);
+        bytes[staticTlsSymbolOffset + 4] = (byte)((1 << 4) | ElfConstants.SttTls);
+        WriteUInt16(bytes.AsSpan(), staticTlsSymbolOffset + 6, 1);
+        WriteUInt64(bytes.AsSpan(), staticTlsSymbolOffset + 8, 4);
+        WriteUInt64(bytes.AsSpan(), staticTlsSymbolOffset + 16, 4);
+        var staticFunctionSymbolOffset = staticSymbolOffset + (2 * ElfConstants.SymbolEntrySize64);
+        WriteUInt32(bytes.AsSpan(), staticFunctionSymbolOffset, 11);
+        bytes[staticFunctionSymbolOffset + 4] = (byte)((1 << 4) | ElfConstants.SttFunc);
+        WriteUInt16(bytes.AsSpan(), staticFunctionSymbolOffset + 6, 3);
+        WriteUInt64(bytes.AsSpan(), staticFunctionSymbolOffset + 8, 0x1600);
+        WriteUInt64(bytes.AsSpan(), staticFunctionSymbolOffset + 16, codeSize);
+
+        WriteSectionHeader(
+            bytes.AsSpan(),
+            sectionHeaderOffset + ElfConstants.SectionHeaderSize64,
+            ElfConstants.ShtStrTab,
+            0,
+            0,
+            dynamicStringOffset,
+            16,
+            0,
+            0,
+            1,
+            0);
+        WriteSectionHeader(
+            bytes.AsSpan(),
+            sectionHeaderOffset + (2 * ElfConstants.SectionHeaderSize64),
+            ElfConstants.ShtDynSym,
+            0,
+            dynamicSymbolOffset,
+            dynamicSymbolOffset,
+            2 * ElfConstants.SymbolEntrySize64,
+            1,
+            1,
+            8,
+            ElfConstants.SymbolEntrySize64);
+        WriteSectionHeader(
+            bytes.AsSpan(),
+            sectionHeaderOffset + (3 * ElfConstants.SectionHeaderSize64),
+            1,
+            6,
+            0x1600,
+            codeOffset,
+            codeSize,
+            0,
+            0,
+            4,
+            0);
+        WriteSectionHeader(
+            bytes.AsSpan(),
+            sectionHeaderOffset + (4 * ElfConstants.SectionHeaderSize64),
+            ElfConstants.ShtRela,
+            0,
+            staticRelaOffset,
+            staticRelaOffset,
+            4 * ElfConstants.RelaEntrySize64,
+            5,
+            3,
+            8,
+            ElfConstants.RelaEntrySize64);
+        WriteSectionHeader(
+            bytes.AsSpan(),
+            sectionHeaderOffset + (5 * ElfConstants.SectionHeaderSize64),
+            ElfConstants.ShtSymTab,
+            0,
+            0,
+            staticSymbolOffset,
+            3 * ElfConstants.SymbolEntrySize64,
+            6,
+            2,
+            8,
+            ElfConstants.SymbolEntrySize64);
+        WriteSectionHeader(
+            bytes.AsSpan(),
+            sectionHeaderOffset + (6 * ElfConstants.SectionHeaderSize64),
+            ElfConstants.ShtStrTab,
+            0,
+            0,
+            staticStringOffset,
+            23,
+            0,
+            0,
+            1,
+            0);
+
+        var words = new uint[]
+        {
+            0x90000000, // ADRP x0, :tlsldm:tls_value
+            0x91000000, // ADD x0, x0, :tlsldm_lo12_nc:tls_value
+            0x9400000E, // BL __tls_get_addr PLT stub at 0x1640
+            0x91400000, // ADD x0, x0, #:dtprel_hi12:tls_value+4
+            0x91000000, // ADD x0, x0, #:dtprel_lo12_nc:tls_value+4
+            0xB9400000, // LDR w0, [x0]
+            0xAA0003E9, // MOV x9, x0
+            0xAA0903EA, // MOV x10, x9
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x40, 0xF0FFFFF0); // ADRP x16, page of TLSLD resolver GOT slot
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x44, 0xF9415611); // LDR x17, [x16, #0x2A8]
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x48, 0x910AA210); // ADD x16, x16, #0x2A8
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x4C, 0xD61F0220); // BR x17
+
+        return bytes;
+    }
+
+    /// <summary>Exact TLSGD ADRP/ADD, __tls_get_addr CALL26, final access, and paired DTPMOD64/DTPREL64 owners.</summary>
+    public static byte[] TlsGeneralDynamicFunctionPie(long dtprelAddend = 0)
+    {
+        var bytes = TlsLocalDynamicFunctionPie(dtprelAddend);
+        const int codeOffset = 0x600;
+        const int codeSize = 7 * sizeof(uint);
+        const int dynamicTableOffset = 0x180;
+        const int dynamicRelaOffset = 0x300;
+        const int pltRelaOffset = 0x330;
+        const int dynamicSymbolOffset = 0x360;
+        const int dynamicStringOffset = 0x3B0;
+        const int hashOffset = 0x3D0;
+        const int staticRelaOffset = 0x4E0;
+        const int sectionHeaderOffset = 0x900;
+
+        WriteUInt64(bytes.AsSpan(), sectionHeaderOffset + (3 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderOffset + (4 * ElfConstants.SectionHeaderSize64) + 32, 2 * ElfConstants.RelaEntrySize64);
+        WriteUInt64(bytes.AsSpan(), dynamicTableOffset + 8, hashOffset);
+        WriteUInt64(bytes.AsSpan(), dynamicTableOffset + 24, dynamicStringOffset);
+        WriteUInt64(bytes.AsSpan(), dynamicTableOffset + 40, 26);
+        WriteUInt64(bytes.AsSpan(), dynamicTableOffset + 56, dynamicSymbolOffset);
+        WriteUInt64(bytes.AsSpan(), dynamicTableOffset + 104, 2 * ElfConstants.RelaEntrySize64);
+        WriteUInt64(bytes.AsSpan(), dynamicTableOffset + 136, pltRelaOffset);
+        WriteUInt64(bytes.AsSpan(), dynamicTableOffset + 152, ElfConstants.RelaEntrySize64);
+
+        bytes.AsSpan(dynamicStringOffset, 26).Clear();
+        "\0__tls_get_addr\0tls_value\0"u8.CopyTo(bytes.AsSpan(dynamicStringOffset));
+        WriteUInt32(bytes.AsSpan(), dynamicSymbolOffset + (2 * ElfConstants.SymbolEntrySize64), 16);
+        bytes[dynamicSymbolOffset + (2 * ElfConstants.SymbolEntrySize64) + 4] = (byte)((1 << 4) | ElfConstants.SttTls);
+        WriteUInt16(bytes.AsSpan(), dynamicSymbolOffset + (2 * ElfConstants.SymbolEntrySize64) + 6, 1);
+        WriteUInt64(bytes.AsSpan(), dynamicSymbolOffset + (2 * ElfConstants.SymbolEntrySize64) + 8, 4);
+        WriteUInt64(bytes.AsSpan(), dynamicSymbolOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, 4);
+
+        bytes.AsSpan(hashOffset, 20).Clear();
+        WriteUInt32(bytes.AsSpan(), hashOffset, 1);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 4, 3);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 8, 1);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 12, 0);
+        WriteUInt32(bytes.AsSpan(), hashOffset + 16, 2);
+
+        WriteUInt64(bytes.AsSpan(), dynamicRelaOffset, 0x2A0);
+        WriteUInt64(bytes.AsSpan(), dynamicRelaOffset + 8, (2UL << 32) | ElfConstants.RArm64TlsDtpMod64);
+        WriteUInt64(bytes.AsSpan(), dynamicRelaOffset + 16, 0);
+        WriteUInt64(bytes.AsSpan(), dynamicRelaOffset + ElfConstants.RelaEntrySize64, 0x2A8);
+        WriteUInt64(bytes.AsSpan(), dynamicRelaOffset + ElfConstants.RelaEntrySize64 + 8, (2UL << 32) | ElfConstants.RArm64TlsDtpRel64);
+        WriteUInt64(bytes.AsSpan(), dynamicRelaOffset + ElfConstants.RelaEntrySize64 + 16, unchecked((ulong)dtprelAddend));
+        WriteUInt64(bytes.AsSpan(), pltRelaOffset, 0x2B0);
+        WriteUInt64(bytes.AsSpan(), pltRelaOffset + 8, (1UL << 32) | ElfConstants.RArm64JumpSlot);
+        WriteUInt64(bytes.AsSpan(), pltRelaOffset + 16, 0);
+        WriteUInt64(bytes.AsSpan(), 0x2B0, 0);
+
+        WriteUInt64(bytes.AsSpan(), staticRelaOffset, 0x1600);
+        WriteUInt64(bytes.AsSpan(), staticRelaOffset + 8, (1UL << 32) | ElfConstants.RArm64TlsGdAdrPage21);
+        WriteUInt64(bytes.AsSpan(), staticRelaOffset + 16, 0);
+        WriteUInt64(bytes.AsSpan(), staticRelaOffset + ElfConstants.RelaEntrySize64, 0x1604);
+        WriteUInt64(bytes.AsSpan(), staticRelaOffset + ElfConstants.RelaEntrySize64 + 8, (1UL << 32) | ElfConstants.RArm64TlsGdAddLo12Nc);
+        WriteUInt64(bytes.AsSpan(), staticRelaOffset + ElfConstants.RelaEntrySize64 + 16, 0);
+        WriteUInt64(bytes.AsSpan(), 0x700 + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+
+        var words = new uint[]
+        {
+            0x90000000, // ADRP x0, :tlsgd:tls_value
+            0x91000000, // ADD x0, x0, :tlsgd_lo12:tls_value
+            0x9400000E, // BL __tls_get_addr PLT stub
+            0xB9400000, // LDR w0, [x0]
+            0xAA0003E9, // MOV x9, x0
+            0xAA0903EA, // MOV x10, x9
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x40, 0xF0FFFFF0); // ADRP x16, page of TLSGD resolver GOT slot
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x44, 0xF9415A11); // LDR x17, [x16, #0x2B0]
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x48, 0x910AC210); // ADD x16, x16, #0x2B0
+        WriteUInt32(bytes.AsSpan(), codeOffset + 0x4C, 0xD61F0220); // BR x17
+
+        return bytes;
+    }
     public static byte[] CongruentNonPageSizedLoadAlignmentPie()
     {
         var bytes = MinimalPie();

@@ -20,7 +20,11 @@ public sealed record TlsSemanticFixup(
     TlsAddressExpression AddressExpression,
     IReadOnlyList<TlsProfileRequirement> ProfileRequirements,
     IReadOnlyList<TlsRuntimeRequirement> RuntimeRequirements,
-    TlsGotEntryBinding? GotEntry);
+    TlsGotEntryBinding? GotEntry,
+    TlsResolverCallBinding? ResolverCall = null,
+    SemanticSourceRange? ResolverCallOutputRange = null,
+    TlsModuleOwnerBinding? ModuleOwner = null,
+    TlsDtpRelOwnerBinding? DtpRelOwner = null);
 
 /// <summary>Bounded TLS semantic fixup planning result; it never writes image bytes.</summary>
 public sealed record TlsSemanticFixupPlanResult(
@@ -54,6 +58,24 @@ public static class TlsSemanticFixupPlanner
                     "The TLS instruction sequence has no unique source-to-output mapping.",
                     binding.SourceRange.FileOffset.Value);
                 continue;
+            }
+
+            SemanticSourceRange? resolverCallOutputRange = null;
+            if (binding.ResolverCall is { } resolverCall)
+            {
+                if (!plan.AddressMap.TryMapSourceRange(
+                        resolverCall.SourceRange,
+                        SemanticEntityKind.Instruction,
+                        out var mappedResolverCallRange))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticAddressMapMissing,
+                        "The TLS resolver call has no unique source-to-output mapping.",
+                        resolverCall.SourceRange.FileOffset.Value);
+                    continue;
+                }
+
+                resolverCallOutputRange = mappedResolverCallRange;
             }
 
             foreach (var site in binding.RelocationSites)
@@ -110,7 +132,36 @@ public static class TlsSemanticFixupPlanner
                     binding.AddressExpression,
                     binding.ProfileRequirements,
                     binding.RuntimeRequirements,
-                    binding.GotEntry));
+                    binding.GotEntry,
+                    binding.ResolverCall,
+                    resolverCallOutputRange,
+                    binding.ModuleOwner,
+                    binding.DtpRelOwner));
+            }
+            if (binding.ResolverCall is { } callBinding
+                && resolverCallOutputRange is { } resolverOutputRange)
+            {
+                fixups.Add(new TlsSemanticFixup(
+                    binding.AccessModel,
+                    TlsRelocationFamily.Dtpmod,
+                    binding.SourceRange,
+                    outputSequenceRange,
+                    callBinding.SourceRange,
+                    resolverOutputRange,
+                    callBinding.Relocation,
+                    -1,
+                    binding.Module,
+                    binding.Symbol,
+                    callBinding.Relocation.Addend,
+                    binding.AccessSize,
+                    binding.AddressExpression,
+                    binding.ProfileRequirements,
+                    binding.RuntimeRequirements,
+                    GotEntry: null,
+                    ResolverCall: callBinding,
+                    ResolverCallOutputRange: resolverOutputRange,
+                    ModuleOwner: binding.ModuleOwner,
+                    DtpRelOwner: binding.DtpRelOwner));
             }
         }
 

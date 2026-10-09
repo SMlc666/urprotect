@@ -29,7 +29,10 @@ public static class Aarch64TlsSequenceRecognizer
         TlsModuleIdentity module,
         TlsSymbolIdentity? symbol,
         SemanticTarget? resolverTarget = null,
-        TlsGotEntryBinding? gotEntry = null)
+        TlsGotEntryBinding? gotEntry = null,
+        TlsResolverCallBinding? resolverCall = null,
+        TlsModuleOwnerBinding? moduleOwner = null,
+        TlsDtpRelOwnerBinding? dtpRelOwner = null)
     {
         ArgumentNullException.ThrowIfNull(instructions);
         ArgumentNullException.ThrowIfNull(relocationSites);
@@ -165,7 +168,8 @@ public static class Aarch64TlsSequenceRecognizer
                 continue;
             }
 
-            if (site.Binding.SymbolName is { } relocationSymbol
+            if (type < ElfConstants.RArm64TlsDtpMod64
+                && site.Binding.SymbolName is { } relocationSymbol
                 && !string.Equals(relocationSymbol, symbol.Name, StringComparison.Ordinal))
             {
                 diagnostics.Error(
@@ -174,8 +178,9 @@ public static class Aarch64TlsSequenceRecognizer
                     site.SourceRange.FileOffset.Value);
             }
 
-            if (site.Binding.SymbolIndex != symbol.SymbolIndex
-                || !string.Equals(site.Binding.SymbolName, symbol.Name, StringComparison.Ordinal))
+            if (type < ElfConstants.RArm64TlsDtpMod64
+                && (site.Binding.SymbolIndex != symbol.SymbolIndex
+                    || !string.Equals(site.Binding.SymbolName, symbol.Name, StringComparison.Ordinal)))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsBindingUnresolved,
@@ -223,7 +228,7 @@ public static class Aarch64TlsSequenceRecognizer
             return Failure(diagnostics);
         }
 
-        if (!ValidateRelocationPattern(model, instructionArray, sites, symbol, gotEntry, diagnostics))
+        if (!ValidateRelocationPattern(model, instructionArray, sites, symbol, gotEntry, resolverCall, moduleOwner, dtpRelOwner, diagnostics))
         {
             return Failure(diagnostics);
         }
@@ -347,7 +352,10 @@ public static class Aarch64TlsSequenceRecognizer
                 sites[0].Binding.Addend),
             profileRequirements,
             runtimeRequirements,
-            gotEntry);
+            gotEntry,
+            resolverCall,
+            moduleOwner,
+            dtpRelOwner);
         return new TlsSequenceRecognitionResult(binding, diagnostics.ToArray());
     }
 
@@ -393,12 +401,21 @@ public static class Aarch64TlsSequenceRecognizer
         IReadOnlyList<TlsRelocationSite> sites,
         TlsSymbolIdentity? symbol,
         TlsGotEntryBinding? gotEntry,
+        TlsResolverCallBinding? resolverCall,
+        TlsModuleOwnerBinding? moduleOwner,
+        TlsDtpRelOwnerBinding? dtpRelOwner,
         DiagnosticBag diagnostics)
     {
-        var complete = TlsRelocationClassifier.IsCompleteRelocationPattern(
-            model,
-            sites.Where(site => site.Binding.RelocationType.HasValue)
-                .Select(site => site.Binding.RelocationType!.Value));
+        var relocationTypes = sites.Where(site => site.Binding.RelocationType.HasValue)
+            .Select(site => site.Binding.RelocationType!.Value)
+            .Concat(model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                && moduleOwner?.Relocation.RelocationType is { } ownerType
+                ? new[] { ownerType }
+                : Array.Empty<uint>())
+            .Concat(model == TlsAccessModel.GeneralDynamic && dtpRelOwner?.Relocation.RelocationType is { } dtpRelType
+                ? new[] { dtpRelType }
+                : Array.Empty<uint>());
+        var complete = TlsRelocationClassifier.IsCompleteRelocationPattern(model, relocationTypes);
         if (!complete)
         {
             diagnostics.Error(
@@ -502,6 +519,29 @@ public static class Aarch64TlsSequenceRecognizer
                     sites[0].SourceRange.FileOffset.Value);
                 complete = false;
             }
+        }
+        else if (model == TlsAccessModel.LocalDynamic
+            && !Aarch64TlsInstructionSemantics.IsSupportedLocalDynamicTlsLdSequence(instructions, sites, resolverCall, moduleOwner))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The supported local-dynamic rewrite requires an exact TLSLD ADRP/ADD, direct __tls_get_addr call, DTPREL ADD/ADD, and loader-owned DTPMOD64 sequence.",
+                sites[0].SourceRange.FileOffset.Value);
+            complete = false;
+        }
+        else if (model == TlsAccessModel.GeneralDynamic
+            && !Aarch64TlsInstructionSemantics.IsSupportedGeneralDynamicTlsGdSequence(
+                instructions,
+                sites,
+                resolverCall,
+                moduleOwner,
+                dtpRelOwner))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsSequenceMalformed,
+                "The supported general-dynamic rewrite requires an exact TLSGD ADRP/ADD, direct __tls_get_addr, final TLS access, and paired DTPMOD64/DTPREL64 owners.",
+                sites[0].SourceRange.FileOffset.Value);
+            complete = false;
         }
 
         return complete;

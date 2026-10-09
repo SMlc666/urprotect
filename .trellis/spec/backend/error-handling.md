@@ -37,9 +37,9 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
   `ValidateObservationOnly` appends instruction-analysis diagnostics only when
   the explicitly selected observation-only mode is requested, and creates
   output bytes only after all errors are absent and byte identity is proven.
-- `ValidationWorkflow.ValidateAndCopyStructurally` accepts an optional `inputOverride`
-  snapshot so report hashes and copied bytes describe the same source.
-  Observation-only copying is explicitly selected through
+- `ValidationWorkflow.ValidateAndCopyStructurally` accepts an optional
+  `inputOverride` snapshot so report hashes and copied bytes describe the same
+  source. Observation-only copying is explicitly selected through
   `ValidateAndCopyObservationOnly`. Both APIs write a flushed temporary sibling
   and remove it on every failure path.
 - `PayloadFrameCodec` validates version, flags, architecture, names, bounds,
@@ -67,8 +67,8 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
   Native Image, or evidence set.
 - Rehydration records and Native Image descriptors bind the current workflow
   owner, profile, ABI, source/request/artifact/output hashes, and handoff fields
-  before publication. An unavailable runtime remains explicit evidence and is not
-  promoted by a different runtime's result.
+  before publication. An unavailable runtime remains explicit evidence and is
+  not promoted by a different runtime's result.
 - Catch only expected I/O, argument, and codec exceptions at boundaries. Do not
   catch all exceptions and continue with a partial model. The CLI top level
   maps an unexpected exception to `Internal` and includes a correlation id.
@@ -96,6 +96,28 @@ All file/virtual/runtime address conversion goes through `LoadMap`; callers do
 not reproduce arithmetic. `BoundedReader` performs little-endian reads only
 after checked range validation. Unknown program headers, dynamic tags, and
 relocation kinds are preserved or warned about rather than guessed.
+
+## AArch64 Encoder Failure Propagation
+
+`Aarch64InstructionEncoder` is the project-owned final-word boundary around
+AsmStone. It returns a typed `Aarch64InstructionEncodeResult` with a zero word
+on failure; it never returns a source-word fallback. Source/output instruction
+addresses, target alignment/range, access width, and load/store scale are
+validated before publication, and every successful word is decoded through
+AsmStone and the project decoder before it is accepted.
+
+Semantic fixup owners map adapter failures to stable `DiagnosticCode` values:
+target alignment/range failures become semantic fixup alignment/range
+diagnostics, while source/template/family/operand/backend/round-trip failures
+remain malformed or unsupported semantic fixup diagnostics. TLS relocation,
+GOT/TLSDESC ownership, PT_TLS identity, addends, and address-map conflicts are
+validated separately by UrProtect; an individually encodable instruction does
+not repair inconsistent ELF/TLS metadata.
+
+No caller may catch an adapter failure and retain the original word, apply a
+local opcode/bitfield fallback, or publish a partial layout. Remaining manual
+writers are migration debt with an owner and focused replacement test; they
+must not gain new instruction families.
 
 ## Examples
 
@@ -126,4 +148,6 @@ Do not treat an unmapped table as empty, truncate a declared count to fit a
 buffer, use an unchecked cast from an ELF field as an array length, execute a
 payload after an integrity failure, use a payload-controlled directory path,
 or silently fall back from a required native ARM64 job to QEMU, another host
-architecture, or the C# packer as a wrapper launcher.
+architecture, or the C# packer as a wrapper launcher. Do not silently fall
+back from an AsmStone encoding failure to source-word retention or manual
+bitfield assembly.

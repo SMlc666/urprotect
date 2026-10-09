@@ -22,7 +22,12 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             CreateModule(),
             CreateSymbol(),
             resolver,
-            expectedModel == TlsAccessModel.InitialExec ? CreateGotEntry() : null);
+            gotEntry: expectedModel == TlsAccessModel.InitialExec ? CreateGotEntry() : null,
+            resolverCall: expectedModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic ? CreateResolverCall() : null,
+            moduleOwner: expectedModel == TlsAccessModel.LocalDynamic
+                ? CreateModuleOwner()
+                : expectedModel == TlsAccessModel.GeneralDynamic ? CreateGeneralDynamicModuleOwner() : null,
+            dtpRelOwner: expectedModel == TlsAccessModel.GeneralDynamic ? CreateDtpRelOwner() : null);
 
         Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
         var binding = result.Binding!;
@@ -100,7 +105,10 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             dynamicSites,
             CreateModule(),
             CreateSymbol(),
-            SemanticTarget.RuntimeResolved("symbol:wrong_resolver"));
+            SemanticTarget.RuntimeResolved("symbol:wrong_resolver"),
+            resolverCall: CreateResolverCall(),
+            moduleOwner: CreateGeneralDynamicModuleOwner(),
+            dtpRelOwner: CreateDtpRelOwner());
         Assert.False(wrongResolver.IsSuccess);
         Assert.Contains(wrongResolver.Diagnostics, item => item.Code == DiagnosticCode.TlsBindingUnresolved);
     }
@@ -155,14 +163,21 @@ public sealed class Aarch64TlsSequenceRecognizerTests
                 Memory(0x3018, 0x618, "ldr", 4, x9),
                 Op(0x301C, 0x61C, 0xD65F03C0, "ret"),
             },
-            TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic => new[]
+            TlsAccessModel.LocalDynamic => new[]
             {
                 Op(0x3000, 0x600, 0x90000000, "adrp"),
                 Op(0x3004, 0x604, 0x91000000, "add"),
                 Call(0x3008, 0x608, "bl"),
-                Op(0x300C, 0x60C, 0xD503201F, "nop"),
+                Op(0x300C, 0x60C, 0x91400000, "add"),
                 Op(0x3010, 0x610, 0x91000000, "add"),
                 Memory(0x3014, 0x614, "ldr", 4, x0),
+            },
+            TlsAccessModel.GeneralDynamic => new[]
+            {
+                Op(0x3000, 0x600, 0x90000000, "adrp"),
+                Op(0x3004, 0x604, 0x91000000, "add"),
+                Call(0x3008, 0x608, "bl"),
+                Memory(0x300C, 0x60C, "ldr", 4, x0),
             },
             TlsAccessModel.TlsDesc => new[]
             {
@@ -192,16 +207,13 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             {
                 CreateSite(ElfConstants.RArm64TlsLdAdrPage21, 0x3000, 0x600, 0),
                 CreateSite(ElfConstants.RArm64TlsLdAddLo12Nc, 0x3004, 0x604, 1),
-                CreateSite(ElfConstants.RArm64TlsLdMovwDtprelG0, 0x3010, 0x610, 2),
-                CreateSite(ElfConstants.RArm64TlsDtpMod64, 0x5000, 0x900, 3),
-                CreateSite(ElfConstants.RArm64TlsDtpRel64, 0x5008, 0x908, 4),
+                CreateSite(ElfConstants.RArm64TlsLdAddDtprelHi12, 0x300C, 0x60C, 2, addend: 4),
+                CreateSite(ElfConstants.RArm64TlsLdAddDtprelLo12Nc, 0x3010, 0x610, 3, addend: 4),
             },
             TlsAccessModel.GeneralDynamic => new[]
             {
                 CreateSite(ElfConstants.RArm64TlsGdAdrPage21, 0x3000, 0x600, 0),
                 CreateSite(ElfConstants.RArm64TlsGdAddLo12Nc, 0x3004, 0x604, 1),
-                CreateSite(ElfConstants.RArm64TlsDtpMod64, 0x5000, 0x900, 2),
-                CreateSite(ElfConstants.RArm64TlsDtpRel64, 0x5008, 0x908, 3),
             },
             TlsAccessModel.TlsDesc => new[]
             {
@@ -330,13 +342,19 @@ public sealed class Aarch64TlsSequenceRecognizerTests
         false,
         "register");
 
-    private static TlsRelocationSite CreateSite(uint type, ulong address, ulong fileOffset, int ordinal)
+    private static TlsRelocationSite CreateSite(
+        uint type,
+        ulong address,
+        ulong fileOffset,
+        int ordinal,
+        long addend = 0)
     {
         var family = TlsRelocationClassifier.GetFamily(type)
             ?? throw new InvalidOperationException($"Relocation type {type} has no TLS family.");
         var relocation = new RelocationBinding(
             Aarch64RelocationKind.ThreadLocal,
             SemanticTarget.RuntimeResolved("tls-symbol:tls_value"),
+            addend,
             SymbolIndex: 1,
             SymbolName: "tls_value",
             RelocationType: type,
@@ -347,9 +365,11 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             Range(address, fileOffset, TlsRelocationClassifier.GetWriteSize(type)),
             relocation,
             ordinal,
-            IsGotOrDescriptorOwned: type is >= ElfConstants.RArm64TlsIeMovwGottprelG1
-                and <= ElfConstants.RArm64TlsIeLdGottprelPrel19
-                or >= ElfConstants.RArm64TlsDescLdPrel19 and <= ElfConstants.RArm64TlsDescCall);
+            IsGotOrDescriptorOwned: type == ElfConstants.RArm64TlsDtpMod64
+                || type is >= ElfConstants.RArm64TlsIeMovwGottprelG1
+                    and <= ElfConstants.RArm64TlsIeLdGottprelPrel19
+                || type is >= ElfConstants.RArm64TlsDescLdPrel19
+                    and <= ElfConstants.RArm64TlsDescCall);
     }
 
     private static TlsModuleIdentity CreateModule() => new(
@@ -366,6 +386,65 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             ElfConstants.PfR | ElfConstants.PfW,
             0,
             new string('0', 64)));
+
+    private static TlsResolverCallBinding CreateResolverCall()
+    {
+        var relocation = new RelocationBinding(
+            Aarch64RelocationKind.Call26,
+            SemanticTarget.RuntimeResolved("symbol:__tls_get_addr"),
+            SymbolIndex: 2,
+            SymbolName: "__tls_get_addr",
+            RelocationType: ElfConstants.RArm64Call26,
+            RelocationAddress: new VirtualAddress(0x3008),
+            RelocationTableAddress: new VirtualAddress(0x4800));
+        return new TlsResolverCallBinding(Range(0x3008, 0x608), relocation);
+    }
+
+    private static TlsModuleOwnerBinding CreateModuleOwner()
+    {
+        var relocation = new RelocationBinding(
+            Aarch64RelocationKind.ThreadLocal,
+            SemanticTarget.RuntimeResolved("tls-module:image:tls-fixture"),
+            RelocationType: ElfConstants.RArm64TlsDtpMod64,
+            RelocationAddress: new VirtualAddress(0x5000),
+            RelocationTableAddress: new VirtualAddress(0x4800));
+        return new TlsModuleOwnerBinding(
+            SemanticEntityId.RelocationSite("tls-module-owner:5000"),
+            Range(0x5000, 0x900, sizeof(ulong)),
+            relocation);
+    }
+
+    private static TlsModuleOwnerBinding CreateGeneralDynamicModuleOwner()
+    {
+        var relocation = new RelocationBinding(
+            Aarch64RelocationKind.ThreadLocal,
+            SemanticTarget.RuntimeResolved("tls-module:image:tls-fixture:tls_value"),
+            RelocationType: ElfConstants.RArm64TlsDtpMod64,
+            SymbolIndex: 1,
+            SymbolName: "tls_value",
+            RelocationAddress: new VirtualAddress(0x5000),
+            RelocationTableAddress: new VirtualAddress(0x4800));
+        return new TlsModuleOwnerBinding(
+            SemanticEntityId.RelocationSite("tls-module-owner:5000"),
+            Range(0x5000, 0x900, sizeof(ulong)),
+            relocation);
+    }
+
+    private static TlsDtpRelOwnerBinding CreateDtpRelOwner()
+    {
+        var relocation = new RelocationBinding(
+            Aarch64RelocationKind.ThreadLocal,
+            SemanticTarget.RuntimeResolved("tls-symbol:image:tls-fixture:tls_value"),
+            SymbolIndex: 1,
+            SymbolName: "tls_value",
+            RelocationType: ElfConstants.RArm64TlsDtpRel64,
+            RelocationAddress: new VirtualAddress(0x5008),
+            RelocationTableAddress: new VirtualAddress(0x4800));
+        return new TlsDtpRelOwnerBinding(
+            SemanticEntityId.RelocationSite("tls-dtprel-owner:5008"),
+            Range(0x5008, 0x908, sizeof(ulong)),
+            relocation);
+    }
 
     private static TlsGotEntryBinding CreateGotEntry()
     {

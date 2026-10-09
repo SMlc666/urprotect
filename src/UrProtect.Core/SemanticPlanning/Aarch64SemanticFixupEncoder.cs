@@ -16,12 +16,9 @@ namespace UrProtect.Core.SemanticPlanning;
 /// </remarks>
 public static class Aarch64SemanticFixupEncoder
 {
-    private const uint Branch26ImmediateMask = 0x03FF_FFFF;
-    private const uint Branch19ImmediateMask = 0x00FF_FFE0;
-    private const uint Branch14ImmediateMask = 0x0007_FFE0;
-    private const uint AdrImmediateMask = 0x60FF_FFE0;
     private const uint AddImmediateMask = 0x003F_FC00;
     private const int InstructionAlignment = sizeof(uint);
+    private static readonly Aarch64InstructionEncoder InstructionEncoder = new();
 
     public static SemanticPlanResolutionResult Resolve(SemanticRewritePlan plan)
     {
@@ -136,52 +133,23 @@ public static class Aarch64SemanticFixupEncoder
             return Failure(fixup, outputSourceAddress, diagnostics, targetAddress);
         }
 
-        var encoded = expression.Kind switch
-        {
-            PcRelativeExpressionKind.Branch26 or PcRelativeExpressionKind.Call26 =>
-                EncodeBranch26(
-                    fixup.OriginalEncoding,
-                    outputPlaceAddress,
-                    addendTarget.Value,
-                    diagnostics,
-                    fixup.SourceFileOffset.Value),
-            PcRelativeExpressionKind.ConditionalBranch19 =>
-                EncodeBranch19(
-                    fixup.OriginalEncoding,
-                    outputPlaceAddress,
-                    addendTarget.Value,
-                    diagnostics,
-                    fixup.SourceFileOffset.Value),
-            PcRelativeExpressionKind.TestBranch14 =>
-                EncodeBranch14(
-                    fixup.OriginalEncoding,
-                    outputPlaceAddress,
-                    addendTarget.Value,
-                    diagnostics,
-                    fixup.SourceFileOffset.Value),
-            PcRelativeExpressionKind.AdrPrelLo21 =>
-                EncodeAdr(
-                    fixup.OriginalEncoding,
-                    outputPlaceAddress,
-                    addendTarget.Value,
-                    diagnostics,
-                    fixup.SourceFileOffset.Value),
-            PcRelativeExpressionKind.AdrPrelPgHi21 =>
-                EncodeAdrp(
-                    fixup.OriginalEncoding,
-                    outputPlaceAddress,
-                    addendTarget.Value,
-                    diagnostics,
-                    fixup.SourceFileOffset.Value),
-            PcRelativeExpressionKind.Literal19 =>
-                EncodeLiteral19(
-                    fixup.OriginalEncoding,
-                    outputPlaceAddress,
-                    addendTarget.Value,
-                    diagnostics,
-                    fixup.SourceFileOffset.Value),
-            _ => UnsupportedEncoding(fixup, diagnostics),
-        };
+        var encoded = EncodePcRelativeWithAdapter(
+            fixup,
+            outputPlaceAddress,
+            addendTarget.Value,
+            expression.Kind switch
+            {
+                PcRelativeExpressionKind.Branch26 => Aarch64InstructionEncodingFamily.Branch26,
+                PcRelativeExpressionKind.Call26 => Aarch64InstructionEncodingFamily.Call26,
+                PcRelativeExpressionKind.ConditionalBranch19 => Aarch64InstructionEncodingFamily.ConditionalBranch19,
+                PcRelativeExpressionKind.TestBranch14 => Aarch64InstructionEncodingFamily.TestBranch14,
+                PcRelativeExpressionKind.AdrPrelLo21 => Aarch64InstructionEncodingFamily.AdrPrelLo21,
+                PcRelativeExpressionKind.AdrPrelPgHi21 => Aarch64InstructionEncodingFamily.AdrPrelPgHi21,
+                PcRelativeExpressionKind.Literal19 => Aarch64InstructionEncodingFamily.Literal19,
+                _ => null,
+            },
+            diagnostics,
+            fixup.SourceFileOffset.Value);
 
         if (encoded is null)
         {
@@ -289,7 +257,10 @@ public static class Aarch64SemanticFixupEncoder
                     targetAddress,
                     value.Value,
                     diagnostics),
-            Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21 =>
+            Aarch64RelocationKind.ThreadLocal when relocation.RelocationType is
+                ElfConstants.RArm64TlsIeAdrGottprelPage21
+                or ElfConstants.RArm64TlsLdAdrPage21
+                or ElfConstants.RArm64TlsGdAdrPage21 =>
                 ResolveRelocationAdrp(fixup, outputSourceAddress, outputPlaceAddress, value.Value, targetAddress, diagnostics),
             Aarch64RelocationKind.AddAbsLo12 =>
                 ResolveAddLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
@@ -309,10 +280,13 @@ public static class Aarch64SemanticFixupEncoder
         ulong relocationValue,
         DiagnosticBag diagnostics)
     {
-        var encoded = EncodeBranch26(
-            fixup.OriginalEncoding,
+        var encoded = EncodePcRelativeWithAdapter(
+            fixup,
             outputPlaceAddress,
             relocationValue,
+            fixup.Relocation?.Kind == Aarch64RelocationKind.Call26
+                ? Aarch64InstructionEncodingFamily.Call26
+                : Aarch64InstructionEncodingFamily.Branch26,
             diagnostics,
             fixup.SourceFileOffset.Value);
         return FinishInstructionEncoding(
@@ -331,10 +305,11 @@ public static class Aarch64SemanticFixupEncoder
         ulong relocationValue,
         DiagnosticBag diagnostics)
     {
-        var encoded = EncodeBranch19(
-            fixup.OriginalEncoding,
+        var encoded = EncodePcRelativeWithAdapter(
+            fixup,
             outputPlaceAddress,
             relocationValue,
+            Aarch64InstructionEncodingFamily.ConditionalBranch19,
             diagnostics,
             fixup.SourceFileOffset.Value);
         return FinishInstructionEncoding(
@@ -353,10 +328,11 @@ public static class Aarch64SemanticFixupEncoder
         ulong relocationValue,
         DiagnosticBag diagnostics)
     {
-        var encoded = EncodeBranch14(
-            fixup.OriginalEncoding,
+        var encoded = EncodePcRelativeWithAdapter(
+            fixup,
             outputPlaceAddress,
             relocationValue,
+            Aarch64InstructionEncodingFamily.TestBranch14,
             diagnostics,
             fixup.SourceFileOffset.Value);
         return FinishInstructionEncoding(
@@ -375,10 +351,11 @@ public static class Aarch64SemanticFixupEncoder
         ulong relocationValue,
         DiagnosticBag diagnostics)
     {
-        var encoded = EncodeLiteral19(
-            fixup.OriginalEncoding,
+        var encoded = EncodePcRelativeWithAdapter(
+            fixup,
             outputPlaceAddress,
             relocationValue,
+            Aarch64InstructionEncodingFamily.Literal19,
             diagnostics,
             fixup.SourceFileOffset.Value);
         return FinishInstructionEncoding(
@@ -397,10 +374,11 @@ public static class Aarch64SemanticFixupEncoder
         VirtualAddress targetAddress,
         DiagnosticBag diagnostics)
     {
-        var encoded = EncodeAdr(
-            fixup.OriginalEncoding,
+        var encoded = EncodePcRelativeWithAdapter(
+            fixup,
             outputPlaceAddress,
             value,
+            Aarch64InstructionEncodingFamily.AdrPrelLo21,
             diagnostics,
             fixup.SourceFileOffset.Value);
         return FinishInstructionEncoding(
@@ -419,10 +397,11 @@ public static class Aarch64SemanticFixupEncoder
         VirtualAddress targetAddress,
         DiagnosticBag diagnostics)
     {
-        var encoded = EncodeAdrp(
-            fixup.OriginalEncoding,
+        var encoded = EncodePcRelativeWithAdapter(
+            fixup,
             outputPlaceAddress,
             value,
+            Aarch64InstructionEncodingFamily.AdrPrelPgHi21,
             diagnostics,
             fixup.SourceFileOffset.Value);
         return FinishInstructionEncoding(
@@ -585,194 +564,50 @@ public static class Aarch64SemanticFixupEncoder
         return Failure(fixup, outputSourceAddress, diagnostics, targetAddress);
     }
 
-    private static uint? EncodeBranch26(
-        uint originalEncoding,
-        VirtualAddress place,
+    private static uint? EncodePcRelativeWithAdapter(
+        SemanticFixup fixup,
+        VirtualAddress outputPlaceAddress,
         ulong target,
+        Aarch64InstructionEncodingFamily? family,
         DiagnosticBag diagnostics,
-        ulong? diagnosticOffset = null)
+        ulong diagnosticOffset)
     {
-        if (place.Value % InstructionAlignment != 0 || target % InstructionAlignment != 0)
+        if (family is not { } encodingFamily)
         {
-            AddAlignmentDiagnostic(
-                diagnostics,
-                "The Branch26 place and target must be aligned to an AArch64 instruction.",
+            diagnostics.Error(
+                DiagnosticCode.SemanticFixupUnsupported,
+                $"The PC-relative expression '{fixup.Expression?.Kind}' has no AsmStone encoder family.",
                 diagnosticOffset);
             return null;
         }
 
-        if (!TryGetScaledImmediate(target, place.Value, InstructionAlignment, 26, out var immediate))
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            fixup.OriginalEncoding,
+            fixup.SourceAddress.Value,
+            outputPlaceAddress.Value,
+            encodingFamily,
+            target));
+        if (result.IsSuccess)
         {
-            AddOutOfRangeDiagnostic(
-                diagnostics,
-                "The Branch26 target is outside the signed 26-bit range.",
-                diagnosticOffset);
-            return null;
+            return result.Encoding;
         }
 
-        return (originalEncoding & ~Branch26ImmediateMask)
-            | (unchecked((uint)immediate) & Branch26ImmediateMask);
-    }
-
-    private static uint? EncodeBranch19(
-        uint originalEncoding,
-        VirtualAddress place,
-        ulong target,
-        DiagnosticBag diagnostics,
-        ulong? diagnosticOffset = null)
-    {
-        if (place.Value % InstructionAlignment != 0 || target % InstructionAlignment != 0)
+        switch (result.DiagnosticCode)
         {
-            AddAlignmentDiagnostic(
-                diagnostics,
-                "The conditional branch place and target must be aligned to an AArch64 instruction.",
-                diagnosticOffset);
-            return null;
+            case Aarch64InstructionEncodeDiagnosticCode.TargetMisaligned:
+                AddAlignmentDiagnostic(diagnostics, result.Diagnostic, diagnosticOffset);
+                break;
+            case Aarch64InstructionEncodeDiagnosticCode.TargetOutOfRange:
+                AddOutOfRangeDiagnostic(diagnostics, result.Diagnostic, diagnosticOffset);
+                break;
+            default:
+                diagnostics.Error(
+                    DiagnosticCode.SemanticFixupMalformed,
+                    $"AsmStone rejected the {encodingFamily} semantic fixup: {result.Diagnostic}",
+                    diagnosticOffset);
+                break;
         }
 
-        if (!TryGetScaledImmediate(target, place.Value, InstructionAlignment, 19, out var immediate))
-        {
-            AddOutOfRangeDiagnostic(
-                diagnostics,
-                "The conditional branch target is outside the signed 19-bit range.",
-                diagnosticOffset);
-            return null;
-        }
-
-        return (originalEncoding & ~Branch19ImmediateMask)
-            | ((unchecked((uint)immediate) & 0x7FFFF) << 5);
-    }
-
-    private static uint? EncodeBranch14(
-        uint originalEncoding,
-        VirtualAddress place,
-        ulong target,
-        DiagnosticBag diagnostics,
-        ulong? diagnosticOffset = null)
-    {
-        if (place.Value % InstructionAlignment != 0 || target % InstructionAlignment != 0)
-        {
-            AddAlignmentDiagnostic(
-                diagnostics,
-                "The test branch place and target must be aligned to an AArch64 instruction.",
-                diagnosticOffset);
-            return null;
-        }
-
-        if (!TryGetScaledImmediate(target, place.Value, InstructionAlignment, 14, out var immediate))
-        {
-            AddOutOfRangeDiagnostic(
-                diagnostics,
-                "The test branch target is outside the signed 14-bit range.",
-                diagnosticOffset);
-            return null;
-        }
-
-        return (originalEncoding & ~Branch14ImmediateMask)
-            | ((unchecked((uint)immediate) & 0x3FFF) << 5);
-    }
-
-    private static uint? EncodeAdr(
-        uint originalEncoding,
-        VirtualAddress place,
-        ulong target,
-        DiagnosticBag diagnostics,
-        ulong? diagnosticOffset = null)
-    {
-        if (place.Value % InstructionAlignment != 0)
-        {
-            AddAlignmentDiagnostic(
-                diagnostics,
-                "The ADR place must be aligned to an AArch64 instruction.",
-                diagnosticOffset);
-            return null;
-        }
-
-        if (!TryGetSignedDelta(target, place.Value, out var delta)
-            || delta < -(1L << 20)
-            || delta > (1L << 20) - 1)
-        {
-            AddOutOfRangeDiagnostic(
-                diagnostics,
-                "The ADR target is outside the signed 21-bit byte range.",
-                diagnosticOffset);
-            return null;
-        }
-
-        var bits = unchecked((ulong)delta);
-        var immLo = (uint)(bits & 0x3) << 29;
-        var immHi = (uint)((bits >> 2) & 0x7FFFF) << 5;
-        return (originalEncoding & ~AdrImmediateMask) | immLo | immHi;
-    }
-
-    private static uint? EncodeAdrp(
-        uint originalEncoding,
-        VirtualAddress place,
-        ulong target,
-        DiagnosticBag diagnostics,
-        ulong? diagnosticOffset = null)
-    {
-        if (place.Value % InstructionAlignment != 0)
-        {
-            AddAlignmentDiagnostic(
-                diagnostics,
-                "The ADRP place must be aligned to an AArch64 instruction.",
-                diagnosticOffset);
-            return null;
-        }
-
-        var targetPage = target & ~0xFFFUL;
-        var placePage = place.Value & ~0xFFFUL;
-        if (!TryGetScaledImmediate(targetPage, placePage, 0x1000, 21, out var immediate))
-        {
-            AddOutOfRangeDiagnostic(
-                diagnostics,
-                "The ADRP target is outside the signed 21-bit page range.",
-                diagnosticOffset);
-            return null;
-        }
-
-        var bits = unchecked((ulong)immediate);
-        var immLo = (uint)(bits & 0x3) << 29;
-        var immHi = (uint)((bits >> 2) & 0x7FFFF) << 5;
-        return (originalEncoding & ~AdrImmediateMask) | immLo | immHi;
-    }
-
-    private static uint? EncodeLiteral19(
-        uint originalEncoding,
-        VirtualAddress place,
-        ulong target,
-        DiagnosticBag diagnostics,
-        ulong? diagnosticOffset = null)
-    {
-        if (place.Value % InstructionAlignment != 0 || target % InstructionAlignment != 0)
-        {
-            AddAlignmentDiagnostic(
-                diagnostics,
-                "The literal place and target must be aligned to an AArch64 instruction.",
-                diagnosticOffset);
-            return null;
-        }
-
-        if (!TryGetScaledImmediate(target, place.Value, InstructionAlignment, 19, out var immediate))
-        {
-            AddOutOfRangeDiagnostic(
-                diagnostics,
-                "The literal target is outside the signed 19-bit range.",
-                diagnosticOffset);
-            return null;
-        }
-
-        return (originalEncoding & ~Branch19ImmediateMask)
-            | ((unchecked((uint)immediate) & 0x7FFFF) << 5);
-    }
-
-    private static uint? UnsupportedEncoding(SemanticFixup fixup, DiagnosticBag diagnostics)
-    {
-        diagnostics.Error(
-            DiagnosticCode.SemanticFixupUnsupported,
-            $"The PC-relative expression kind '{fixup.Expression?.Kind}' is not supported by the AArch64 semantic encoder.",
-            fixup.SourceFileOffset.Value);
         return null;
     }
 
@@ -1228,33 +1063,6 @@ public static class Aarch64SemanticFixupEncoder
         delta = magnitude == (1UL << 63)
             ? long.MinValue
             : -(long)magnitude;
-        return true;
-    }
-
-    private static bool TryGetScaledImmediate(
-        ulong target,
-        ulong place,
-        int scale,
-        int width,
-        out long immediate)
-    {
-        immediate = default;
-        if (!TryGetSignedDelta(target, place, out var delta)
-            || scale <= 0
-            || delta % scale != 0)
-        {
-            return false;
-        }
-
-        var scaled = delta / scale;
-        var minimum = -(1L << (width - 1));
-        var maximum = (1L << (width - 1)) - 1;
-        if (scaled < minimum || scaled > maximum)
-        {
-            return false;
-        }
-
-        immediate = scaled;
         return true;
     }
 }

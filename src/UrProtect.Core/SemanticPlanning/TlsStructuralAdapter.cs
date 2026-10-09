@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
+using UrProtect.Core.Aarch64Semantics;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
 
@@ -144,6 +146,418 @@ public static class TlsStructuralAdapter
             diagnostics.ToArray());
     }
 
+    /// <summary>
+    /// Projects the loader-owned DTPMOD64 GOT owner without attaching it to the
+    /// selected function's instruction-site list.
+    /// </summary>
+    public static TlsStructuralProjectionResult<TlsModuleOwnerBinding> ProjectModuleOwner(
+        ElfFile file,
+        TlsModuleIdentity module)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(module);
+        var diagnostics = new DiagnosticBag();
+        var facts = file.TlsMetadata.Dynamic.Relocations
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsDtpMod64)
+            .ToArray();
+        if (facts.Length != 1)
+        {
+            diagnostics.Error(
+                facts.Length == 0 ? DiagnosticCode.TlsBindingUnresolved : DiagnosticCode.TlsMetadataMalformed,
+                facts.Length == 0
+                    ? "The local-dynamic TLS sequence has no unique loader-owned DTPMOD64 relocation."
+                    : "The local-dynamic TLS sequence has duplicate DTPMOD64 module owners.",
+                facts.Length == 0 ? null : facts[0].Relocation.Offset);
+            return Failure<TlsModuleOwnerBinding>(diagnostics);
+        }
+
+        var fact = facts[0];
+        if (fact.WriteSize != sizeof(ulong)
+            || fact.Symbol is not null
+            || fact.Relocation.SymbolIndex != 0
+            || fact.Relocation.Addend != 0
+            || !file.LoadMap.TryVirtualAddressToFileOffset(
+                new VirtualAddress(fact.Relocation.Offset),
+                sizeof(ulong),
+                out var fileOffset)
+            || file.LoadMap.Segments.Count(segment =>
+                segment.ContainsVirtualAddress(fact.Relocation.Offset, sizeof(ulong))
+                && segment.ContainsFileOffset(fileOffset.Value, sizeof(ulong))
+                && (segment.Flags & ElfConstants.PfW) != 0) != 1)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsMetadataMalformed,
+                "The DTPMOD64 module owner is not one aligned, writable, file-backed loader-owned GOT range.",
+                fact.Relocation.Offset);
+            return Failure<TlsModuleOwnerBinding>(diagnostics);
+        }
+
+        var target = SemanticTarget.RuntimeResolved($"tls-module:{module.Identity}");
+        var relocation = RelocationBinding.FromRelocation(fact.Relocation, target);
+        var range = new SemanticSourceRange(
+            fileOffset,
+            new VirtualAddress(fact.Relocation.Offset),
+            sizeof(ulong));
+        return new TlsStructuralProjectionResult<TlsModuleOwnerBinding>(
+            new TlsModuleOwnerBinding(
+                SemanticEntityId.RelocationSite($"tls-module-owner:{fact.Relocation.Offset:X}"),
+                range,
+                relocation),
+            diagnostics.ToArray());
+    }
+
+    /// <summary>
+    /// Projects the two loader-owned TLSGD GOT words. The module and symbol
+    /// owners must be adjacent, writable, file-backed DTPMOD64/DTPREL64 records
+    /// for one dynamic TLS symbol.
+    /// </summary>
+    public static TlsStructuralProjectionResult<TlsGeneralDynamicOwnerBinding> ProjectGeneralDynamicOwners(
+        ElfFile file,
+        TlsModuleIdentity module,
+        TlsSymbolIdentity symbol,
+        long addend)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(module);
+        ArgumentNullException.ThrowIfNull(symbol);
+        var diagnostics = new DiagnosticBag();
+        var dynamicFacts = file.TlsMetadata.Dynamic.Relocations;
+        var moduleFacts = dynamicFacts
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsDtpMod64
+                && string.Equals(fact.Symbol?.Name, symbol.Name, StringComparison.Ordinal)
+                && fact.Relocation.Addend == 0)
+            .ToArray();
+        var dtpRelFacts = dynamicFacts
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsDtpRel64
+                && string.Equals(fact.Symbol?.Name, symbol.Name, StringComparison.Ordinal)
+                && fact.Relocation.Addend == addend)
+            .ToArray();
+        if (moduleFacts.Length != 1 || dtpRelFacts.Length != 1)
+        {
+            diagnostics.Error(
+                moduleFacts.Length == 0 || dtpRelFacts.Length == 0
+                    ? DiagnosticCode.TlsBindingUnresolved
+                    : DiagnosticCode.TlsMetadataMalformed,
+                "The TLSGD access does not have one matching loader-owned DTPMOD64/DTPREL64 owner pair.",
+                moduleFacts.Length == 1
+                    ? dtpRelFacts.Length == 1 ? dtpRelFacts[0].Relocation.Offset : moduleFacts[0].Relocation.Offset
+                    : null);
+            return Failure<TlsGeneralDynamicOwnerBinding>(diagnostics);
+        }
+
+        var moduleFact = moduleFacts[0];
+        var dtpRelFact = dtpRelFacts[0];
+        if (!IsWritableTlsOwner(file, moduleFact, out var moduleOffset)
+            || !IsWritableTlsOwner(file, dtpRelFact, out var dtpRelOffset)
+            || moduleFact.Relocation.Offset > ulong.MaxValue - sizeof(ulong)
+            || moduleFact.Relocation.Offset + sizeof(ulong) != dtpRelFact.Relocation.Offset
+            || moduleOffset.Value > ulong.MaxValue - sizeof(ulong)
+            || moduleOffset.Value + sizeof(ulong) != dtpRelOffset.Value)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsMetadataMalformed,
+                "The TLSGD DTPMOD64/DTPREL64 owner pair is not adjacent, aligned, writable, and file-backed.",
+                moduleFact.Relocation.Offset);
+            return Failure<TlsGeneralDynamicOwnerBinding>(diagnostics);
+        }
+
+        var moduleRelocation = RelocationBinding.FromRelocation(
+            moduleFact.Relocation,
+            SemanticTarget.RuntimeResolved($"tls-module:{module.Identity}:{symbol.Name}"),
+            symbol.Name);
+        var dtpRelocation = RelocationBinding.FromRelocation(
+            dtpRelFact.Relocation,
+            SemanticTarget.RuntimeResolved($"tls-symbol:{module.Identity}:{symbol.Name}"),
+            symbol.Name);
+        var moduleRange = new SemanticSourceRange(
+            moduleOffset,
+            new VirtualAddress(moduleFact.Relocation.Offset),
+            sizeof(ulong));
+        var dtpRelRange = new SemanticSourceRange(
+            dtpRelOffset,
+            new VirtualAddress(dtpRelFact.Relocation.Offset),
+            sizeof(ulong));
+        return new TlsStructuralProjectionResult<TlsGeneralDynamicOwnerBinding>(
+            new TlsGeneralDynamicOwnerBinding(
+                new TlsModuleOwnerBinding(
+                    SemanticEntityId.RelocationSite($"tls-module-owner:{moduleFact.Relocation.Offset:X}"),
+                    moduleRange,
+                    moduleRelocation),
+                new TlsDtpRelOwnerBinding(
+                    SemanticEntityId.RelocationSite($"tls-dtprel-owner:{dtpRelFact.Relocation.Offset:X}"),
+                    dtpRelRange,
+                    dtpRelocation)),
+            diagnostics.ToArray());
+    }
+
+    private static bool IsWritableTlsOwner(
+        ElfFile file,
+        TlsRelocationFacts fact,
+        out FileOffset fileOffset)
+    {
+        fileOffset = default;
+        if (!file.LoadMap.TryVirtualAddressToFileOffset(
+                new VirtualAddress(fact.Relocation.Offset),
+                sizeof(ulong),
+                out fileOffset))
+        {
+            return false;
+        }
+
+        var mappedFileOffset = fileOffset;
+        var writableOwnerCount = file.LoadMap.Segments.Count(segment =>
+            segment.ContainsVirtualAddress(fact.Relocation.Offset, sizeof(ulong))
+            && segment.ContainsFileOffset(mappedFileOffset.Value, sizeof(ulong))
+            && (segment.Flags & ElfConstants.PfW) != 0);
+        return writableOwnerCount == 1;
+    }
+
+    /// <summary>One paired TLSGD loader-owner projection.</summary>
+    public sealed record TlsGeneralDynamicOwnerBinding(
+        TlsModuleOwnerBinding ModuleOwner,
+        TlsDtpRelOwnerBinding DtpRelOwner);
+
+    /// <summary>
+    /// Projects the exact resolver call carrier for a linked image. The linked
+    /// image retains the resolver as a JUMP_SLOT owner rather than a source
+    /// CALL26 RELA, so the selected direct-call word is paired with that unique
+    /// loader binding while retaining CALL26 semantic kind for rewriting.
+    /// </summary>
+    public static bool IsExactResolverCall(ElfFile file, SemanticSourceRange sourceRange) =>
+        ProjectResolverCall(file, sourceRange).IsSuccess;
+
+    public static TlsStructuralProjectionResult<TlsResolverCallBinding> ProjectResolverCall(
+        ElfFile file,
+        SemanticSourceRange sourceRange)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var diagnostics = new DiagnosticBag();
+        var candidates = file.RelaRelocations
+            .Where(relocation => relocation.IsPlt && relocation.Type == ElfConstants.RArm64JumpSlot)
+            .Select(relocation => (relocation, Name: TryGetDynamicSymbolName(file, relocation.SymbolIndex)))
+            .Where(item => string.Equals(item.Name, "__tls_get_addr", StringComparison.Ordinal))
+            .ToArray();
+        if (candidates.Length != 1
+            || !sourceRange.IsInstructionRange
+            || sourceRange.Size != sizeof(uint)
+            || !file.LoadMap.TryVirtualAddressToFileOffset(
+                sourceRange.VirtualAddress,
+                sizeof(uint),
+                out var sourceOffset)
+            || sourceOffset != sourceRange.FileOffset
+            || !TryReadWord(file, sourceOffset, out var sourceEncoding))
+        {
+            diagnostics.Error(
+                candidates.Length == 0 ? DiagnosticCode.TlsBindingUnresolved : DiagnosticCode.TlsMetadataMalformed,
+                candidates.Length == 0
+                    ? "The dynamic TLS sequence has no unique loader-owned __tls_get_addr resolver binding."
+                    : "The selected dynamic TLS call is not a bounded direct CALL26 with a decoded target.",
+                sourceRange.FileOffset.Value);
+            return Failure<TlsResolverCallBinding>(diagnostics);
+        }
+
+        var sourceDecode = new AsmStoneAdapter().Decode(sourceEncoding, sourceRange.VirtualAddress.Value);
+        if (!sourceDecode.IsSuccess
+            || sourceDecode.Instruction?.ControlFlow != Aarch64ControlFlowKind.DirectCall
+            || sourceDecode.Instruction.DirectTarget is not { } resolverStubAddress)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsMetadataMalformed,
+                "The selected dynamic TLS call is not a bounded direct CALL26 with a decoded target.",
+                sourceRange.FileOffset.Value);
+            return Failure<TlsResolverCallBinding>(diagnostics);
+        }
+
+        var jumpSlot = candidates[0].relocation;
+        var writable = IsWritableFileBackedRange(file, jumpSlot.Offset, sizeof(ulong));
+        var exactStub = IsExactAarch64PltStub(file, resolverStubAddress, jumpSlot.Offset);
+        if (!writable || !exactStub)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "The dynamic TLS CALL26 target is not an executable AArch64 PLT stub owned by the __tls_get_addr JUMP_SLOT.",
+                sourceRange.FileOffset.Value);
+            return Failure<TlsResolverCallBinding>(diagnostics);
+        }
+
+        var target = SemanticTarget.RuntimeResolved("symbol:__tls_get_addr");
+        var binding = new RelocationBinding(
+            Aarch64RelocationKind.Call26,
+            target,
+            jumpSlot.Addend,
+            jumpSlot.SymbolIndex,
+            IsPlt: false,
+            SymbolName: "__tls_get_addr",
+            RelocationType: ElfConstants.RArm64Call26,
+            RelocationAddress: sourceRange.VirtualAddress,
+            RelocationTableAddress: new VirtualAddress(jumpSlot.SourceAddress));
+        return new TlsStructuralProjectionResult<TlsResolverCallBinding>(
+            new TlsResolverCallBinding(sourceRange, binding),
+            diagnostics.ToArray());
+    }
+
+    private static bool IsExactAarch64PltStub(
+        ElfFile file,
+        ulong stubAddress,
+        ulong jumpSlotAddress)
+    {
+        if ((stubAddress & 0xF) != 0
+            || !IsExecutableFileBackedRange(file, stubAddress, 4 * sizeof(uint)))
+        {
+            return false;
+        }
+
+        var adapter = new AsmStoneAdapter();
+        var instructions = new Aarch64DecodeResult[4];
+        for (var index = 0; index < instructions.Length; index++)
+        {
+            if (!TryAdd(stubAddress, (ulong)index * sizeof(uint), out var address)
+                || !file.LoadMap.TryVirtualAddressToFileOffset(
+                    new VirtualAddress(address),
+                    sizeof(uint),
+                    out var offset)
+                || offset.Value > int.MaxValue
+                || offset.Value > (ulong)file.Bytes.Length
+                || sizeof(uint) > (ulong)file.Bytes.Length - offset.Value)
+            {
+                return false;
+            }
+
+            var word = BinaryPrimitives.ReadUInt32LittleEndian(
+                file.Bytes.Span.Slice(checked((int)offset.Value), sizeof(uint)));
+            instructions[index] = adapter.Decode(word, address);
+            if (!instructions[index].IsSuccess)
+            {
+                return false;
+            }
+        }
+
+        var adrp = instructions[0].Instruction!;
+        var load = instructions[1].Instruction!;
+        var add = instructions[2].Instruction!;
+        var branch = instructions[3].Instruction!;
+        var gotPageTarget = adrp.DirectTarget.GetValueOrDefault();
+        var memory = load.Operands
+            .Where(operand => operand.Memory is not null)
+            .Select(operand => operand.Memory)
+            .FirstOrDefault();
+        var addImmediate = add.Operands
+            .Where(operand => operand.Immediate.HasValue)
+            .Select(operand => operand.Immediate)
+            .FirstOrDefault();
+        var validShape = adrp.Properties.HasFlag(Aarch64InstructionProperties.PcRelative)
+            && adrp.DirectTarget.HasValue
+            && HasRegister(adrp, Aarch64OperandDirection.Output, 16)
+            && load.Properties.HasFlag(Aarch64InstructionProperties.Load)
+            && HasRegister(load, Aarch64OperandDirection.Output, 17)
+            && memory is not null
+            && memory.Base is { Class: Aarch64RegisterClass.General, Index: 16, Width: 64 }
+            && memory.Index is null
+            && memory.AccessSize == sizeof(ulong)
+            && !memory.WritesBack
+            && string.Equals(add.Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(add, Aarch64OperandDirection.Input, 16)
+            && HasRegister(add, Aarch64OperandDirection.Output, 16)
+            && addImmediate.HasValue
+            && addImmediate.Value >= 0
+            && string.Equals(branch.Mnemonic, "br", StringComparison.OrdinalIgnoreCase)
+            && branch.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
+            && HasRegister(branch, Aarch64OperandDirection.Input, 17);
+        if (!validShape)
+        {
+            return false;
+        }
+
+        var gotPage = gotPageTarget & ~0xFFFUL;
+        var loaded = TryAddSigned(gotPage, memory!.Offset, out var loadedGotAddress);
+        var added = TryAddSigned(gotPage, addImmediate!.Value, out var addedGotAddress);
+        if (!loaded || !added || loadedGotAddress != jumpSlotAddress || addedGotAddress != jumpSlotAddress)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasRegister(
+        Aarch64Instruction instruction,
+        Aarch64OperandDirection direction,
+        byte index) => instruction.Operands.Any(operand =>
+        operand.Direction == direction
+        && operand.Register is
+        {
+            Class: Aarch64RegisterClass.General,
+            Role: Aarch64RegisterRole.None,
+            Width: 64,
+        } register
+        && register.Index == index);
+
+    private static bool IsWritableFileBackedRange(ElfFile file, ulong address, ulong size) =>
+        file.LoadMap.TryVirtualAddressToFileOffset(new VirtualAddress(address), size, out var fileOffset)
+        && file.LoadMap.Segments.Count(segment =>
+            segment.ContainsVirtualAddress(address, size)
+            && segment.ContainsFileOffset(fileOffset.Value, size)
+            && (segment.Flags & ElfConstants.PfW) != 0) == 1;
+
+    private static bool IsExecutableFileBackedRange(ElfFile file, ulong address, ulong size) =>
+        file.LoadMap.TryVirtualAddressToFileOffset(new VirtualAddress(address), size, out var fileOffset)
+        && file.LoadMap.Segments.Count(segment =>
+            segment.ContainsVirtualAddress(address, size)
+            && segment.ContainsFileOffset(fileOffset.Value, size)
+            && (segment.Flags & ElfConstants.PfX) != 0) == 1;
+
+    private static bool TryReadWord(ElfFile file, FileOffset fileOffset, out uint value)
+    {
+        value = 0;
+        if (fileOffset.Value > int.MaxValue
+            || fileOffset.Value > (ulong)file.Bytes.Length
+            || sizeof(uint) > (ulong)file.Bytes.Length - fileOffset.Value)
+        {
+            return false;
+        }
+
+        value = BinaryPrimitives.ReadUInt32LittleEndian(
+            file.Bytes.Span.Slice(checked((int)fileOffset.Value), sizeof(uint)));
+        return true;
+    }
+
+    private static bool TryAdd(ulong value, ulong amount, out ulong result)
+    {
+        if (amount > ulong.MaxValue - value)
+        {
+            result = 0;
+            return false;
+        }
+
+        result = value + amount;
+        return true;
+    }
+
+    private static bool TryAddSigned(ulong value, long addend, out ulong result)
+    {
+        if (addend >= 0)
+        {
+            if ((ulong)addend > ulong.MaxValue - value)
+            {
+                result = 0;
+                return false;
+            }
+
+            result = value + (ulong)addend;
+            return true;
+        }
+
+        var magnitude = unchecked((ulong)(-(addend + 1))) + 1;
+        if (magnitude > value)
+        {
+            result = 0;
+            return false;
+        }
+
+        result = value - magnitude;
+        return true;
+    }
+
     public static TlsStructuralProjectionResult<TlsRelocationSite> ProjectRelocationSite(
         ElfFile file,
         TlsModuleIdentity module,
@@ -201,6 +615,19 @@ public static class TlsStructuralAdapter
         return new TlsStructuralProjectionResult<TlsRelocationSite>(
             new TlsRelocationSite(family.Value, range, binding, pairOrdinal, isGotOwned),
             diagnostics.ToArray());
+    }
+
+    private static string? TryGetDynamicSymbolName(ElfFile file, uint symbolIndex)
+    {
+        if (symbolIndex >= file.DynamicSymbols.Count)
+        {
+            return null;
+        }
+
+        var symbol = file.DynamicSymbols[(int)symbolIndex];
+        return ElfParserUtilities.TryReadString(file.DynamicMetadata.StringTable, symbol.Name, out var name)
+            ? name
+            : null;
     }
 
     private static TlsStructuralProjectionResult<T> Failure<T>(DiagnosticBag diagnostics)

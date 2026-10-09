@@ -35,6 +35,16 @@
   only bounded, demand-driven dependency queries.
 - Pin and retain licenses for AsmStone and miniz. Native source, compiler
   inputs, specs hashes, and output hashes belong in provenance.
+- Keep final AArch64 instruction-word generation behind the project-owned
+  `Aarch64InstructionEncoder` in `Aarch64Semantics`. It may call AsmStone's
+  generated object encoder, but AsmStone model types and generated field names
+  must not escape that adapter. Semantic and ELF layers calculate relocation,
+  TLS ownership, target, addend, range, scale, and address-map facts; they pass
+  those facts as project-owned requests to the adapter.
+- Every adapter-produced word must decode through AsmStone and the project
+  decoder before it is returned. A failed encode or round trip returns no word;
+  callers do not preserve a partially encoded template or fall back to local
+  opcode/bitfield assembly.
 
 ## Forbidden Patterns
 
@@ -121,6 +131,9 @@ ASLR addresses and timing.
 - Does every promoted fuzz finding have a minimized deterministic regression?
 - Does CI retain enough environment and failure evidence to distinguish a
   product failure from a missing capability?
+- Does every new or migrated AArch64 instruction writer use
+  `Aarch64InstructionEncoder`, and is every remaining manual writer recorded
+  with an owner, replacement slice, and focused test?
 
 ## Examples
 
@@ -132,6 +145,125 @@ ASLR addresses and timing.
   report snapshots rather than assertions on incidental console formatting.
 - `native/urprotect-launcher/Makefile` demonstrates the pinned static-PIE
   compile/link contract and strict AArch64 build checks.
+
+## Scenario: AsmStone-backed AArch64 instruction encoding
+
+### 1. Scope / Trigger
+
+This contract applies whenever managed protection, semantic relocation, TLS
+materialization, layout, a fixture builder, or a golden test generates or
+re-encodes an AArch64 instruction word. It establishes the one encoding
+boundary between UrProtect's ELF/TLS semantics and AsmStone's instruction
+codec.
+
+### 2. Signatures
+
+The project-owned API is:
+
+```text
+Aarch64InstructionEncoder : IAarch64InstructionEncoder
+  TryEncode(Aarch64InstructionEncodeRequest)
+    -> Aarch64InstructionEncodeResult
+  TryCreate(Aarch64InstructionBuildRequest)
+    -> Aarch64InstructionEncodeResult
+```
+
+`Aarch64InstructionEncodeRequest` carries the source word/address, output
+address, one project-owned `Aarch64InstructionEncodingFamily`, the resolved
+target or immediate, optional access width, optional output template, and an
+explicit source-immediate preservation flag. `TryCreate` is reserved for
+adapter-backed fixture or generated-instruction construction. Current owned
+families are Branch26, Call26, ConditionalBranch19, TestBranch14,
+AdrPrelLo21, AdrPrelPgHi21, Literal19, AddImmediate, and
+LoadStoreUnsignedImmediate.
+
+`Aarch64InstructionEncodeResult` returns `IsSuccess`, a word, the project-owned
+`Aarch64Instruction`, a stable adapter diagnostic code, and a bounded message.
+The adapter diagnostic codes include invalid request, source/template decode
+failure, unsupported family, operand/width failure, target misalignment or
+range failure, backend failure, and round-trip failure.
+
+### 3. Contracts
+
+- Source and output addresses are four-byte aligned and source words must
+  decode before re-encoding.
+- An output template, when supplied, must decode to the same instruction
+  family as the source. The adapter does not infer a different opcode from a
+  relocation type.
+- AsmStone owns operand legality, register/width/scale encoding, and generic
+  PC-relative target encoding. UrProtect owns relocation-family selection,
+  TLS symbol/module/GOT/TLSDESC ownership, addends, address-map placement,
+  target calculation, range policy, and relaxation decisions.
+- The adapter invokes AsmStone encoding and then decodes the result through
+  AsmStone and the project decoder. It returns a successful result only when
+  the decoded family and requested target/immediate/width still match.
+- `Aarch64SemanticFixupEncoder` uses the adapter for Branch26/Call26,
+  conditional/test branches, ADR/ADRP, and literal loads. Dynamic TLS
+  resolver CALL26, module ADRP/ADD, and TLSLD DTPREL ADD output use the same
+  boundary. Remaining manual writers are transition debt, not permission to
+  add another writer.
+- GNU assembler/linker output remains an independent ABI/toolchain oracle. It
+  can provide a positive fixture, but it does not replace the project adapter
+  in managed production paths.
+- Raw masks are permitted for bounded recognition or validation only when the
+  instruction is also checked through project-owned AsmStone-projected
+  operands. They are not a new final-word encoding mechanism.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| source/output address is not four-byte aligned | `InvalidRequest`; no word |
+| source or output template cannot be decoded | source/template decode diagnostic; no word |
+| requested family does not match decoded instruction | unsupported-family or invalid-operand diagnostic; no word |
+| PC-relative target is misaligned or outside its signed range | target alignment/range diagnostic; semantic caller maps it to its stable fixup diagnostic |
+| immediate width, access width, or load/store scale is invalid | operand/width diagnostic; no word |
+| AsmStone encode fails | backend diagnostic; no fallback encoding |
+| AsmStone or project decode round trip changes family or requested value | round-trip diagnostic; no publication |
+| instruction is individually encodable but TLS relocation/GOT/PT_TLS facts are inconsistent | TLS semantic/layout diagnostic before materialization; encoding success does not override ELF validation |
+| a new production writer bypasses the adapter | review/architecture failure; add or migrate the adapter seam first |
+
+### 5. Good/Base/Bad Cases
+
+- Good: UrProtect validates a TLS relocation and mapped target, sends a typed
+  request to `Aarch64InstructionEncoder`, verifies the AsmStone/project decode
+  round trip, and materializes only the returned word.
+- Base: an existing manual writer remains while its owner, replacement test,
+  and bounded migration scope are recorded in the task research; it does not
+  receive new instruction families.
+- Bad: a semantic or layout consumer imports AsmStone model types, copies an
+  opcode mask into a new writer, accepts a backend failure by retaining the
+  source word, or treats an encodable instruction as proof of valid TLS
+  relocation ownership.
+
+### 6. Tests Required
+
+- `tests/UrProtect.Core.Tests/Semantics/Aarch64InstructionEncoderTests.cs`
+  must cover adapter construction, PC-relative remapping, ADD and unsigned
+  load/store width/scale requests, target alignment/range rejection, and
+  mandatory AsmStone/project round trips.
+- `tests/UrProtect.Core.Tests/Semantics/SemanticRelocationTests.cs` and TLS
+  workflow tests must prove the production semantic fixup path uses the
+  adapter while retaining relocation/addend/address-map decisions in
+  UrProtect.
+- Positive fixture and golden words must come from the adapter or a named GNU
+  assembler/linker oracle and must decode through AsmStone. Nearest-negative
+  cases mutate structured operands or relocation metadata from valid fixtures.
+- Release build, focused adapter/semantic/TLS tests, full managed tests,
+  `git diff --check`, task validation, architecture checks, and the applicable
+  native checks must run before promotion. Missing `musl-gcc` is retained as
+  an explicit environment gap for the launcher lane.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: calculate a TLS target, OR it into a local opcode mask, and keep the
+       source word when AsmStone rejects the result.
+
+Correct: validate TLS ownership and the mapped target in UrProtect, submit a
+         project-owned request to Aarch64InstructionEncoder, require both
+         AsmStone and project decode round trips, then publish only that word.
+```
 
 ## Public real-sample CI corpus
 
@@ -268,7 +400,6 @@ Wrong: accept a schema-1 result because its directory and JSON are non-empty.
 Correct: require schema-2 fields, all layer results, cleanup marker, and a
          target-consistent aggregate before upload can pass.
 ```
-
 
 ## Scenario: Managed TLS semantic rewrite and current artifact handoff
 

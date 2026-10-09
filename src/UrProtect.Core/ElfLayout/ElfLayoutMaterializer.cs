@@ -197,7 +197,7 @@ public static class ElfLayoutMaterializer
             var fixup = decision.Fixup;
             var relocation = fixup.Relocation;
             var relocationType = relocation.RelocationType;
-            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec)
+            if (fixup.AccessModel is not (TlsAccessModel.LocalExec or TlsAccessModel.InitialExec or TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic)
                 || (fixup.AccessModel == TlsAccessModel.LocalExec
                     && (fixup.RelocationFamily != TlsRelocationFamily.Tprel
                         || fixup.AddressExpression.Kind != TlsAddressExpressionKind.ThreadPointerRelative
@@ -215,11 +215,24 @@ public static class ElfLayoutMaterializer
                             or ElfConstants.RArm64TlsIeMovwGottprelG0Nc
                             or ElfConstants.RArm64TlsIeAdrGottprelPage21
                             or ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
-                            or ElfConstants.RArm64TlsIeLdGottprelPrel19))))
+                            or ElfConstants.RArm64TlsIeLdGottprelPrel19)))
+                || (fixup.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+                    && (fixup.ResolverCall is null
+                        || fixup.ModuleOwner is null
+                        || (fixup.AccessModel == TlsAccessModel.GeneralDynamic && fixup.DtpRelOwner is null)
+                        || (relocation.Kind == Aarch64RelocationKind.Call26
+                            ? fixup.PairOrdinal != -1
+                            : fixup.AccessModel == TlsAccessModel.LocalDynamic
+                                ? relocationType is not (ElfConstants.RArm64TlsLdAdrPage21
+                                    or ElfConstants.RArm64TlsLdAddLo12Nc
+                                    or ElfConstants.RArm64TlsLdAddDtprelHi12
+                                    or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
+                                : relocationType is not (ElfConstants.RArm64TlsGdAdrPage21
+                                    or ElfConstants.RArm64TlsGdAddLo12Nc)))))
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsSemanticsUnsupported,
-                    "Materialization received a TLS output fixup outside the supported local-exec or TLSIE MOVW subset.",
+                    "Materialization received a TLS output fixup outside the supported managed TLS slices.",
                     fixup.RelocationSourceRange.FileOffset.Value);
                 return false;
             }
@@ -256,18 +269,28 @@ public static class ElfLayoutMaterializer
                 return false;
             }
 
-            var sourceMatches = sourceFile.TlsMetadata.StaticRelocations
-                .Concat(sourceFile.TlsMetadata.Dynamic.Relocations)
-                .Where(fact => fact.Relocation.Offset == fixup.RelocationSourceRange.VirtualAddress.Value
-                    && fact.Relocation.Type == relocationType
-                    && fact.Relocation.Info == relocation.RawInfo
-                    && fact.Relocation.SymbolIndex == relocation.SymbolIndex
-                    && fact.Relocation.Addend == relocation.Addend
-                    && fact.Relocation.SourceAddress == relocation.RelocationTableAddress?.Value
-                    && fact.WriteSize == fixup.RelocationSourceRange.Size
-                    && fact.Symbol?.Name == relocation.SymbolName)
-                .ToArray();
-            if (sourceMatches.Length != 1)
+            var sourceMatchCount = relocation.Kind == Aarch64RelocationKind.Call26
+                ? sourceFile.RelaRelocations.Count(candidate =>
+                    candidate.IsPlt
+                    && candidate.Type == ElfConstants.RArm64JumpSlot
+                    && candidate.SourceAddress == relocation.RelocationTableAddress?.Value
+                    && candidate.SymbolIndex == relocation.SymbolIndex
+                    && candidate.Addend == relocation.Addend
+                    && string.Equals(
+                        TryGetDynamicSymbolName(sourceFile, candidate.SymbolIndex),
+                        relocation.SymbolName,
+                        StringComparison.Ordinal))
+                : sourceFile.TlsMetadata.StaticRelocations
+                    .Concat(sourceFile.TlsMetadata.Dynamic.Relocations)
+                    .Count(fact => fact.Relocation.Offset == fixup.RelocationSourceRange.VirtualAddress.Value
+                        && fact.Relocation.Type == relocationType
+                        && fact.Relocation.Info == relocation.RawInfo
+                        && fact.Relocation.SymbolIndex == relocation.SymbolIndex
+                        && fact.Relocation.Addend == relocation.Addend
+                        && fact.Relocation.SourceAddress == relocation.RelocationTableAddress?.Value
+                        && fact.WriteSize == fixup.RelocationSourceRange.Size
+                        && fact.Symbol?.Name == relocation.SymbolName);
+            if (sourceMatchCount != 1)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsLayoutMismatch,
@@ -279,6 +302,19 @@ public static class ElfLayoutMaterializer
             if (fixup.AccessModel == TlsAccessModel.InitialExec
                 && (fixup.GotEntry is null
                     || !ValidateInitialExecGotEntryPreserved(sourceFile, outputFile, output, fixup.GotEntry, diagnostics)))
+            {
+                return false;
+            }
+            if (fixup.AccessModel is TlsAccessModel.GeneralDynamic
+                && (fixup.ModuleOwner is null
+                    || fixup.DtpRelOwner is null
+                    || !ValidateDynamicOwnerPairPreserved(sourceFile, outputFile, output, fixup.ModuleOwner, fixup.DtpRelOwner, diagnostics)))
+            {
+                return false;
+            }
+            if (fixup.AccessModel == TlsAccessModel.LocalDynamic
+                && (fixup.ModuleOwner is null
+                    || !ValidateLocalDynamicModuleOwnerPreserved(sourceFile, outputFile, output, fixup.ModuleOwner, diagnostics)))
             {
                 return false;
             }
@@ -792,6 +828,135 @@ public static class ElfLayoutMaterializer
         return true;
     }
 
+    private static bool ValidateDynamicOwnerPairPreserved(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        byte[] output,
+        TlsModuleOwnerBinding moduleOwner,
+        TlsDtpRelOwnerBinding dtpRelOwner,
+        DiagnosticBag diagnostics)
+    {
+        if (!ValidateDynamicOwnerPreserved(sourceFile, outputFile, output, moduleOwner.SourceRange, moduleOwner.Relocation, diagnostics)
+            || !ValidateDynamicOwnerPreserved(sourceFile, outputFile, output, dtpRelOwner.SourceRange, dtpRelOwner.Relocation, diagnostics))
+        {
+            return false;
+        }
+
+        return moduleOwner.SourceRange.VirtualAddress.Value <= ulong.MaxValue - sizeof(ulong)
+            && moduleOwner.SourceRange.FileOffset.Value <= ulong.MaxValue - sizeof(ulong)
+            && dtpRelOwner.SourceRange.VirtualAddress.Value == moduleOwner.SourceRange.VirtualAddress.Value + sizeof(ulong)
+            && dtpRelOwner.SourceRange.FileOffset.Value == moduleOwner.SourceRange.FileOffset.Value + sizeof(ulong);
+    }
+
+    private static bool ValidateDynamicOwnerPreserved(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        byte[] output,
+        SemanticSourceRange ownerRange,
+        RelocationBinding ownerRelocation,
+        DiagnosticBag diagnostics)
+    {
+        var sourceFacts = sourceFile.TlsMetadata.Dynamic.Relocations
+            .Where(fact => fact.Relocation.Type == ownerRelocation.RelocationType
+                && fact.Relocation.Offset == ownerRange.VirtualAddress.Value
+                && fact.Relocation.Info == ownerRelocation.RawInfo
+                && fact.Relocation.Addend == ownerRelocation.Addend
+                && fact.Relocation.SourceAddress == ownerRelocation.RelocationTableAddress?.Value)
+            .ToArray();
+        var outputFacts = outputFile.TlsMetadata.Dynamic.Relocations
+            .Where(fact => fact.Relocation.Type == ownerRelocation.RelocationType
+                && fact.Relocation.Offset == ownerRange.VirtualAddress.Value
+                && fact.Relocation.Info == ownerRelocation.RawInfo
+                && fact.Relocation.Addend == ownerRelocation.Addend
+                && fact.Relocation.SourceAddress == ownerRelocation.RelocationTableAddress?.Value)
+            .ToArray();
+        if (sourceFacts.Length != 1 || outputFacts.Length != 1
+            || !sourceFile.LoadMap.TryVirtualAddressToFileOffset(ownerRange.VirtualAddress, sizeof(ulong), out var sourceOffset)
+            || !outputFile.LoadMap.TryVirtualAddressToFileOffset(ownerRange.VirtualAddress, sizeof(ulong), out var outputOffset)
+            || sourceOffset != ownerRange.FileOffset
+            || outputOffset != ownerRange.FileOffset
+            || sourceOffset.Value > int.MaxValue
+            || outputOffset.Value > int.MaxValue
+            || sourceOffset.Value > (ulong)sourceFile.Bytes.Length
+            || outputOffset.Value > (ulong)output.Length
+            || sizeof(ulong) > (ulong)sourceFile.Bytes.Length - sourceOffset.Value
+            || sizeof(ulong) > (ulong)output.Length - outputOffset.Value
+            || !sourceFile.Bytes.Span.Slice(checked((int)sourceOffset.Value), sizeof(ulong))
+                .SequenceEqual(output.AsSpan(checked((int)outputOffset.Value), sizeof(ulong))))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsLayoutMismatch,
+                "A TLSGD loader-owned GOT word moved, changed, or lost its dynamic relocation owner.",
+                ownerRange.FileOffset.Value);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ValidateLocalDynamicModuleOwnerPreserved(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        byte[] output,
+        TlsModuleOwnerBinding owner,
+        DiagnosticBag diagnostics)
+    {
+        var sourceFacts = sourceFile.TlsMetadata.Dynamic.Relocations
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsDtpMod64
+                && fact.Relocation.Offset == owner.SourceRange.VirtualAddress.Value
+                && fact.Relocation.SymbolIndex == 0
+                && fact.Relocation.Addend == owner.Relocation.Addend
+                && fact.Relocation.SourceAddress == owner.Relocation.RelocationTableAddress?.Value
+                && fact.Symbol is null
+                && fact.WriteSize == sizeof(ulong))
+            .ToArray();
+        var outputFacts = outputFile.TlsMetadata.Dynamic.Relocations
+            .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsDtpMod64
+                && fact.Relocation.Offset == owner.SourceRange.VirtualAddress.Value
+                && fact.Relocation.SymbolIndex == 0
+                && fact.Relocation.Addend == owner.Relocation.Addend
+                && fact.Relocation.SourceAddress == owner.Relocation.RelocationTableAddress?.Value
+                && fact.Symbol is null
+                && fact.WriteSize == sizeof(ulong))
+            .ToArray();
+        if (sourceFacts.Length != 1 || outputFacts.Length != 1
+            || !sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+                owner.SourceRange.VirtualAddress,
+                sizeof(ulong),
+                out var sourceOffset)
+            || sourceOffset != owner.SourceRange.FileOffset
+            || !outputFile.LoadMap.TryVirtualAddressToFileOffset(
+                owner.SourceRange.VirtualAddress,
+                sizeof(ulong),
+                out var outputOffset)
+            || outputOffset != owner.SourceRange.FileOffset
+            || sourceOffset.Value > int.MaxValue
+            || outputOffset.Value > int.MaxValue
+            || sourceOffset.Value > (ulong)sourceFile.Bytes.Length
+            || outputOffset.Value > (ulong)output.Length
+            || sizeof(ulong) > (ulong)sourceFile.Bytes.Length - sourceOffset.Value
+            || sizeof(ulong) > (ulong)output.Length - outputOffset.Value
+            || sourceFile.LoadMap.Segments.Count(segment =>
+                segment.ContainsVirtualAddress(owner.SourceRange.VirtualAddress.Value, sizeof(ulong))
+                && segment.ContainsFileOffset(owner.SourceRange.FileOffset.Value, sizeof(ulong))
+                && (segment.Flags & ElfConstants.PfW) != 0) != 1
+            || outputFile.LoadMap.Segments.Count(segment =>
+                segment.ContainsVirtualAddress(owner.SourceRange.VirtualAddress.Value, sizeof(ulong))
+                && segment.ContainsFileOffset(owner.SourceRange.FileOffset.Value, sizeof(ulong))
+                && (segment.Flags & ElfConstants.PfW) != 0) != 1
+            || !sourceFile.Bytes.Span.Slice(checked((int)sourceOffset.Value), sizeof(ulong))
+                .SequenceEqual(output.AsSpan(checked((int)outputOffset.Value), sizeof(ulong))))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsLayoutMismatch,
+                "The TLSLD DTPMOD64 owner moved, changed, lost writable ownership, or no longer has one matching loader relocation.",
+                owner.SourceRange.FileOffset.Value);
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool ValidateInitialExecGotEntryPreserved(
         ElfFile sourceFile,
         ElfFile outputFile,
@@ -1231,6 +1396,20 @@ public static class ElfLayoutMaterializer
 
         return true;
     }
+
+    private static string? TryGetDynamicSymbolName(ElfFile file, uint symbolIndex)
+    {
+        if (symbolIndex >= file.DynamicSymbols.Count)
+        {
+            return null;
+        }
+
+        var symbol = file.DynamicSymbols[(int)symbolIndex];
+        return ElfParserUtilities.TryReadString(file.DynamicMetadata.StringTable, symbol.Name, out var name)
+            ? name
+            : null;
+    }
+
 
     private static bool TryGetBranchEncoding(
         ElfLayoutPlan plan,
