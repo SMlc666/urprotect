@@ -15,3 +15,4 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-oracle.md","reason":"Audit exact TLSDESC site ordering, BLR marker ownership, full descriptor extent, DT_TLSDESC_PLT/GOT mapping, PT_TLS preservation, and no-runtime-promotion boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-fixture.s","reason":"Check the retained GNU TLSDESC fixture source and its initialized/zero-fill TLS declarations."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-managed-status.md","reason":"Record the completed bounded managed TLSDESC producer/layout evidence, test witness, and explicit no-runtime-promotion boundary."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-runtime-evidence-projection.md","reason":"Bounded additive TLS runtime evidence projection, result boundaries, and checker witnesses."}

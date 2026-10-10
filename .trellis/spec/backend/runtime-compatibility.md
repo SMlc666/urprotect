@@ -1239,6 +1239,43 @@ urprotect protect-image INPUT --artifact PATH --role PATH --manifest PATH --stag
 
 The producer emits `protected-image.bin`, `protected-image.json`, `stage.json`, and a closed `SHA256SUMS` file. The stage record is schema v1 with `status`, command/environment/producer/source/request/artifact bindings, bounded diagnostics, transformation identity, and `publicationComplete`.
 
+
+### TLS runtime projection (additive evidence only)
+
+The producer stage may contain an optional `tlsEvidence` object. This is a
+bounded evidence projection consumed by `scripts/check-protected-image-evidence.py`;
+it does not change Protected Image v1, the operation grammar, or runtime support
+status. Its `schemaVersion` is `1` and its model vocabulary is exactly
+`local-exec`, `initial-exec`, `local-dynamic`, `general-dynamic`, and `tlsdesc`.
+The object binds one explicit `profile`, `runtime` (`glibc`, `musl`, or
+`bionic`), and `lifecycle` (`current-thread`, `registered-worker`, or
+`not-run`) to the enclosing stage.
+
+The projection retains source, transformed, and Protected Image paths plus
+SHA-256 digests; toolchain and loader identity; bounded PT_TLS template,
+`fileSize`, `memorySize`, `zeroFillSize`, alignment, and owning-load facts; and
+`perThread`, `zeroFill`, and `teardown` observations. Source and template paths
+must be regular files within the evidence root, their digests must match the
+files, and transformed/artifact paths and digests must match the enclosing
+published Protected Image. PT_TLS template length must equal `fileSize`,
+`fileSize <= memorySize`, and `memorySize - fileSize == zeroFillSize`; sizes and
+program-header identity are bounded and alignment is a positive power of two.
+Unknown fields, unsupported models/profiles/runtimes/results, path traversal,
+symlinks, digest mismatches, and malformed numeric facts fail closed.
+
+The result vocabulary is shared with the runtime matrix:
+`accepted-and-runs`, `environment-unavailable`, or `runtime-failure`.
+All three TLS runtime results require a completely published producer stage and
+retained transformed/artifact hashes. `accepted-and-runs` requires observed
+per-thread, zero-fill, and teardown facts with no first failure. An
+`environment-unavailable` result requires `firstFailureStage=environment`,
+`lifecycle=not-run`, and no lifecycle observation. `runtime-failure` describes a
+failure after publication and requires a non-environment first-failure stage;
+it never substitutes for a failed producer publication. Producer/layout failure
+continues to use the existing failed-stage contract, with no artifact or role.
+The selected checker runtime argument must equal `tlsEvidence.runtime`, so one
+runtime's result cannot promote another runtime.
+
 ### 3. Contracts
 
 - The command snapshots explicit selectors and passes, uses the managed `ProtectedImageProducer`, and publishes through `ProtectedImagePublisher`; the current `protect` command and `ProductReport` schema remain unchanged.

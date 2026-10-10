@@ -15,3 +15,4 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-oracle.md","reason":"Exact GNU TLSDESC sequence, ordered relocation markers, 16-byte descriptor ownership, paired dynamic tags, PT_TLS geometry, and runtime evidence boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-fixture.s","reason":"Linker-oracle fixture for the bounded TLSDESC semantic/materialization slice, including initialized TLS and zero-fill."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-managed-status.md","reason":"Carry the exact TLSDESC producer implementation status and remaining runtime evidence boundary into the execution context."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-runtime-evidence-projection.md","reason":"Bounded additive TLS runtime evidence projection, result boundaries, and checker witnesses."}

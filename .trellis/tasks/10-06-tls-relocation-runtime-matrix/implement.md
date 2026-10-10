@@ -144,3 +144,26 @@ and bionic lanes. The exact commands and retained artifact paths are added to
 A failed phase is reverted or narrowed at its own boundary. No compatibility
 wrapper, alternate writer, guessed relocation, or runtime fallback is added to
 recover a failed phase.
+
+## Phase 5/6 bounded evidence increment
+
+The existing Protected Image producer evidence checker now accepts an optional
+`tlsEvidence` projection. It validates the five TLS model names, profile/runtime/
+lifecycle binding, source/transformed/artifact hashes, bounded PT_TLS facts,
+per-thread/zero-fill/teardown observations, first-failure classification, and
+publication/rollback invariants. `accepted-and-runs`,
+`environment-unavailable`, and `runtime-failure` remain distinct; no result
+promotes a different runtime. Existing producer stages without this optional
+projection remain valid.
+
+Verified locally:
+
+- `python3 -m unittest discover -s tests -p 'test_*.py'` — 300 passed;
+- `python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr`;
+- `python3 scripts/validate-regression-matrix.py tests/regression-matrix.json`;
+- `python3 ./.trellis/scripts/task.py validate .trellis/tasks/10-06-tls-relocation-runtime-matrix`;
+- native runtime and launcher contract tests with `CC=aarch64-linux-gnu-gcc`.
+
+The local cell is native AArch64 with GNU cross-tooling, 4 KiB pages, no
+`musl-gcc`, and no Docker/Podman. Musl and bionic transformed TLS runtime rows
+remain explicit CI environment/evidence work and are not promoted locally.
