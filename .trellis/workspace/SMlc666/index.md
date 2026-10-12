@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~498 | Active |
+| `journal-1.md` | ~538 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-10-13 | Finish TLS runtime matrix after CI reassignment | `5db1de7` | `feat/tls-relocation-runtime-matrix` |
 | 17 | 2026-10-13 | Complete TLS runtime matrix evidence | `8a04e38` | `feat/tls-relocation-runtime-matrix` |
 | 16 | 2026-10-12 | Continue TLS runtime matrix | `ee4ab84` | `main` |
 | 15 | 2026-10-12 | Complete AsmStone encoder unification | `7ba3268`, `ca340d5`, `53e8bcd`, `b40e31e`, `86bb3c0` | `task/10-11-asmstone-encoder-unification` |

@@ -496,3 +496,43 @@ Completed and committed TLS runtime matrix follow-up. Added canonical Android pa
 ### Next Steps
 
 - Push feat/tls-relocation-runtime-matrix and observe CI musl/bionic evidence lanes
+
+
+## Session 18: Finish TLS runtime matrix after CI reassignment
+<!-- trellis-session: v=2 fp=efa68fed76db7887 -->
+
+**Date**: 2026-10-13
+**Task**: Finish TLS runtime matrix after CI reassignment
+**Branch**: `feat/tls-relocation-runtime-matrix`
+
+### Summary
+
+Completed the reassigned 10-06-tls-relocation-runtime-matrix task end to end. Closed the CI coverage boundary by excluding vendored AsmStone from project-owned coverage, accepted bounded Go zero-file PT_TLS observations at image-end offsets while retaining fail-closed managed projection, and fixed bionic fixture RELR/loader-specific dynamic metadata boundaries. Added unconditional apt partial cleanup, explicit Bionic platform compile flags, structured relrImageBoundary and dynamicMetadataBoundary evidence, and synchronized compatibility/task documentation. PR #24 CI run 38315313811 passed build-and-test, real-sample-matrix, bionic-native-arm64, musl-container-smoke, runtime-matrix-native-arm64, and independent-evaluator. Task archive validates; .pi/settings.json remains user-owned dirty state only.
+
+### Main Changes
+
+- Closed AsmStone-aware coverage gate and Go PT_TLS real-sample rejection
+- Added bionic DT_RELR and dynamic metadata loader-boundary evidence with cleanup trap
+- Synchronized task/spec/compatibility documentation and retained row-local runtime claims
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5db1de7` | fix: record bionic loader boundaries |
+
+### Testing
+
+- [OK] 391 managed tests
+- [OK] 309 Python tests
+- [OK] native runtime and launcher suites
+- [OK] 13 fixture and 22 regression cases
+- [OK] PR CI run 38315313811: all required jobs successful
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- No task implementation remains; merge PR #24 when repository policy permits
