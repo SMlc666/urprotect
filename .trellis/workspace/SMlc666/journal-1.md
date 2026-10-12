@@ -408,3 +408,29 @@ Added the HostContext rehydration evidence runner that was omitted from the firs
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: Complete AsmStone encoder unification
+<!-- trellis-session: v=2 fp=19f358101c50f395 -->
+
+**Date**: 2026-10-12
+**Task**: Complete AsmStone encoder unification
+**Branch**: `task/10-11-asmstone-encoder-unification`
+
+### Summary
+
+Updated vendored AsmStone to ff961cff, expanded the project-owned Aarch64InstructionEncoder with MOV/MOV-register/CMP/RET and branch families, routed dispatcher/layout/semantic/TLS output through the adapter, added the final-word architecture checker and CI gate, updated backend contracts, and archived task 10-11-asmstone-encoder-unification. Verification passed: AsmStone upstream tests, 385 managed tests, 296 Python tests with 7 environment-gated skips, 13 fixture cases, 20 regression cases, architecture checks, native runtime tests, and native launcher integration.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ba3268` | vendor: update AsmStone to ff961cff |
+| `ca340d5` | refactor: expand project-owned AArch64 encoder adapter |
+| `53e8bcd` | refactor: route protection dispatcher through AsmStone encoder |
+| `b40e31e` | refactor: route layout and semantic fixups through encoder |
+| `86bb3c0` | test/docs: enforce one final AArch64 encoding boundary |
+
+### Status
+
+[OK] **Completed**
