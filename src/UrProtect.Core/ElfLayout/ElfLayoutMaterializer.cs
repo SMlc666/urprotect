@@ -497,7 +497,6 @@ public static class ElfLayoutMaterializer
             var valid = ordered.Length == 1
                 && ordered[0].Fixup.PairOrdinal == 0
                 && ordered[0].Fixup.GotEntry is { } gotEntry
-                && ordered[0].Fixup.Relocation.SymbolIndex == gotEntry.Symbol.SymbolIndex
                 && string.Equals(
                     ordered[0].Fixup.Relocation.SymbolName,
                     gotEntry.Symbol.Name,
@@ -764,7 +763,7 @@ public static class ElfLayoutMaterializer
                     && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
                         sourceWords,
                         sourcePairDelta,
-                        requireSourceLow12Zero: true)
+                        requireSourceLow12Zero: false)
                     && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
                         outputWords,
                         outputPairDelta,
@@ -1230,8 +1229,7 @@ public static class ElfLayoutMaterializer
                 && !fact.Relocation.IsPlt
                 && fact.Relocation.Addend == gotEntry.Addend
                 && fact.Symbol is not null
-                && fact.Symbol.SymbolIndex == gotEntry.Symbol.SymbolIndex
-                && string.Equals(fact.Symbol.Name, gotEntry.Symbol.Name, StringComparison.Ordinal))
+                && TlsStructuralAdapter.SymbolsMatch(fact.Symbol, gotEntry.Symbol))
             .ToArray();
         if (sourceFacts.Length != 1)
         {

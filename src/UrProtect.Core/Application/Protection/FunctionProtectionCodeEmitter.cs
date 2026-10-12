@@ -217,6 +217,17 @@ public sealed partial class FunctionProtectionService
                 .Relocation.Offset,
             _ => (ulong?)null,
         };
+        var tlsIeRegisterOffsetAccessAddress = hasTlsIeAdrLd64
+            && tlsIePcRelativeLoadAddress is { } tlsIePairAddress
+            && tlsIePairAddress <= ulong.MaxValue - (3UL * sizeof(uint))
+            ? analysis.Instructions
+                .Where(instruction => instruction.Address == tlsIePairAddress + (3UL * sizeof(uint)))
+                .Where(instruction => instruction.Decode.Instruction?.Mnemonic.Equals("ldr", StringComparison.OrdinalIgnoreCase) == true)
+                .Where(instruction => instruction.Decode.Instruction?.Operands.Any(operand =>
+                    operand.Memory is { Index: not null, Offset: 0, WritesBack: false }) == true)
+                .Select(instruction => (ulong?)instruction.Address)
+                .FirstOrDefault()
+            : null;
         var hasTlsLdShape = tlsFacts.Length == 4
             && tlsFacts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
             {
@@ -335,6 +346,8 @@ public sealed partial class FunctionProtectionService
                     && !(supportsTlsIePcRelativeLoad
                         && tlsIePcRelativeLoadAddress is { } pcRelativeLoadAddress
                         && instruction.Address == pcRelativeLoadAddress)
+                    && !(tlsIeRegisterOffsetAccessAddress is { } registerOffsetAddress
+                        && instruction.Address == registerOffsetAddress)
                     && !isTlsLdResolverCall
                     && !isTlsLdModuleAddress
                     && !isTlsDescModuleAddress)

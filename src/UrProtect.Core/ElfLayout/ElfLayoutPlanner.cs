@@ -1549,8 +1549,7 @@ public static class ElfLayoutPlanner
                 && fact.Relocation.Offset == gotEntry.SourceRange.VirtualAddress.Value
                 && fact.Relocation.Addend == gotEntry.Addend
                 && fact.Symbol is not null
-                && fact.Symbol.SymbolIndex == gotEntry.Symbol.SymbolIndex
-                && string.Equals(fact.Symbol.Name, gotEntry.Symbol.Name, StringComparison.Ordinal))
+                && TlsStructuralAdapter.SymbolsMatch(fact.Symbol, gotEntry.Symbol))
             .ToArray();
         var valid = gotEntry.SourceRange.Size == sizeof(ulong)
             && sourceFile.LoadMap.TryVirtualAddressToFileOffset(
@@ -1660,7 +1659,7 @@ public static class ElfLayoutPlanner
                     valid = Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
                                 sourceWords,
                                 checked((int)(sourceDelta / sizeof(uint))),
-                                requireSourceLow12Zero: true)
+                                requireSourceLow12Zero: false)
                         && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Sequence(
                             outputWords,
                             0,
@@ -1695,7 +1694,6 @@ public static class ElfLayoutPlanner
                 && region.CodeBytes.Length >= sizeof(uint)
                 && fixup.PairOrdinal == 0
                 && fixup.GotEntry is { } gotEntry
-                && fixup.Relocation.SymbolIndex == gotEntry.Symbol.SymbolIndex
                 && string.Equals(fixup.Relocation.SymbolName, gotEntry.Symbol.Name, StringComparison.Ordinal)
                 && fixup.Relocation.Addend == gotEntry.Addend
                 && fixup.SequenceSourceRange.Size >= 4 * sizeof(uint)

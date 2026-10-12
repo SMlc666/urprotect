@@ -16,3 +16,4 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-fixture.s","reason":"Linker-oracle fixture for the bounded TLSDESC semantic/materialization slice, including initialized TLS and zero-fill."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-managed-status.md","reason":"Carry the exact TLSDESC producer implementation status and remaining runtime evidence boundary into the execution context."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-runtime-evidence-projection.md","reason":"Bounded additive TLS runtime evidence projection, result boundaries, and checker witnesses."}
+{"file":"scripts/run-tls-host-context-rehydration-e2e.sh","reason":"Run and retain the real native AArch64 glibc transformed TLSIE evidence lane with PT_TLS/readelf/hash projection."}

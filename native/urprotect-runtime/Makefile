@@ -226,7 +226,7 @@ $(GRAPH_SELF_TEST_OBJECT): host_context_graph_self_test.c host_context_graph_fix
 # TLS/property fixtures, keeping each positive oracle isolated to its feature.
 $(TLS_FIXTURE): $(TLS_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none -z now "$<" -o "$@"
+	$(LD) -shared --build-id=none -z now --emit-relocs "$<" -o "$@"
 
 $(THREADED_TLS_FIXTURE): $(THREADED_TLS_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"

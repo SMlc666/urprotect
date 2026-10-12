@@ -521,3 +521,17 @@ Correct: recognize a bounded typed sequence, carry its canonical snapshot,
         map every source site through the shared layout plan, reparse the
         output, and publish only after identity and TLS facts match.
 ```
+
+## Scenario: Linked retained TLS relocations
+
+When a linked AArch64 ELF retains section-owned relocation records, the record's
+symbol index belongs to the linked section symbol table (`SHT_SYMTAB`), while
+loader-owned dynamic/GOT records use the dynamic symbol table (`DT_SYMTAB`).
+Raw indices and `r_info` remain preserved for round-trip identity, but semantic
+owner matching across those records compares the complete bounded TLS symbol
+identity (name, binding, type, visibility, section, value, and size), never a
+raw index from the other table. A linked `--emit-relocs` instruction may also
+retain an already-resolved page/low-12 field; accept it only when the decoded
+page and scaled low-12 value equal the carried GOT owner plus addend. The
+relocatable zero-field form remains valid, and any inconsistent nonzero field
+fails before snapshot or publication.

@@ -2,6 +2,12 @@
 
 __thread int urp_tls_value = 43;
 
+__attribute__((noinline, visibility("hidden")))
+int32_t urp_tls_read(void)
+{
+    return urp_tls_value;
+}
+
 int32_t urp_entry(
     const urp_host_context_v1 *host,
     const urp_launch_args_v1 *args)
@@ -9,5 +15,5 @@ int32_t urp_entry(
     if (host == 0 || args == 0 || args->argc != 1U || args->argv == 0) {
         return 19;
     }
-    return urp_tls_value;
+    return urp_tls_read();
 }

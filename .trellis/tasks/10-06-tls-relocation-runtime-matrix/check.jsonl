@@ -16,3 +16,4 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-fixture.s","reason":"Check the retained GNU TLSDESC fixture source and its initialized/zero-fill TLS declarations."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-managed-status.md","reason":"Record the completed bounded managed TLSDESC producer/layout evidence, test witness, and explicit no-runtime-promotion boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-runtime-evidence-projection.md","reason":"Bounded additive TLS runtime evidence projection, result boundaries, and checker witnesses."}
+{"file":"scripts/run-tls-host-context-rehydration-e2e.sh","reason":"Audit the transformed TLSIE evidence runner, closed manifest, and independent glibc handoff witness."}

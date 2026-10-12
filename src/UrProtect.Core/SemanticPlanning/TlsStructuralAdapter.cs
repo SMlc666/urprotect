@@ -78,8 +78,7 @@ public static class TlsStructuralAdapter
             .Concat(file.TlsMetadata.Dynamic.Relocations)
             .Where(fact => fact.Relocation.Type == ElfConstants.RArm64TlsTprel64
                 && fact.Symbol is not null
-                && fact.Symbol.SymbolIndex == symbol.SymbolIndex
-                && string.Equals(fact.Symbol.Name, symbol.Name, StringComparison.Ordinal)
+                && SymbolsMatch(fact.Symbol, symbol)
                 && fact.Relocation.Addend == addend)
             .ToArray();
         if (facts.Length != 1)
@@ -837,4 +836,25 @@ public static class TlsStructuralAdapter
         leftStart <= rightStart
             ? rightStart - leftStart < leftSize
             : leftStart - rightStart < rightSize;
+
+    /// <summary>Compares TLS symbol meaning across dynamic and regular symbol tables.</summary>
+    public static bool SymbolsMatch(TlsRelocationSymbolIdentity left, TlsSymbolIdentity right) =>
+        string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+        && left.Binding == right.Binding
+        && left.Type == right.SymbolType
+        && left.Visibility == right.Visibility
+        && left.SectionIndex == right.SectionIndex
+        && left.Value == right.Value
+        && left.Size == right.Size
+        && right.IsDefined == (left.SectionIndex != 0);
+
+    public static bool SymbolsMatch(TlsSymbolIdentity left, TlsSymbolIdentity right) =>
+        string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+        && left.Binding == right.Binding
+        && left.SymbolType == right.SymbolType
+        && left.Visibility == right.Visibility
+        && left.SectionIndex == right.SectionIndex
+        && left.Value == right.Value
+        && left.Size == right.Size
+        && left.IsDefined == right.IsDefined;
 }

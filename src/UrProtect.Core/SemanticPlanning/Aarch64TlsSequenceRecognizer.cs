@@ -277,6 +277,7 @@ public static class Aarch64TlsSequenceRecognizer
                 sites,
                 resolverKind,
                 descriptorOwner,
+                gotEntry,
                 diagnostics))
         {
             return Failure(diagnostics);
@@ -404,13 +405,12 @@ public static class Aarch64TlsSequenceRecognizer
         var valid = gotEntry.SourceRange.Size == sizeof(ulong)
             && gotEntry.SourceRange.FileOffset.Value % sizeof(ulong) == 0
             && gotEntry.SourceRange.VirtualAddress.Value % sizeof(ulong) == 0
-            && gotEntry.Symbol == symbol
+            && TlsStructuralAdapter.SymbolsMatch(gotEntry.Symbol, symbol)
             && gotEntry.Addend == addend
             && gotEntry.SourceIdentity.Value.Length > 0
             && relocation.RelocationType == ElfConstants.RArm64TlsTprel64
             && !relocation.IsPlt
             && relocation.Kind == Aarch64RelocationKind.ThreadLocal
-            && relocation.SymbolIndex == symbol.SymbolIndex
             && string.Equals(relocation.SymbolName, symbol.Name, StringComparison.Ordinal)
             && relocation.Addend == addend
             && relocation.RelocationAddress == gotEntry.SourceRange.VirtualAddress
@@ -476,7 +476,7 @@ public static class Aarch64TlsSequenceRecognizer
                             && Aarch64TlsInstructionSemantics.IsSupportedInitialExecMovwPair(instructions, sites))
                         || (sites[0].Binding.RelocationType == ElfConstants.RArm64TlsIeAdrGottprelPage21
                             && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
-                            && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(instructions, sites)));
+                            && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(instructions, sites, gotEntry)));
             }
             if (!validPair)
             {
@@ -597,6 +597,7 @@ public static class Aarch64TlsSequenceRecognizer
         IReadOnlyList<TlsRelocationSite> relocationSites,
         TlsResolverKind resolverKind,
         TlsDescriptorOwnerBinding? descriptorOwner,
+        TlsGotEntryBinding? gotEntry,
         DiagnosticBag diagnostics)
     {
         var hasThreadPointer = instructions.Any(IsThreadPointerMrs);
@@ -629,7 +630,8 @@ public static class Aarch64TlsSequenceRecognizer
                         relocationSites)
                     : Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(
                         instructions,
-                        relocationSites),
+                        relocationSites,
+                        gotEntry),
             TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic => adrpIndex >= 0
                 && addIndex > adrpIndex
                 && resolverKind == TlsResolverKind.TlsGetAddr

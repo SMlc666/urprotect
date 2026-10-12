@@ -1128,7 +1128,8 @@ public static partial class SemanticPlanSnapshotCodec
                 && sites[1].Binding.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc
                 && Aarch64TlsInstructionSemantics.IsSupportedInitialExecAdrLd64Pair(
                     binding.InstructionSequence.Instructions,
-                    sites)));
+                    sites,
+                    binding.GotEntry)));
     }
 
     private static bool IsValidLocalExecRelocationPair(
@@ -1286,7 +1287,7 @@ public static partial class SemanticPlanSnapshotCodec
         ValidateRange(gotEntry.SourceRange, "TLSIE GOT source range", diagnostics, offset);
         ValidateRelocation(gotEntry.Relocation, diagnostics, offset);
         var valid = symbol is not null
-            && gotEntry.Symbol == symbol
+            && TlsStructuralAdapter.SymbolsMatch(gotEntry.Symbol, symbol)
             && gotEntry.Addend == addend
             && gotEntry.SourceRange.Size == sizeof(ulong)
             && gotEntry.SourceRange.FileOffset.Value % sizeof(ulong) == 0
@@ -1294,7 +1295,6 @@ public static partial class SemanticPlanSnapshotCodec
             && gotEntry.Relocation.RelocationType == ElfConstants.RArm64TlsTprel64
             && !gotEntry.Relocation.IsPlt
             && gotEntry.Relocation.Kind == Aarch64RelocationKind.ThreadLocal
-            && gotEntry.Relocation.SymbolIndex == gotEntry.Symbol.SymbolIndex
             && string.Equals(gotEntry.Relocation.SymbolName, gotEntry.Symbol.Name, StringComparison.Ordinal)
             && gotEntry.Relocation.Addend == addend
             && gotEntry.Relocation.RelocationAddress == gotEntry.SourceRange.VirtualAddress

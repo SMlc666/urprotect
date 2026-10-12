@@ -48,6 +48,12 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         self.assertIn("host-context-entry", self.runner)
         self.assertIn("execveat", self.runner)
 
+    def test_workflow_runs_the_managed_tls_initial_exec_evidence_lane(self) -> None:
+        self.assertIn("run-tls-host-context-rehydration-e2e.sh", self.workflow)
+        self.assertIn("tls.initial-exec.glibc.host-context-entry", self.workflow)
+        self.assertIn("runtime.host-context.protected-image-tls-initial-exec", self.workflow)
+        self.assertIn("--entry-status 43", (ROOT / "scripts/run-tls-host-context-rehydration-e2e.sh").read_text(encoding="utf-8"))
+
     def test_checker_requires_stage_specific_bindings_and_closed_evidence(self) -> None:
         for marker in (
             "SHA256SUMS is not closed",

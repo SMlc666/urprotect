@@ -167,3 +167,48 @@ Verified locally:
 The local cell is native AArch64 with GNU cross-tooling, 4 KiB pages, no
 `musl-gcc`, and no Docker/Podman. Musl and bionic transformed TLS runtime rows
 remain explicit CI environment/evidence work and are not promoted locally.
+
+## Verified transformed glibc TLSIE evidence increment
+
+The real GCC-linked `host-context-tls-fixture.so` now retains `.rela.text`
+TLSIE ADRP/LD64 records and a local helper selected from `.symtab`. The loader-owned
+`R_AARCH64_TLS_TPREL64` GOT record remains in `.dynsym` index space; semantic
+matching compares full TLS symbol identity across table domains rather than raw
+indices. The managed producer accepts both the linked low-12 GOT field and the
+relocatable zero-field form, while shared layout validation proves the resolved
+page/low-12 target against the preserved GOT owner. The GCC register-offset
+`MRS x10, TPIDR_EL0; LDR w0, [x10, x9]` form is covered by a focused fixture and
+shared-layout integration test.
+
+The native AArch64 glibc transformed lane is retained by
+`scripts/run-tls-host-context-rehydration-e2e.sh`. Its PR evidence unit is
+`tls.initial-exec.glibc.host-context-entry`; the Protected Image producer,
+rehydrator, sealed-memfd HostContext handoff, PT_TLS/readelf facts, hashes, and
+rollback/evidence checkers all pass with entry status `43` and release status
+`passed`. This is a glibc current-thread transformed row only. It does not
+promote musl, bionic, worker lifecycle, or the other four transformed TLS models.
+
+## Current verified boundary
+
+The managed semantic gate is complete for all five typed models. Release
+verification after the AsmStone merge passed with zero build warnings/errors and
+387 managed tests; the focused AsmStone/TLS set passed 95 tests. The serial
+Python suite passed 304 tests, fixture and regression contracts passed 13 and 20
+cases respectively, the protected-image evidence suite passed 9 tests, and the
+native runtime contract, launcher integration, and glibc transformed TLSIE
+HostContext lane all passed.
+
+The only promoted transformed TLS runtime row is
+`initial-exec × host-context-entry × glibc × current-thread`. Its retained
+feature row is
+`runtime.host-context.protected-image-tls-initial-exec`, with
+`tlsEvidence.result=accepted-and-runs`, PT_TLS facts, source/transformed
+digests, entry status `43`, and release status `passed`. The native bionic
+adapter and existing glibc worker rows remain independent baseline evidence; they
+are not managed transformed TLS promotion.
+
+Musl and bionic transformed TLS rows, transformed registered-worker lifecycle,
+and transformed runtime rows for local-exec, local-dynamic, general-dynamic,
+and TLSDESC remain explicitly unpromoted. Missing musl tooling, Docker, or a
+bionic userspace must be represented as a feature-specific
+`environment-unavailable` result, never as a glibc-derived pass.

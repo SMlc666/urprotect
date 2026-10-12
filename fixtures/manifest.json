@@ -367,6 +367,24 @@
       ]
     },
     {
+      "id": "runtime.host-context.protected-image-tls-initial-exec",
+      "status": "validated",
+      "obligation": "The managed protection and rehydration workflow preserves a real GCC initial-exec TLSIE image through HostContext handoff and releases it after the TLS-backed entry returns status 43 on native AArch64 glibc.",
+      "witness": "scripts/run-tls-host-context-rehydration-e2e.sh",
+      "oracle": "scripts/check-protected-image-evidence.py",
+      "evidence": [
+        "scripts/run-tls-host-context-rehydration-e2e.sh",
+        "scripts/run-host-context-rehydration-e2e.sh",
+        "scripts/check-protected-image-evidence.py",
+        "scripts/check-rehydration-evidence.py",
+        "native/urprotect-runtime/host_context_tls_fixture.c",
+        "native/urprotect-runtime/host_context_image_handoff.c",
+        ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md"
+      ]
+    },
+    {
       "id": "runtime.host-context.bionic-handoff",
       "status": "validated",
       "obligation": "The pinned native ARM64 Termux userspace builds and runs the HostContext adapter oracle, verifying sealed memfd image loading, real entry dispatch, release, and no executable temporary pathname",

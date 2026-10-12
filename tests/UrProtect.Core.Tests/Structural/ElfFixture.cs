@@ -324,6 +324,39 @@ internal static partial class ElfFixture
         bytes.AsSpan(codeOffset + codeSize, sizeof(uint) * 2).Clear();
         return bytes;
     }
+
+    /// <summary>
+    /// GCC initial-exec register-offset access: the GOT-loaded TPREL value is
+    /// consumed directly by an indexed scalar LDR after the TP read.
+    /// </summary>
+    public static byte[] TlsInitialExecAdrLd64RegisterOffsetFunctionPie(long relocationAddend = 0)
+    {
+        var bytes = TlsInitialExecAdrLd64FunctionPie(relocationAddend);
+        const int codeOffset = 0x200;
+        const int codeSize = 5 * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            codeSize,
+            codeSize,
+            0x1000);
+
+        // mrs x10, tpidr_el0 and ldr w0, [x10, x9] consume the TP read in
+        // x10 and GOT-loaded TPREL in x9, matching GCC's register-offset form.
+        WriteUInt32(bytes.AsSpan(), codeOffset + (3 * sizeof(uint)), 0xB8696940);
+        WriteUInt32(bytes.AsSpan(), codeOffset + (4 * sizeof(uint)), 0xD65F03C0);
+        bytes.AsSpan(codeOffset + codeSize, sizeof(uint) * 3).Clear();
+        return bytes;
+    }
     /// <summary>
     /// GNU TLSIE standalone literal-load form: one PREL19 instruction relocation
     /// targets the source-preserved writable TPREL64 GOT owner.

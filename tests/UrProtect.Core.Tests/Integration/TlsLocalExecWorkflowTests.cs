@@ -649,6 +649,38 @@ public sealed class TlsLocalExecWorkflowTests
             (ulong)gotLow12);
     }
 
+    [Fact]
+    [Trait("Category", "TlsInitialExec")]
+    public void SelectedInitialExecAdrLd64RegisterOffsetAccessFlowsThroughSnapshotAndSharedLayout()
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsInitialExecAdrLd64RegisterOffsetFunctionPie(),
+            "tls.initial-exec.adr-ld64-register-offset.fixture",
+            "tls.initial-exec.adr-ld64-register-offset.producer",
+            new[] { ProtectionPass.ControlFlowFlattening });
+        var planning = new FunctionProtectionService().Plan(setup.Source, setup.Request);
+
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var snapshot = Assert.IsType<SemanticPlanSnapshot>(planning.Plan!.SemanticSnapshot);
+        var binding = Assert.IsType<SemanticTlsBindingExtension>(Assert.Single(
+            snapshot.Extensions.OfType<SemanticTlsBindingExtension>())).Binding;
+        Assert.Equal(TlsAccessModel.InitialExec, binding.AccessModel);
+        Assert.Equal(1, binding.InstructionSequence.Instructions.Count(
+            instruction => instruction.Role == TlsInstructionRole.TlsMemoryAccess));
+        Assert.Equal(2, TlsSemanticFixupPlanner.Build(snapshot.Plan).Fixups.Count);
+
+        var rehydration = GenericRehydrationEngine.Rehydrate(
+            setup.Source,
+            setup.Emission.ArtifactBytes!,
+            setup.RehydrationOptions);
+
+        Assert.True(rehydration.IsSuccess, string.Join(Environment.NewLine, rehydration.Diagnostics));
+        Assert.Equal(
+            Assert.IsType<ElfFile>(ElfParser.Parse(setup.Source).File).TlsMetadata.StaticRelocations,
+            rehydration.NativeImage!.ParsedImage.TlsMetadata.StaticRelocations);
+        Assert.Equal(2, rehydration.NativeImage.LayoutEvidence!.TlsFixups.Count);
+    }
+
     [Theory]
     [InlineData(0x204, 0xB9400129u)]
     [InlineData(0x204, 0xF9400529u)]

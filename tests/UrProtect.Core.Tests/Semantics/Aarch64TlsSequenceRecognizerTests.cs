@@ -627,6 +627,35 @@ public sealed class Aarch64TlsSequenceRecognizerTests
             Range(0x5000, 0x900, 6 * sizeof(uint)),
             Range(0x6000, 0x920, sizeof(ulong)));
     }
+    [Fact]
+    public void MatchesTlsOwnerAcrossDynamicAndRegularSymbolTableIndexSpaces()
+    {
+        var retainedRelocationSymbol = new TlsRelocationSymbolIdentity(
+            25,
+            "tls_value",
+            1,
+            ElfConstants.SttTls,
+            0,
+            12,
+            0,
+            4);
+        var dynamicGotSymbol = new TlsSymbolIdentity(
+            3,
+            "tls_value",
+            1,
+            ElfConstants.SttTls,
+            0,
+            12,
+            0,
+            4,
+            true);
+
+        Assert.True(TlsStructuralAdapter.SymbolsMatch(retainedRelocationSymbol, dynamicGotSymbol));
+        Assert.False(TlsStructuralAdapter.SymbolsMatch(
+            retainedRelocationSymbol with { Size = 8 },
+            dynamicGotSymbol));
+    }
+
     private static TlsGotEntryBinding CreateGotEntry()
     {
         var symbol = CreateSymbol();

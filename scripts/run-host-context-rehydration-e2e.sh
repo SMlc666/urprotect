@@ -2,19 +2,25 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--unit UNIT] [--source ELF]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--unit UNIT] [--source ELF] [--function-id TABLE:INDEX] [--entry-status STATUS] [--producer-id ID]\n' "$0" >&2
 }
 
 tier=''
 runtime=''
 unit='compat.protection-host-context-fixture.glibc.host-context-entry'
 source_file=''
+function_id=''
+expected_entry_status='23'
+producer_id='gcc-c-host-context-fixture'
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier) [[ $# -ge 2 ]] || { usage; exit 2; }; tier="$2"; shift 2 ;;
     --runtime) [[ $# -ge 2 ]] || { usage; exit 2; }; runtime="$2"; shift 2 ;;
     --unit) [[ $# -ge 2 ]] || { usage; exit 2; }; unit="$2"; shift 2 ;;
     --source) [[ $# -ge 2 ]] || { usage; exit 2; }; source_file="$2"; shift 2 ;;
+    --function-id) [[ $# -ge 2 ]] || { usage; exit 2; }; function_id="$2"; shift 2 ;;
+    --entry-status) [[ $# -ge 2 ]] || { usage; exit 2; }; expected_entry_status="$2"; shift 2 ;;
+    --producer-id) [[ $# -ge 2 ]] || { usage; exit 2; }; producer_id="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
@@ -26,6 +32,14 @@ if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
   exit 2
 fi
 case "$(uname -m)" in aarch64|arm64) ;; *) echo "environment-unavailable: HostContext handoff requires native AArch64" >&2; exit 2 ;; esac
+if [[ ! "${expected_entry_status}" =~ ^[0-9]+$ || "${expected_entry_status}" -gt 255 ]]; then
+  echo "invalid expected HostContext entry status: ${expected_entry_status}" >&2
+  exit 2
+fi
+if [[ -n "${function_id}" && ! "${function_id}" =~ ^(dynsym|symtab):[0-9]+$ ]]; then
+  echo "invalid function selector: ${function_id}" >&2
+  exit 2
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 artifact_root="${PROTECTED_IMAGE_ARTIFACT_ROOT:-${repo_root}/.artifacts/protected-image/${tier}/${runtime}/${unit}}"
@@ -63,11 +77,12 @@ native_role_path="$artifact_root/native-image.json"
 record_path="$artifact_root/rehydration.json"
 handoff_path="$artifact_root/handoff.json"
 
-# The fixture exports the same function in .dynsym and .symtab. Resolve the
-# current dynamic identity explicitly; name-only selection is intentionally
-# rejected by the shared selector contract.
-dynsym_index="$(readelf -Ws "$source_path" | awk '$8 == "urp_transform_target" && $1 ~ /^[0-9]+:/ { sub(":", "", $1); print $1; exit }')"
-[[ "$dynsym_index" =~ ^[0-9]+$ ]] || { echo "HostContext transform symbol is missing" >&2; exit 1; }
+# Name-only selection is intentionally rejected by the shared selector contract.
+if [[ -z "${function_id}" ]]; then
+  dynsym_index="$(readelf -Ws "$source_path" | awk '$8 == "urp_transform_target" && $1 ~ /^[0-9]+:/ { sub(":", "", $1); print $1; exit }')"
+  [[ "$dynsym_index" =~ ^[0-9]+$ ]] || { echo "HostContext transform symbol is missing" >&2; exit 1; }
+  function_id="dynsym:${dynsym_index}"
+fi
 source_sha256="$(sha256sum "$source_path" | cut -d' ' -f1)"
 cli="$repo_root/src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll"
 core="$repo_root/src/UrProtect.Core/bin/Release/net8.0/UrProtect.Core.dll"
@@ -76,9 +91,9 @@ core="$repo_root/src/UrProtect.Core/bin/Release/net8.0/UrProtect.Core.dll"
 set +e
 dotnet "$cli" protect-image "$source_path" \
   --artifact "$artifact_path" --role "$role_path" --manifest "$manifest_path" --stage "$stage_path" \
-  --unit "$unit" --profile host-context-entry --producer-id gcc-c-host-context-fixture \
+  --unit "$unit" --profile host-context-entry --producer-id "${producer_id}" \
   --rehydrator urprotect.rehydrator.v1 --source-sha256 "$source_sha256" \
-  --function-id "dynsym:${dynsym_index}" --pass control-flow-flattening --json - \
+  --function-id "${function_id}" --pass control-flow-flattening --json - \
   >"$artifact_root/producer.json" 2>"$artifact_root/producer.stderr"
 producer_status=$?
 set -e
@@ -105,7 +120,7 @@ set +e
   >"$artifact_root/handoff.stdout" 2>"$artifact_root/handoff.stderr"
 handoff_status=$?
 set -e
-[[ "$handoff_status" -eq 23 && -s "$handoff_path" ]] || { echo "HostContext native handoff failed with status $handoff_status" >&2; exit 1; }
+[[ "$handoff_status" -eq "$expected_entry_status" && -s "$handoff_path" ]] || { echo "HostContext native handoff failed with status $handoff_status" >&2; exit 1; }
 
 python3 - "$record_path" "$handoff_path" "$native_role_path" <<'PY'
 import hashlib

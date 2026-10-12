@@ -137,6 +137,34 @@ jobs:
             ".artifacts/protected-image/${tier}/glibc/compat.protection-host-context-fixture.glibc.host-context-entry" \
             --tier "${tier}" --runtime glibc \
             --unit compat.protection-host-context-fixture.glibc.host-context-entry
+      - name: Run managed TLS initial-exec transformed-image evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-tls-host-context-rehydration-e2e.sh \
+            --tier "${tier}" \
+            --unit tls.initial-exec.glibc.host-context-entry
+      - name: Check managed TLS initial-exec transformed-image evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.protected-image-tls-initial-exec
+          python3 scripts/check-protected-image-evidence.py \
+            ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry" \
+            --tier "${tier}" --runtime glibc \
+            --unit tls.initial-exec.glibc.host-context-entry
+          python3 scripts/check-rehydration-evidence.py \
+            ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry" \
+            --tier "${tier}" --runtime glibc \
+            --unit tls.initial-exec.glibc.host-context-entry
       - name: Run strict compatibility corpus growth evidence
         if: always()
         run: |

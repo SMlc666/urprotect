@@ -1519,12 +1519,14 @@ public static class Aarch64TlsInstructionSemantics
 
     /// <summary>
     /// Validates the exact TLSIE ADRP/LD64 GOTTPREL sequence emitted by GNU
-    /// AArch64 toolchains. The relocatable source form has a zero low-12 field;
-    /// the shared layout path resolves that field against the preserved GOT entry.
+    /// AArch64 toolchains. Relocatable source records may have a zero low-12
+    /// field; linked retained-reloc records may carry the resolved GOT low-12
+    /// field, which is checked against the preserved GOT owner when available.
     /// </summary>
     public static bool IsSupportedInitialExecAdrLd64Pair(
         IReadOnlyList<SemanticInstruction> instructions,
-        IReadOnlyList<TlsRelocationSite> relocationSites)
+        IReadOnlyList<TlsRelocationSite> relocationSites,
+        TlsGotEntryBinding? gotEntry = null)
     {
         ArgumentNullException.ThrowIfNull(instructions);
         ArgumentNullException.ThrowIfNull(relocationSites);
@@ -1550,13 +1552,20 @@ public static class Aarch64TlsInstructionSemantics
             && IsSupportedInitialExecAdrLd64Sequence(
                 instructions.Select(instruction => instruction.Encoding).ToArray(),
                 firstIndex,
-                requireSourceLow12Zero: true);
+                requireSourceLow12Zero: gotEntry is null)
+            && (gotEntry is null || IsResolvedInitialExecGotLow12(
+                instructions[firstIndex].Encoding,
+                instructions[secondIndex].Encoding,
+                firstAddress.Value,
+                gotEntry.SourceRange.VirtualAddress.Value,
+                relocationSites[0].Binding.Addend));
     }
 
     /// <summary>Validates the canonical TLSIE ADRP/LD64 sequence after projection.</summary>
     public static bool IsSupportedInitialExecAdrLd64Pair(
         IReadOnlyList<TlsInstructionRecord> instructions,
-        IReadOnlyList<TlsRelocationSite> relocationSites)
+        IReadOnlyList<TlsRelocationSite> relocationSites,
+        TlsGotEntryBinding? gotEntry = null)
     {
         ArgumentNullException.ThrowIfNull(instructions);
         ArgumentNullException.ThrowIfNull(relocationSites);
@@ -1572,7 +1581,13 @@ public static class Aarch64TlsInstructionSemantics
             && IsSupportedInitialExecAdrLd64Sequence(
                 instructions.Select(instruction => instruction.Encoding).ToArray(),
                 firstIndex,
-                requireSourceLow12Zero: true)
+                requireSourceLow12Zero: gotEntry is null)
+            && (gotEntry is null || IsResolvedInitialExecGotLow12(
+                instructions[firstIndex].Encoding,
+                instructions[secondIndex].Encoding,
+                firstAddress.Value,
+                gotEntry.SourceRange.VirtualAddress.Value,
+                relocationSites[0].Binding.Addend))
             && instructions.Count(item => item.Role == TlsInstructionRole.TlsMemoryAccess) == 1
             && instructions.Count(item => item.Role == TlsInstructionRole.GotEntryLoad) == 1;
     }
@@ -1580,13 +1595,35 @@ public static class Aarch64TlsInstructionSemantics
     /// <summary>
     /// Validates the raw TLSIE ADRP/LD64 chain at a pair-relative instruction index.
     /// </summary>
+    private static bool IsResolvedInitialExecGotLow12(
+        uint adrpEncoding,
+        uint ldEncoding,
+        ulong adrpAddress,
+        ulong gotAddress,
+        long addend)
+    {
+        if (!TryGetInitialExecLd64GotRegisters(ldEncoding, out _, out _, out var low12)
+            || low12 == 0
+            || !TryAddSigned(gotAddress, addend, out var targetAddress)
+            || targetAddress % sizeof(ulong) != 0)
+        {
+            return low12 == 0;
+        }
+
+        var decoded = new AsmStoneAdapter().Decode(adrpEncoding, adrpAddress);
+        return decoded.IsSuccess
+            && decoded.Instruction?.DirectTarget is { } pageTarget
+            && (pageTarget & ~0xFFFUL) == (targetAddress & ~0xFFFUL)
+            && low12 == (targetAddress & 0xFFF);
+    }
+
     public static bool IsSupportedInitialExecAdrLd64Sequence(
         IReadOnlyList<uint> encodings,
         int pairIndex,
         bool requireSourceLow12Zero = false)
     {
         ArgumentNullException.ThrowIfNull(encodings);
-        if (pairIndex < 0 || pairIndex > encodings.Count - 6
+        if (pairIndex < 0 || pairIndex > encodings.Count - 5
             || !TryGetInitialExecAdrRegister(encodings[pairIndex], out var adrRegister)
             || !TryGetInitialExecLd64GotRegisters(
                 encodings[pairIndex + 1],
@@ -1596,29 +1633,86 @@ public static class Aarch64TlsInstructionSemantics
             || gotBaseRegister != adrRegister
             || (requireSourceLow12Zero && gotOffset != 0)
             || !TryGetThreadPointerRegister(encodings[pairIndex + 2], out var threadPointerRegister)
-            || !TryGetLocalExecAddressRegister(
-                encodings[pairIndex + 3],
-                threadPointerRegister,
-                gotValueRegister,
-                out var tlsAddressRegister)
-            || threadPointerRegister == gotValueRegister
-            || !TryGetInitialExecTlsAccessRegisters(
-                encodings[pairIndex + 4],
-                out var tlsBaseRegister,
-                out _)
-            || tlsBaseRegister != tlsAddressRegister)
+            || threadPointerRegister == gotValueRegister)
         {
             return false;
         }
 
-        var memoryIndices = encodings
-            .Select((encoding, index) => (encoding, index))
-            .Where(item => IsLoadStoreEncoding(item.encoding))
-            .Select(item => item.index)
-            .ToArray();
-        return memoryIndices.Length == 2
-            && memoryIndices[0] == pairIndex + 1
-            && memoryIndices[1] == pairIndex + 4;
+        var hasAddressAdd = TryGetLocalExecAddressRegister(
+            encodings[pairIndex + 3],
+            threadPointerRegister,
+            gotValueRegister,
+            out var tlsAddressRegister);
+        var hasRegisterOffsetAccess = TryGetInitialExecRegisterOffsetAccess(
+            encodings[pairIndex + 3],
+            threadPointerRegister,
+            gotValueRegister,
+            out _);
+        if (!hasAddressAdd && !hasRegisterOffsetAccess)
+        {
+            return false;
+        }
+
+        if (!IsLoadStoreEncoding(encodings[pairIndex + 1]))
+        {
+            return false;
+        }
+
+        if (hasRegisterOffsetAccess)
+        {
+            return IsLoadStoreEncoding(encodings[pairIndex + 3]);
+        }
+
+        return IsLoadStoreEncoding(encodings[pairIndex + 4])
+            && TryGetInitialExecTlsAccessRegisters(
+                encodings[pairIndex + 4],
+                out var tlsBaseRegister,
+                out _)
+            && tlsBaseRegister == tlsAddressRegister;
+    }
+
+    private static bool TryGetInitialExecRegisterOffsetAccess(
+        uint encoding,
+        byte threadPointerRegister,
+        byte gotValueRegister,
+        out byte destinationRegister)
+    {
+        destinationRegister = 0;
+        var decoded = new AsmStoneAdapter().Decode(encoding, 0);
+        if (!decoded.IsSuccess || decoded.Instruction is null
+            || !string.Equals(decoded.Instruction.Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var memory = GetMemory(decoded.Instruction);
+        var output = decoded.Instruction.Operands
+            .Where(operand => operand.Direction is Aarch64OperandDirection.Output or Aarch64OperandDirection.InputOutput)
+            .Select(operand => operand.Register)
+            .FirstOrDefault(register => register.HasValue);
+        if (memory is not
+            {
+                Base: { Class: Aarch64RegisterClass.General, Role: Aarch64RegisterRole.None, Width: 64 } baseRegister,
+                Index: { } indexRegister,
+                Offset: 0,
+                AccessSize: 1 or 2 or 4 or 8,
+                WritesBack: false
+            }
+            || baseRegister.Index != threadPointerRegister
+            || indexRegister.Class != Aarch64RegisterClass.General
+            || indexRegister.Role != Aarch64RegisterRole.None
+            || indexRegister.Width != 64
+            || indexRegister.Index != gotValueRegister
+            || output is not { } valueRegister
+            || valueRegister.Class != Aarch64RegisterClass.General
+            || valueRegister.Role != Aarch64RegisterRole.None
+            || valueRegister.Width is not (32 or 64))
+        {
+            return false;
+        }
+
+        destinationRegister = valueRegister.Index;
+        return destinationRegister != 31;
     }
 
     /// <summary>
@@ -1978,8 +2072,7 @@ public static class Aarch64TlsInstructionSemantics
                 out var sourceLdBase,
                 out _,
                 out var sourceLdOffset)
-            || sourceAdrRegister != sourceLdBase
-            || sourceLdOffset != 0)
+            || sourceAdrRegister != sourceLdBase)
         {
             return false;
         }
@@ -2088,7 +2181,7 @@ public static class Aarch64TlsInstructionSemantics
             && IsSupportedInitialExecAdrLd64Sequence(
                 instructions.Select(instruction => instruction.Encoding).ToArray(),
                 firstIndex,
-                requireSourceLow12Zero: true);
+                requireSourceLow12Zero: false);
     }
 
     public static bool IsSupportedInitialExecLdGotPrel19EmitterSequence(
@@ -2165,7 +2258,9 @@ public static class Aarch64TlsInstructionSemantics
             0x3900_0000u or 0x3940_0000u
             or 0x7900_0000u or 0x7940_0000u
             or 0xB900_0000u or 0xB940_0000u
-            or 0xF900_0000u or 0xF940_0000u;
+            or 0xF900_0000u or 0xF940_0000u
+            or 0x3840_0000u or 0x7840_0000u
+            or 0xB840_0000u or 0xF840_0000u;
 
     private static bool IsMemoryInstruction(SemanticInstruction instruction) =>
         instruction.Operands.Any(operand => operand.Memory is not null)

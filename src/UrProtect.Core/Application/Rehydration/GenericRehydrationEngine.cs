@@ -431,8 +431,7 @@ public static class GenericRehydrationEngine
                             && fact.Relocation.Offset == binding.GotEntry.SourceRange.VirtualAddress.Value
                             && fact.Relocation.Addend == binding.GotEntry.Addend
                             && fact.Symbol is not null
-                            && fact.Symbol.SymbolIndex == binding.GotEntry.Symbol.SymbolIndex
-                            && string.Equals(fact.Symbol.Name, binding.GotEntry.Symbol.Name, StringComparison.Ordinal))
+                            && TlsStructuralAdapter.SymbolsMatch(fact.Symbol, binding.GotEntry.Symbol))
                         .ToArray();
                     if (gotFacts.Length != 1)
                     {
