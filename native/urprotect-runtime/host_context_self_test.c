@@ -1,6 +1,7 @@
 #include "urp/host_context.h"
 #include "urp/host_adapter.h"
 #include "host_image_validation.h"
+#include "android_packed_relocation_tags.h"
 #include "urp/runtime.h"
 #include "sha256.h"
 
@@ -57,14 +58,6 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_DT_RELRSZ 35U
 #define FIXTURE_DT_RELRENT 37U
 #define FIXTURE_DT_TEXTREL 22U
-#define FIXTURE_DT_ANDROID_REL UINT64_C(0x6000000f)
-#define FIXTURE_DT_ANDROID_RELSZ UINT64_C(0x60000010)
-#define FIXTURE_DT_ANDROID_RELA UINT64_C(0x60000011)
-#define FIXTURE_DT_ANDROID_RELASZ UINT64_C(0x60000012)
-#define FIXTURE_DT_ANDROID_RELR UINT64_C(0x6fffe000)
-#define FIXTURE_DT_ANDROID_RELRSZ UINT64_C(0x6fffe001)
-#define FIXTURE_DT_ANDROID_RELRENT UINT64_C(0x6fffe003)
-#define FIXTURE_DT_ANDROID_RELRCOUNT UINT64_C(0x6fffe005)
 #define FIXTURE_DT_VERSYM UINT64_C(0x6ffffff0)
 #define FIXTURE_DT_VERDEF UINT64_C(0x6ffffffc)
 #define FIXTURE_DT_VERDEFNUM UINT64_C(0x6ffffffd)
@@ -1245,14 +1238,14 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
 
     static const fixture_dynamic_rejection android_packed_relocation_tags[] = {
-        {FIXTURE_DT_ANDROID_REL, "a DT_ANDROID_REL packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELSZ, "a DT_ANDROID_RELSZ packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELA, "a DT_ANDROID_RELA packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELASZ, "a DT_ANDROID_RELASZ packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELR, "a DT_ANDROID_RELR packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELRSZ, "a DT_ANDROID_RELRSZ packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELRENT, "a DT_ANDROID_RELRENT packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELRCOUNT, "a DT_ANDROID_RELRCOUNT packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_REL, "a DT_ANDROID_REL packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELSZ, "a DT_ANDROID_RELSZ packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELA, "a DT_ANDROID_RELA packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELASZ, "a DT_ANDROID_RELASZ packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELR, "a DT_ANDROID_RELR packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELRCOUNT, "a DT_ANDROID_RELRCOUNT packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELRSZ, "a DT_ANDROID_RELRSZ packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELRENT, "a DT_ANDROID_RELRENT packed relocation entry was accepted or returned a handle"},
     };
     if (!fixture_reject_dynamic_tags(
             &adapter,

@@ -17,3 +17,11 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-managed-status.md","reason":"Carry the exact TLSDESC producer implementation status and remaining runtime evidence boundary into the execution context."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-runtime-evidence-projection.md","reason":"Bounded additive TLS runtime evidence projection, result boundaries, and checker witnesses."}
 {"file":"scripts/run-tls-host-context-rehydration-e2e.sh","reason":"Run and retain the real native AArch64 glibc transformed TLSIE evidence lane with PT_TLS/readelf/hash projection."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/runtime-difference-audit.md","reason":"Record glibc/musl/bionic TLS runtime differences, the transformed promotion matrix boundary, PT_TLS predicate parity, sectionless decision, worker lifecycle limits, and the Android packed-relocation prerequisite probe."}
+{"file":"fixtures/tls-runtime-matrix.json","reason":"Implement the closed model/profile/runtime/lifecycle TLS promotion registry separate from the six-cell environment covering set."}
+{"file":"scripts/run-tls-runtime-matrix.py","reason":"Implement the independent 60-row transformed TLS evidence producer with the glibc control row and row-local runtime boundaries."}
+{"file":"scripts/check-tls-runtime-matrix-evidence.py","reason":"Implement the closed TLS matrix checker for hashes, semantic/native gates, PT_TLS facts, lifecycle observations, first failure, and promotion boundaries."}
+{"file":"scripts/run-tls-prerequisite-probes.py","reason":"Implement the managed/native Android packed-tag and PT_TLS predicate prerequisite evidence producer."}
+{"file":"scripts/check-tls-prerequisite-evidence.py","reason":"Implement the prerequisite evidence checker for canonical tags, parity mutations, and closed manifests."}
+{"file":"tests/test_tls_runtime_matrix.py","reason":"Implement contract tests for the new TLS registry, producers, checkers, CI, and regression matrix."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-matrix-completion.md","reason":"Carry the final 60-row producer result, prerequisite probe evidence, single promoted control row, and runtime boundaries into implementation context."}

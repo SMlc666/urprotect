@@ -46,6 +46,7 @@ THREADED_TLS_RUNTIME_TEST := $(BUILD_DIR)/host-context-threaded-tls-runtime-test
 THREAD_ADAPTER_TEST := $(BUILD_DIR)/host-context-thread-adapter-test
 NATIVE_IMAGE_HANDOFF := $(BUILD_DIR)/native-image-handoff
 HOST_CONTEXT_IMAGE_HANDOFF := $(BUILD_DIR)/host-context-image-handoff
+HOST_IMAGE_VALIDATION_PROBE := $(BUILD_DIR)/host-image-validation-probe
 DYNAMIC_TLS_FIXTURE := $(BUILD_DIR)/host-context-dynamic-tls-fixture.so
 DYNAMIC_TLS_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-dynamic-tls-fixture.o
 PROPERTY_FIXTURE := $(BUILD_DIR)/host-context-property-fixture.so
@@ -56,7 +57,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl -pthread
 
-.PHONY: all test runtime self-test host-context-launcher host-context-image-handoff symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
+.PHONY: all test runtime self-test host-context-launcher host-context-image-handoff host-image-validation-probe symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -131,6 +132,8 @@ native-image-handoff: $(NATIVE_IMAGE_HANDOFF)
 
 host-context-image-handoff: $(HOST_CONTEXT_IMAGE_HANDOFF)
 
+host-image-validation-probe: $(HOST_IMAGE_VALIDATION_PROBE)
+
 native-handoff-test: $(NATIVE_IMAGE_HANDOFF)
 	./test_native_image_handoff.sh "$(NATIVE_IMAGE_HANDOFF)"
 
@@ -141,6 +144,10 @@ $(NATIVE_IMAGE_HANDOFF): native_image_handoff.c ../urprotect-launcher/sha256.c .
 $(HOST_CONTEXT_IMAGE_HANDOFF): host_context_image_handoff.c ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) host_context_image_handoff.c ../urprotect-launcher/sha256.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o $(LDLIBS) -o "$@"
+
+$(HOST_IMAGE_VALIDATION_PROBE): host_image_validation_probe.c host_image_validation.h $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) host_image_validation_probe.c $(BUILD_DIR)/host_image_validation.o -o "$@"
 
 $(SELF_TEST): $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(ENTRY_FIXTURE)
 	@mkdir -p "$(BUILD_DIR)"
@@ -289,7 +296,7 @@ $(PROPERTY_FIXTURE_OBJECT): host_context_property_fixture.c include/urp/host_con
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -mbranch-protection=bti -c "$<" -o "$@"
 
-$(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c host_image_validation.h include/urp/host_context.h include/urp/runtime.h
+$(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c host_image_validation.h android_packed_relocation_tags.h include/urp/host_context.h include/urp/runtime.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
@@ -321,7 +328,7 @@ $(BUILD_DIR)/host_adapter.o: host_adapter.c host_image_validation.h include/urp/
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 
-$(BUILD_DIR)/host_image_validation.o: host_image_validation.c host_image_validation.h include/urp/host_context.h
+$(BUILD_DIR)/host_image_validation.o: host_image_validation.c host_image_validation.h android_packed_relocation_tags.h include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 

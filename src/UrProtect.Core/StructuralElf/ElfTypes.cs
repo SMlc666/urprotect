@@ -85,13 +85,26 @@ public static class ElfConstants
     public const ulong DtRelrEnt = 37;
     public const ulong DtTlsDescPlt = 0x6FFFFEF6;
     public const ulong DtTlsDescGot = 0x6FFFFEF7;
-    public const ulong DtAndroidRel = 0x6000000E;
-    public const ulong DtAndroidRelsz = 0x6000000F;
+    public const ulong DtAndroidRel = 0x6000000F;
+    public const ulong DtAndroidRelsz = 0x60000010;
     public const ulong DtAndroidRela = 0x60000011;
     public const ulong DtAndroidRelasz = 0x60000012;
-    public const ulong DtAndroidRelr = 0x60000013;
-    public const ulong DtAndroidRelrsz = 0x60000014;
-    public const ulong DtAndroidRelrent = 0x60000015;
+    public const ulong DtAndroidRelr = 0x6FFFE000;
+    public const ulong DtAndroidRelrsz = 0x6FFFE001;
+    public const ulong DtAndroidRelrent = 0x6FFFE003;
+    public const ulong DtAndroidRelrCount = 0x6FFFE005;
+
+    public static IReadOnlyList<ulong> AndroidPackedRelocationTags { get; } = Array.AsReadOnly(new[]
+    {
+        DtAndroidRel,
+        DtAndroidRelsz,
+        DtAndroidRela,
+        DtAndroidRelasz,
+        DtAndroidRelr,
+        DtAndroidRelrCount,
+        DtAndroidRelrsz,
+        DtAndroidRelrent,
+    });
 
     public const uint RArm64None = 0;
     public const uint RArm64Abs64 = 257;

@@ -44,6 +44,21 @@ the managed transformer preserves TLS behavior.
    SemanticPlanSnapshotCodec as the only codec. No migration reader, compatibility
    alias, parallel TLS codec, or fallback writer is added. A transformed TLS plan
    without that operation is incomplete and fails before publication.
+7. **Promotion is a four-dimensional evidence contract:** transformed TLS rows
+   are scoped as `model × profile × runtime × lifecycle` across all five models,
+   both current profiles, and glibc, musl, and bionic. Musl and bionic are
+   required rows in this task, not follow-up scope. A row is promoted only when
+   its own managed rewrite/materialization, loader handoff, behavior comparison,
+   PT_TLS template/zero-fill, per-thread values, constructor/destructor/
+   worker/release order, source/protected/native artifact hashes,
+   toolchain/runtime/loader identity, first-failure stage, and rollback witness
+   are retained. `environment-unavailable` is row-local evidence and never
+   promotes another runtime.
+8. **Evidence layers do not imply one another:** StructuralElf observation,
+   managed semantic/layout acceptance, native HostContext adapter acceptance,
+   and transformed runtime promotion are separate claims. The six-cell
+   `fixtures/runtime-matrix.json` covering set is environment/loader coverage,
+   not the TLS promotion matrix.
 
 
 ## AArch64 encoding boundary and test correction
@@ -224,13 +239,54 @@ Payload Frame v3 layout and version remain unchanged. Protected Image operations
 carry only the current operation/artifact contract already owned by G2; no
 parallel TLS payload codec is introduced.
 
-## Runtime matrix contract
+## Runtime promotion and prerequisite decisions
 
-Runtime evidence begins only after the semantic gate passes. Matrix keys are:
+The runtime matrix is an independent evidence consumer. Its complete transformed
+TLS scope is `model × profile × runtime × lifecycle` for local-exec,
+initial-exec, local-dynamic, general-dynamic, and TLSDESC; `outer-execveat` and
+`host-context-entry`; current-thread and registered-worker lifecycle boundaries;
+and glibc, musl, and bionic. Musl and bionic rows remain required in this task,
+not optional follow-up work. Profile/lifecycle combinations that are not
+applicable receive an explicit row-local classification and never silently
+become support.
 
-```text
-model × profile × runtime × lifecycle
-```
+A promoted row must independently retain managed rewrite/materialization,
+loader handoff, baseline/transformed behavior comparison, PT_TLS template and
+zero-fill, per-thread values, constructor/destructor/worker/release ordering,
+source/protected/native artifact hashes, compiler/linker/toolchain/runtime/
+loader identity, first-failure stage, and rollback evidence. Only that row's
+complete evidence can promote it. Missing capabilities are
+feature-specific `environment-unavailable` results and never inherit glibc
+results. The sole currently promoted transformed row is
+`initial-exec x host-context-entry x glibc x current-thread`; independent
+musl/bionic and other-model rows must pass before any additional promotion.
+
+The claim ladder is explicit: StructuralElf may make bounded observation,
+managed semantic/layout may accept a typed rewrite/materialization plan, the
+native HostContext adapter may accept its own loader/ABI subset, and only the
+transformed runtime row may claim promoted behavior. The six-cell
+`fixtures/runtime-matrix.json` covering set is not this TLS promotion matrix.
+
+Promotion prerequisites are recorded rather than inferred:
+
+- The high-severity Android packed-relocation tag mismatch between managed
+  `ElfTypes`/`ProfileMaterializationPolicies` and native
+  `host_image_validation.c` requires correction and a bounded one-tag-at-a-time
+  probe for all canonical tags. Managed and native rejection, zero handle, and
+  no-publication behavior must agree before a bionic transformed row advances.
+- A PT_TLS parity probe must compare managed and native count, range/size,
+  alignment, flags, owning-load, and template/zero-fill predicates. Any
+  intentional difference remains a named layer boundary and blocks promotion
+  until the row contract accounts for it.
+- Sectionless observation remains valid for StructuralElf/managed parsing and
+  the glibc adapter oracle, but bionic requires section headers. The common
+  three-runtime transformed TLS contract therefore uses a sectioned image;
+  bionic sectionless rejection is retained as loader-specific boundary
+  evidence, not support.
+- Worker rows remain independent from current-thread rows. Claimed worker
+  evidence includes creation/join, TLS teardown, constructor/destructor,
+  release, and image-destruction order; unmanaged workers, recursive dispatch,
+  and missing worker capabilities remain explicit boundaries.
 
 Each row records one of:
 
@@ -280,3 +336,21 @@ No new assembly is required initially. Structural, semantic, planning, and layou
 TLS records stay in their G1 owners. Native runtime code remains a peer contract
 implementation. Runtime scripts own toolchain/evidence orchestration and never
 become managed semantic authorities.
+
+## Completion evidence projection
+
+The completed runtime-evidence increment uses one checked-in
+`fixtures/tls-runtime-matrix.json` registry for exactly 60
+`model × profile × runtime × lifecycle` rows. `scripts/run-tls-runtime-matrix.py`
+retains one row directory and closed hash manifest per row, with common PT_TLS
+facts, a managed semantic-gate witness, native preflight witness, result,
+first-failure, publication, rollback, and lifecycle fields. The only
+`accepted-and-runs` row is the independently transformed native AArch64 glibc
+initial-exec HostContext current-thread control. Missing musl/bionic capabilities
+are row-local `environment-unavailable`; rows without an applicable transformed
+oracle remain explicit `not-applicable`.
+
+The prerequisite producer/checker independently covers all eight canonical
+Android packed-relocation tags and six PT_TLS predicate mutations. The existing
+six-cell `fixtures/runtime-matrix.json` remains an environment/loader covering
+set and is never used as transformed TLS promotion evidence.

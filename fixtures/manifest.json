@@ -385,6 +385,50 @@
       ]
     },
     {
+      "id": "runtime.host-context.tls-prerequisite-probes",
+      "status": "validated",
+      "obligation": "Managed and native HostContext PT_TLS and Android packed-relocation predicates remain aligned through bounded one-tag and malformed-PT_TLS probes.",
+      "witness": "scripts/run-tls-prerequisite-probes.py",
+      "oracle": "scripts/check-tls-prerequisite-evidence.py",
+      "evidence": [
+        "scripts/run-tls-prerequisite-probes.py",
+        "scripts/check-tls-prerequisite-evidence.py",
+        "native/urprotect-runtime/host_image_validation_probe.c",
+        "native/urprotect-runtime/host_image_validation.c",
+        "src/UrProtect.Core/Application/Rehydration/ProfileMaterializationPolicies.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        ".artifacts/tls-prerequisites/pr/android-packed-tags.json",
+        ".artifacts/tls-prerequisites/pr/pt-tls-predicate-parity.json",
+        ".artifacts/tls-prerequisites/pr/SHA256SUMS"
+      ],
+      "constraints": [
+        "All eight canonical Android packed-relocation tags are independently rejected by managed HostContext policy and native preflight with no handle or publication.",
+        "PT_TLS parity retains baseline, executable, owner-permission, empty-memory, file-size, and alignment mutations; StructuralElf observation remains distinct from HostContext handoff acceptance."
+      ]
+    },
+    {
+      "id": "runtime.host-context.tls-transformed-runtime-matrix",
+      "status": "validated",
+      "obligation": "The transformed TLS evidence contract retains an independent result for every model, profile, runtime, and lifecycle tuple without cross-runtime promotion.",
+      "witness": "scripts/run-tls-runtime-matrix.py",
+      "oracle": "scripts/check-tls-runtime-matrix-evidence.py",
+      "evidence": [
+        "fixtures/tls-runtime-matrix.json",
+        "scripts/run-tls-runtime-matrix.py",
+        "scripts/check-tls-runtime-matrix-evidence.py",
+        ".artifacts/tls-runtime/pr/matrix.json",
+        ".artifacts/tls-runtime/pr/environment.json",
+        ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/pr/SHA256SUMS"
+      ],
+      "constraints": [
+        "The matrix contains exactly 60 rows across five models, two profiles, three runtimes, and two lifecycle boundaries.",
+        "Only initial-exec x host-context-entry x glibc x current-thread is promoted from the retained transformed control row; all other rows remain independently not-applicable or environment-unavailable until their own oracle passes.",
+        "The existing six-cell fixtures/runtime-matrix.json covering set remains environment evidence and is not this TLS promotion matrix."
+      ]
+    },
+    {
       "id": "runtime.host-context.bionic-handoff",
       "status": "validated",
       "obligation": "The pinned native ARM64 Termux userspace builds and runs the HostContext adapter oracle, verifying sealed memfd image loading, real entry dispatch, release, and no executable temporary pathname",

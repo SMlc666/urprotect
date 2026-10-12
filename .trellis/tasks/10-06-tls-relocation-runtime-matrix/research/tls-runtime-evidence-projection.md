@@ -4,6 +4,18 @@
 
 The Phase 5/6 increment adds an optional `tlsEvidence` projection to the existing Protected Image producer `stage.json` record. It is additive evidence validation only. It does not change Protected Image v1, Payload Frame v3, the semantic snapshot operation, fixture manifest support status, or strict evaluator claim semantics.
 
+The complete transformed TLS evidence scope remains in this task and is keyed by
+`model × profile × runtime × lifecycle` for all five typed models, the current
+profiles, and glibc, musl, and bionic. Musl and bionic rows are required scope,
+not optional follow-up work. The currently promoted transformed row is only
+`initial-exec x host-context-entry x glibc x current-thread`; every other row
+must remain independently classified until its own evidence passes.
+
+The claim layers remain separate: StructuralElf observation, managed
+semantic/layout acceptance, native HostContext adapter acceptance, and
+transformed runtime promotion are not interchangeable. The six-cell runtime
+covering set is environment/loader evidence and is not a TLS promotion matrix.
+
 ## Bounded contract
 
 `scripts/check-protected-image-evidence.py` validates one record with:
@@ -12,7 +24,7 @@ The Phase 5/6 increment adds an optional `tlsEvidence` projection to the existin
 - the enclosing `outer-execveat` or `host-context-entry` profile;
 - exactly one explicit `glibc`, `musl`, or `bionic` runtime lane;
 - `current-thread`, `registered-worker`, or `not-run` lifecycle;
-- source, transformed, and Protected Image paths/digests, toolchain and loader identity;
+- source, transformed, Protected Image, and native handoff/runtime artifact paths/digests, with each digest bound to the row's retained files;
 - bounded PT_TLS template, file/memory/zero-fill, alignment, and owning-load facts;
 - per-thread, zero-fill, teardown, first-failure, publication, and rollback projections.
 
@@ -26,8 +38,16 @@ The result vocabulary is shared with the runtime matrix:
 - `environment-unavailable`: complete publication, `firstFailureStage=environment`, `lifecycle=not-run`, and no lifecycle observations;
 - `runtime-failure`: complete publication and retained artifact hashes, with a non-environment first-failure stage. This describes a post-publication runtime failure and does not replace a failed producer stage.
 
-A missing runtime capability is therefore explicit evidence and does not promote another runtime. Producer/layout/publication failure remains governed by the existing failed-stage contract and retains no successful artifact or role.
+A row is promoted only with its own managed rewrite/materialization, loader
+handoff, baseline/transformed behavior comparison, PT_TLS template/zero-fill,
+per-thread values, constructor/destructor/worker/release ordering,
+source/protected/native artifact hashes, toolchain/runtime/loader identity,
+first-failure stage, and rollback evidence. `environment-unavailable` is
+feature-specific row evidence and never promotes another runtime. Worker
+lifecycle evidence is separate from current-thread evidence and must show the
+claimed join/teardown/release order.
+
 
 ## Evidence
 
-`tests/test_protected_image_evidence.py` covers accepted-and-runs, environment-unavailable, runtime-failure, hash mismatch, lifecycle contamination, closed manifests, and existing producer success/failure behavior. The current checked-in glibc outer and HostContext evidence trees pass the extended checker. Native glibc adapter self-tests pass locally; musl and bionic runtime cells remain environment-specific CI evidence.
+`tests/test_protected_image_evidence.py` covers accepted-and-runs, environment-unavailable, runtime-failure, hash mismatch, lifecycle contamination, closed manifests, and existing producer success/failure behavior. The checked-in PR producer retains a 60-row model/profile/runtime/lifecycle matrix under `.artifacts/tls-runtime/pr`. The only accepted-and-runs transformed row is the independently rehydrated glibc initial-exec HostContext current-thread control; musl/bionic and other rows remain row-local not-applicable or environment-unavailable. Native glibc adapter self-tests, Android packed-tag probes, and PT_TLS parity probes pass locally; musl and bionic execution remain independent CI capability lanes.

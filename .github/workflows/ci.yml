@@ -165,6 +165,61 @@ jobs:
             ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry" \
             --tier "${tier}" --runtime glibc \
             --unit tls.initial-exec.glibc.host-context-entry
+      - name: Run TLS prerequisite probes
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          NATIVE_LAUNCHER_CC=cc \
+            python3 scripts/run-tls-prerequisite-probes.py \
+            --tier "${tier}" \
+            --artifact-root ".artifacts/tls-prerequisites/${tier}"
+          python3 scripts/check-tls-prerequisite-evidence.py \
+            ".artifacts/tls-prerequisites/${tier}"
+
+      - name: Run independent transformed TLS runtime matrix
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          NATIVE_LAUNCHER_CC=cc \
+            python3 scripts/run-tls-runtime-matrix.py \
+            --tier "${tier}" \
+            --artifact-root ".artifacts/tls-runtime/${tier}"
+
+      - name: Check transformed TLS runtime matrix
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-tls-runtime-matrix-evidence.py \
+            ".artifacts/tls-runtime/${tier}" \
+            --registry fixtures/tls-runtime-matrix.json
+
+      - name: Check TLS feature evidence declarations
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          if [[ "${tier}" != pr ]]; then
+            rm -rf .artifacts/tls-prerequisites/pr .artifacts/tls-runtime/pr
+            mkdir -p .artifacts/tls-prerequisites .artifacts/tls-runtime
+            cp -a ".artifacts/tls-prerequisites/${tier}" .artifacts/tls-prerequisites/pr
+            cp -a ".artifacts/tls-runtime/${tier}" .artifacts/tls-runtime/pr
+          fi
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-prerequisite-probes
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-transformed-runtime-matrix
+
       - name: Run strict compatibility corpus growth evidence
         if: always()
         run: |
@@ -322,6 +377,8 @@ jobs:
             .artifacts/compatibility-matrix.md
             .artifacts/protection/
             .artifacts/protected-image/
+            .artifacts/tls-prerequisites/
+            .artifacts/tls-runtime/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
           include-hidden-files: true

@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
+using UrProtect.Core.Application.Protection;
+using UrProtect.Core.Application.Rehydration;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.SemanticPlanning;
 using UrProtect.Core.StructuralElf;
@@ -561,6 +563,87 @@ public sealed class ElfParserTests
         Assert.Equal(0x1F0UL, table.Address);
         Assert.Equal(8UL, table.Size);
         Assert.Equal(bytes.AsSpan(0x1F0, 8).ToArray(), table.RawBytes.ToArray());
+    }
+
+    [Fact]
+    public void CanonicalAndroidPackedRelocationTagsAreRejectedByHostContextPolicy()
+    {
+        var expectedTags = new[]
+        {
+            0x6000000FUL,
+            0x60000010UL,
+            0x60000011UL,
+            0x60000012UL,
+            0x6FFFE000UL,
+            0x6FFFE005UL,
+            0x6FFFE001UL,
+            0x6FFFE003UL,
+        };
+
+        Assert.Equal(expectedTags, ElfConstants.AndroidPackedRelocationTags);
+        Assert.Equal(8, ElfConstants.AndroidPackedRelocationTags.Distinct().Count());
+
+        foreach (var tag in ElfConstants.AndroidPackedRelocationTags)
+        {
+            var bytes = ElfFixture.MinimalPie();
+            var dynamicEntries = tag is ElfConstants.DtAndroidRelr
+                or ElfConstants.DtAndroidRelrsz
+                or ElfConstants.DtAndroidRelrent
+                or ElfConstants.DtAndroidRelrCount
+                ? new (ulong Tag, ulong Value)[]
+                {
+                    (ElfConstants.DtAndroidRelr, 0x1F0),
+                    (ElfConstants.DtAndroidRelrsz, 8),
+                    (ElfConstants.DtAndroidRelrent, 8),
+                    (ElfConstants.DtAndroidRelrCount, 1),
+                    (ElfConstants.DtNull, 0),
+                }
+                : new (ulong Tag, ulong Value)[]
+                {
+                    (ElfConstants.DtAndroidRel, 0x1F0),
+                    (ElfConstants.DtAndroidRelsz, 8),
+                    (ElfConstants.DtAndroidRela, 0x1F0),
+                    (ElfConstants.DtAndroidRelasz, 8),
+                    (ElfConstants.DtNull, 0),
+                };
+            for (var index = 0; index < dynamicEntries.Length; index++)
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    bytes.AsSpan(ElfFixture.DynamicTableOffset + (index * ElfConstants.DynamicEntrySize64)),
+                    dynamicEntries[index].Tag);
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    bytes.AsSpan(ElfFixture.DynamicTableOffset + (index * ElfConstants.DynamicEntrySize64) + 8),
+                    dynamicEntries[index].Value);
+            }
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                bytes.AsSpan(ElfFixture.DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.FileSize),
+                checked((ulong)(dynamicEntries.Length * ElfConstants.DynamicEntrySize64)));
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                bytes.AsSpan(ElfFixture.DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.MemorySize),
+                checked((ulong)(dynamicEntries.Length * ElfConstants.DynamicEntrySize64)));
+
+            var parsed = ElfParser.Parse(bytes);
+            Assert.True(parsed.IsSuccess, string.Join(Environment.NewLine, parsed.Diagnostics));
+            var diagnostics = new DiagnosticBag();
+            var options = new RehydrationOptions(
+                new string('a', 64),
+                new string('b', 64),
+                "unit.android-packed",
+                ProtectedImageProfile.HostContextEntry,
+                "producer.android-packed",
+                new string('c', 64),
+                ProtectedImageAbiV1.DefaultRehydratorConsumerId,
+                new string('d', 64));
+
+            var accepted = new HostContextEntryMaterializationPolicy()
+                .ValidateSource(parsed.File!, options, diagnostics);
+
+            Assert.False(accepted);
+            Assert.Contains(
+                diagnostics,
+                diagnostic => diagnostic.Code == DiagnosticCode.ProtectedImageUnsupported
+                    && diagnostic.Message.Contains($"0x{tag:X}", StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     [Fact]

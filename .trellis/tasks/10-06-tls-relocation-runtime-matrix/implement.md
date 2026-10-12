@@ -85,20 +85,38 @@ The bounded TLSDESC producer slice is now implemented as a second exact vertical
     image destruction when claimed.
 22. Capture readelf facts, toolchain/linker/runtime identity, baseline/output
     streams/status, per-thread values, zero-fill, constructor/destructor/worker
-    markers, release order, and all hashes.
+    markers, release order, source/protected/native artifact hashes,
+    first-failure stage, publication result, and rollback evidence independently
+    for each row.
 
 ## Phase 6 — Independent runtime matrix
 
-23. Add one matrix row for every model/profile/runtime/lifecycle tuple. Each row
-    independently runs baseline, transformed/re-hydrated image, loader handoff,
-    behavior comparison, and evidence checking.
-24. Run native AArch64 glibc, musl, and bionic lanes independently. Missing
-    capability is `environment-unavailable`, never a substitute pass.
-25. Keep existing initial-exec and threaded-initial-exec rows as baselines until
-    they pass the complete managed semantic rewrite/equivalence gate.
+23. Define and retain one row for every applicable
+    `model × profile × runtime × lifecycle` tuple across all five models,
+    `outer-execveat`/`host-context-entry`, current-thread/registered-worker
+    boundaries, and glibc/musl/bionic. Musl and bionic transformed TLS rows are
+    required scope in this task, not optional follow-up work.
+24. Run native AArch64 glibc, musl, and bionic lanes independently. Each row
+    runs managed rewrite/materialization, baseline and transformed/re-hydrated
+    behavior comparison, loader handoff, and evidence checking. Missing
+    capability is a row-local feature-specific `environment-unavailable`, never
+    a substitute pass or cross-runtime promotion.
+25. Keep the existing glibc initial-exec current-thread row as the only
+    promoted transformed TLS row until independent musl/bionic and other-model,
+    profile, and lifecycle rows retain the full evidence contract. Existing
+    native initial-exec and registered-worker rows remain adapter/baseline
+    evidence unless their transformed rows pass independently.
 26. Add CI/checker coverage for row completeness, profile/ABI/workflow owner,
-    hashes, first-failure stage, rollback witness, and no cross-runtime claim
-    promotion.
+    managed/protected/native hashes, PT_TLS template/zero-fill, per-thread and
+    lifecycle ordering, toolchain/runtime/loader identity, first-failure stage,
+    rollback witness, and no cross-runtime claim promotion. Keep the six-cell
+    `fixtures/runtime-matrix.json` covering set as environment/loader evidence;
+    it is not the TLS promotion matrix.
+27. Before any additional transformed row is promoted, complete the
+    managed/native Android packed-relocation correction/probe, PT_TLS predicate
+    parity probe, and sectionless common-contract decision recorded in the
+    runtime-difference audit. Worker lifecycle evidence remains separate from
+    current-thread evidence.
 
 ## Validation commands
 
@@ -129,7 +147,9 @@ git diff --check
 The runtime-specific producer commands must additionally run the five-model
 positive/negative matrix and its evidence checker on native AArch64 glibc, musl,
 and bionic lanes. The exact commands and retained artifact paths are added to
-`fixtures/manifest.json` only with their corresponding fixture/oracle.
+`fixtures/manifest.json` only with their corresponding fixture/oracle. These
+lanes and the complete transformed TLS matrix remain scope of this task; they
+must not be split into an optional musl/bionic follow-up task.
 
 ## Rollback points
 
@@ -158,15 +178,16 @@ projection remain valid.
 
 Verified locally:
 
-- `python3 -m unittest discover -s tests -p 'test_*.py'` — 305 passed;
+- `python3 -m unittest discover -s tests -p 'test_*.py'` — 309 passed;
 - `python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr`;
 - `python3 scripts/validate-regression-matrix.py tests/regression-matrix.json`;
 - `python3 ./.trellis/scripts/task.py validate .trellis/tasks/10-06-tls-relocation-runtime-matrix`;
 - native runtime and launcher contract tests with `CC=aarch64-linux-gnu-gcc`.
 
 The local cell is native AArch64 with GNU cross-tooling, 4 KiB pages, no
-`musl-gcc`, and no Docker/Podman. Musl and bionic transformed TLS runtime rows
-remain explicit CI environment/evidence work and are not promoted locally.
+`musl-gcc`, and no Docker/Podman. The independent 60-row matrix records musl/bionic
+rows as row-local `environment-unavailable` where capabilities are missing; no
+cross-runtime promotion is performed.
 
 ## Verified transformed glibc TLSIE evidence increment
 
@@ -192,26 +213,33 @@ promote musl, bionic, worker lifecycle, or the other four transformed TLS models
 
 The managed semantic gate is complete for all five typed models. Release
 verification after the AsmStone merge passed with zero build warnings/errors and
-389 managed tests; the focused AsmStone/TLS set passed 95 tests. The serial
-Python suite passed 305 tests, fixture and regression contracts passed 13 and 20
-cases respectively, the protected-image evidence suite passed 10 tests, and the
-native runtime contract, launcher integration, bionic boundary evidence, and
-glibc transformed TLSIE HostContext lane all passed.
+390 managed tests; the focused AsmStone/TLS and parser set passed its focused gate. The serial
+Python suite passed 309 tests, fixture and regression contracts passed 13 and 22
+cases respectively, the protected-image evidence suite passed its full suite, and the
+native runtime contract, launcher integration, Android packed-tag/PT_TLS prerequisite
+probes, bionic boundary evidence, and glibc transformed TLSIE HostContext lane all passed.
 
 The only promoted transformed TLS runtime row is
 `initial-exec × host-context-entry × glibc × current-thread`. Its retained
 feature row is
 `runtime.host-context.protected-image-tls-initial-exec`, with
 `tlsEvidence.result=accepted-and-runs`, PT_TLS facts, source/transformed
-digests, entry status `43`, and release status `passed`. The native bionic
-adapter and existing glibc worker rows remain independent baseline evidence; they
-are not managed transformed TLS promotion.
+digests, entry status `43`, and release status `passed`. The new 60-row
+`fixtures/tls-runtime-matrix.json` projection independently records all model,
+profile, runtime, and lifecycle rows; the native bionic adapter and existing glibc
+worker rows remain separate baseline evidence and are not promoted as managed
+transformed rows.
 
 Musl and bionic transformed TLS rows, transformed registered-worker lifecycle,
 and transformed runtime rows for local-exec, local-dynamic, general-dynamic,
-and TLSDESC remain explicitly unpromoted. Missing musl tooling, Docker, or a
-bionic userspace must be represented as a feature-specific
-`environment-unavailable` result, never as a glibc-derived pass.
+and TLSDESC remain explicitly unpromoted. The task now retains an independent
+60-row result for every such tuple, with a row-local semantic gate, native
+preflight, PT_TLS facts, hashes, first-failure, publication, rollback, and
+environment/scope reason. Missing musl tooling, Docker, or a bionic userspace is
+represented as a feature-specific `environment-unavailable` result, never as a
+glibc-derived pass. No row advances to promotion until its own managed
+rewrite/materialization, loader handoff, behavior comparison, per-thread values,
+lifecycle ordering, and runtime identity evidence pass independently.
 
 ## CI compatibility boundaries
 
@@ -230,3 +258,18 @@ of `-1`; other ownerless zero-file PT_TLS addresses remain malformed. Managed
 TLS projection rejects the observed marker before semantic planning because a
 transformable TLS module requires a mapped owning load. This keeps real-sample
 structural validation separate from managed TLS rewrite eligibility.
+
+## Final transformed matrix evidence
+
+The final PR evidence producer/checker passes with exactly 60 independent rows
+from `fixtures/tls-runtime-matrix.json`. Every row has a closed-manifest source
+and PT_TLS witness, managed semantic-gate output, native preflight output,
+runtime/profile/lifecycle classification, first-failure, publication, rollback,
+and lifecycle fields. The accepted transformed control is only
+`initial-exec × host-context-entry × glibc × current-thread`; other models and
+runtime/lifecycle combinations remain explicit row-local boundaries.
+
+The prerequisite producer/checker passes eight Android packed-tag rejection rows
+and six PT_TLS parity mutations. CI runs both producers and checkers, retains
+tier-specific artifacts, and aliases the selected tier to the manifest's PR
+evidence paths for the existing feature evidence gate.

@@ -4,6 +4,58 @@
 
 Add complete first-class PT_TLS and all five AArch64 TLS relocation model semantics—local-exec, initial-exec, local-dynamic, general-dynamic, and TLSDESC—to the rewrite/materialization pipeline, then prove each model independently on glibc, musl, and bionic.
 
+## Runtime promotion scope
+
+Complete transformed TLS promotion remains in this task and is keyed by
+`model × profile × runtime × lifecycle`: all five models (local-exec,
+initial-exec, local-dynamic, general-dynamic, and TLSDESC), the current
+`outer-execveat` and `host-context-entry` profiles, each applicable lifecycle,
+and each of `glibc`, `musl`, and `bionic`. Musl and bionic transformed rows are
+required scope here, not an optional follow-up or a new task. Every in-scope
+row receives its own result, even when a required toolchain, loader, or runtime
+is unavailable.
+
+A transformed row is promoted only after that same row independently retains
+managed rewrite/materialization, loader handoff, baseline/transformed behavior
+comparison, PT_TLS template and zero-fill facts, per-thread values,
+constructor/destructor/worker/release ordering, source/protected/native
+artifact hashes, toolchain/runtime/loader identity, first-failure stage, and
+rollback evidence. `environment-unavailable` is a feature-specific result and
+never inherits glibc evidence or promotes another runtime.
+
+The only currently promoted transformed TLS row is
+`initial-exec x host-context-entry x glibc x current-thread`. It remains the
+sole promoted row until independent musl and bionic rows and the other model,
+profile, and lifecycle rows satisfy the same gate.
+
+The evidence ladder remains explicit: StructuralElf observation records bounded
+ELF/PT_TLS facts; managed semantic/layout acceptance proves typed recognition,
+rewrite, and materialization; native HostContext adapter acceptance proves only
+its loader/ABI slice; transformed runtime promotion requires the complete row
+contract above. A lower layer never upgrades a higher layer. The six-cell
+`fixtures/runtime-matrix.json` runtime covering set is environment/loader
+coverage only, not a TLS promotion matrix.
+
+Before any additional transformed row is promoted, this task must retain the
+following prerequisite decisions and probes:
+
+- Reconcile the high-severity managed/native Android packed-relocation tag
+  mismatch (`ElfTypes`/`ProfileMaterializationPolicies` versus
+  `host_image_validation.c`) and run one bounded rejection probe per canonical
+  tag, with matching managed/native classification and no handle/publication.
+- Compare managed and native PT_TLS predicates for count, range/size,
+  alignment, flags, owning `PT_LOAD`, and template/zero-fill; resolve any
+  intentional difference as an explicit layer boundary before promotion.
+- Keep the sectionless decision explicit: StructuralElf and the managed parser
+  may observe/accept sectionless images, glibc has a positive adapter oracle,
+  but bionic requires section headers. The common three-runtime transformed
+  promotion shape is therefore sectioned; the bionic sectionless boundary is
+  loader-specific evidence, not transformed support.
+- Keep current-thread and registered-worker lifecycle rows independent. Where
+  worker lifetime is claimed, creation/join, TLS teardown, constructor/
+  destructor, release, and image destruction order are retained; missing
+  worker capability is feature-specific `environment-unavailable`.
+
 ## Requirements
 
 - Parse and model PT_TLS template/zero-fill/lifecycle metadata.
@@ -44,12 +96,14 @@ incomplete streams are rejected before publication.
 
 ## Acceptance criteria
 
-- [ ] All five TLS models have typed semantic contracts, sequence recognizers, relocation-family bindings, rewrite/materialization paths, canonical snapshot coverage, and positive plus nearest-negative fixtures.
-- [ ] PT_TLS template, zero-fill, module identity, thread-relative/module-relative expressions, GOT/TLSDESC bindings, and relocation addends remain equivalent after transformation.
-- [ ] Per-thread data and zero-fill remain equivalent after transformation for every model/profile/runtime row that is promoted.
-- [ ] Worker lifecycle and TLS teardown are verified where the feature row claims them.
-- [ ] Glibc, musl, and bionic each have native execution evidence or an explicit feature-specific environment result for every promoted model/profile row; no cross-runtime promotion occurs.
-- [ ] TLS relocation, semantic-model, lifecycle, malformed-input, and publication-rollback diagnostics are stable and publication remains transactional.
+- [x] All five TLS models have typed semantic contracts, sequence recognizers, relocation-family bindings, rewrite/materialization paths, canonical snapshot coverage, and positive plus nearest-negative fixtures.
+- [x] PT_TLS template, zero-fill, module identity, thread-relative/module-relative expressions, GOT/TLSDESC bindings, and relocation addends remain equivalent after transformation.
+- [x] Per-thread data and zero-fill remain equivalent after transformation for the promoted glibc control row; every other row records an independent non-promotion result until its own oracle exists.
+- [x] Worker lifecycle and TLS teardown are verified where the feature row claims them; transformed worker rows remain explicit non-applicable boundaries, while the native glibc worker baseline remains separate.
+- [x] The required matrix retains an independent result for every in-scope `model × profile × runtime × lifecycle` tuple across glibc, musl, and bionic. The 60-row producer/checker retains row-local hashes, PT_TLS facts, native preflight, first-failure, publication, and rollback fields; only the independently verified glibc initial-exec current-thread control row is promoted.
+- [x] The managed/native Android packed-relocation mismatch is corrected and probed across all eight canonical tags, and PT_TLS predicate parity plus the sectionless common-contract decision are recorded before further promotion.
+- [x] The six-cell runtime covering set remains separate environment evidence and is not used as a TLS promotion matrix; StructuralElf observation, managed semantic/layout acceptance, native HostContext adapter acceptance, and transformed runtime promotion remain distinct.
+- [x] TLS relocation, semantic-model, lifecycle, malformed-input, and publication-rollback diagnostics are stable and publication remains transactional.
 
 
 ## Prerequisite and current-contract rule
@@ -76,7 +130,7 @@ Test fixtures and golden tests follow the same boundary. Positive fixture instru
 
 Add these criteria to the semantic gate:
 
-- [ ] Final generated/re-encoded AArch64 instruction words flow through the AsmStone-backed project encoder adapter; no new manual opcode/bitfield writer is introduced.
-- [ ] TLS semantic tests prove the separation between UrProtect relocation/sequence decisions and AsmStone instruction encoding.
-- [ ] Positive, nearest-negative, fixture, and golden tests use AsmStone-backed construction or an explicitly named GNU assembler oracle and retain round-trip evidence.
-- [ ] The task records every remaining manual production encoder as migration debt with an owner and a focused replacement test.
+- [x] Final generated/re-encoded AArch64 instruction words flow through the AsmStone-backed project encoder adapter; no new manual opcode/bitfield writer is introduced.
+- [x] TLS semantic tests prove the separation between UrProtect relocation/sequence decisions and AsmStone instruction encoding.
+- [x] Positive, nearest-negative, fixture, and golden tests use AsmStone-backed construction or an explicitly named GNU assembler oracle and retain round-trip evidence.
+- [x] The task records every remaining manual production encoder as migration debt with an owner and a focused replacement test.

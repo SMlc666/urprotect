@@ -134,14 +134,8 @@ public sealed class HostContextEntryMaterializationPolicy : IProfileMaterializat
             ElfConstants.DtRelEnt,
             ElfConstants.DtVerdef,
             ElfConstants.DtVerdefNum,
-            ElfConstants.DtAndroidRel,
-            ElfConstants.DtAndroidRelsz,
-            ElfConstants.DtAndroidRela,
-            ElfConstants.DtAndroidRelasz,
-            ElfConstants.DtAndroidRelr,
-            ElfConstants.DtAndroidRelrsz,
-            ElfConstants.DtAndroidRelrent,
         };
+        unsupportedDynamicTags.UnionWith(ElfConstants.AndroidPackedRelocationTags);
         foreach (var entry in source.DynamicEntries)
         {
             if (unsupportedDynamicTags.Contains(entry.Tag))
@@ -160,6 +154,44 @@ public sealed class HostContextEntryMaterializationPolicy : IProfileMaterializat
                 DiagnosticCode.ProtectedImageUnsupported,
                 "HostContext preflight rejects an executable PT_GNU_STACK request.");
             valid = false;
+        }
+
+        foreach (var tls in source.TlsMetadata.Segments)
+        {
+            if (tls.MemorySize == 0
+                || (tls.Permissions & ElfConstants.PfR) == 0
+                || (tls.Permissions & ElfConstants.PfX) != 0
+                || (tls.Permissions & ~(ElfConstants.PfR | ElfConstants.PfW)) != 0
+                || tls.OwningLoadProgramHeaderIndex < 0
+                || tls.OwningLoadProgramHeaderIndex >= source.ProgramHeaders.Count)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ProtectedImageUnsupported,
+                    "HostContext PT_TLS requires one non-empty readable non-executable segment with a mapped owner.");
+                valid = false;
+                continue;
+            }
+
+            var owner = source.ProgramHeaders[tls.OwningLoadProgramHeaderIndex];
+            if (owner.Type != ElfConstants.PtLoad
+                || (owner.Flags & (ElfConstants.PfR | ElfConstants.PfW))
+                    != (ElfConstants.PfR | ElfConstants.PfW)
+                || tls.FileSize > owner.FileSize
+                || tls.TemplateFileOffset.Value < owner.Offset
+                || tls.TemplateFileOffset.Value - owner.Offset
+                    > owner.FileSize - tls.FileSize
+                || tls.TemplateAddress.Value < owner.VirtualAddress
+                || tls.MemorySize > owner.MemorySize
+                || tls.TemplateAddress.Value - owner.VirtualAddress
+                    > owner.MemorySize - tls.MemorySize
+                || tls.TemplateFileOffset.Value - owner.Offset
+                    != tls.TemplateAddress.Value - owner.VirtualAddress)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ProtectedImageUnsupported,
+                    "HostContext PT_TLS requires a congruent writable PT_LOAD owner and preserved template range.");
+                valid = false;
+            }
         }
 
         return valid && !diagnostics.HasErrors;

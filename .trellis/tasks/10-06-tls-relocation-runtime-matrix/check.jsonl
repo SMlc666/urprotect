@@ -17,3 +17,11 @@
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-tlsdesc-managed-status.md","reason":"Record the completed bounded managed TLSDESC producer/layout evidence, test witness, and explicit no-runtime-promotion boundary."}
 {"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-runtime-evidence-projection.md","reason":"Bounded additive TLS runtime evidence projection, result boundaries, and checker witnesses."}
 {"file":"scripts/run-tls-host-context-rehydration-e2e.sh","reason":"Audit the transformed TLSIE evidence runner, closed manifest, and independent glibc handoff witness."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/runtime-difference-audit.md","reason":"Check runtime-specific TLS promotion scope, independent row evidence, PT_TLS managed/native parity, sectionless and worker boundaries, six-cell covering-set distinction, and Android packed-relocation prerequisite."}
+{"file":"fixtures/tls-runtime-matrix.json","reason":"Validate the closed model/profile/runtime/lifecycle TLS promotion registry and its separation from the six-cell runtime covering set."}
+{"file":"scripts/run-tls-runtime-matrix.py","reason":"Run the independent 60-row transformed TLS evidence producer with row-local hashes, PT_TLS facts, semantic gate, native preflight, and environment boundaries."}
+{"file":"scripts/check-tls-runtime-matrix-evidence.py","reason":"Check the closed TLS matrix, evidence manifest, native preflight, managed semantic gate, PT_TLS facts, hashes, and single promoted control row."}
+{"file":"scripts/run-tls-prerequisite-probes.py","reason":"Produce the bounded Android packed-tag and managed/native PT_TLS predicate prerequisite evidence."}
+{"file":"scripts/check-tls-prerequisite-evidence.py","reason":"Validate eight canonical Android tag rejection rows, PT_TLS parity cases, managed policy pass, and closed prerequisite evidence."}
+{"file":"tests/test_tls_runtime_matrix.py","reason":"Test TLS registry dimensions, row/checker closure, prerequisite probe coverage, CI wiring, and regression-matrix references."}
+{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/tls-matrix-completion.md","reason":"Review the final 60-row producer result, prerequisite probe evidence, single promoted control row, and runtime boundaries."}
