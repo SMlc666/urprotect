@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "kind": "tls-transformed-runtime-matrix",
+  "models": [
+    "local-exec",
+    "initial-exec",
+    "local-dynamic",
+    "general-dynamic",
+    "tlsdesc"
+  ],
+  "profiles": [
+    "outer-execveat",
+    "host-context-entry"
+  ],
+  "runtimes": [
+    "glibc",
+    "musl",
+    "bionic"
+  ],
+  "lifecycles": [
+    "current-thread",
+    "registered-worker"
+  ],
+  "controlRow": "initial-exec.host-context-entry.glibc.current-thread",
+  "resultVocabulary": [
+    "accepted-and-runs",
+    "environment-unavailable",
+    "runtime-failure",
+    "not-applicable"
+  ],
+  "policy": {
+    "outerRegisteredWorker": "not-applicable",
+    "hostContextRegisteredWorkerWithoutDedicatedTransformedOracle": "not-applicable",
+    "missingRuntimeCapability": "environment-unavailable",
+    "unimplementedTransformedModel": "not-applicable"
+  }
+}

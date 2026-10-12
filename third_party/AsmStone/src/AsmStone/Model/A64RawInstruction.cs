@@ -28,6 +28,12 @@ public readonly ref struct A64RawInstruction
     /// <summary>Gets the generated TableGen source name.</summary>
     public string SourceName => plan?.Info.Name ?? string.Empty;
 
+    /// <summary>Gets the stable generated instruction code.</summary>
+    public A64InstructionCode Code => plan?.Code ?? A64InstructionCode.Invalid;
+
+    /// <summary>Gets the generated instruction descriptor.</summary>
+    public A64InstructionDescriptor? Descriptor => plan?.Descriptor;
+
     /// <summary>Gets the generated instruction mnemonic.</summary>
     public string Mnemonic => plan?.Info.Mnemonic ?? string.Empty;
 

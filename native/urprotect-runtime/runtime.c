@@ -233,7 +233,7 @@ static urp_status urp_parse_frame(
     size_t frame_size,
     urp_frame_view *view)
 {
-    if (frame == NULL || view == NULL || frame_size < URP_FRAME_COMMON_HEADER_SIZE) {
+    if (frame == NULL || view == NULL || frame_size < URP_FRAME_HEADER_SIZE) {
         return URP_STATUS_FRAME_INVALID;
     }
 
@@ -244,18 +244,10 @@ static urp_status urp_parse_frame(
 
     uint16_t version = urp_read_u16_le(header + URP_FRAME_VERSION_OFFSET);
     uint16_t header_size = urp_read_u16_le(header + URP_FRAME_HEADER_SIZE_OFFSET);
-    if (version != URP_FRAME_VERSION_V1
-        && version != URP_FRAME_VERSION_V2
-        && version != URP_FRAME_VERSION_V3) {
+    if (version != URP_FRAME_VERSION) {
         return URP_STATUS_UNSUPPORTED;
     }
-
-    uint16_t expected_header_size = version == URP_RUNTIME_FRAME_VERSION_V1
-        ? URP_FRAME_V1_HEADER_SIZE
-        : (version == URP_RUNTIME_FRAME_VERSION_V2
-            ? URP_FRAME_V2_HEADER_SIZE
-            : URP_FRAME_V3_HEADER_SIZE);
-    if (header_size != expected_header_size
+    if (header_size != URP_FRAME_HEADER_SIZE
         || urp_read_u32_le(header + URP_FRAME_FLAGS_OFFSET) != URP_FRAME_DEFLATE_FLAG
         || urp_read_u16_le(header + URP_FRAME_MACHINE_OFFSET) != URP_FRAME_MACHINE_AARCH64
         || urp_read_u16_le(header + URP_FRAME_TYPE_OFFSET) != URP_FRAME_TYPE_DYN
@@ -263,42 +255,35 @@ static urp_status urp_parse_frame(
         return URP_STATUS_FRAME_INVALID;
     }
 
+    uint32_t profile = urp_read_u32_le(frame + URP_FRAME_PROFILE_OFFSET);
+    if (urp_read_u32_le(frame + URP_FRAME_RESERVED_OFFSET) != 0U
+        || (profile != URP_PROFILE_OUTER_EXECVEAT
+            && profile != URP_PROFILE_HOST_CONTEXT_ENTRY)) {
+        return URP_STATUS_UNSUPPORTED;
+    }
+
     uint32_t host_abi_version = URP_HOST_ABI_VERSION;
     uint64_t required_capabilities = 0U;
     uint32_t entry_name_size_u32 = 0U;
-    uint32_t profile = version == URP_RUNTIME_FRAME_VERSION_V3
-        ? 0U
-        : URP_PROFILE_HOST_CONTEXT_ENTRY;
-    if (version == URP_RUNTIME_FRAME_VERSION_V3) {
-        profile = urp_read_u32_le(frame + URP_FRAME_V3_PROFILE_OFFSET);
-        if (urp_read_u32_le(frame + URP_FRAME_V3_RESERVED_OFFSET) != 0U
-            || (profile != URP_PROFILE_OUTER_EXECVEAT
-                && profile != URP_PROFILE_HOST_CONTEXT_ENTRY)) {
-            return URP_STATUS_UNSUPPORTED;
-        }
-        if (profile == URP_PROFILE_OUTER_EXECVEAT) {
-            for (size_t index = URP_FRAME_V2_HOST_ABI_OFFSET;
-                 index < URP_FRAME_V3_PROFILE_OFFSET;
-                 ++index) {
-                if (frame[index] != 0U) {
-                    return URP_STATUS_FRAME_INVALID;
-                }
+    if (profile == URP_PROFILE_OUTER_EXECVEAT) {
+        for (size_t index = URP_FRAME_HOST_ABI_OFFSET;
+             index < URP_FRAME_PROFILE_OFFSET;
+             ++index) {
+            if (frame[index] != 0U) {
+                return URP_STATUS_FRAME_INVALID;
             }
         }
-    }
-    if (version == URP_RUNTIME_FRAME_VERSION_V2
-        || (version == URP_RUNTIME_FRAME_VERSION_V3
-            && profile == URP_PROFILE_HOST_CONTEXT_ENTRY)) {
+    } else {
         host_abi_version = urp_read_u32_le(
-            frame + URP_RUNTIME_FRAME_V2_HOST_ABI_OFFSET);
+            frame + URP_FRAME_HOST_ABI_OFFSET);
         uint32_t reserved_before_capabilities = urp_read_u32_le(
-            frame + URP_RUNTIME_FRAME_V2_RESERVED_BEFORE_CAPABILITIES_OFFSET);
+            frame + URP_FRAME_RESERVED_BEFORE_CAPABILITIES_OFFSET);
         required_capabilities = urp_read_u64_le(
-            frame + URP_RUNTIME_FRAME_V2_REQUIRED_CAPABILITIES_OFFSET);
+            frame + URP_FRAME_REQUIRED_CAPABILITIES_OFFSET);
         entry_name_size_u32 = urp_read_u32_le(
-            frame + URP_RUNTIME_FRAME_V2_ENTRY_NAME_SIZE_OFFSET);
+            frame + URP_FRAME_ENTRY_NAME_SIZE_OFFSET);
         uint32_t reserved_after_entry_name_size = urp_read_u32_le(
-            frame + URP_RUNTIME_FRAME_V2_RESERVED_AFTER_ENTRY_NAME_SIZE_OFFSET);
+            frame + URP_FRAME_RESERVED_AFTER_ENTRY_NAME_SIZE_OFFSET);
         if (reserved_before_capabilities != 0U
             || reserved_after_entry_name_size != 0U) {
             return URP_STATUS_FRAME_INVALID;
@@ -338,9 +323,7 @@ static urp_status urp_parse_frame(
     }
 
     uint64_t entry_name_offset = 0U;
-    if (version == URP_RUNTIME_FRAME_VERSION_V2
-        || (version == URP_RUNTIME_FRAME_VERSION_V3
-            && profile == URP_PROFILE_HOST_CONTEXT_ENTRY)) {
+    if (profile == URP_PROFILE_HOST_CONTEXT_ENTRY) {
         entry_name_offset = encoded_offset_expected;
         if (!urp_checked_add_u64(
                 encoded_offset_expected,
@@ -373,9 +356,7 @@ static urp_status urp_parse_frame(
         || !urp_u64_to_size((uint64_t)name_size, &name_size_size)) {
         return URP_STATUS_FRAME_INVALID;
     }
-    if ((version == URP_RUNTIME_FRAME_VERSION_V2
-         || (version == URP_RUNTIME_FRAME_VERSION_V3
-             && profile == URP_PROFILE_HOST_CONTEXT_ENTRY))
+    if (profile == URP_PROFILE_HOST_CONTEXT_ENTRY
         && !urp_u64_to_size(entry_name_offset, &entry_name_offset_size)) {
         return URP_STATUS_FRAME_INVALID;
     }
@@ -396,9 +377,7 @@ static urp_status urp_parse_frame(
 
     const uint8_t *entry_name = NULL;
     size_t entry_name_size = 0U;
-    if (version == URP_RUNTIME_FRAME_VERSION_V2
-        || (version == URP_RUNTIME_FRAME_VERSION_V3
-            && profile == URP_PROFILE_HOST_CONTEXT_ENTRY)) {
+    if (profile == URP_PROFILE_HOST_CONTEXT_ENTRY) {
         if (!urp_u64_to_size((uint64_t)entry_name_size_u32, &entry_name_size)
             || entry_name_offset_size > frame_size
             || entry_name_size > frame_size - entry_name_offset_size) {
@@ -597,22 +576,7 @@ static urp_status urp_runtime_execute_frame_inner(
                 ? URP_LAUNCH_ARGS_CURRENT_SIZE
                 : URP_LAUNCH_ARGS_MIN_SIZE;
             current_args.image = requires_thread_lifetime ? image : 0U;
-            if (requires_thread_lifetime) {
-                entry_status = entry(host, &current_args);
-            } else {
-                /* Keep the optional callbacks and image identity invisible to legacy frames. */
-                urp_host_context_v1 legacy_host;
-                memset(&legacy_host, 0, sizeof(legacy_host));
-                size_t host_copy_size = host->struct_size < URP_HOST_CONTEXT_MIN_SIZE
-                    ? (size_t)host->struct_size
-                    : (size_t)URP_HOST_CONTEXT_MIN_SIZE;
-                memcpy(&legacy_host, host, host_copy_size);
-                legacy_host.struct_size = URP_HOST_CONTEXT_MIN_SIZE;
-                legacy_host.capabilities &= ~URP_HOST_CAP_THREAD_LIFETIME;
-                legacy_host.create_image_thread = NULL;
-                legacy_host.join_image_thread = NULL;
-                entry_status = entry(&legacy_host, &current_args);
-            }
+            entry_status = entry(host, &current_args);
         }
     }
 

@@ -28,6 +28,8 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         self.assertIn("if: always()", self.workflow[run:check])
         self.assertIn("if: always()", self.workflow[check:upload])
         self.assertIn(".artifacts/protected-image/", self.workflow[upload : upload + 800])
+        self.assertIn("--profile host-context-entry", self.workflow)
+        self.assertIn("compat.protection-host-context-fixture.glibc.host-context-entry", self.workflow)
 
     def test_runner_retains_all_stage_records_and_closes_manifest(self) -> None:
         for marker in (
@@ -42,7 +44,15 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.runner)
         self.assertIn("run-protected-image-e2e.sh", self.runner)
+        self.assertIn("run-host-context-rehydration-e2e.sh", self.runner)
+        self.assertIn("host-context-entry", self.runner)
         self.assertIn("execveat", self.runner)
+
+    def test_workflow_runs_the_managed_tls_initial_exec_evidence_lane(self) -> None:
+        self.assertIn("run-tls-host-context-rehydration-e2e.sh", self.workflow)
+        self.assertIn("tls.initial-exec.glibc.host-context-entry", self.workflow)
+        self.assertIn("runtime.host-context.protected-image-tls-initial-exec", self.workflow)
+        self.assertIn("--entry-status 43", (ROOT / "scripts/run-tls-host-context-rehydration-e2e.sh").read_text(encoding="utf-8"))
 
     def test_checker_requires_stage_specific_bindings_and_closed_evidence(self) -> None:
         for marker in (

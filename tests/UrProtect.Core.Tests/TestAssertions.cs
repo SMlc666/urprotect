@@ -1,5 +1,5 @@
 using UrProtect.Core.Diagnostics;
-using UrProtect.Core.Pack;
+using UrProtect.Core.ArtifactProtocol;
 
 namespace UrProtect.Core.Tests;
 

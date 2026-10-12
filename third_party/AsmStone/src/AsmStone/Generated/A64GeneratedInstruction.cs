@@ -25,7 +25,7 @@ internal enum A64GeneratedFlags
     MayRaiseFpException = 1 << 18,
 }
 
-internal sealed record A64GeneratedInstruction(
+internal readonly record struct A64GeneratedInstruction(
     string Name,
     string Mnemonic,
     string Assembly,

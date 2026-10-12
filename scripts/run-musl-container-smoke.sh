@@ -68,7 +68,7 @@ dotnet run --project "${repo_root}/src/UrProtect.Cli" \
   --configuration Release \
   --no-build \
   --no-restore \
-  -- validate "${binary}" --no-analysis --copy "${copy}" \
+  -- validate "${binary}" --copy "${copy}" \
   > "${artifact_root}/validator.stdout" \
   2> "${artifact_root}/validator.stderr"
 cmp -- "${binary}" "${copy}"

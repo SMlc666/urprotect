@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Quality gate for adapter ownership, round-trip validation, bounded encoding, focused tests, and architecture review."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Quality gate for fail-closed backend errors, stable diagnostics, and transactional publication after encoder failures."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Check that ABI, runtime evidence, and environment claims remain unchanged while encoder paths are migrated."}
+{"file":".trellis/tasks/10-11-asmstone-encoder-unification/prd.md","reason":"Task-specific acceptance criteria for vendoring the GitLab snapshot and eliminating duplicate final-word writers."}
+{"file":".trellis/tasks/10-11-asmstone-encoder-unification/design.md","reason":"Task-specific ownership, adapter, migration, compatibility, and rollback contracts for review."}
+{"file":"src/UrProtect.Core/ElfLayout/ElfLayoutBranchEncoding.cs","reason":"Review that layout direct and veneer branches have one adapter-backed final-word writer."}
+{"file":"scripts/check-aarch64-encoding-boundary.py","reason":"Review that production final-word construction remains behind Aarch64InstructionEncoder."}
+{"file":"tests/test_aarch64_encoding_boundary.py","reason":"Review positive and deliberate-negative architecture enforcement."}

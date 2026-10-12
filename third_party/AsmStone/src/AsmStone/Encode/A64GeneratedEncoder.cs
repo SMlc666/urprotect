@@ -16,13 +16,17 @@ internal static partial class A64GeneratedEncoder
         encoding = 0;
         ArgumentNullException.ThrowIfNull(features);
         A64CompiledInstruction compiled;
-        if (instruction.SourceName is null
-            || !A64InstructionCatalog.TryGetCompiledByName(instruction.SourceName, out compiled))
+        if (!instruction.Code.IsValid
+            || !A64InstructionCatalog.TryGetCompiledByCode(instruction.Code, out compiled))
         {
-            diagnostic = new A64Diagnostic(
-                A64DiagnosticCode.InvalidInstruction,
-                "Generated instructions require their TableGen source name.");
-            return false;
+            if (instruction.SourceName is null
+                || !A64InstructionCatalog.TryGetCompiledByName(instruction.SourceName, out compiled))
+            {
+                diagnostic = new A64Diagnostic(
+                    A64DiagnosticCode.InvalidInstruction,
+                    "Generated instructions require their instruction code or TableGen source name.");
+                return false;
+            }
         }
 
         var info = compiled.Info;

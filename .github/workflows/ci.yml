@@ -116,6 +116,110 @@ jobs:
             ".artifacts/protected-image/${tier}/glibc/compat.protection-symbolized-fixture.glibc.outer-execveat" \
             --tier "${tier}" --runtime glibc \
             --unit compat.protection-symbolized-fixture.glibc.outer-execveat
+      - name: Run HostContext Generic Rehydration and Native Image handoff (additive)
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-rehydration-e2e.sh --tier "${tier}" --runtime glibc --profile host-context-entry
+      - name: Check retained HostContext Generic Rehydration evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-rehydration-evidence.py \
+            ".artifacts/protected-image/${tier}/glibc/compat.protection-host-context-fixture.glibc.host-context-entry" \
+            --tier "${tier}" --runtime glibc \
+            --unit compat.protection-host-context-fixture.glibc.host-context-entry
+      - name: Run managed TLS initial-exec transformed-image evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-tls-host-context-rehydration-e2e.sh \
+            --tier "${tier}" \
+            --unit tls.initial-exec.glibc.host-context-entry
+      - name: Check managed TLS initial-exec transformed-image evidence
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.protected-image-tls-initial-exec
+          python3 scripts/check-protected-image-evidence.py \
+            ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry" \
+            --tier "${tier}" --runtime glibc \
+            --unit tls.initial-exec.glibc.host-context-entry
+          python3 scripts/check-rehydration-evidence.py \
+            ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry" \
+            --tier "${tier}" --runtime glibc \
+            --unit tls.initial-exec.glibc.host-context-entry
+      - name: Run TLS prerequisite probes
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          NATIVE_LAUNCHER_CC=cc \
+            python3 scripts/run-tls-prerequisite-probes.py \
+            --tier "${tier}" \
+            --artifact-root ".artifacts/tls-prerequisites/${tier}"
+          python3 scripts/check-tls-prerequisite-evidence.py \
+            ".artifacts/tls-prerequisites/${tier}"
+
+      - name: Run independent transformed TLS runtime matrix
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          NATIVE_LAUNCHER_CC=cc \
+            python3 scripts/run-tls-runtime-matrix.py \
+            --tier "${tier}" \
+            --artifact-root ".artifacts/tls-runtime/${tier}"
+
+      - name: Check transformed TLS runtime matrix
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-tls-runtime-matrix-evidence.py \
+            ".artifacts/tls-runtime/${tier}" \
+            --registry fixtures/tls-runtime-matrix.json
+
+      - name: Check TLS feature evidence declarations
+        if: always()
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          if [[ "${tier}" != pr ]]; then
+            rm -rf .artifacts/tls-prerequisites/pr .artifacts/tls-runtime/pr
+            mkdir -p .artifacts/tls-prerequisites .artifacts/tls-runtime
+            cp -a ".artifacts/tls-prerequisites/${tier}" .artifacts/tls-prerequisites/pr
+            cp -a ".artifacts/tls-runtime/${tier}" .artifacts/tls-runtime/pr
+          fi
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-prerequisite-probes
+          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-transformed-runtime-matrix
+
       - name: Run strict compatibility corpus growth evidence
         if: always()
         run: |
@@ -158,6 +262,11 @@ jobs:
         run: python3 scripts/check-coverage.py
       - name: Check compatibility matrix contract
         run: python3 tests/test_fixture_matrix.py
+      - name: Check managed architecture boundaries
+        run: |
+          python3 scripts/check-architecture-boundaries.py --self-test
+          python3 scripts/check-aarch64-encoding-boundary.py
+          python3 tests/test_aarch64_encoding_boundary.py
       - name: Check regression matrix contract
         run: python3 tests/test_regression_matrix.py
       - name: Check runtime covering matrix
@@ -196,7 +305,6 @@ jobs:
       - name: Check PR handoff evidence
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.wrapper-v1-baseline
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.outer.dynamic-et-exec
       - name: HostContext runtime contract smoke
         run: |
@@ -217,8 +325,6 @@ jobs:
             2>&1 | tee .artifacts/host-context/pr/managed-pack.log
       - name: Check PR HostContext evidence
         run: |
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v1
-          python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context-v2
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.pt-tls
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.threaded-initial-exec-tls
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.gnu-property
@@ -271,6 +377,8 @@ jobs:
             .artifacts/compatibility-matrix.md
             .artifacts/protection/
             .artifacts/protected-image/
+            .artifacts/tls-prerequisites/
+            .artifacts/tls-runtime/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
           include-hidden-files: true

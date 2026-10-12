@@ -1100,7 +1100,7 @@ PYOUTERPLAN
   if python3 "${repo_root}/scripts/compare-real-sample-fingerprint.py" --manifest "${manifest}" --project-id "${id}" \
       --fingerprint "${sample_root}/elf-fingerprint.json" --output "${sample_root}/fingerprint-comparison.json" > "${sample_root}/logs/fingerprint-compare.log" 2>&1; then :; else fingerprint_status=$?; fi
   local validator_status=0
-  if "${dotnet_cli[@]}" validate "${artifact}" --no-analysis --json - > "${sample_root}/urprotect-report.json" 2> "${sample_root}/logs/urprotect.log"; then :; else validator_status=$?; fi
+  if "${dotnet_cli[@]}" validate "${artifact}" --json - > "${sample_root}/urprotect-report.json" 2> "${sample_root}/logs/urprotect.log"; then :; else validator_status=$?; fi
   local actual_static
   if [[ "${fingerprint_status}" -ne 0 ]]; then actual_static=unexpected-rejection
   elif [[ "${validator_status}" -eq 0 && "${expected_static}" == expected-rejected ]]; then actual_static=unexpected-acceptance

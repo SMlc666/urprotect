@@ -171,7 +171,7 @@ PY
     return 1
   fi
 
-  "${dotnet_cli[@]}" validate "${binary}" --no-analysis --copy "${copy}" \
+  "${dotnet_cli[@]}" validate "${binary}" --copy "${copy}" \
     > "${case_root}/validator.stdout" 2> "${case_root}/validator.stderr"
   cmp -- "${binary}" "${copy}"
 

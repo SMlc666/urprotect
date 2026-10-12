@@ -330,8 +330,8 @@ def build_environment(
         },
     }
     producer_script = REPO_ROOT / "scripts/run-protected-image-e2e.sh"
-    producer_source = REPO_ROOT / "src/UrProtect.Core/Protect/ProtectionPlan.cs"
-    rehydrator_source = REPO_ROOT / "src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs"
+    producer_source = REPO_ROOT / "src/UrProtect.Core/Application/Protection/ProtectionPlan.cs"
+    rehydrator_source = REPO_ROOT / "src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs"
     product_capabilities = {
         "producerScriptSha256": _file_digest(producer_script),
         "producerSourceSha256": _file_digest(producer_source),

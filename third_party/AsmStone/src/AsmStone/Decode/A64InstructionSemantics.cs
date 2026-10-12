@@ -106,7 +106,7 @@ internal static class A64InstructionSemantics
             result.Add(new A64InstructionOperand(
                 binding.Name,
                 resolvedOperands[index],
-                Direction(binding.Direction),
+                binding.Direction,
                 implicitOperands[index],
                 binding.Type,
                 tiedTo)
@@ -139,16 +139,6 @@ internal static class A64InstructionSemantics
         }
 
         return result;
-    }
-
-    private static A64OperandDirection Direction(string direction)
-    {
-        return direction switch
-        {
-            "out" => A64OperandDirection.Output,
-            "inout" => A64OperandDirection.InputOutput,
-            _ => A64OperandDirection.Input,
-        };
     }
 
     private static A64OperandKind Kind(A64CompiledOperandKind kind)

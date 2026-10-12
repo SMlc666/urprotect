@@ -28,7 +28,173 @@ def run_checker(root: Path, expect_failure: bool = False) -> subprocess.Complete
     return subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
 
 
+def write_tls_evidence(root: Path, stage: dict, *, result: str = "accepted-and-runs") -> None:
+    source = root / "source-image.bin"
+    source.write_bytes(b"tls source image")
+    template = root / "pt-tls-template.bin"
+    template.write_bytes(b"initialized tls")
+    artifact = root / "protected-image.bin"
+    if not artifact.exists():
+        body = bytearray(b"UPPI" + b"\x01\x00\xB7\x00\x01\x00\x00\x00" + b"\x00" * 8)
+        body[12:16] = (len(body) + 32).to_bytes(4, "little")
+        artifact.write_bytes(bytes(body) + hashlib.sha256(body).digest())
+    source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    artifact_sha = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    stage.update({
+        "sourceSha256": source_sha,
+        "artifactSha256": artifact_sha,
+        "artifactSize": artifact.stat().st_size,
+        "publicationComplete": True,
+    })
+    stage["tlsEvidence"] = {
+        "schemaVersion": 1,
+        "model": "initial-exec",
+        "profile": stage["profile"],
+        "runtime": "glibc",
+        "lifecycle": "current-thread" if result == "accepted-and-runs" else "not-run",
+        "result": result,
+        "sourcePath": "source-image.bin",
+        "sourceSha256": source_sha,
+        "transformedPath": "protected-image.bin",
+        "transformedSha256": artifact_sha,
+        "artifactPath": "protected-image.bin",
+        "artifactSha256": artifact_sha,
+        "toolchainIdentity": "gcc-13.3;ld-2.42",
+        "loaderIdentity": "ld-linux-aarch64.so.1",
+        "ptTls": {
+            "templatePath": "pt-tls-template.bin",
+            "templateSha256": hashlib.sha256(template.read_bytes()).hexdigest(),
+            "fileSize": 15,
+            "memorySize": 32,
+            "zeroFillSize": 17,
+            "alignment": 16,
+            "owningLoad": 1,
+        },
+        "perThread": "observed" if result == "accepted-and-runs" else "not-run",
+        "zeroFill": "observed" if result == "accepted-and-runs" else "not-run",
+        "teardown": "observed" if result == "accepted-and-runs" else "not-run",
+        "firstFailureStage": None if result == "accepted-and-runs" else "environment" if result == "environment-unavailable" else "target-loader",
+        "publicationResult": "published",
+        "rollbackResult": "not-applicable",
+    }
+
+
 class ProtectedImageEvidenceTests(unittest.TestCase):
+    def make_tls_tree(self, root: Path, result: str) -> None:
+        root.mkdir()
+        producer_sha = hashlib.sha256(b"producer").hexdigest()
+        stage = {
+            "schemaVersion": 1,
+            "stage": "protected-image-producer",
+            "status": "passed",
+            "unitId": root.name,
+            "profile": "outer-execveat",
+            "sourceSha256": None,
+            "requestSha256": hashlib.sha256(b"request").hexdigest(),
+            "producerId": "producer.fixture",
+            "producerBuildSha256": producer_sha,
+            "rehydratorConsumerId": "urprotect.rehydrator.v1",
+            "artifactSha256": None,
+            "artifactSize": None,
+            "commandDigest": hashlib.sha256(b"command").hexdigest(),
+            "environmentDigest": hashlib.sha256(b"environment").hexdigest(),
+            "artifactPath": "protected-image.bin",
+            "rolePath": "protected-image.json",
+            "rawEvidenceManifestPath": "SHA256SUMS",
+            "transformationStatus": "passed",
+            "transformedFunctionCount": 1,
+            "selectors": ["name=target"],
+            "passes": ["control-flow-flattening"],
+            "diagnostics": [],
+            "artifactRole": "protected-image",
+            "abiId": "urprotect.protected-image.v1",
+            "abiVersion": 1,
+            "publicationComplete": True,
+        }
+        write_tls_evidence(root, stage, result=result)
+        role = {
+            "schemaVersion": 1,
+            "artifactRole": "protected-image",
+            "abiId": "urprotect.protected-image.v1",
+            "abiVersion": 1,
+            "unitId": root.name,
+            "profile": stage["profile"],
+            "sourceSha256": stage["sourceSha256"],
+            "artifactSha256": stage["artifactSha256"],
+            "artifactSize": stage["artifactSize"],
+            "producerId": stage["producerId"],
+            "producerBuildSha256": producer_sha,
+            "rehydratorConsumerId": stage["rehydratorConsumerId"],
+            "requestSha256": stage["requestSha256"],
+            "rawArtifactPath": "protected-image.bin",
+            "rawArtifactRetained": True,
+        }
+        (root / "protected-image.json").write_text(json.dumps(role, indent=2) + "\n", encoding="utf-8")
+        (root / "stage.json").write_text(json.dumps(stage, indent=2) + "\n", encoding="utf-8")
+        (root / "stdout.txt").write_text("structured output\n", encoding="utf-8")
+        (root / "stderr.txt").write_text("", encoding="utf-8")
+        write_closed_manifest(root)
+
+    def test_tls_accepted_and_runs_projection_is_validated(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-accepted-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "accepted-and-runs")
+            result = run_checker(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tls_environment_unavailable_has_no_lifecycle_claim(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-environment-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "environment-unavailable")
+            result = run_checker(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tls_runtime_failure_retains_published_artifact(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-runtime-failure-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "runtime-failure")
+            result = run_checker(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tls_environment_unavailable_rejects_lifecycle_observation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-environment-negative-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "environment-unavailable")
+            stage_path = root / "stage.json"
+            stage = json.loads(stage_path.read_text(encoding="utf-8"))
+            stage["tlsEvidence"]["perThread"] = "observed"
+            stage_path.write_text(json.dumps(stage, indent=2) + "\n", encoding="utf-8")
+            write_closed_manifest(root)
+            result = run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("lifecycle", result.stderr.lower())
+
+    def test_tls_pt_tls_numeric_bound_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-bounds-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "accepted-and-runs")
+            stage_path = root / "stage.json"
+            stage = json.loads(stage_path.read_text(encoding="utf-8"))
+            stage["tlsEvidence"]["ptTls"]["memorySize"] = 128 * 1024 * 1024 + 1
+            stage_path.write_text(json.dumps(stage, indent=2) + "\n", encoding="utf-8")
+            write_closed_manifest(root)
+            result = run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bounded integer", result.stderr.lower())
+
+    def test_tls_nearest_negative_hash_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-negative-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "accepted-and-runs")
+            stage_path = root / "stage.json"
+            stage = json.loads(stage_path.read_text(encoding="utf-8"))
+            stage["tlsEvidence"]["artifactSha256"] = "0" * 64
+            stage_path.write_text(json.dumps(stage, indent=2) + "\n", encoding="utf-8")
+            write_closed_manifest(root)
+            result = run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("hash", result.stderr.lower())
+
     def test_success_tree_is_closed_and_hash_bound(self) -> None:
         with tempfile.TemporaryDirectory(prefix="urprotect-protected-image-evidence-") as directory:
             root = Path(directory) / "unit"

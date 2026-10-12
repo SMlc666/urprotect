@@ -12,7 +12,7 @@
       "Runtime facts do not imply Android framework or device behavior.",
       "Unknown features never count as a support claim.",
       "Release tier uses selected producer/hardening witnesses, not a blind Cartesian product.",
-      "Legacy Wrapper v1 and Android JNI/native-bridge observations remain baseline evidence, not HostContext compatibility claims."
+      "Android JNI/native-bridge observations remain baseline evidence, not HostContext compatibility claims."
     ]
   },
   "features": [
@@ -20,11 +20,11 @@
       "id": "elf.identity.aarch64-et-dyn",
       "status": "proven",
       "obligation": "ELF64 little-endian AArch64 ET_DYN identity and bounded load map",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfValidator.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfValidator.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/BinaryPropertyTests.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/BinaryPropertyTests.cs"
       ]
     },
     {
@@ -32,15 +32,15 @@
       "status": "proven",
       "obligation": "The ELF parser classifies bounded AArch64 ET_EXEC images as observation data without implying outer launch or HostContext support.",
       "witness": "c-gcc-glibc-et-exec",
-      "oracle": "src/UrProtect.Core/Elf/ElfValidator.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfValidator.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/ElfFixture.cs",
-        "src/UrProtect.Core/Elf/ElfTypes.cs",
-        "src/UrProtect.Core/Elf/ElfValidator.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfFixture.cs",
+        "src/UrProtect.Core/StructuralElf/ElfTypes.cs",
+        "src/UrProtect.Core/StructuralElf/ElfValidator.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs",
+      "negativeOracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "constraints": [
         "This row proves parser/model observation only. Outer acceptance is separately recorded as elf.outer.dynamic-et-exec; static ET_EXEC remains un-packable and HostContext remains ET_DYN-only."
       ]
@@ -49,15 +49,15 @@
       "id": "elf.load-layout.alignment-congruence",
       "status": "proven",
       "obligation": "Each AArch64 ET_DYN PT_LOAD with p_align greater than one uses a power-of-two alignment and congruent p_offset and p_vaddr residues, including non-page-sized alignment",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/ElfFixture.cs",
-        "src/UrProtect.Core/Elf/ElfParser.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfFixture.cs",
+        "src/UrProtect.Core/StructuralElf/ElfParser.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "negativeOracle": "tests/UrProtect.Core.Tests/ElfParserTests.cs"
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs"
     },
     {
       "id": "elf.outer.dynamic-et-exec",
@@ -70,8 +70,8 @@
         "scripts/run-packed-fixture-matrix.sh",
         ".artifacts/packed/pr/c-gcc-glibc-et-exec"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
+      "negativeOracle": "src/UrProtect.Core/Application/Pack/ElfPackService.cs",
       "constraints": [
         "Accepted predicate: AArch64 ELF64 little-endian ET_EXEC, executable entry in PT_LOAD, PT_DYNAMIC, PT_INTERP with an absolute path ending in ld-linux-aarch64.so.1 or ld-musl-aarch64.so.1, and no RPATH/RUNPATH.",
         "Shared objects, static ET_EXEC, missing PT_INTERP, and unrecognized interpreters remain rejected.",
@@ -82,29 +82,29 @@
       "id": "elf.dynamic",
       "status": "proven",
       "obligation": "PT_DYNAMIC and dynamic metadata are mapped and bounded",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs"
       ]
     },
     {
       "id": "elf.symbol-version.definitions",
       "status": "proven",
       "obligation": "The managed ELF parser bounds and models DT_VERDEF/DT_VERDEFNUM records and their dynamic-string-table auxiliaries as parser observation only.",
-      "witness": "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
         "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so",
         "tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/README.md",
-        "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
-        "src/UrProtect.Core/Elf/ElfTypes.cs",
-        "src/UrProtect.Core/Elf/ElfParserUtilities.cs",
-        "src/UrProtect.Cli/ProductReport.cs"
+        "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
+        "src/UrProtect.Core/StructuralElf/ElfTypes.cs",
+        "src/UrProtect.Core/StructuralElf/ElfParserUtilities.cs",
+        "src/UrProtect.Cli/Rendering/ProductReport.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
+      "negativeOracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "constraints": [
         "The registry-baseline declaredFeatureCoverage cue is symbol-versions: 7; it is expected-tag coverage, not confirmed ELF prevalence or product support evidence.",
         "The checked-in positive fixture path is tests/UrProtect.Core.Tests/Fixtures/SymbolVersions/liburp-versioned.so with SHA-256 4fb8ffa362ce8a18590eff735c971aaf217eb4dcd338bf071810fe0b3c971ae8.",
@@ -116,16 +116,16 @@
       "id": "elf.symbol-version.requirements",
       "status": "proven",
       "obligation": "The managed ELF model bounds and records DT_VERNEED/DT_VERNEEDNUM records, their dynamic-string-table filenames, and version auxiliaries without inferring runtime resolution",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
-        "src/UrProtect.Core/Elf/ElfTypes.cs",
-        "src/UrProtect.Core/Elf/ElfParserUtilities.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
+        "src/UrProtect.Core/StructuralElf/ElfTypes.cs",
+        "src/UrProtect.Core/StructuralElf/ElfParserUtilities.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "negativeOracle": "src/UrProtect.Core/Elf/ElfSymbolVersionParser.cs",
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "negativeOracle": "src/UrProtect.Core/StructuralElf/ElfSymbolVersionParser.cs",
       "constraints": [
         "The positive parser oracle asserts the version-need file name and bounded auxiliary name/index; malformed, unmapped, truncated, or inconsistent chains report VersionNeedTableMalformed or SymbolVersionTableMalformed.",
         "This is parser/model evidence only. It does not define loader resolution or HostContext acceptance; runtime acceptance is limited to runtime.host-context.dependency-symbol-version-requirements."
@@ -201,14 +201,14 @@
       "id": "elf.sectionless-program-headers",
       "status": "proven",
       "obligation": "A valid ET_DYN remains parseable when section headers are absent; program headers remain authoritative",
-      "witness": "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-      "oracle": "src/UrProtect.Core/Elf/ElfParser.cs",
+      "witness": "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+      "oracle": "src/UrProtect.Core/StructuralElf/ElfParser.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
-        "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs"
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs"
       ],
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs",
-      "negativeOracle": "tests/UrProtect.Core.Tests/ElfMalformedCorpusTests.cs"
+      "negativeWitness": "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/Structural/ElfMalformedCorpusTests.cs"
     },
     {
       "id": "runtime.host-context.sectionless-image",
@@ -323,54 +323,6 @@
       ]
     },
     {
-      "id": "runtime.host-context-v1",
-      "status": "validated",
-      "obligation": "Versioned HostContext v1 callbacks and the legacy frame provide immutable AArch64 ET_DYN image loading and explicit entry dispatch for the declared adapter slice; the native adapter enforces image-byte immutability with verified memfd seals before loader handoff.",
-      "witness": "native/urprotect-runtime/host_context_entry_fixture.c",
-      "oracle": "native/urprotect-runtime/host_context_self_test.c",
-      "evidence": [
-        "src/UrProtect.Core/Pack/HostContextContract.cs",
-        "native/urprotect-runtime/include/urp/host_context.h",
-        "native/urprotect-runtime/include/urp/host_adapter.h",
-        "native/urprotect-runtime/runtime.c",
-        "native/urprotect-runtime/host_adapter.c",
-        "native/urprotect-runtime/host_context_entry_fixture.c",
-        "native/urprotect-runtime/README.md",
-        ".artifacts/host-context/pr/self-test.log"
-      ],
-      "constraints": [
-        "The native adapter creates the memfd with MFD_ALLOW_SEALING, adds F_SEAL_WRITE/F_SEAL_SHRINK/F_SEAL_GROW/F_SEAL_SEAL after the complete verified write, verifies F_GET_SEALS, and fails closed before dlopen when any seal operation is unavailable or incomplete.",
-        "No PT_INTERP or DT_NEEDED semantics; constructor/destructor tags use the separate runtime.host-context.constructor-destructor rejection boundary",
-        "RPATH/RUNPATH tags use the separate runtime.host-context.path-search rejection boundary",
-        "Dynamic flags are limited to immediate binding flags; runtime.host-context.unsupported-relocation-table is the dedicated rejection boundary for unsupported relocation-table tags",
-        "Only checked AArch64 RELATIVE/RELR relocation targets are accepted; application and memory protection are delegated to the recorded native system loader"
-      ]
-    },
-    {
-      "id": "runtime.host-context-v2",
-      "status": "validated",
-      "obligation": "HostContext frame v2 carries the ABI, required capabilities, and bounded entry symbol through one frame-relative layout and dispatches the declared entry without a temporary executable path",
-      "witness": "tests/UrProtect.Core.Tests/PayloadFrameTests.cs",
-      "oracle": "native/urprotect-runtime/host_context_self_test.c",
-      "evidence": [
-        "src/UrProtect.Core/Pack/HostContextContract.cs",
-        "src/UrProtect.Core/Pack/PayloadFrame.cs",
-        "tests/UrProtect.Core.Tests/HostContextContractTests.cs",
-        "tests/UrProtect.Core.Tests/PayloadFrameTests.cs",
-        "native/urprotect-runtime/include/urp/runtime.h",
-        "native/urprotect-runtime/runtime.c",
-        "native/urprotect-runtime/host_context_self_test.c",
-        "native/urprotect-runtime/README.md",
-        ".artifacts/host-context/pr/self-test.log"
-      ],
-      "constraints": [
-        "The legacy v1 and HostContext v2 layouts remain migration evidence only",
-        "Current v3 reserved fields must be zero and unknown profile, ABI, or capability bits are rejected before image loading",
-        "Entry and source names are bounded strict UTF-8 values without path components; profile selection is explicit",
-        "The current packaging contract uses profile-matched v3 launchers; stale versions and profile/launcher mismatches fail closed."
-      ]
-    },
-    {
       "id": "runtime.host-context.production-pack",
       "status": "validated",
       "obligation": "The production managed pack command selects the current v3 host-context-entry profile and a matching launcher, verifies the sealed in-process handoff, dispatches urp_entry once, releases the image, and preserves its status.",
@@ -378,10 +330,10 @@
       "oracle": "native/urprotect-runtime/test_managed_host_context.sh",
       "evidence": [
         "native/urprotect-runtime/test_managed_host_context.sh",
-        "src/UrProtect.Core/Pack/ElfPackService.cs",
-        "src/UrProtect.Core/Pack/PayloadFrame.cs",
-        "src/UrProtect.Cli/CliApplication.cs",
-        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
+        "src/UrProtect.Core/Application/Pack/ElfPackService.cs",
+        "src/UrProtect.Core/ArtifactProtocol/PayloadFrameCodecContracts.cs",
+        "src/UrProtect.Cli/Commands/CliApplication.cs",
+        "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
         "native/urprotect-runtime/host_context_launcher.c",
         "native/urprotect-runtime/runtime.c",
         ".artifacts/host-context/managed/host-context-packed.json",
@@ -393,6 +345,87 @@
         "The current frame is v3 with an explicit host-context-entry profile and bounded urp_entry metadata.",
         "The launcher uses a sealed memfd adapter and the system loader; the retained oracle verifies status 23, clean streams, and the managed report profile/version.",
         "This row proves the declared glibc/native AArch64 adapter slice; bionic remains separately evidenced by runtime.host-context.bionic-handoff."
+      ]
+    },
+    {
+      "id": "runtime.host-context.protected-image-rehydration",
+      "status": "validated",
+      "obligation": "The shared protection workflow emits and rehydrates a profile-bound Protected Image into a HostContext Native Image, then retains sealed-memfd entry, release-order, hash, and first-failure evidence on the native AArch64 glibc lane.",
+      "witness": "scripts/run-host-context-rehydration-e2e.sh",
+      "oracle": "scripts/check-rehydration-evidence.py",
+      "evidence": [
+        "scripts/run-rehydration-e2e.sh",
+        "scripts/run-host-context-rehydration-e2e.sh",
+        "scripts/check-rehydration-evidence.py",
+        "native/urprotect-runtime/host_context_image_handoff.c",
+        ".artifacts/protected-image/pr/glibc/compat.protection-host-context-fixture.glibc.host-context-entry"
+      ],
+      "constraints": [
+        "The current Protected Image profile is host-context-entry and the rehydrated source is a bounded AArch64 ET_DYN shared-object entry image without PT_INTERP.",
+        "The retained positive handoff is native AArch64 glibc evidence only; musl and bionic remain independent lanes and are not promoted by this row.",
+        "Profile mismatch, malformed operation stream, materialization, native-image, and publication failures remain fail-closed with no successful partial Native Image publication."
+      ]
+    },
+    {
+      "id": "runtime.host-context.protected-image-tls-initial-exec",
+      "status": "validated",
+      "obligation": "The managed protection and rehydration workflow preserves a real GCC initial-exec TLSIE image through HostContext handoff and releases it after the TLS-backed entry returns status 43 on native AArch64 glibc.",
+      "witness": "scripts/run-tls-host-context-rehydration-e2e.sh",
+      "oracle": "scripts/check-protected-image-evidence.py",
+      "evidence": [
+        "scripts/run-tls-host-context-rehydration-e2e.sh",
+        "scripts/run-host-context-rehydration-e2e.sh",
+        "scripts/check-protected-image-evidence.py",
+        "scripts/check-rehydration-evidence.py",
+        "native/urprotect-runtime/host_context_tls_fixture.c",
+        "native/urprotect-runtime/host_context_image_handoff.c",
+        ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry",
+        "COMPATIBILITY.md",
+        ".trellis/spec/backend/runtime-compatibility.md"
+      ]
+    },
+    {
+      "id": "runtime.host-context.tls-prerequisite-probes",
+      "status": "validated",
+      "obligation": "Managed and native HostContext PT_TLS and Android packed-relocation predicates remain aligned through bounded one-tag and malformed-PT_TLS probes.",
+      "witness": "scripts/run-tls-prerequisite-probes.py",
+      "oracle": "scripts/check-tls-prerequisite-evidence.py",
+      "evidence": [
+        "scripts/run-tls-prerequisite-probes.py",
+        "scripts/check-tls-prerequisite-evidence.py",
+        "native/urprotect-runtime/host_image_validation_probe.c",
+        "native/urprotect-runtime/host_image_validation.c",
+        "src/UrProtect.Core/Application/Rehydration/ProfileMaterializationPolicies.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
+        ".artifacts/tls-prerequisites/pr/android-packed-tags.json",
+        ".artifacts/tls-prerequisites/pr/pt-tls-predicate-parity.json",
+        ".artifacts/tls-prerequisites/pr/SHA256SUMS"
+      ],
+      "constraints": [
+        "All eight canonical Android packed-relocation tags are independently rejected by managed HostContext policy and native preflight with no handle or publication.",
+        "PT_TLS parity retains baseline, executable, owner-permission, empty-memory, file-size, and alignment mutations; StructuralElf observation remains distinct from HostContext handoff acceptance."
+      ]
+    },
+    {
+      "id": "runtime.host-context.tls-transformed-runtime-matrix",
+      "status": "validated",
+      "obligation": "The transformed TLS evidence contract retains an independent result for every model, profile, runtime, and lifecycle tuple without cross-runtime promotion.",
+      "witness": "scripts/run-tls-runtime-matrix.py",
+      "oracle": "scripts/check-tls-runtime-matrix-evidence.py",
+      "evidence": [
+        "fixtures/tls-runtime-matrix.json",
+        "scripts/run-tls-runtime-matrix.py",
+        "scripts/check-tls-runtime-matrix-evidence.py",
+        ".artifacts/tls-runtime/pr/matrix.json",
+        ".artifacts/tls-runtime/pr/environment.json",
+        ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/pr/SHA256SUMS"
+      ],
+      "constraints": [
+        "The matrix contains exactly 60 rows across five models, two profiles, three runtimes, and two lifecycle boundaries.",
+        "Only initial-exec x host-context-entry x glibc x current-thread is promoted from the retained transformed control row; all other rows remain independently not-applicable or environment-unavailable until their own oracle passes.",
+        "The existing six-cell fixtures/runtime-matrix.json covering set remains environment evidence and is not this TLS promotion matrix."
       ]
     },
     {
@@ -423,7 +456,7 @@
       "witness": "native/urprotect-launcher/test_launcher.sh",
       "oracle": "native/urprotect-launcher/launcher_main.c",
       "evidence": [
-        "src/UrProtect.Cli/CliApplication.cs",
+        "src/UrProtect.Cli/Commands/CliApplication.cs",
         "native/urprotect-launcher/launcher_main.c",
         "native/urprotect-launcher/test_launcher.sh",
         "native/urprotect-launcher/test_managed_handoff.sh",
@@ -434,14 +467,14 @@
       "id": "elf.interpreter.unsupported",
       "status": "rejected",
       "obligation": "An interpreter outside the declared AArch64 host runtimes is refused",
-      "witness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-      "oracle": "src/UrProtect.Core/Pack/ElfPackService.cs",
+      "witness": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
+      "oracle": "src/UrProtect.Core/Application/Pack/ElfPackService.cs",
       "evidence": [
-        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs"
+        "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs"
       ],
       "reason": "The current no-path contract does not define dependency resolution for arbitrary interpreters.",
-      "negativeWitness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-      "negativeOracle": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs"
+      "negativeWitness": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs",
+      "negativeOracle": "tests/UrProtect.Core.Tests/Application/ElfPackServiceTests.cs"
     },
     {
       "id": "runtime.host-context.pt-tls",
@@ -555,7 +588,7 @@
         "native/urprotect-runtime/host_image_validation.c",
         "native/urprotect-runtime/host_adapter.c",
         "native/urprotect-runtime/test_managed_host_context.sh",
-        "tests/UrProtect.Core.Tests/ElfParserTests.cs",
+        "tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs",
         ".artifacts/host-context/managed/dependency-version-metadata.txt",
         ".artifacts/host-context/managed/version-self-test.log",
         ".artifacts/host-context/managed/dependency-result.txt"
@@ -786,25 +819,6 @@
       ],
       "constraints": [
         "This is the existing JNI/native-bridge baseline; it does not execute packed output or prove a native ARM64 Android device/runtime."
-      ]
-    },
-    {
-      "id": "runtime.wrapper-v1-baseline",
-      "status": "validated",
-      "obligation": "The existing Wrapper 0.2 managed v1 frame and launcher behavior remain a regression baseline separate from the in-process HostContext v2 contract.",
-      "witness": "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-      "oracle": "native/urprotect-launcher/test_launcher.sh",
-      "evidence": [
-        "src/UrProtect.Core/Pack/PayloadFrame.cs",
-        "tests/UrProtect.Core.Tests/ElfPackServiceTests.cs",
-        "tests/UrProtect.Core.Tests/PayloadFrameTests.cs",
-        "native/urprotect-launcher/test_launcher.sh",
-        "native/urprotect-launcher/test_managed_handoff.sh",
-        ".artifacts/packed/pr/handoff.log"
-      ],
-      "constraints": [
-        "Legacy v1 retains its wrapper-absolute offset and the managed pack path leaves HostContext metadata null.",
-        "This baseline is not an in-process HostContext support claim and does not add a platform compatibility profile."
       ]
     }
   ],

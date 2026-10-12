@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Current API, bounded binary, current-only contract, and test requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed current frame/profile behavior and deterministic diagnostics."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Current v3 profiles and native evidence ownership."}
+{"file":".trellis/tasks/10-06-architecture-boundary-refactor/prd.md","reason":"G0 scope, hard no-history decisions, and downstream gate."}
+{"file":".trellis/tasks/10-06-architecture-boundary-refactor/research/architecture-audit.md","reason":"Evidence inventory of all aliases, retired frame paths, and current manifest rows."}

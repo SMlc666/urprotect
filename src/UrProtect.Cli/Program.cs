@@ -1,4 +1,4 @@
-using UrProtect.Cli;
+using UrProtect.Cli.Commands;
 
 var embeddedExitCode = CliApplication.TryRunEmbeddedPayload();
 if (embeddedExitCode is int exitCode)

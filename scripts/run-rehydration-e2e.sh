@@ -2,12 +2,14 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--unit UNIT] [--source C_SOURCE]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--profile outer-execveat|host-context-entry] [--unit UNIT] [--source C_SOURCE]\n' "$0" >&2
 }
 
 tier=''
 runtime=''
-unit='compat.protection-symbolized-fixture.glibc.outer-execveat'
+profile='outer-execveat'
+unit=''
+unit_set=0
 source_file=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -17,9 +19,12 @@ while [[ $# -gt 0 ]]; do
     --runtime)
       [[ $# -ge 2 ]] || { usage; exit 2; }
       runtime="$2"; shift 2 ;;
+    --profile)
+      [[ $# -ge 2 ]] || { usage; exit 2; }
+      profile="$2"; shift 2 ;;
     --unit)
       [[ $# -ge 2 ]] || { usage; exit 2; }
-      unit="$2"; shift 2 ;;
+      unit="$2"; unit_set=1; shift 2 ;;
     --source)
       [[ $# -ge 2 ]] || { usage; exit 2; }
       source_file="$2"; shift 2 ;;
@@ -29,6 +34,19 @@ while [[ $# -gt 0 ]]; do
 done
 case "$tier" in pr|nightly|release) ;; *) echo "invalid rehydration tier: $tier" >&2; exit 2 ;; esac
 case "$runtime" in glibc) ;; *) echo "the frozen rehydration vertical slice requires glibc" >&2; exit 2 ;; esac
+case "$profile" in outer-execveat|host-context-entry) ;; *) echo "invalid rehydration profile: $profile" >&2; exit 2 ;; esac
+if [[ "$unit_set" -eq 0 ]]; then
+  if [[ "$profile" == 'host-context-entry' ]]; then
+    unit='compat.protection-host-context-fixture.glibc.host-context-entry'
+  else
+    unit='compat.protection-symbolized-fixture.glibc.outer-execveat'
+  fi
+fi
+if [[ "$profile" == 'host-context-entry' ]]; then
+  host_args=(--tier "$tier" --runtime "$runtime" --unit "$unit")
+  if [[ -n "$source_file" ]]; then host_args+=(--source "$source_file"); fi
+  exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-host-context-rehydration-e2e.sh" "${host_args[@]}"
+fi
 if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
   echo "invalid rehydration unit: $unit" >&2
   exit 2

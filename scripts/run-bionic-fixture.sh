@@ -11,6 +11,11 @@ container_runtime="${BIONIC_CONTAINER_RUNTIME:-docker}"
 mkdir -p "${case_root}"
 chmod a+rwx "${case_root}"
 
+cleanup_incomplete_apt_download() {
+  sudo rm -rf -- "${case_root}/apt-archives/partial" 2>/dev/null || true
+}
+trap cleanup_incomplete_apt_download EXIT
+
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "bionic fixture requires a native aarch64 host; got $(uname -m)" >&2
   exit 2
@@ -254,14 +259,18 @@ run_shell -c '
   make -C /workspace/native/urprotect-runtime \
     SHELL="${PREFIX}/bin/sh" \
     BUILD_DIR=/artifacts/host-context/build \
-    CC=clang test-adapter > /artifacts/host-context/build-and-test.log 2>&1
+    ENTRY_FIXTURE_LDFLAGS=--pack-dyn-relocs=none \
+    HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ \
+    LD=ld.lld \
+    CC=clang self-test > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
 ' -- "${compiler_package_specs[@]}"
 
-# The container's apt sandbox may leave its partial-download directory with
-# restrictive ownership; make the retained hash-locked archives readable by
-# the host evidence scanner/upload action.
+# The container's apt sandbox may leave its incomplete partial-download
+# directory root-owned and unreadable. It is not part of the locked package
+# evidence, so remove it before making retained archives readable.
+sudo rm -rf -- "${case_root}/apt-archives/partial"
 sudo chmod -R a+rX "${case_root}/apt-archives"
 
 python3 - "${case_root}/packages-before.txt" "${case_root}/packages.txt" \
@@ -477,14 +486,14 @@ sha256sum "${host_context_fixture}" > "${case_root}/host-context/entry-fixture.s
 printf '%s\n' \
   "status=validated" \
   "abi=HostContext-v1" \
-  "frame=HostContext-v2" \
+  "frame=HostContext-v3" \
   "handoff=sealed-memfd-with-verified-required-seals" \
   "loader=Termux-bionic-dlopen-through-proc-self-fd" \
   "entry=urp_entry" \
   "executable_temporary_path=false" \
   "oracle=host-context/build-and-test.log" \
   > "${case_root}/host-context/result.txt"
-sed -i 's/^handoff_status=.*/handoff_status=validated-host-context-v2-adapter-self-test/' \
+sed -i 's/^handoff_status=.*/handoff_status=validated-host-context-v3-adapter-self-test/' \
   "${case_root}/provenance.txt"
 
 python3 - "${case_root}/result.json" "${image}" "${termux_source_commit}" \
@@ -539,11 +548,11 @@ document = {
     "baselineStatus": int(baseline),
     "directLinkerStatus": int(linker),
     "directLinkerMode": "identity",
-    "handoffStatus": "validated-host-context-v2-adapter-self-test",
+    "handoffStatus": "validated-host-context-v3-adapter-self-test",
     "hostContextAdapterOracle": {
         "status": "validated",
         "abi": "HostContext-v1",
-        "frame": "HostContext-v2",
+        "frame": "HostContext-v3",
         "fixture": "host-context/build/host-context-entry-fixture.so",
         "fixtureSha256": hashlib.sha256(
             pathlib.Path(host_context_fixture).read_bytes()
@@ -553,6 +562,27 @@ document = {
         "entryDispatch": "urp_entry",
         "executableTemporaryPath": False,
         "loader": "Termux-bionic-dlopen-through-proc-self-fd",
+        "sectionlessImageBoundary": {
+            "status": "loader-unsupported",
+            "loader": "bionic",
+            "reason": "API 26+ bionic requires ELF section headers for the sectionless mutation",
+            "log": "host-context/build-and-test.log",
+            "marker": "HostContext self-test: sectionless image skipped on bionic; loader requires section headers",
+        },
+        "relrImageBoundary": {
+            "status": "loader-unsupported",
+            "loader": "bionic",
+            "reason": "Bionic ignores DT_RELR metadata; HostContext rejects it before loader handoff",
+            "log": "host-context/build-and-test.log",
+            "marker": "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR",
+        },
+        "dynamicMetadataBoundary": {
+            "status": "loader-unsupported",
+            "loader": "bionic",
+            "reason": "Bionic dynamic metadata negatives may return loader-specific failure statuses before handoff",
+            "log": "host-context/build-and-test.log",
+            "marker": "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff",
+        },
     },
 }
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")

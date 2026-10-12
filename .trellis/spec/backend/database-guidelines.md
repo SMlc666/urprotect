@@ -14,11 +14,11 @@ records, JSON reports, plain-text provenance files, and retained CI artifacts.
 
 ## Persistence Boundary
 
-- `src/UrProtect.Core/Pipeline/NoOpPipeline.cs` reads a source snapshot and
+- `src/UrProtect.Core/Application/Validation/ValidationWorkflow.cs` reads a source snapshot and
   publishes a byte-identical output through a destination-local temporary file.
-- `src/UrProtect.Core/Pack/ElfPackService.cs` reads source and launcher bytes,
+- `src/UrProtect.Core/Application/Pack/ElfPackService.cs` reads source and launcher bytes,
   verifies the generated wrapper, then atomically moves the temporary output.
-- `src/UrProtect.Cli/ProductReport.cs` serializes report records as JSON; it does
+- `src/UrProtect.Cli/Rendering/ProductReport.cs` serializes report records as JSON; it does
   not persist them through a data-access abstraction.
 - `scripts/package-release.sh` and CI upload release/provenance files as build
   artifacts rather than inserting them into a store.

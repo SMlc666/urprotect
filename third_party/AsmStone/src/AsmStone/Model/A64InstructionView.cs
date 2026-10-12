@@ -670,6 +670,10 @@ public readonly ref struct A64InstructionView
 
     public string SourceName => plan?.Info.Name ?? string.Empty;
 
+    public A64InstructionCode Code => plan?.Code ?? A64InstructionCode.Invalid;
+
+    public A64InstructionDescriptor? Descriptor => plan?.Descriptor;
+
     public string Mnemonic => plan?.Info.Mnemonic ?? string.Empty;
 
     public A64InstructionFlags Flags

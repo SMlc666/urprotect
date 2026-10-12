@@ -336,7 +336,7 @@ Dynamic section at offset 0xf00 contains 1 entry:
                         "validatorStatus": 0,
                         "copyStatus": 0,
                         "streamsMatch": True,
-                        "application": "UrProtect CLI validate --no-analysis --copy",
+                        "application": "UrProtect CLI validate --copy",
                         "applicationBuildSha256": "sha256:" + hashlib.sha256(
                             (ROOT / "src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll").read_bytes()
                         ).hexdigest(),
@@ -378,7 +378,12 @@ Dynamic section at offset 0xf00 contains 1 entry:
             f"{fixture_digest}  fixture.so\n", encoding="utf-8"
         )
         (root / "host-context/build-and-test.log").write_text(
-            "HostContext runtime self-test: PASS\n", encoding="utf-8"
+            "HostContext self-test: sectionless image skipped on bionic; "
+            "loader requires section headers\n"
+            "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR\n"
+            "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff\n"
+            "HostContext runtime self-test: PASS\n",
+            encoding="utf-8",
         )
         (root / "host-context/result.txt").write_text(
             "status=validated\nentry=urp_entry\n", encoding="utf-8"
@@ -455,15 +460,36 @@ Dynamic section at offset 0xf00 contains 1 entry:
             "baselineStatus": 0,
             "directLinkerStatus": 0,
             "directLinkerMode": "identity",
-            "handoffStatus": "validated-host-context-v2-adapter-self-test",
+            "handoffStatus": "validated-host-context-v3-adapter-self-test",
             "hostContextAdapterOracle": {
                 "status": "validated",
                 "abi": "HostContext-v1",
-                "frame": "HostContext-v2",
+                "frame": "HostContext-v3",
                 "sealedImage": True,
                 "entryDispatch": "urp_entry",
                 "executableTemporaryPath": False,
                 "fixtureSha256": fixture_digest,
+                "sectionlessImageBoundary": {
+                    "status": "loader-unsupported",
+                    "loader": "bionic",
+                    "reason": "API 26+ bionic requires ELF section headers for the sectionless mutation",
+                    "log": "host-context/build-and-test.log",
+                    "marker": "HostContext self-test: sectionless image skipped on bionic; loader requires section headers",
+                },
+                "relrImageBoundary": {
+                    "status": "loader-unsupported",
+                    "loader": "bionic",
+                    "reason": "Bionic ignores DT_RELR metadata; HostContext rejects it before loader handoff",
+                    "log": "host-context/build-and-test.log",
+                    "marker": "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR",
+                },
+                "dynamicMetadataBoundary": {
+                    "status": "loader-unsupported",
+                    "loader": "bionic",
+                    "reason": "Bionic dynamic metadata negatives may return loader-specific failure statuses before handoff",
+                    "log": "host-context/build-and-test.log",
+                    "marker": "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff",
+                },
             },
         }
         (root / "result.json").write_text(json.dumps(document), encoding="utf-8")
@@ -477,6 +503,22 @@ Dynamic section at offset 0xf00 contains 1 entry:
             self.make_bionic_evidence(bionic)
             result = self.gate(root, bionic, self._fixture_manifest_path)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_bionic_sectionless_boundary_marker_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_core_evidence(root)
+            bionic = root / "bionic"
+            self.make_bionic_evidence(bionic)
+            (bionic / "host-context/build-and-test.log").write_text(
+                "HostContext runtime self-test: PASS\n",
+                encoding="utf-8",
+            )
+
+            result = self.gate(root, bionic, self._fixture_manifest_path)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sectionless image boundary marker", result.stderr)
 
     def test_unavailable_page_probe_cannot_claim_16k_support(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

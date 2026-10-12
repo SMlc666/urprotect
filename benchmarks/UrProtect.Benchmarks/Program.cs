@@ -1,10 +1,10 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using UrProtect.Core.Elf;
-using UrProtect.Core.Pipeline;
+using UrProtect.Core.StructuralElf;
+using UrProtect.Core.Application.Validation;
 
 var input = CreateFixture();
-var pipeline = new NoOpPipeline();
+var pipeline = new ValidationWorkflow();
 var iterations = ReadIterations(args);
 var parsed = ElfParser.Parse(input);
 if (!parsed.IsSuccess || parsed.File is null)
@@ -25,13 +25,13 @@ Measure("load-map", iterations, () =>
         throw new InvalidOperationException("LoadMap round trip failed.");
     }
 });
-Measure("validate-no-analysis", iterations, () => EnsureSuccess(
-    pipeline.Validate(input, emitOutput: false, analyzeInstructions: false)));
-Measure("validate-with-analysis", Math.Max(1, iterations / 10), () => EnsureSuccess(
-    pipeline.Validate(input, emitOutput: false, analyzeInstructions: true)));
+Measure("validate-structural", iterations, () => EnsureSuccess(
+    pipeline.ValidateStructurally(input)));
+Measure("validate-observation", Math.Max(1, iterations / 10), () => EnsureSuccess(
+    pipeline.ValidateObservationOnly(input)));
 Measure("no-op-memory-copy", iterations, () =>
 {
-    var result = pipeline.Validate(input, emitOutput: true, analyzeInstructions: false);
+    var result = pipeline.ValidateStructurally(input, emitOutput: true);
     EnsureSuccess(result);
     if (result.OutputBytes is null || !input.AsSpan().SequenceEqual(result.OutputBytes))
     {
@@ -47,7 +47,7 @@ try
     File.WriteAllBytes(inputPath, input);
     Measure("no-op-disk-copy", Math.Max(1, Math.Min(iterations, 100)), () =>
     {
-        var result = pipeline.ValidateAndCopy(inputPath, outputPath, analyzeInstructions: false);
+        var result = pipeline.ValidateAndCopyStructurally(inputPath, outputPath);
         EnsureSuccess(result);
         if (!input.AsSpan().SequenceEqual(File.ReadAllBytes(outputPath)))
         {
@@ -76,7 +76,7 @@ static int ReadIterations(string[] args)
     throw new ArgumentException("Usage: --iterations <positive number <= 1000000>");
 }
 
-static void EnsureSuccess(NoOpValidationResult result)
+static void EnsureSuccess(ValidationResult result)
 {
     if (!result.IsSuccess)
     {

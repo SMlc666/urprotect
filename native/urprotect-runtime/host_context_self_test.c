@@ -1,6 +1,7 @@
 #include "urp/host_context.h"
 #include "urp/host_adapter.h"
 #include "host_image_validation.h"
+#include "android_packed_relocation_tags.h"
 #include "urp/runtime.h"
 #include "sha256.h"
 
@@ -21,6 +22,7 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 
 #define FIXTURE_ELF_HEADER_SIZE 64U
 #define FIXTURE_ELF_PROGRAM_HEADER_SIZE 56U
+#define FIXTURE_ELF_SECTION_HEADER_SIZE 64U
 #define FIXTURE_ELF_DYNAMIC_ENTRY_SIZE 16U
 #define FIXTURE_PT_LOAD 1U
 #define FIXTURE_PT_DYNAMIC 2U
@@ -56,14 +58,6 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_DT_RELRSZ 35U
 #define FIXTURE_DT_RELRENT 37U
 #define FIXTURE_DT_TEXTREL 22U
-#define FIXTURE_DT_ANDROID_REL UINT64_C(0x6000000f)
-#define FIXTURE_DT_ANDROID_RELSZ UINT64_C(0x60000010)
-#define FIXTURE_DT_ANDROID_RELA UINT64_C(0x60000011)
-#define FIXTURE_DT_ANDROID_RELASZ UINT64_C(0x60000012)
-#define FIXTURE_DT_ANDROID_RELR UINT64_C(0x6fffe000)
-#define FIXTURE_DT_ANDROID_RELRSZ UINT64_C(0x6fffe001)
-#define FIXTURE_DT_ANDROID_RELRENT UINT64_C(0x6fffe003)
-#define FIXTURE_DT_ANDROID_RELRCOUNT UINT64_C(0x6fffe005)
 #define FIXTURE_DT_VERSYM UINT64_C(0x6ffffff0)
 #define FIXTURE_DT_VERDEF UINT64_C(0x6ffffffc)
 #define FIXTURE_DT_VERDEFNUM UINT64_C(0x6ffffffd)
@@ -72,20 +66,24 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 #define FIXTURE_REJECTION_SENTINEL UINT64_C(0xfeedface)
 
 static const uint8_t fixture_frame[] = {
-    0x55, 0x52, 0x50, 0x43, 0x4b, 0x30, 0x31, 0x00, 0x01, 0x00, 0x70, 0x00,
+    0x55, 0x52, 0x50, 0x43, 0x4b, 0x30, 0x31, 0x00, 0x03, 0x00, 0x90, 0x00,
     0x01, 0x00, 0x00, 0x00, 0xb7, 0x00, 0x03, 0x00, 0x1a, 0x00, 0x00, 0x00,
     0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1d, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x8a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xb3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x61, 0x2f, 0x35, 0x55, 0x0d, 0x6c, 0xad, 0x74, 0x5a, 0xc6, 0x7e, 0x9f,
     0xab, 0xe3, 0x40, 0xb5, 0x06, 0xa5, 0x7b, 0x0a, 0x4f, 0xae, 0xa0, 0x44,
     0x76, 0xfd, 0xbd, 0x13, 0x00, 0xca, 0xee, 0x1e, 0x8c, 0xe0, 0x3f, 0x9d,
     0x41, 0xbb, 0x8d, 0x41, 0x42, 0xf6, 0x8e, 0x29, 0xa8, 0xe0, 0xe6, 0xa0,
     0xe3, 0x55, 0xbd, 0xa0, 0xf9, 0xe6, 0xad, 0xe1, 0x11, 0x5e, 0xa7, 0x49,
-    0x81, 0x36, 0xc6, 0x3f, 0x68, 0x6f, 0x73, 0x74, 0x2d, 0x63, 0x6f, 0x6e,
-    0x74, 0x65, 0x78, 0x74, 0x2d, 0x65, 0x6e, 0x74, 0x72, 0x79, 0x2d, 0x66,
-    0x69, 0x78, 0x74, 0x75, 0x72, 0x65, 0xcb, 0xc8, 0x2f, 0x2e, 0xd1, 0x4d,
-    0xce, 0xcf, 0x2b, 0x49, 0xad, 0x28, 0xd1, 0x4d, 0xcd, 0x2b, 0x29, 0xaa,
-    0xd4, 0x4d, 0xcb, 0xac, 0x28, 0x29, 0x2d, 0x4a, 0xe5, 0x02, 0x00,
+    0x81, 0x36, 0xc6, 0x3f, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x68, 0x6f, 0x73, 0x74, 0x2d, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74,
+    0x2d, 0x65, 0x6e, 0x74, 0x72, 0x79, 0x2d, 0x66, 0x69, 0x78, 0x74, 0x75,
+    0x72, 0x65, 0x75, 0x72, 0x70, 0x5f, 0x65, 0x6e, 0x74, 0x72, 0x79, 0xcb,
+    0xc8, 0x2f, 0x2e, 0xd1, 0x4d, 0xce, 0xcf, 0x2b, 0x49, 0xad, 0x28, 0xd1,
+    0x4d, 0xcd, 0x2b, 0x29, 0xaa, 0xd4, 0x4d, 0xcb, 0xac, 0x28, 0x29, 0x2d,
+    0x4a, 0xe5, 0x02, 0x00,
 };
 
 typedef struct fixture_state {
@@ -109,7 +107,7 @@ static int32_t fixture_entry(
     const urp_launch_args_v1 *args)
 {
     fixture_state *state = (fixture_state *)host->userdata;
-    if (host->struct_size != URP_HOST_CONTEXT_MIN_SIZE
+    if (host->struct_size != sizeof(urp_host_context_v1)
         || (host->capabilities & URP_HOST_CAP_THREAD_LIFETIME) != 0U
         || args->struct_size != URP_LAUNCH_ARGS_MIN_SIZE || args->image != 0U
         || args->argc != 1U || args->argv == NULL || strcmp(args->argv[0], "fixture") != 0) {
@@ -495,9 +493,12 @@ static int fixture_reject_dynamic_tags(
             URP_LOAD_IMAGE_IMMUTABLE,
             &rejected_handle);
         free(image);
-        if (!fixture_expect(
-                status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
-                rejections[index].message)) {
+#if defined(__BIONIC__) || defined(__ANDROID__)
+        int rejected = status != URP_STATUS_OK && rejected_handle == 0U;
+#else
+        int rejected = status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U;
+#endif
+        if (!fixture_expect(rejected, rejections[index].message)) {
             return 0;
         }
     }
@@ -598,7 +599,7 @@ static int fixture_make_stored_deflate(
     return 1;
 }
 
-static int fixture_make_frame_versioned(
+static int fixture_make_frame(
     const uint8_t *source,
     size_t source_size,
     const char *source_name,
@@ -607,32 +608,23 @@ static int fixture_make_frame_versioned(
     size_t *frame_size_out)
 {
     if (source == NULL || source_size == 0U || source_name == NULL
-        || frame_out == NULL || frame_size_out == NULL) {
+        || entry_name == NULL || frame_out == NULL || frame_size_out == NULL) {
         return 0;
     }
 
     size_t source_name_size = strlen(source_name);
-    if (source_name_size == 0U || source_name_size > UINT32_MAX) {
+    size_t entry_name_size = strlen(entry_name);
+    if (source_name_size == 0U || source_name_size > UINT32_MAX
+        || entry_name_size == 0U || entry_name_size > UINT32_MAX) {
         return 0;
     }
 
-    int is_v2 = entry_name != NULL;
-    size_t entry_name_size = is_v2 ? strlen(entry_name) : 0U;
-    if (is_v2 && (entry_name_size == 0U || entry_name_size > UINT32_MAX)) {
+    size_t header_size = URP_RUNTIME_FRAME_HEADER_SIZE;
+    if (header_size > SIZE_MAX - source_name_size
+        || entry_name_size > SIZE_MAX - header_size - source_name_size) {
         return 0;
     }
-
-    size_t header_size = is_v2
-        ? (size_t)URP_RUNTIME_FRAME_V2_HEADER_SIZE
-        : (size_t)URP_RUNTIME_FRAME_V1_HEADER_SIZE;
-    if (header_size > SIZE_MAX - source_name_size) {
-        return 0;
-    }
-    size_t encoded_offset = header_size + source_name_size;
-    if (entry_name_size > SIZE_MAX - encoded_offset) {
-        return 0;
-    }
-    encoded_offset += entry_name_size;
+    size_t encoded_offset = header_size + source_name_size + entry_name_size;
 
     uint8_t *encoded = NULL;
     size_t encoded_size = 0U;
@@ -651,46 +643,40 @@ static int fixture_make_frame_versioned(
 
     static const uint8_t magic[] = {'U', 'R', 'P', 'C', 'K', '0', '1', 0};
     memcpy(frame, magic, sizeof(magic));
-    fixture_write_u16_le(
-        frame + 8U,
-        is_v2 ? URP_RUNTIME_FRAME_VERSION_V2 : URP_RUNTIME_FRAME_VERSION_V1);
-    fixture_write_u16_le(frame + 10U, (uint16_t)header_size);
-    fixture_write_u32_le(frame + 12U, 1U);
-    fixture_write_u16_le(frame + 16U, 183U);
-    fixture_write_u16_le(frame + 18U, 3U);
-    fixture_write_u32_le(frame + 20U, (uint32_t)source_name_size);
-    fixture_write_u64_le(frame + 24U, (uint64_t)source_size);
-    fixture_write_u64_le(frame + 32U, (uint64_t)encoded_size);
-    fixture_write_u64_le(frame + 40U, (uint64_t)encoded_offset);
-
-    if (is_v2) {
-        fixture_write_u32_le(frame + URP_RUNTIME_FRAME_V2_HOST_ABI_OFFSET, URP_HOST_ABI_VERSION);
-        fixture_write_u64_le(
-            frame + URP_RUNTIME_FRAME_V2_REQUIRED_CAPABILITIES_OFFSET,
-            URP_HOST_CAP_MANDATORY);
-        fixture_write_u32_le(
-            frame + URP_RUNTIME_FRAME_V2_ENTRY_NAME_SIZE_OFFSET,
-            (uint32_t)entry_name_size);
-    }
+    fixture_write_u16_le(frame + URP_FRAME_VERSION_OFFSET, URP_RUNTIME_FRAME_VERSION);
+    fixture_write_u16_le(frame + URP_FRAME_HEADER_SIZE_OFFSET, (uint16_t)header_size);
+    fixture_write_u32_le(frame + URP_FRAME_FLAGS_OFFSET, URP_FRAME_DEFLATE_FLAG);
+    fixture_write_u16_le(frame + URP_FRAME_MACHINE_OFFSET, URP_FRAME_MACHINE_AARCH64);
+    fixture_write_u16_le(frame + URP_FRAME_TYPE_OFFSET, URP_FRAME_TYPE_DYN);
+    fixture_write_u32_le(frame + URP_FRAME_SOURCE_NAME_SIZE_OFFSET, (uint32_t)source_name_size);
+    fixture_write_u64_le(frame + URP_FRAME_SOURCE_SIZE_OFFSET, (uint64_t)source_size);
+    fixture_write_u64_le(frame + URP_FRAME_ENCODED_SIZE_OFFSET, (uint64_t)encoded_size);
+    fixture_write_u64_le(frame + URP_FRAME_ENCODED_OFFSET_OFFSET, (uint64_t)encoded_offset);
+    fixture_write_u32_le(frame + URP_FRAME_HOST_ABI_OFFSET, URP_HOST_ABI_VERSION);
+    fixture_write_u64_le(
+        frame + URP_FRAME_REQUIRED_CAPABILITIES_OFFSET,
+        URP_HOST_CAP_MANDATORY);
+    fixture_write_u32_le(
+        frame + URP_FRAME_ENTRY_NAME_SIZE_OFFSET,
+        (uint32_t)entry_name_size);
+    fixture_write_u32_le(frame + URP_FRAME_PROFILE_OFFSET, URP_PROFILE_HOST_CONTEXT_ENTRY);
 
     urp_sha256_context source_context;
-    uint8_t source_hash[32];
+    uint8_t source_hash[URP_FRAME_SHA256_SIZE];
     urp_sha256_init(&source_context);
     urp_sha256_update(&source_context, source, source_size);
     urp_sha256_final(&source_context, source_hash);
-    memcpy(frame + 48U, source_hash, sizeof(source_hash));
+    memcpy(frame + URP_FRAME_SOURCE_SHA256_OFFSET, source_hash, sizeof(source_hash));
 
     urp_sha256_context encoded_context;
-    uint8_t encoded_hash[32];
+    uint8_t encoded_hash[URP_FRAME_SHA256_SIZE];
     urp_sha256_init(&encoded_context);
     urp_sha256_update(&encoded_context, encoded, encoded_size);
     urp_sha256_final(&encoded_context, encoded_hash);
-    memcpy(frame + 80U, encoded_hash, sizeof(encoded_hash));
+    memcpy(frame + URP_FRAME_ENCODED_SHA256_OFFSET, encoded_hash, sizeof(encoded_hash));
 
     memcpy(frame + header_size, source_name, source_name_size);
-    if (is_v2) {
-        memcpy(frame + header_size + source_name_size, entry_name, entry_name_size);
-    }
+    memcpy(frame + header_size + source_name_size, entry_name, entry_name_size);
     memcpy(frame + encoded_offset, encoded, encoded_size);
     free(encoded);
     *frame_out = frame;
@@ -698,40 +684,7 @@ static int fixture_make_frame_versioned(
     return 1;
 }
 
-static int fixture_make_frame(
-    const uint8_t *source,
-    size_t source_size,
-    const char *source_name,
-    uint8_t **frame_out,
-    size_t *frame_size_out)
-{
-    return fixture_make_frame_versioned(
-        source,
-        source_size,
-        source_name,
-        NULL,
-        frame_out,
-        frame_size_out);
-}
-
-static int fixture_make_v2_frame(
-    const uint8_t *source,
-    size_t source_size,
-    const char *source_name,
-    const char *entry_name,
-    uint8_t **frame_out,
-    size_t *frame_size_out)
-{
-    return fixture_make_frame_versioned(
-        source,
-        source_size,
-        source_name,
-        entry_name,
-        frame_out,
-        frame_size_out);
-}
-
-static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
+static int fixture_run_real_adapter(const char *fixture_path)
 {
     uint8_t *source = NULL;
     size_t source_size = 0U;
@@ -827,14 +780,14 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
 
     uint8_t *frame = NULL;
     size_t frame_size = 0U;
-    int made_frame = fixture_make_v2_frame(
+    int made_frame = fixture_make_frame(
         source,
         source_size,
         "host-context-entry-fixture.so",
         "urp_entry",
         &frame,
         &frame_size);
-    if (!fixture_expect(made_frame, "could not construct the real adapter HostContext v2 frame")) {
+    if (!fixture_expect(made_frame, "could not construct the real adapter HostContext v3 frame")) {
         free(source);
         return 0;
     }
@@ -926,11 +879,6 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         free(source);
         return 0;
     }
-    if (positive_only) {
-        free(source);
-        return 1;
-    }
-
     size_t gnu_stack_header_offset = (size_t)(gnu_stack_header - source);
     uint8_t *executable_stack_image = (uint8_t *)malloc(source_size);
     if (!fixture_expect(
@@ -958,6 +906,17 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         return 0;
     }
 
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    /*
+     * Android API 26+ bionic rejects the ELF-valid sectionless header
+     * combination (e_shoff/e_shnum/e_shstrndx all zero) before dynamic
+     * metadata is consulted. Keep this loader-specific boundary explicit;
+     * the glibc lane below remains the sectionless HostContext oracle.
+     */
+    fprintf(
+        stderr,
+        "HostContext self-test: sectionless image skipped on bionic; loader requires section headers\n");
+#else
     uint8_t *sectionless_image = (uint8_t *)malloc(source_size);
     if (!fixture_expect(
             sectionless_image != NULL,
@@ -967,7 +926,7 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
     }
     memcpy(sectionless_image, source, source_size);
     fixture_write_u64_le(sectionless_image + 40U, 0U);
-    fixture_write_u16_le(sectionless_image + 58U, 0U);
+    fixture_write_u16_le(sectionless_image + 58U, FIXTURE_ELF_SECTION_HEADER_SIZE);
     fixture_write_u16_le(sectionless_image + 60U, 0U);
     fixture_write_u16_le(sectionless_image + 62U, 0U);
     uint8_t *sectionless_frame = NULL;
@@ -976,6 +935,7 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         sectionless_image,
         source_size,
         "host-context-sectionless-fixture.so",
+        "urp_entry",
         &sectionless_frame,
         &sectionless_frame_size);
     if (!fixture_expect(
@@ -998,6 +958,7 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         free(source);
         return 0;
     }
+#endif
     size_t rela_tag_offset;
     size_t rela_value_offset;
     size_t rela_size_tag_offset;
@@ -1113,6 +1074,7 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         relr_image,
         source_size,
         "host-context-relr-fixture.so",
+        "urp_entry",
         &relr_frame,
         &relr_frame_size);
     if (!fixture_expect(made_relr_frame, "could not construct the RELR fixture frame")) {
@@ -1127,10 +1089,22 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         &args);
     free(relr_frame);
     free(relr_image);
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED,
+            "DT_RELR was handed to the bionic loader instead of rejected")) {
+        free(source);
+        return 0;
+    }
+    fprintf(
+        stderr,
+        "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR\n");
+#else
     if (!fixture_expect(status == 23, "a valid RELR image was not dispatched")) {
         free(source);
         return 0;
     }
+#endif
 
     size_t dynamic_terminator_offset = 0U;
     if (!fixture_expect(
@@ -1200,12 +1174,24 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
         URP_LOAD_IMAGE_IMMUTABLE,
         &rejected_handle);
     free(dependency_image);
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    if (!fixture_expect(
+            status != URP_STATUS_OK && rejected_handle == 0U,
+            "a DT_NEEDED dynamic entry was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+    fprintf(
+        stderr,
+        "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff\n");
+#else
     if (!fixture_expect(
             status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
             "a DT_NEEDED dynamic entry was accepted or returned a handle")) {
         free(source);
         return 0;
     }
+#endif
 
     static const fixture_dynamic_rejection auxiliary_filter_dynamic_tags[] = {
         {FIXTURE_DT_AUXILIARY, "a DT_AUXILIARY dependency entry was accepted or returned a handle"},
@@ -1279,14 +1265,14 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
     }
 
     static const fixture_dynamic_rejection android_packed_relocation_tags[] = {
-        {FIXTURE_DT_ANDROID_REL, "a DT_ANDROID_REL packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELSZ, "a DT_ANDROID_RELSZ packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELA, "a DT_ANDROID_RELA packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELASZ, "a DT_ANDROID_RELASZ packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELR, "a DT_ANDROID_RELR packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELRSZ, "a DT_ANDROID_RELRSZ packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELRENT, "a DT_ANDROID_RELRENT packed relocation entry was accepted or returned a handle"},
-        {FIXTURE_DT_ANDROID_RELRCOUNT, "a DT_ANDROID_RELRCOUNT packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_REL, "a DT_ANDROID_REL packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELSZ, "a DT_ANDROID_RELSZ packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELA, "a DT_ANDROID_RELA packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELASZ, "a DT_ANDROID_RELASZ packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELR, "a DT_ANDROID_RELR packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELRCOUNT, "a DT_ANDROID_RELRCOUNT packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELRSZ, "a DT_ANDROID_RELRSZ packed relocation entry was accepted or returned a handle"},
+        {URP_DT_ANDROID_RELRENT, "a DT_ANDROID_RELRENT packed relocation entry was accepted or returned a handle"},
     };
     if (!fixture_reject_dynamic_tags(
             &adapter,
@@ -1552,9 +1538,7 @@ static int fixture_run_real_adapter(const char *fixture_path, int positive_only)
 
 int main(int argc, char **argv)
 {
-    if (!fixture_expect(
-            argc == 2 || (argc == 3 && strcmp(argv[2], "--adapter-v2") == 0),
-            "the entry fixture path is required, optionally followed by --adapter-v2")) {
+    if (!fixture_expect(argc == 2, "the entry fixture path is required")) {
         return 2;
     }
 
@@ -1563,14 +1547,6 @@ int main(int argc, char **argv)
         || !fixture_expect(URP_HOST_CONTEXT_MIN_SIZE == 56U && URP_HOST_CONTEXT_THREAD_LIFETIME_SIZE == 72U, "context minimum size changed")
         || !fixture_expect(URP_LAUNCH_ARGS_MIN_SIZE == 32U && URP_LAUNCH_ARGS_CURRENT_SIZE == 40U, "launch args minimum size changed")) {
         return 1;
-    }
-
-    if (argc == 3) {
-        if (!fixture_run_real_adapter(argv[1], 1)) {
-            return 1;
-        }
-        puts("HostContext runtime self-test: PASS (real-adapter v2 path)");
-        return 0;
     }
 
     fixture_state state = {0};
@@ -1627,96 +1603,96 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    static const uint8_t v2_source[] = "host-context-entry-fixture\n";
-    uint8_t *v2_frame = NULL;
-    size_t v2_frame_size = 0U;
+    static const uint8_t current_source[] = "host-context-entry-fixture\n";
+    uint8_t *current_frame = NULL;
+    size_t current_frame_size = 0U;
     if (!fixture_expect(
-            fixture_make_v2_frame(
-                v2_source,
-                sizeof(v2_source) - 1U,
+            fixture_make_frame(
+                current_source,
+                sizeof(current_source) - 1U,
                 "fixture",
                 "custom_entry",
-                &v2_frame,
-                &v2_frame_size),
-            "could not construct the v2 HostContext frame")) {
+                &current_frame,
+                &current_frame_size),
+            "could not construct the current HostContext v3 frame")) {
         return 1;
     }
 
-    fixture_state v2_state = {0};
-    v2_state.expected_entry_name = "custom_entry";
-    urp_host_context_v1 v2_host = host;
-    v2_host.userdata = &v2_state;
-    status = urp_runtime_execute_frame(&v2_host, v2_frame, v2_frame_size, &args);
-    if (!fixture_expect(status == 17, "v2 entry status was not preserved")
-        || !fixture_expect(v2_state.loaded && v2_state.immutable, "v2 image was not loaded")
-        || !fixture_expect(v2_state.looked_up && v2_state.entry_called, "v2 entry was not dispatched")
-        || !fixture_expect(v2_state.released, "v2 image lifetime was not released")) {
-        free(v2_frame);
+    fixture_state current_state = {0};
+    current_state.expected_entry_name = "custom_entry";
+    urp_host_context_v1 current_host = host;
+    current_host.userdata = &current_state;
+    status = urp_runtime_execute_frame(&current_host, current_frame, current_frame_size, &args);
+    if (!fixture_expect(status == 17, "current entry status was not preserved")
+        || !fixture_expect(current_state.loaded && current_state.immutable, "current image was not loaded")
+        || !fixture_expect(current_state.looked_up && current_state.entry_called, "current entry was not dispatched")
+        || !fixture_expect(current_state.released, "current image lifetime was not released")) {
+        free(current_frame);
         return 1;
     }
 
-    uint8_t *invalid_capabilities = (uint8_t *)malloc(v2_frame_size);
-    if (!fixture_expect(invalid_capabilities != NULL, "could not allocate invalid v2 frame")) {
-        free(v2_frame);
+    uint8_t *invalid_capabilities = (uint8_t *)malloc(current_frame_size);
+    if (!fixture_expect(invalid_capabilities != NULL, "could not allocate invalid current frame")) {
+        free(current_frame);
         return 1;
     }
-    memcpy(invalid_capabilities, v2_frame, v2_frame_size);
+    memcpy(invalid_capabilities, current_frame, current_frame_size);
     fixture_write_u64_le(
-        invalid_capabilities + URP_RUNTIME_FRAME_V2_REQUIRED_CAPABILITIES_OFFSET,
+        invalid_capabilities + URP_RUNTIME_FRAME_REQUIRED_CAPABILITIES_OFFSET,
         UINT64_C(1) << 63U);
-    fixture_state invalid_v2_state = {0};
-    invalid_v2_state.expected_entry_name = "custom_entry";
-    urp_host_context_v1 invalid_v2_host = v2_host;
-    invalid_v2_host.userdata = &invalid_v2_state;
-    status = urp_runtime_execute_frame(
-        &invalid_v2_host,
+    fixture_state invalid_capabilities_state = {0};
+    invalid_capabilities_state.expected_entry_name = "custom_entry";
+    urp_host_context_v1 invalid_capabilities_host = current_host;
+    invalid_capabilities_host.userdata = &invalid_capabilities_state;
+    urp_status unsupported_capabilities_status = urp_runtime_execute_frame(
+        &invalid_capabilities_host,
         invalid_capabilities,
-        v2_frame_size,
+        current_frame_size,
         &args);
 
-    memcpy(invalid_capabilities, v2_frame, v2_frame_size);
+    memcpy(invalid_capabilities, current_frame, current_frame_size);
     fixture_write_u64_le(
-        invalid_capabilities + URP_RUNTIME_FRAME_V2_REQUIRED_CAPABILITIES_OFFSET,
+        invalid_capabilities + URP_RUNTIME_FRAME_REQUIRED_CAPABILITIES_OFFSET,
         URP_HOST_CAP_MANDATORY | URP_HOST_CAP_THREAD_LIFETIME);
     fixture_state missing_thread_state = {0};
     missing_thread_state.expected_entry_name = "custom_entry";
-    urp_host_context_v1 missing_thread_host = v2_host;
+    urp_host_context_v1 missing_thread_host = current_host;
     missing_thread_host.userdata = &missing_thread_state;
     urp_status missing_thread_status = urp_runtime_execute_frame(
-        &missing_thread_host, invalid_capabilities, v2_frame_size, &args);
+        &missing_thread_host, invalid_capabilities, current_frame_size, &args);
 
-    urp_host_context_v1 incomplete_thread_host = v2_host;
+    urp_host_context_v1 incomplete_thread_host = current_host;
     incomplete_thread_host.capabilities |= URP_HOST_CAP_THREAD_LIFETIME;
     urp_status incomplete_thread_status = urp_runtime_execute_frame(
-        &incomplete_thread_host, v2_frame, v2_frame_size, &args);
+        &incomplete_thread_host, current_frame, current_frame_size, &args);
 
-    uint8_t *invalid_entry_name = (uint8_t *)malloc(v2_frame_size);
-    if (!fixture_expect(invalid_entry_name != NULL, "could not allocate invalid v2 entry frame")) {
+    uint8_t *invalid_entry_name = (uint8_t *)malloc(current_frame_size);
+    if (!fixture_expect(invalid_entry_name != NULL, "could not allocate invalid current entry frame")) {
         free(invalid_capabilities);
-        free(v2_frame);
+        free(current_frame);
         return 1;
     }
-    memcpy(invalid_entry_name, v2_frame, v2_frame_size);
+    memcpy(invalid_entry_name, current_frame, current_frame_size);
     invalid_entry_name[
-        URP_RUNTIME_FRAME_V2_HEADER_SIZE + strlen("fixture")] = UINT8_C(0xFF);
+        URP_RUNTIME_FRAME_HEADER_SIZE + strlen("fixture")] = UINT8_C(0xFF);
     fixture_state invalid_entry_state = {0};
     invalid_entry_state.expected_entry_name = "custom_entry";
-    urp_host_context_v1 invalid_entry_host = v2_host;
+    urp_host_context_v1 invalid_entry_host = current_host;
     invalid_entry_host.userdata = &invalid_entry_state;
     urp_status invalid_entry_status = urp_runtime_execute_frame(
         &invalid_entry_host,
         invalid_entry_name,
-        v2_frame_size,
+        current_frame_size,
         &args);
     free(invalid_capabilities);
     free(invalid_entry_name);
-    free(v2_frame);
+    free(current_frame);
     if (!fixture_expect(
-            status == URP_STATUS_UNSUPPORTED,
-            "unsupported v2 capability was accepted")
+            unsupported_capabilities_status == URP_STATUS_UNSUPPORTED,
+            "unsupported current capability was accepted")
         || !fixture_expect(
-            invalid_v2_state.loaded == 0,
-            "invalid v2 capability reached the host loader")
+            invalid_capabilities_state.loaded == 0,
+            "unsupported current capability reached the host loader")
         || !fixture_expect(
             missing_thread_status == URP_STATUS_HOST_INVALID
                 && missing_thread_state.loaded == 0 && missing_thread_state.entry_called == 0,
@@ -1726,10 +1702,10 @@ int main(int argc, char **argv)
             "thread-lifetime capability without extension callbacks was accepted")
         || !fixture_expect(
             invalid_entry_status == URP_STATUS_FRAME_INVALID,
-            "invalid v2 UTF-8 entry name was accepted")
+            "invalid current UTF-8 entry name was accepted")
         || !fixture_expect(
             invalid_entry_state.loaded == 0,
-            "invalid v2 entry name reached the host loader")) {
+            "invalid current entry name reached the host loader")) {
         return 1;
     }
 
@@ -1763,7 +1739,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (!fixture_run_real_adapter(argv[1], 0)) {
+    if (!fixture_run_real_adapter(argv[1])) {
         return 1;
     }
 

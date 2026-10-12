@@ -33,12 +33,15 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 
 - `ElfParser.Parse(ReadOnlyMemory<byte>)` returns `ElfParseResult`; malformed
   input becomes diagnostics and a missing `File`, not an exception.
-- `NoOpPipeline.Validate` preserves the parsed file when safe, appends analysis
-  diagnostics, and creates output bytes only after all errors are absent and
-  byte identity is proven.
-- `NoOpPipeline.ValidateAndCopy` accepts an optional `inputOverride` snapshot so
-  report hashes and copied bytes describe the same source. It writes a flushed
-  temporary sibling and removes it on every failure path.
+- `ValidationWorkflow.ValidateStructurally` preserves the parsed file when safe.
+  `ValidateObservationOnly` appends instruction-analysis diagnostics only when
+  the explicitly selected observation-only mode is requested, and creates
+  output bytes only after all errors are absent and byte identity is proven.
+- `ValidationWorkflow.ValidateAndCopyStructurally` accepts an optional
+  `inputOverride` snapshot so report hashes and copied bytes describe the same
+  source. Observation-only copying is explicitly selected through
+  `ValidateAndCopyObservationOnly`. Both APIs write a flushed temporary sibling
+  and remove it on every failure path.
 - `PayloadFrameCodec` validates version, flags, architecture, names, bounds,
   encoded digest, exact decompressed size, and source digest before returning
   source bytes.
@@ -48,19 +51,31 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
   creation, rejects foreign/repeated/self-join handles, and never reuses opaque
   thread handles. Release closes creation and joins registered workers; a join
   failure preserves the image mapping and descriptor so live code is not
-  unloaded. Non-threaded frames receive a legacy-size HostContext projection
-  with the optional callbacks/capability cleared and a 32-byte launch-args view
-  with image handle zero.
+  unloaded. The runtime passes the current HostContext table directly. Ordinary
+  frames receive the 32-byte minimum launch-args view with image handle zero;
+  frames requiring thread lifetime receive the current 40-byte view with the
+  active image handle.
 - `ElfPackService` validates source and launcher independently, validates the
   assembled wrapper and recovered payload, and publishes only after a final
   byte comparison.
+- `ProtectionWorkflow` is the single owner for current `protect`,
+  `protect-image`, and `rehydrate-image` planning/materialization decisions.
+  `OuterExecveat` and `HostContextEntry` use explicit profile policies over the
+  shared layout/materializer operations; profile mismatch, malformed operation,
+  reparse, native-image, handoff, or publication failure records a deterministic
+  first-failure stage and publishes no successful artifact, role, stage, report,
+  Native Image, or evidence set.
+- Rehydration records and Native Image descriptors bind the current workflow
+  owner, profile, ABI, source/request/artifact/output hashes, and handoff fields
+  before publication. An unavailable runtime remains explicit evidence and is
+  not promoted by a different runtime's result.
 - Catch only expected I/O, argument, and codec exceptions at boundaries. Do not
   catch all exceptions and continue with a partial model. The CLI top level
   maps an unexpected exception to `Internal` and includes a correlation id.
 
 ## CLI Contract
 
-`src/UrProtect.Cli/CliApplication.cs` owns product exit codes:
+`src/UrProtect.Cli/Commands/CliApplication.cs` owns product exit codes:
 
 | Code | Meaning |
 |------|---------|
@@ -82,6 +97,30 @@ not reproduce arithmetic. `BoundedReader` performs little-endian reads only
 after checked range validation. Unknown program headers, dynamic tags, and
 relocation kinds are preserved or warned about rather than guessed.
 
+## AArch64 Encoder Failure Propagation
+
+`Aarch64InstructionEncoder` is the project-owned final-word boundary around
+AsmStone. It returns a typed `Aarch64InstructionEncodeResult` with a zero word
+on failure; it never returns a source-word fallback. Source/output instruction
+addresses, target alignment/range, access width, and load/store scale are
+validated before publication, and every successful word is decoded through
+AsmStone and the project decoder before it is accepted.
+
+Semantic fixup owners map adapter failures to stable `DiagnosticCode` values:
+target alignment/range failures become semantic fixup alignment/range
+diagnostics, while source/template/family/operand/backend/round-trip failures
+remain malformed or unsupported semantic fixup diagnostics. TLS relocation,
+GOT/TLSDESC ownership, PT_TLS identity, addends, and address-map conflicts are
+validated separately by UrProtect; an individually encodable instruction does
+not repair inconsistent ELF/TLS metadata.
+
+No caller may catch an adapter failure and retain the original word, apply a
+local opcode/bitfield fallback, or publish a partial layout. Layout branch
+policy may choose direct, veneer, or long-branch placement, but final Branch26
+and Call26 words still come from the adapter-backed layout helper. Remaining
+raw masks are limited to recognition, invariant checks, ELF serialization, and
+byte-preserving copies; they must not gain new instruction families.
+
 ## Examples
 
 Correct range handling:
@@ -94,15 +133,14 @@ if (!loadMap.TryVirtualAddressToFileOffset(address, size, out var fileOffset))
 Correct snapshot reuse:
 
 ```csharp
-pipeline.ValidateAndCopy(
+pipeline.ValidateAndCopyStructurally(
     options.InputPath,
     options.CopyPath,
-    options.Analyze,
     inputOverride: input);
 ```
 
 Relevant regressions live in `ElfMalformedCorpusTests.cs`,
-`ElfParserFuzzTests.cs`, `BinaryPropertyTests.cs`, `NoOpPipelineTests.cs`,
+`ElfParserFuzzTests.cs`, `BinaryPropertyTests.cs`, `ValidationWorkflowTests.cs`,
 `CliApplicationTests.cs`, `PayloadFrameTests.cs`, and
 `ElfPackServiceTests.cs`.
 
@@ -112,4 +150,6 @@ Do not treat an unmapped table as empty, truncate a declared count to fit a
 buffer, use an unchecked cast from an ELF field as an array length, execute a
 payload after an integrity failure, use a payload-controlled directory path,
 or silently fall back from a required native ARM64 job to QEMU, another host
-architecture, or the C# packer as a wrapper launcher.
+architecture, or the C# packer as a wrapper launcher. Do not silently fall
+back from an AsmStone encoding failure to source-word retention or manual
+bitfield assembly.

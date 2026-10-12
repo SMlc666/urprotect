@@ -38,6 +38,7 @@ class RegressionMatrixTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         self.assertIn("managed.coverage-guided-fuzz", {case["id"] for case in self.data["cases"]})
         self.assertIn("native.host-context-e2e", {case["id"] for case in self.data["cases"]})
+        self.assertIn("native.managed-rehydration-host-context-e2e", {case["id"] for case in self.data["cases"]})
         runtime_cases = {case["id"] for case in self.data["cases"]}
         self.assertTrue({
             "fixture.runtime-covering-matrix-pr",

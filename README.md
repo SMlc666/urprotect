@@ -1,7 +1,7 @@
 # urprotect
 
-`urprotect` is **UrProtect Validator 0.1** with the **AArch64 ELF Wrapper 0.2**
-runtime shell, a C#/.NET command-line product for conservative ELF64 AArch64
+`urprotect` is **UrProtect Validator 0.1** with the current **AArch64 ELF
+Wrapper v3** runtime shell, a C#/.NET command-line product for conservative ELF64 AArch64
 validation and outer ELF packaging.
 It validates supported `ET_DYN` PIE executables and dynamically linked shared
 objects, emits a stable JSON report, can produce a byte-identical no-op copy,
@@ -41,6 +41,10 @@ Validate an AArch64 ELF and print the human-readable result:
 urprotect validate ./program
 ```
 
+Generic validation is structural and decoder-independent by default. Use the
+explicit `--observe-analysis` option only when whole-image instruction
+observation is wanted.
+
 Create a safe no-op copy and a machine-readable report:
 
 ```sh
@@ -52,7 +56,7 @@ urprotect validate ./program \
 Stream exactly one JSON document to stdout:
 
 ```sh
-urprotect validate ./program --json - --no-analysis > report.json
+urprotect validate ./program --json - > report.json
 ```
 
 ## Explicit function protection
@@ -144,9 +148,8 @@ The outer launcher is a static AArch64 `ET_DYN` PIE with no interpreter or
 shared-library dependencies. The HostContext launcher is a profile-matched
 AArch64 runtime executable that uses the sealed-memfd adapter. `pack` requires
 an explicit profile-matched `--launcher`; it never silently turns the C# packer
-into a runtime wrapper or falls back between profiles. Current production
-packaging emits frame v3. Legacy v1/v2 behavior remains historical migration
-evidence only and is rejected by current launchers.
+into a runtime wrapper or falls back between profiles. Current production packaging emits the current v3 frame for the selected
+execution profile.
 
 The outer profile supports native ARM64 Linux glibc and is exercised by the PR
 covering fixture matrix. The first HostContext production slice supports a

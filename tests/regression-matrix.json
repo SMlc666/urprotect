@@ -175,6 +175,24 @@
       ]
     },
     {
+      "id": "native.managed-rehydration-host-context-e2e",
+      "class": "host-context",
+      "command": "./scripts/run-rehydration-e2e.sh --tier pr --runtime glibc --profile host-context-entry",
+      "tiers": [
+        "pr",
+        "nightly",
+        "release"
+      ],
+      "platform": "native-arm64",
+      "budgetSeconds": 300,
+      "memoryMb": 2048,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/protected-image/*/glibc/compat.protection-host-context-fixture.glibc.host-context-entry/"
+      ]
+    },
+    {
       "id": "native.host-context-dependency-graph",
       "class": "host-context",
       "command": "native/urprotect-runtime/test_managed_host_context.sh",
@@ -401,6 +419,41 @@
         ".artifacts/bionic/c-termux-bionic-pie/apt-archives/*.deb",
         ".artifacts/bionic/c-termux-bionic-pie/host-context/entry-fixture.sha256",
         ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log"
+      ]
+    },
+    {
+      "id": "fixture.tls-prerequisite-probes",
+      "class": "host-context",
+      "command": "python3 scripts/run-tls-prerequisite-probes.py --tier ${TLS_MATRIX_TIER:-pr} && python3 scripts/check-tls-prerequisite-evidence.py .artifacts/tls-prerequisites/${TLS_MATRIX_TIER:-pr}",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 900,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/tls-prerequisites/*/android-packed-tags.json",
+        ".artifacts/tls-prerequisites/*/pt-tls-predicate-parity.json",
+        ".artifacts/tls-prerequisites/*/managed-host-context-policy-test.txt",
+        ".artifacts/tls-prerequisites/*/SHA256SUMS"
+      ]
+    },
+    {
+      "id": "fixture.tls-transformed-runtime-matrix",
+      "class": "host-context",
+      "command": "python3 scripts/run-tls-runtime-matrix.py --tier ${TLS_MATRIX_TIER:-pr} && python3 scripts/check-tls-runtime-matrix-evidence.py .artifacts/tls-runtime/${TLS_MATRIX_TIER:-pr} --registry fixtures/tls-runtime-matrix.json",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/tls-runtime/*/matrix.json",
+        ".artifacts/tls-runtime/*/environment.json",
+        ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/SHA256SUMS"
       ]
     }
   ]

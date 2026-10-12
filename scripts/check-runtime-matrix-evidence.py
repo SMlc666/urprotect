@@ -106,7 +106,7 @@ def check_bionic_evidence(
         "execution": "native-arm64-bionic-container",
         "packageProvenance": "version-and-sha256-locked-package-set",
         "directLinkerMode": "identity",
-        "handoffStatus": "validated-host-context-v2-adapter-self-test",
+        "handoffStatus": "validated-host-context-v3-adapter-self-test",
     }
     for key, expected in expected_fields.items():
         if document.get(key) != expected:
@@ -142,12 +142,60 @@ def check_bionic_evidence(
         not isinstance(oracle, dict)
         or oracle.get("status") != "validated"
         or oracle.get("abi") != "HostContext-v1"
-        or oracle.get("frame") != "HostContext-v2"
+        or oracle.get("frame") != "HostContext-v3"
         or oracle.get("sealedImage") is not True
         or oracle.get("entryDispatch") != "urp_entry"
         or oracle.get("executableTemporaryPath") is not False
     ):
         fail("bionic HostContext adapter oracle is incomplete")
+
+    sectionless_boundary = oracle.get("sectionlessImageBoundary")
+    expected_sectionless_marker = (
+        "HostContext self-test: sectionless image skipped on bionic; "
+        "loader requires section headers"
+    )
+    if (
+        not isinstance(sectionless_boundary, dict)
+        or sectionless_boundary.get("status") != "loader-unsupported"
+        or sectionless_boundary.get("loader") != "bionic"
+        or sectionless_boundary.get("reason")
+        != "API 26+ bionic requires ELF section headers for the sectionless mutation"
+        or sectionless_boundary.get("log") != "host-context/build-and-test.log"
+        or sectionless_boundary.get("marker") != expected_sectionless_marker
+    ):
+        fail("bionic sectionless image boundary evidence is incomplete")
+
+    relr_boundary = oracle.get("relrImageBoundary")
+    expected_relr_marker = (
+        "HostContext self-test: DT_RELR rejected on bionic; "
+        "loader does not apply DT_RELR"
+    )
+    if (
+        not isinstance(relr_boundary, dict)
+        or relr_boundary.get("status") != "loader-unsupported"
+        or relr_boundary.get("loader") != "bionic"
+        or relr_boundary.get("reason")
+        != "Bionic ignores DT_RELR metadata; HostContext rejects it before loader handoff"
+        or relr_boundary.get("log") != "host-context/build-and-test.log"
+        or relr_boundary.get("marker") != expected_relr_marker
+    ):
+        fail("bionic DT_RELR boundary evidence is incomplete")
+
+    dynamic_boundary = oracle.get("dynamicMetadataBoundary")
+    expected_dynamic_marker = (
+        "HostContext self-test: bionic dynamic metadata negatives rejected "
+        "before loader handoff"
+    )
+    if (
+        not isinstance(dynamic_boundary, dict)
+        or dynamic_boundary.get("status") != "loader-unsupported"
+        or dynamic_boundary.get("loader") != "bionic"
+        or dynamic_boundary.get("reason")
+        != "Bionic dynamic metadata negatives may return loader-specific failure statuses before handoff"
+        or dynamic_boundary.get("log") != "host-context/build-and-test.log"
+        or dynamic_boundary.get("marker") != expected_dynamic_marker
+    ):
+        fail("bionic dynamic metadata boundary evidence is incomplete")
 
     required_artifacts = cell.get("requiredArtifacts")
     if not isinstance(required_artifacts, list) or not required_artifacts:
@@ -234,8 +282,11 @@ def check_bionic_evidence(
     if hashlib.sha256(fixture_binary.read_bytes()).hexdigest() != fixture_digest:
         fail("bionic HostContext fixture bytes do not match result.json digest")
     self_test_path = root / "host-context/build-and-test.log"
-    if "HostContext runtime self-test: PASS" not in self_test_path.read_text(encoding="utf-8"):
+    self_test_text = self_test_path.read_text(encoding="utf-8")
+    if "HostContext runtime self-test: PASS" not in self_test_text:
         fail("bionic HostContext self-test lacks its PASS oracle")
+    if expected_sectionless_marker not in self_test_text:
+        fail("bionic sectionless image boundary marker is missing from the self-test log")
     host_result = (root / "host-context/result.txt").read_text(encoding="utf-8")
     if "status=validated" not in host_result or "entry=urp_entry" not in host_result:
         fail("bionic HostContext result lacks validated entry-dispatch evidence")
@@ -663,7 +714,7 @@ def check_native_fixture(
         fail(f"{fixture_id} UrProtect validation did not pass")
     if result.get("directStatus") != 0 or result.get("copyStatus") != 0:
         fail(f"{fixture_id} direct or copied image did not return zero")
-    if result.get("application") != "UrProtect CLI validate --no-analysis --copy":
+    if result.get("application") != "UrProtect CLI validate --copy":
         fail(f"{fixture_id} does not record the expected UrProtect validation oracle")
     digest = result.get("applicationBuildSha256")
     if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:

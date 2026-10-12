@@ -1,3 +1,8 @@
+{"file":"src/UrProtect.Core/Application/Validation/ValidationWorkflow.cs","reason":"Check that generic validation is structural by default and does not scan unrelated executable code."}
+{"file":"src/UrProtect.Core/Aarch64Semantics/Aarch64ObservationAnalyzer.cs","reason":"Check the explicit whole-image observer is not a structural validation prerequisite and does not leak into wrapper/layout paths."}
+{"file":"src/UrProtect.Cli/Commands/CliApplication.cs","reason":"Check validate command analysis defaults and explicit scope behavior."}
+{"file":"tests/UrProtect.Core.Tests/Application/ValidationWorkflowTests.cs","reason":"Check decoder-independent structural validation and selected-function analysis regressions."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/analysis-boundary-audit.md","reason":"Check the architecture correction against the concrete current-path evidence and non-goals."}
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Bounded binary reads, program-header authority, atomic publication, parser/fuzz requirements, and three-runtime evidence rules govern the rewrite."}
 {"file":".trellis/spec/backend/runtime-compatibility.md","reason":"HostContext, TLS, relocation, loader, runtime-matrix, and evidence boundaries must remain synchronized with the new claims."}
 {"file":"COMPATIBILITY.md","reason":"Existing conditional compatibility claims and evidence-layer distinctions constrain the new three-runtime semantic support rows."}

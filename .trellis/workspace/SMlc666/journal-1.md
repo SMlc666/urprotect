@@ -294,3 +294,245 @@ Implemented and verified the generic AArch64 ELF layout planner/materializer. Re
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Correct structural validation boundary
+<!-- trellis-session: v=2 fp=afe4582d66eeab93 -->
+
+**Date**: 2026-10-06
+**Task**: Correct structural validation boundary
+**Branch**: `main`
+
+### Summary
+
+Separated generic ELF structural validation from whole-image instruction observation. Structural validation is decoder-independent by default; --observe-analysis and NoOpAnalysisMode.ObservationOnly are explicit observation paths, while selected-function protection remains the code-analysis boundary. Updated CLI/report/spec/contract/test coverage and planning artifacts. Verified Release build, 268 Core tests, 290 Python tests, 13 fixtures, 19 regression-matrix cases, static boundary checks, and git diff --check.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4bb9227` | refactor: make generic ELF validation structural by default |
+| `7c50b63` | chore(task): record indirect-control analysis boundary |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 11: Purge historical contract and freeze current runtime
+<!-- trellis-session: v=2 fp=a0e01efaf0bf3eac -->
+
+**Date**: 2026-10-07
+**Task**: Purge historical contract and freeze current runtime
+**Branch**: `main`
+
+### Summary
+
+Completed G0 current-contract purge. Removed historical managed/native Payload Frame paths, API/CLI aliases, legacy host projection, migration evidence rows, and the obsolete AArch64 analyzer wrapper; retained one v3 current contract with explicit profiles. Added and synchronized architecture-boundary planning artifacts. Verified release build, 266 managed tests, 290 Python tests, 13 fixtures, 19 regression cases, native runtime/contract tests, task validation, and diff checks. Native launcher full test remains environment-unavailable because musl-gcc is absent; no fallback claim was made.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fb61de8` | refactor: purge historical current-contract paths |
+| `825730d` | chore(task): record architecture boundary gates |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 12: Complete G1 namespace-first responsibility boundaries
+<!-- trellis-session: v=2 fp=6e77e5d605487a5e -->
+
+**Date**: 2026-10-07
+**Task**: Complete G1 namespace-first responsibility boundaries
+**Branch**: `main`
+
+### Summary
+
+Completed G1 responsibility-boundaries after two implementation passes and an independent blocker review. Established the checked-in ownership map and deterministic architecture checker with a deliberate forbidden-reference fixture; moved Core and CLI ownership areas into StructuralElf, Aarch64Semantics, SemanticPlanning, ElfLayout, ArtifactProtocol, Application, Infrastructure, and CLI Parsing/Commands/Rendering; extracted ValidationWorkflow, protection planning/code-emission/layout/output seams, Application workflows, and Infrastructure side-effect adapters; split semantic model/snapshot/layout/Payload Frame buckets and reclassified test namespaces. Preserved the current v3 frame contract and kept G2 workflow convergence, HostContext materialization, TLS, CFI, indirect-control, and native changes out of scope. Final independent gates passed: Release build, 266 managed tests, 294 Python tests, 13 fixture cases, 19 regression cases, architecture production plus deliberate fixture self-test, task validation, and git diff --check.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2809137` | refactor: establish G1 responsibility boundaries |
+| `224dcde` | chore(task): record G1 ownership boundaries |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 13: Complete G2 unified protection workflow
+<!-- trellis-session: v=2 fp=8be22d35a71f7103 -->
+
+**Date**: 2026-10-07
+**Task**: Complete G2 unified protection workflow
+**Branch**: `main`
+
+### Summary
+
+Completed G2 unified current protection workflow. Added one ProtectionWorkflow owner for protect/protect-image/rehydrate-image, removed the reachable direct FunctionProtectionService.Protect writer path, connected shared planning/layout/materialization/publication, and added explicit OuterExecveat and HostContextEntry policies. Completed HostContext ET_DYN/no-interpreter/entry/ABI/profile validation, sealed-memfd handoff, entry status/release-order/hash evidence, rollback and first-failure binding. Updated current fixtures, CI/evidence checkers, regression coverage, and runtime contracts. Independent review passed: Release build, 269 managed tests, 287 Python tests plus 7 skips, fixtures, regression matrix, native runtime, protection E2E, outer and HostContext rehydration E2E/evidence. Native launcher remained environment-unavailable because musl-gcc is absent; no substitute was used.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd62e7e` | feat: unify protection workflow and HostContext materialization |
+| `6935b9d` | chore(task): record G2 workflow contract |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 14: Record HostContext evidence runner follow-up
+<!-- trellis-session: v=2 fp=a9d033f87e2daaba -->
+
+**Date**: 2026-10-07
+**Task**: Record HostContext evidence runner follow-up
+**Branch**: `main`
+
+### Summary
+
+Added the HostContext rehydration evidence runner that was omitted from the first G2 product commit. The executable runner builds the native fixture/helper, selects the explicit dynsym transform target, runs current host-context production and rehydration, performs the sealed-memfd handoff, binds record/role/handoff hashes and release evidence, and writes the retained current evidence artifacts. No product behavior or contract changed; the follow-up commit restores the complete G2 evidence surface.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fe14891` | test: add HostContext rehydration evidence runner |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 15: Complete AsmStone encoder unification
+<!-- trellis-session: v=2 fp=19f358101c50f395 -->
+
+**Date**: 2026-10-12
+**Task**: Complete AsmStone encoder unification
+**Branch**: `task/10-11-asmstone-encoder-unification`
+
+### Summary
+
+Updated vendored AsmStone to ff961cff, expanded the project-owned Aarch64InstructionEncoder with MOV/MOV-register/CMP/RET and branch families, routed dispatcher/layout/semantic/TLS output through the adapter, added the final-word architecture checker and CI gate, updated backend contracts, and archived task 10-11-asmstone-encoder-unification. Verification passed: AsmStone upstream tests, 385 managed tests, 296 Python tests with 7 environment-gated skips, 13 fixture cases, 20 regression cases, architecture checks, native runtime tests, and native launcher integration.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ba3268` | vendor: update AsmStone to ff961cff |
+| `ca340d5` | refactor: expand project-owned AArch64 encoder adapter |
+| `53e8bcd` | refactor: route protection dispatcher through AsmStone encoder |
+| `b40e31e` | refactor: route layout and semantic fixups through encoder |
+| `86bb3c0` | test/docs: enforce one final AArch64 encoding boundary |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 16: Continue TLS runtime matrix
+<!-- trellis-session: v=2 fp=7cf2dfccbccc567c -->
+
+**Date**: 2026-10-12
+**Task**: Continue TLS runtime matrix
+**Branch**: `main`
+
+### Summary
+
+Resumed 10-06-tls-relocation-runtime-matrix after AsmStone merge. Verified the real glibc initial-exec transformed TLSIE HostContext lane end-to-end with entry status 43, added the retained evidence runner/manifest/CI/checker contract, preserved explicit no-promotion boundaries for musl, bionic, worker lifecycle, and the other four TLS models, and passed task validation, 387 managed tests, 95 focused TLS/AsmStone tests, 304 serial Python tests, fixture/regression/evidence checks, native runtime, and launcher tests. Task remains in_progress for remaining runtime promotion evidence.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee4ab84` | feat: retain transformed glibc TLSIE evidence |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 17: Complete TLS runtime matrix evidence
+<!-- trellis-session: v=2 fp=18d86f96c544511b -->
+
+**Date**: 2026-10-13
+**Task**: Complete TLS runtime matrix evidence
+**Branch**: `feat/tls-relocation-runtime-matrix`
+
+### Summary
+
+Completed and committed TLS runtime matrix follow-up. Added canonical Android packed-relocation tag alignment and eight-row managed/native rejection probes, explicit HostContext PT_TLS handoff predicate parity with six mutation cases, a closed 60-row model/profile/runtime/lifecycle transformed TLS evidence registry and checker, CI/regression/manifest wiring, and retained the sole promoted glibc initial-exec current-thread transformed row. Musl/bionic and other model/profile/lifecycle rows remain explicitly row-local not-applicable or environment-unavailable without cross-runtime promotion. Archive commit follows separately; .pi/settings.json remains user-owned dirty state.
+
+### Main Changes
+
+- Added canonical managed/native Android packed-relocation tag definitions and rejection probes
+- Added PT_TLS predicate parity fixtures and HostContext profile validation
+- Added 60-row transformed TLS evidence producer/checker and CI wiring
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a04e38` | feat: complete TLS runtime matrix evidence |
+
+### Testing
+
+- [OK] 390 managed tests
+- [OK] 309 Python tests
+- [OK] native runtime and launcher suites
+- [OK] fixture, regression, evaluator, architecture, and Trellis checks
+- [OK] TLS prerequisite probes and 60-row matrix checker
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push feat/tls-relocation-runtime-matrix and observe CI musl/bionic evidence lanes
+
+
+## Session 18: Finish TLS runtime matrix after CI reassignment
+<!-- trellis-session: v=2 fp=efa68fed76db7887 -->
+
+**Date**: 2026-10-13
+**Task**: Finish TLS runtime matrix after CI reassignment
+**Branch**: `feat/tls-relocation-runtime-matrix`
+
+### Summary
+
+Completed the reassigned 10-06-tls-relocation-runtime-matrix task end to end. Closed the CI coverage boundary by excluding vendored AsmStone from project-owned coverage, accepted bounded Go zero-file PT_TLS observations at image-end offsets while retaining fail-closed managed projection, and fixed bionic fixture RELR/loader-specific dynamic metadata boundaries. Added unconditional apt partial cleanup, explicit Bionic platform compile flags, structured relrImageBoundary and dynamicMetadataBoundary evidence, and synchronized compatibility/task documentation. PR #24 CI run 38315313811 passed build-and-test, real-sample-matrix, bionic-native-arm64, musl-container-smoke, runtime-matrix-native-arm64, and independent-evaluator. Task archive validates; .pi/settings.json remains user-owned dirty state only.
+
+### Main Changes
+
+- Closed AsmStone-aware coverage gate and Go PT_TLS real-sample rejection
+- Added bionic DT_RELR and dynamic metadata loader-boundary evidence with cleanup trap
+- Synchronized task/spec/compatibility documentation and retained row-local runtime claims
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5db1de7` | fix: record bionic loader boundaries |
+
+### Testing
+
+- [OK] 391 managed tests
+- [OK] 309 Python tests
+- [OK] native runtime and launcher suites
+- [OK] 13 fixture and 22 regression cases
+- [OK] PR CI run 38315313811: all required jobs successful
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- No task implementation remains; merge PR #24 when repository policy permits

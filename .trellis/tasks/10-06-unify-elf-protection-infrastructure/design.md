@@ -31,6 +31,15 @@ ElfParser / ElfValidator / LoadMap
 `ProtectionRewritePlan` owns semantic movement. `ElfLayoutPlan` owns physical placement. The materializer consumes both; neither mutates the source model while planning.
 
 ## Semantic IR
+## Analysis boundaries
+
+The pipeline separates three concerns that were previously conflated:
+
+1. `ElfStructuralIndex`: whole-ELF bounded parsing of headers, load maps, symbols, relocations, dynamic metadata, and raw ranges. This layer does not disassemble executable segments.
+2. `SelectedFunctionPass`: explicit function-rooted AArch64 decoding, CFG/data-flow, semantic projection, and demand-driven indirect/jump-table dependency resolution. It may query a referenced table, relocation, symbol, or exact target range without scanning unrelated code.
+3. `ElfLayoutPlan`/`NativeImageMaterializer`: whole-file physical placement and byte/header emission. It consumes validated semantic contracts and never reconstructs semantic meaning by rescanning the source image.
+
+The legacy whole-image instruction observer is not a production prerequisite. Structural validation must succeed independently of the decoder backend and of unrelated unknown instructions; instruction-analysis diagnostics belong only to an explicitly requested analysis scope.
 
 Add project-owned records around the existing AsmStone adapter. Every instruction retains source address/file offset/raw encoding plus decoded operands, implicit register/flag effects, control-flow classification, PC-relative expression, literal reference, TLS reference, relocation binding, and unwind effect. The IR distinguishes exact targets, bounded target sets, runtime-resolved targets, and unresolved targets.
 
@@ -65,9 +74,9 @@ Add bounded CIE/FDE and `.eh_frame_hdr` models. Source ranges map to trampoline 
 
 ## Artifact and CLI compatibility
 
-Protected Image v1 remains historical migration evidence. The current producer artifact evolves to a versioned operation contract capable of carrying semantic fixups, address maps, relocation/TLS edits, veneer/pool placement, and CFI edits. `protect-image` publishes it with role/stage/checksum evidence. `rehydrate-image` consumes it. `protect` invokes the same Core workflow in one command and publishes only the final output unless an evidence directory is requested.
+The current producer artifact is one versioned operation contract capable of carrying semantic fixups, address maps, relocation/TLS edits, veneer/pool placement, and CFI edits. `protect-image` publishes it with role/stage/checksum evidence. `rehydrate-image` consumes it. `protect` invokes the same Core workflow in one command and publishes only the final output unless an evidence directory is requested. The HostContext profile has a complete profile-specific materialization path and native handoff oracle.
 
-The old direct writer is removed from production behavior after the unified path passes migration oracles. It is not retained as a runtime fallback.
+Historical frame/API/CLI behavior and the old direct writer are deleted from production. No migration oracle, fallback, or alternate writer is required or selectable.
 
 ## Verification and safety
 
@@ -81,5 +90,8 @@ Every stage is bounded and immutable until the final writer. The output is repar
 - Three-runtime evidence increases CI cost; it is required by the selected scope and is kept as separate feature rows rather than a single blended compatibility claim.
 
 ## Dependency ordering
+
+
+The architecture-boundary-refactor child is the mandatory G0-G2 prerequisite. It freezes one current contract, removes all migration/fallback paths and historical test data, establishes namespace-first ownership, unifies the current workflow, and completes HostContext materialization. TLS, CFI, indirect-control, and runtime evidence work may consume the resulting seams only after its gates pass.
 
 The semantic IR/address map and layout-plan contracts precede feature implementation. The semantic relocation child supplies the shared fixup model; the layout child supplies materialization; indirect/jump-table, TLS, and CFI children add their domains; the workflow child integrates all producers and runtime evidence. Child artifacts must repeat these ordering constraints because the task tree itself is not a dependency mechanism.

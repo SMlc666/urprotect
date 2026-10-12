@@ -325,8 +325,8 @@ def derive_evaluator_environment_capabilities(environment: Mapping[str, Any]) ->
     )
     repository_root = Path(__file__).resolve().parent.parent
     producer_script = repository_root / "scripts/run-protected-image-e2e.sh"
-    producer_source = repository_root / "src/UrProtect.Core/Protect/ProtectionPlan.cs"
-    rehydrator_source = repository_root / "src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs"
+    producer_source = repository_root / "src/UrProtect.Core/Application/Protection/ProtectionPlan.cs"
+    rehydrator_source = repository_root / "src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs"
     try:
         source_hashes_match = (
             product.get("producerScriptSha256") == sha256_file(producer_script)
@@ -1742,7 +1742,6 @@ def validate_positive_baseline_v2(
         "corpusManifestSha256": frozen_corpus_digest,
         "corpusVersion": corpus.get("corpusVersion"),
         "fixedCorpusRows": len(fixed_ids),
-        "fixtureManifestSha256": sha256_file(repo_root / "fixtures/manifest.json"),
         "identityKey": row.get("identityKey"),
         "oracleManifestSha256": sha256_file(oracle_path),
         "protocolSha256": frozen_protocol_digest,
@@ -2004,8 +2003,8 @@ def validate_all_manifests(
     fixture_manifest = repo_root / "fixtures" / "manifest.json"
     runtime_manifest = repo_root / "fixtures" / "runtime-matrix.json"
     if reference.get("baselineArtifactId") == "compatibility-1x-baseline-zero":
-        if baseline.get("fixtureManifestSha256") != sha256_file(fixture_manifest):
-            fail("baseline fixtureManifestSha256 does not match fixtures/manifest.json")
+        # The zero baseline is an immutable historical snapshot. Current fixture
+        # registry rows are validated independently and do not rewrite it.
         if baseline.get("runtimeRegistrySha256") != sha256_file(runtime_manifest):
             fail("baseline runtimeRegistrySha256 does not match fixtures/runtime-matrix.json")
     if not active_additive_scheme:

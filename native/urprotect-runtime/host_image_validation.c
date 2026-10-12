@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include "host_image_validation.h"
+#include "android_packed_relocation_tags.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -39,8 +40,9 @@ static void urp_trace_validation_failure(const char *stage, urp_status status)
 #define URP_GNU_PROPERTY_AARCH64_FEATURE_1_AND UINT32_C(0xC0000000)
 #define URP_GNU_PROPERTY_AARCH64_FEATURE_1_BTI UINT32_C(1)
 #define URP_GNU_PROPERTY_AARCH64_FEATURE_1_PAC UINT32_C(2)
-#define URP_PF_W 2U
 #define URP_PF_X 1U
+#define URP_PF_W 2U
+#define URP_PF_R 4U
 #define URP_DT_NEEDED 1U
 #define URP_DT_PLTRELSZ 2U
 #define URP_DT_PLTGOT 3U
@@ -82,14 +84,6 @@ static void urp_trace_validation_failure(const char *stage, urp_status status)
 #define URP_DT_RELRSZ 35U
 #define URP_DT_RELR 36U
 #define URP_DT_RELRENT 37U
-#define URP_DT_ANDROID_REL UINT64_C(0x6000000f)
-#define URP_DT_ANDROID_RELSZ UINT64_C(0x60000010)
-#define URP_DT_ANDROID_RELA UINT64_C(0x60000011)
-#define URP_DT_ANDROID_RELASZ UINT64_C(0x60000012)
-#define URP_DT_ANDROID_RELR UINT64_C(0x6fffe000)
-#define URP_DT_ANDROID_RELRSZ UINT64_C(0x6fffe001)
-#define URP_DT_ANDROID_RELRENT UINT64_C(0x6fffe003)
-#define URP_DT_ANDROID_RELRCOUNT UINT64_C(0x6fffe005)
 #define URP_DT_VERSYM UINT64_C(0x6ffffff0)
 #define URP_DT_GNU_HASH UINT64_C(0x6ffffef5)
 #define URP_DT_VERDEF UINT64_C(0x6ffffffc)
@@ -399,6 +393,68 @@ static int urp_find_load_range(
         return 1;
     }
     return 0;
+}
+
+static int urp_find_tls_owner(
+    const uint8_t *image,
+    size_t image_size,
+    uint64_t program_header_offset,
+    uint16_t program_header_count,
+    uint64_t tls_file_offset,
+    uint64_t tls_virtual_address,
+    uint64_t tls_file_size,
+    uint64_t tls_memory_size,
+    uint32_t tls_flags)
+{
+    size_t owner_count = 0U;
+    for (uint16_t index = 0; index < program_header_count; ++index) {
+        const uint8_t *header;
+        if (!urp_get_program_header(
+                image,
+                image_size,
+                program_header_offset,
+                program_header_count,
+                index,
+                &header)) {
+            return 0;
+        }
+
+        if (urp_read_u32_le(header) != URP_PT_LOAD) {
+            continue;
+        }
+
+        uint32_t load_flags = urp_read_u32_le(header + 4U);
+        uint64_t load_file_offset = urp_read_u64_le(header + 8U);
+        uint64_t load_virtual_address = urp_read_u64_le(header + 16U);
+        uint64_t load_file_size = urp_read_u64_le(header + 32U);
+        uint64_t load_memory_size = urp_read_u64_le(header + 40U);
+        if ((load_flags & (URP_PF_R | URP_PF_W)) != (URP_PF_R | URP_PF_W)
+            || tls_virtual_address < load_virtual_address
+            || tls_memory_size > load_memory_size
+            || tls_virtual_address - load_virtual_address
+                > load_memory_size - tls_memory_size) {
+            continue;
+        }
+
+        uint64_t virtual_delta = tls_virtual_address - load_virtual_address;
+        if (tls_file_size != 0U) {
+            if (tls_file_offset < load_file_offset
+                || tls_file_size > load_file_size
+                || tls_file_offset - load_file_offset != virtual_delta
+                || tls_file_offset - load_file_offset > load_file_size - tls_file_size) {
+                continue;
+            }
+        }
+
+        if ((tls_flags & URP_PF_W) != 0U && (load_flags & URP_PF_W) == 0U) {
+            continue;
+        }
+        if (++owner_count > 1U) {
+            return 0;
+        }
+    }
+
+    return owner_count == 1U;
 }
 
 static int urp_validate_relocation_target(
@@ -1086,6 +1142,11 @@ static urp_status urp_validate_relr(
     if (!dynamic->has_relr) {
         return URP_STATUS_OK;
     }
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    /* Bionic/Termux currently ignores DT_RELR metadata; reject before dlopen
+     * rather than allowing an unrelocated pointer to reach the entry point. */
+    return URP_STATUS_UNSUPPORTED;
+#endif
     if (!dynamic->has_relrsz || !dynamic->has_relrent
         || dynamic->relrent != sizeof(uint64_t)
         || dynamic->relrsz % dynamic->relrent != 0U) {
@@ -1545,6 +1606,7 @@ urp_status urp_host_image_validate(
     size_t load_count = 0U;
     size_t dependency_count = 0U;
     size_t dynamic_segment_count = 0U;
+    size_t tls_segment_count = 0U;
     int executable_load = 0;
     for (uint16_t index = 0; index < program_header_count; ++index) {
         uint64_t header_offset;
@@ -1600,18 +1662,29 @@ urp_status urp_host_image_validate(
             break;
         }
         case URP_PT_TLS:
-            /* P4-A bounded slice: static initial-exec TLS is owned by the system loader. */
-            if ((flags & URP_PF_X) != 0U
-                || !urp_find_load_range(
+            /*
+             * HostContext and managed HostContext materialization share the
+             * sectioned, writable-owner PT_TLS contract. StructuralElf may
+             * retain broader observation-only facts, but handoff accepts only
+             * one non-empty readable TLS segment with an exact writable load
+             * owner and a congruent file/template range.
+             */
+            ++tls_segment_count;
+            if (tls_segment_count > 1U
+                || memory_size == 0U
+                || (flags & URP_PF_X) != 0U
+                || (flags & URP_PF_R) == 0U
+                || (flags & ~(URP_PF_R | URP_PF_W)) != 0U
+                || !urp_find_tls_owner(
                     image,
                     image_size,
                     program_header_offset,
                     program_header_count,
+                    file_offset,
                     virtual_address,
+                    file_size,
                     memory_size,
-                    URP_PF_W,
-                    0,
-                    NULL)) {
+                    flags)) {
                 URP_TRACE_VALIDATION_FAILURE("PT_TLS", URP_STATUS_UNSUPPORTED);
                 return URP_STATUS_UNSUPPORTED;
             }

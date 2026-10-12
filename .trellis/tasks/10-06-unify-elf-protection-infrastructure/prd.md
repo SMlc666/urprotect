@@ -8,10 +8,18 @@ The user value is a protection artifact that remains executable and behaviorally
 
 ## Confirmed requirements
 
+### R0. Structural wrapper and selected-function analysis boundary
+
+- Generic ELF parsing, validation, packing, layout, and rehydration must remain structural operations over program headers, load maps, symbols, relocations, dynamic metadata, and bounded byte ranges; they must not disassemble the whole image or build a whole-image code CFG as a prerequisite.
+- AArch64 instruction semantics, CFG, register/data-flow, indirect-target discovery, and jump-table resolution belong to explicit selected-function passes and demand-driven dependency queries.
+- `protect` and `protect-image` begin from explicit function selectors. `rehydrate-image` consumes the semantic/layout artifact and does not rediscover code meaning from raw source bytes.
+- Whole-image instruction inspection is available only through the explicit current observation API; it never gates validation, packing, layout, protection, or publication. The deprecated `Aarch64Analyzer` wrapper and Boolean/CLI aliases are deleted rather than retained as compatibility surfaces.
+- Whole-file output materialization does not imply whole-program code analysis. Unrelated functions and executable bytes must not affect a selected-function protection result.
+
 ### R1. One production pipeline
 
 - `protect` becomes a high-level one-command facade over the same producer/materializer workflow used by `protect-image` and `rehydrate-image`.
-- The old direct `FunctionProtectionService.Protect` writer is removed from production behavior after migration; it may remain temporarily as a test oracle only.
+- The old direct `FunctionProtectionService.Protect` writer is removed from production behavior; no alternate writer, migration oracle, or historical test/evidence path remains.
 - Producer, layout/materialization, validation, and publication logic each have one owner.
 - Intermediate Protected Image, role, stage, native-image, and rehydration evidence remains available for CI or an explicit evidence-directory mode.
 
@@ -61,15 +69,17 @@ The user value is a protection artifact that remains executable and behaviorally
 
 ## Confirmed repository facts
 
-- `src/UrProtect.Core/Protect/FunctionProtectionService.cs` currently finds a `PT_NULL` slot, appends an RX `PT_LOAD`, patches an entry `B imm26`, and rejects direct calls, indirect branches, and most non-terminal PC-relative instructions.
-- `src/UrProtect.Core/Protect/ProtectedImageV1.cs` currently models only `EmitRegion` and `ApplyEntryBranch26` operations.
-- `src/UrProtect.Core/Rehydrate/GenericRehydrationEngine.cs` currently materializes the `outer-execveat` layout and reports the HostContext materializer as a later boundary.
+- `src/UrProtect.Core/Application/Protection/FunctionProtectionService.cs` currently finds a `PT_NULL` slot, appends an RX `PT_LOAD`, patches an entry `B imm26`, and rejects direct calls, indirect branches, and most non-terminal PC-relative instructions.
+- `src/UrProtect.Core/Application/Protection/ProtectedImageV1.cs` currently models only `EmitRegion` and `ApplyEntryBranch26` operations.
+- `src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs` currently materializes the `outer-execveat` layout and reports the HostContext materializer as a later boundary.
 - The repository has no general `.eh_frame`/CFI rewrite engine or complete TLS semantic rewriter today.
 - The current narrow glibc vertical slice is healthy: Release build succeeds with zero warnings/errors, 175 managed tests pass, protection E2E passes, and rehydration/native-handoff/behavioral-oracle evidence passes.
 
 ## Acceptance criteria
 
 - [ ] `protect`, `protect-image`, and `rehydrate-image` use one production rewrite/materialization workflow; no direct writer remains as a separate production behavior.
+- [ ] The current `HostContextEntry` profile has a complete profile-specific materialization path through the shared workflow and passes its native AArch64 HostContext handoff oracle; it is not accepted and then rejected by a generic outer-profile materializer.
+- [ ] All historical migration paths and formats are absent from production, current test data, manifests, and evidence gates; no compatibility aliases or alternate direct writer remain.
 - [ ] A valid fixture with every program-header slot occupied is transformed through the unified path without requiring `PT_NULL`, and the resulting ELF passes structural and native behavior checks.
 - [ ] Layout plans and emitted ELF preserve required program-header semantics and record their chosen placement strategy and address mappings.
 - [ ] The semantic rewrite model handles the agreed initial PC-relative, call, literal-pool, and relocation families with positive and nearest-negative fixtures.
@@ -77,7 +87,7 @@ The user value is a protection artifact that remains executable and behaviorally
 - [ ] The agreed TLS relocation models execute with preserved per-thread values and lifecycle evidence on every runtime claimed by the feature row.
 - [ ] Valid CFI is preserved or regenerated for transformed code, and malformed CFI follows the repair/canonicalization contract with retained evidence.
 - [ ] Branch-range, relocation, TLS, indirect-target, jump-table, CFI, layout, overflow, and publication failures return stable diagnostics and publish no partial output.
-- [ ] Existing narrow protection, rehydration, native handoff, regression, fuzz, and compatibility tests remain green after migration.
+- [ ] Existing narrow protection, rehydration, native handoff, regression, fuzz, and current-contract tests remain green after the architecture refactor.
 - [ ] Documentation, compatibility matrix, contract inventory, reports, fixtures, CI commands, and evidence checkers describe the unified workflow and each promoted semantic feature accurately.
 
 ## Scope decision
@@ -91,3 +101,7 @@ The user value is a protection artifact that remains executable and behaviorally
 - Untrusted binary reads, counts, offsets, sizes, and address arithmetic remain bounded and checked.
 - Unknown or unrecoverable semantics are never guessed; the contract must classify them deterministically.
 - Native loader/runtime claims remain conditional on retained host-specific evidence.
+
+## Architecture prerequisite
+
+All semantic feature and workflow implementation is blocked on child task `10-06-architecture-boundary-refactor` Gates G0-G2: current-contract purge, namespace-first responsibility boundaries, one production workflow, and complete HostContext materialization. The prerequisite deletes all historical migration paths and test/evidence data; downstream tasks must not retain migration fixtures, compatibility aliases, or alternate production writers.

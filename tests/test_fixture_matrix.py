@@ -117,17 +117,10 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertEqual(features["runtime.host-context.production-pack"]["status"], "validated")
 
-    def test_legacy_wrapper_and_android_jni_are_labeled_as_baselines(self) -> None:
+    def test_android_jni_is_labeled_as_a_baseline(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         features = {feature["id"]: feature for feature in self.data["features"]}
-        legacy = features["runtime.wrapper-v1-baseline"]
-        self.assertEqual(legacy["status"], "validated")
-        self.assertIn("Wrapper 0.2", legacy["obligation"])
-        self.assertIn(
-            "not an in-process HostContext support claim",
-            " ".join(legacy["constraints"]),
-        )
         android = features["android.jni.native-bridge"]
         self.assertIn("does not execute packed output", " ".join(android["constraints"]))
 
@@ -526,7 +519,7 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertEqual(parser["status"], "proven")
         self.assertEqual(
             parser["witness"],
-            "tests/UrProtect.Core.Tests/ElfSymbolVersionParserTests.cs",
+            "tests/UrProtect.Core.Tests/Structural/ElfSymbolVersionParserTests.cs",
         )
         self.assertIn(
             "liburp-versioned.so",
@@ -713,7 +706,6 @@ class FixtureMatrixTests(unittest.TestCase):
             self.assertIn("runtime.host-context.android-packed-relocation | rejected", rendered)
             self.assertIn("runtime.host-context.symbol-version | rejected", rendered)
             self.assertIn("elf.symbol-version.definitions | proven", rendered)
-            self.assertIn("runtime.wrapper-v1-baseline | validated", rendered)
 
 
 if __name__ == "__main__":

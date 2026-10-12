@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check bounded arithmetic, parser/layout separation, typed ranges, and positive/negative fixture coverage."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check stable diagnostics and no-partial-publication for missing proofs and malformed/ambiguous tables."}
+{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Check that runtime target translation and three-runtime claims have explicit contracts and evidence."}
+{"file":".trellis/tasks/10-06-indirect-control-jump-tables/design.md","reason":"Check implementation against selected-function roots, demand-driven resolution, ownership, preservation, and runtime-extension boundaries."}
+{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/research/analysis-boundary-audit.md","reason":"Verify the wrapper remains structural and no whole-image code scan is reintroduced as a prerequisite."}
+{"file":"tests/UrProtect.Core.Tests/NoOpPipelineTests.cs","reason":"Guard the architecture boundary: structural validation is independent of decoder availability and unrelated code bytes."}
+{"file":"tests/UrProtect.Core.Tests/Aarch64SemanticPlanFactoryTests.cs","reason":"Ensure indirect/jump-table extensions attach to the canonical selected-function semantic plan."}

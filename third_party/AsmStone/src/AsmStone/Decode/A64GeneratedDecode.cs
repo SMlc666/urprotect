@@ -104,6 +104,7 @@ internal static class A64GeneratedDecode
                 address)
             {
                 SourceName = decoded.Info.Name,
+                Code = decoded.Code,
                 Flags = flags
                     | (HasPcRelativeOperand(decoded)
                         ? A64InstructionFlags.IsPcRelative
