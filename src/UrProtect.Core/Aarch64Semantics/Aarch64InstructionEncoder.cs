@@ -5,8 +5,12 @@ using A64Operand = global::AsmStone.Model.A64Operand;
 using A64Register = global::AsmStone.Model.A64Register;
 using A64RegisterOperand = global::AsmStone.Model.RegisterOperand;
 using A64ImmediateOperand = global::AsmStone.Model.ImmediateOperand;
+using A64EnumImmediateOperand = global::AsmStone.Model.EnumImmediateOperand;
+using A64EnumKind = global::AsmStone.Model.A64EnumKind;
 using A64MemoryOperand = global::AsmStone.Model.MemoryOperand;
 using A64TargetOperand = global::AsmStone.Model.TargetOperand;
+using A64ModifiedRegisterOperand = global::AsmStone.Model.ModifiedRegisterOperand;
+using A64OperandDirection = global::AsmStone.Model.A64OperandDirection;
 
 namespace UrProtect.Core.Aarch64Semantics;
 
@@ -21,6 +25,10 @@ public enum Aarch64InstructionEncodingFamily
     Literal19,
     AddImmediate,
     LoadStoreUnsignedImmediate,
+    MoveWideImmediate,
+    MoveRegister,
+    CompareImmediate,
+    Return,
 }
 
 public enum Aarch64InstructionEncodeDiagnosticCode
@@ -48,7 +56,8 @@ public readonly record struct Aarch64InstructionEncodeRequest(
     ulong TargetOrImmediate,
     int AccessWidth = 0,
     uint? OutputTemplateEncoding = null,
-    bool PreserveSourceImmediate = false);
+    bool PreserveSourceImmediate = false,
+    int RegisterWidth = 0);
 
 public readonly record struct Aarch64InstructionBuildRequest(
     Aarch64InstructionEncodingFamily Family,
@@ -59,7 +68,10 @@ public readonly record struct Aarch64InstructionBuildRequest(
     int DestinationWidth = 64,
     int AccessWidth = 0,
     bool IsStore = false,
-    bool ShiftedImmediate = false);
+    bool ShiftedImmediate = false,
+    int ImmediateShift = 0,
+    byte? SourceRegister = null,
+    int ConditionCode = 0);
 
 public readonly record struct Aarch64InstructionEncodeResult(
     bool IsSuccess,
@@ -84,6 +96,11 @@ public interface IAarch64InstructionEncoder
     Aarch64InstructionEncodeResult TryEncode(Aarch64InstructionEncodeRequest request);
 
     Aarch64InstructionEncodeResult TryCreate(Aarch64InstructionBuildRequest request);
+
+    Aarch64EncodeResult TryPermuteGeneralRegisters(
+        uint encoding,
+        ulong address,
+        IReadOnlyDictionary<byte, byte> mapping);
 }
 
 /// <summary>
@@ -96,6 +113,16 @@ public interface IAarch64InstructionEncoder
 /// </remarks>
 public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
 {
+    private const string MovzWSourceName = "MOVZWi";
+    private const string MovnWSourceName = "MOVNWi";
+    private const string MovkWSourceName = "MOVKWi";
+    private const string MovzXSourceName = "MOVZXi";
+    private const string MovnXSourceName = "MOVNXi";
+    private const string MovkXSourceName = "MOVKXi";
+    private const string OrrWSourceName = "ORRWrs";
+    private const string OrrXSourceName = "ORRXrs";
+    private const string LogicalShiftedRegister32Codec = "logical_shifted_reg32";
+    private const string LogicalShiftedRegister64Codec = "logical_shifted_reg64";
     private static readonly string[] ConditionalBranchDomains = { "am_brcond", "am_brcmpcond" };
     private static readonly string[] TestBranchDomains = { "am_tbrcond" };
     private static readonly string[] LiteralDomains = { "am_ldrlit" };
@@ -135,7 +162,7 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
                 $"AsmStone could not decode the source instruction: {decodeDiagnostic}");
         }
 
-        if (!TryValidateFamily(sourceInstruction, request.Family, request.AccessWidth, out var familyError))
+        if (!TryValidateFamily(sourceInstruction, request.Family, request.AccessWidth, request.RegisterWidth, out var familyError))
         {
             return Failure(
                 familyError.Code,
@@ -157,7 +184,7 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
                     $"AsmStone could not decode the output instruction template: {templateDiagnostic}");
             }
 
-            if (!TryValidateFamily(decodedTemplate, request.Family, request.AccessWidth, out var templateFamilyError)
+            if (!TryValidateFamily(decodedTemplate, request.Family, request.AccessWidth, request.RegisterWidth, out var templateFamilyError)
                 || !string.Equals(
                     decodedTemplate.SourceName,
                     sourceInstruction.SourceName,
@@ -188,6 +215,36 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
             case Aarch64InstructionEncodingFamily.Literal19:
                 ReplaceTarget(operands, request.TargetOrImmediate);
                 break;
+            case Aarch64InstructionEncodingFamily.MoveWideImmediate:
+                if (request.PreserveSourceImmediate)
+                {
+                    if (!TryGetSourceImmediate(
+                            sourceInstruction,
+                            request.Family,
+                            out var sourceImmediate)
+                        || sourceImmediate < 0)
+                    {
+                        return Failure(
+                            Aarch64InstructionEncodeDiagnosticCode.InvalidOperand,
+                            "The source move-wide instruction does not expose a non-negative immediate.");
+                    }
+
+                    expectedValue = checked((ulong)sourceImmediate);
+                }
+
+                if (expectedValue > ushort.MaxValue)
+                {
+                    return Failure(
+                        Aarch64InstructionEncodeDiagnosticCode.InvalidOperand,
+                        "Move-wide immediate must fit the 16-bit halfword domain.");
+                }
+
+                ReplaceImmediate(operands, (long)expectedValue);
+                break;
+            case Aarch64InstructionEncodingFamily.MoveRegister:
+            case Aarch64InstructionEncodingFamily.Return:
+                break;
+            case Aarch64InstructionEncodingFamily.CompareImmediate:
             case Aarch64InstructionEncodingFamily.AddImmediate:
             case Aarch64InstructionEncodingFamily.LoadStoreUnsignedImmediate:
                 if (request.PreserveSourceImmediate)
@@ -222,6 +279,15 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
                             ? sourceInstruction.Operands.OfType<A64ImmediateOperand>().SingleOrDefault()?.EncodedValue
                             : null);
                 }
+                else if (request.Family == Aarch64InstructionEncodingFamily.CompareImmediate)
+                {
+                    ReplaceImmediate(
+                        operands,
+                        (long)expectedValue,
+                        request.PreserveSourceImmediate
+                            ? sourceInstruction.Operands.OfType<A64ImmediateOperand>().SingleOrDefault()?.EncodedValue
+                            : null);
+                }
                 else
                 {
                     ReplaceMemoryOffset(operands, (long)expectedValue);
@@ -238,7 +304,7 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
             Address = request.OutputAddress,
             Operands = operands,
         };
-        return EncodeAndRoundTrip(outputInstruction, request.Family, expectedValue);
+        return EncodeAndRoundTrip(outputInstruction, request.Family, expectedValue, request.RegisterWidth);
     }
 
     public Aarch64InstructionEncodeResult TryCreate(Aarch64InstructionBuildRequest request)
@@ -255,7 +321,19 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
             return Failure(error.Code, error.Message);
         }
 
-        return EncodeAndRoundTrip(instruction!, request.Family, request.TargetOrImmediate);
+        var expectedValue = request.Family == Aarch64InstructionEncodingFamily.MoveRegister
+            || request.Family == Aarch64InstructionEncodingFamily.Return
+            ? 0UL
+            : request.TargetOrImmediate;
+        var expectedRegisterWidth = request.Family switch
+        {
+            Aarch64InstructionEncodingFamily.MoveWideImmediate
+            or Aarch64InstructionEncodingFamily.MoveRegister
+            or Aarch64InstructionEncodingFamily.CompareImmediate => request.DestinationWidth,
+            Aarch64InstructionEncodingFamily.Return => 64,
+            _ => 0,
+        };
+        return EncodeAndRoundTrip(instruction!, request.Family, expectedValue, expectedRegisterWidth);
     }
 
     public Aarch64EncodeResult TryPermuteGeneralRegisters(
@@ -319,7 +397,8 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
     private Aarch64InstructionEncodeResult EncodeAndRoundTrip(
         A64InstructionModel instruction,
         Aarch64InstructionEncodingFamily family,
-        ulong expectedValue)
+        ulong expectedValue,
+        int expectedRegisterWidth = 0)
     {
         if (!global::AsmStone.AsmStoneApi.TryEncode(
                 instruction,
@@ -348,8 +427,9 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
             decoded,
             family,
             GetExpectedAccessWidth(instruction, family),
+            expectedRegisterWidth,
             out var familyError);
-        var valueMatches = familyMatches && MatchesExpectedValue(decoded, family, expectedValue);
+        var valueMatches = familyMatches && MatchesExpectedValue(decoded, instruction, family, expectedValue);
         if (!familyMatches || !valueMatches)
         {
             var familyMessage = familyError.Message ?? string.Empty;
@@ -402,6 +482,22 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
                 mnemonic = "bl";
                 operands = new A64Operand[] { new A64TargetOperand(request.TargetOrImmediate) };
                 break;
+            case Aarch64InstructionEncodingFamily.ConditionalBranch19:
+                if ((uint)request.ConditionCode > 15)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.InvalidOperand,
+                        "Conditional branches require a condition code from 0 through 15.");
+                    return false;
+                }
+
+                sourceName = "Bcc";
+                mnemonic = "b.cond";
+                operands = new A64Operand[]
+                {
+                    new A64EnumImmediateOperand(request.ConditionCode, A64EnumKind.ConditionCode),
+                    new A64TargetOperand(request.TargetOrImmediate),
+                };
+                break;
             case Aarch64InstructionEncodingFamily.AdrPrelLo21:
             case Aarch64InstructionEncodingFamily.AdrPrelPgHi21:
                 sourceName = request.Family == Aarch64InstructionEncodingFamily.AdrPrelLo21 ? "ADR" : "ADRP";
@@ -422,6 +518,94 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
                         : A64Register.X(request.DestinationRegister)),
                     new A64TargetOperand(request.TargetOrImmediate),
                 };
+                break;
+            case Aarch64InstructionEncodingFamily.MoveWideImmediate:
+                if (request.DestinationWidth is not (32 or 64)
+                    || request.TargetOrImmediate > ushort.MaxValue
+                    || !IsValidMoveWideShift(request.DestinationWidth, request.ImmediateShift))
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.InvalidOperand,
+                        "Move-wide construction requires a 16-bit immediate and a valid halfword shift for its register width.");
+                    return false;
+                }
+
+                sourceName = request.DestinationWidth == 32 ? MovzWSourceName : MovzXSourceName;
+                mnemonic = "movz";
+                operands = new A64Operand[]
+                {
+                    new A64RegisterOperand(request.DestinationWidth == 32
+                        ? A64Register.W(request.DestinationRegister)
+                        : A64Register.X(request.DestinationRegister)),
+                    new A64ImmediateOperand((long)request.TargetOrImmediate),
+                    new A64ImmediateOperand(request.ImmediateShift),
+                };
+                break;
+            case Aarch64InstructionEncodingFamily.MoveRegister:
+                if (request.DestinationWidth is not (32 or 64)
+                    || request.SourceRegister is not { } sourceRegister
+                    || sourceRegister > 30)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.InvalidRequest,
+                        "Register moves require 32- or 64-bit general registers from x0/w0 through x30/w30.");
+                    return false;
+                }
+
+                sourceName = request.DestinationWidth == 32 ? OrrWSourceName : OrrXSourceName;
+                mnemonic = "orr";
+                var moveSource = request.DestinationWidth == 32
+                    ? A64Register.W(sourceRegister)
+                    : A64Register.X(sourceRegister);
+                var moveZero = request.DestinationWidth == 32
+                    ? A64Register.Zr(32)
+                    : A64Register.Zr(64);
+                operands = new A64Operand[]
+                {
+                    new A64RegisterOperand(request.DestinationWidth == 32
+                        ? A64Register.W(request.DestinationRegister)
+                        : A64Register.X(request.DestinationRegister)),
+                    new A64RegisterOperand(moveZero),
+                    new A64ModifiedRegisterOperand(
+                        moveSource,
+                        0,
+                        request.DestinationWidth == 32
+                            ? LogicalShiftedRegister32Codec
+                            : LogicalShiftedRegister64Codec),
+                };
+                break;
+            case Aarch64InstructionEncodingFamily.CompareImmediate:
+                if (request.DestinationWidth is not (32 or 64)
+                    || !IsValidAddSubImmediate(request.TargetOrImmediate))
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.InvalidOperand,
+                        "Compare-immediate construction requires a valid ADD/SUB immediate domain.");
+                    return false;
+                }
+
+                sourceName = request.DestinationWidth == 32 ? "SUBSWri" : "SUBSXri";
+                mnemonic = "subs";
+                operands = new A64Operand[]
+                {
+                    new A64RegisterOperand(request.DestinationWidth == 32
+                        ? A64Register.Zr(32)
+                        : A64Register.Zr(64)),
+                    new A64RegisterOperand(request.DestinationWidth == 32
+                        ? A64Register.W(request.BaseRegister)
+                        : A64Register.X(request.BaseRegister)),
+                    new A64ImmediateOperand((long)request.TargetOrImmediate),
+                };
+                break;
+            case Aarch64InstructionEncodingFamily.Return:
+                var returnRegister = request.SourceRegister ?? 30;
+                if (returnRegister > 30)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.InvalidRequest,
+                        "Return construction requires a general register from x0 through x30.");
+                    return false;
+                }
+
+                sourceName = "RET";
+                mnemonic = "ret";
+                operands = new A64Operand[] { new A64RegisterOperand(A64Register.X(returnRegister)) };
                 break;
             case Aarch64InstructionEncodingFamily.AddImmediate:
                 if (request.TargetOrImmediate > 0xFFF000
@@ -502,6 +686,7 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
         A64InstructionModel instruction,
         Aarch64InstructionEncodingFamily family,
         int expectedAccessWidth,
+        int expectedRegisterWidth,
         out (Aarch64InstructionEncodeDiagnosticCode Code, string Message) error)
     {
         error = default;
@@ -542,6 +727,72 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
                     false,
                     LiteralDomains,
                     out error);
+            case Aarch64InstructionEncodingFamily.MoveWideImmediate:
+                if (!IsMoveWideSourceName(instruction.SourceName)
+                    || !TryGetOutputRegisterWidth(instruction, out var moveWideWidth)
+                    || !IsMoveWideWidthConsistent(instruction.SourceName, moveWideWidth)
+                    || instruction.Operands.OfType<A64ImmediateOperand>().Count() != 2)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.UnsupportedInstructionFamily,
+                        "The source instruction is not a valid MOVZ/MOVN/MOVK immediate form.");
+                    return false;
+                }
+
+                if (expectedRegisterWidth != 0 && moveWideWidth != expectedRegisterWidth)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.OperandWidthMismatch,
+                        "The move-wide register width does not match the requested width.");
+                    return false;
+                }
+
+                return true;
+            case Aarch64InstructionEncodingFamily.MoveRegister:
+                if (!IsCanonicalMoveRegister(instruction)
+                    || !TryGetOutputRegisterWidth(instruction, out var moveWidth))
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.UnsupportedInstructionFamily,
+                        "The source instruction is not a canonical ORR register-move alias.");
+                    return false;
+                }
+
+                if (expectedRegisterWidth != 0 && moveWidth != expectedRegisterWidth)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.OperandWidthMismatch,
+                        "The register-move width does not match the requested width.");
+                    return false;
+                }
+
+                return true;
+            case Aarch64InstructionEncodingFamily.CompareImmediate:
+                if (!IsCanonicalCompareImmediate(instruction, out var compareWidth)
+                    || !instruction.Flags.HasFlag(global::AsmStone.Model.A64InstructionFlags.IsCompare)
+                    || instruction.Operands.OfType<A64ImmediateOperand>().Count() != 1)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.UnsupportedInstructionFamily,
+                        "The source instruction is not a canonical CMP/SUBS-immediate compare form.");
+                    return false;
+                }
+
+                if (expectedRegisterWidth != 0 && compareWidth != expectedRegisterWidth)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.OperandWidthMismatch,
+                        "The compare register width does not match the requested width.");
+                    return false;
+                }
+
+                return true;
+            case Aarch64InstructionEncodingFamily.Return:
+                if (instruction.SourceName != "RET"
+                    || !instruction.Flags.HasFlag(global::AsmStone.Model.A64InstructionFlags.IsReturn)
+                    || instruction.Operands.OfType<A64RegisterOperand>().Count() != 1
+                    || instruction.Operands.OfType<A64RegisterOperand>().Single().Register.Width != 64)
+                {
+                    error = (Aarch64InstructionEncodeDiagnosticCode.UnsupportedInstructionFamily,
+                        "The source instruction is not the canonical RET form.");
+                    return false;
+                }
+
+                return true;
             case Aarch64InstructionEncodingFamily.AddImmediate:
                 if (!string.Equals(instruction.Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
                     || instruction.Operands.OfType<A64ImmediateOperand>().Count() != 1)
@@ -610,7 +861,20 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
         out long value)
     {
         value = default;
-        if (family == Aarch64InstructionEncodingFamily.AddImmediate)
+        if (family == Aarch64InstructionEncodingFamily.MoveWideImmediate)
+        {
+            var immediate = instruction.Operands.OfType<A64ImmediateOperand>().FirstOrDefault();
+            if (immediate is null)
+            {
+                return false;
+            }
+
+            value = immediate.Value;
+            return true;
+        }
+
+        if (family is Aarch64InstructionEncodingFamily.AddImmediate
+            or Aarch64InstructionEncodingFamily.CompareImmediate)
         {
             var immediate = instruction.Operands.OfType<A64ImmediateOperand>().SingleOrDefault();
             if (immediate is null)
@@ -667,8 +931,91 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
         }
     }
 
+    private static bool TryGetOutputRegisterWidth(
+        A64InstructionModel instruction,
+        out int width)
+    {
+        var output = instruction.OperandSemantics
+            .FirstOrDefault(operand => operand.Direction is A64OperandDirection.Output or A64OperandDirection.InputOutput)
+            ?.Operand as A64RegisterOperand;
+        width = output?.Register.Width ?? 0;
+        return width is 32 or 64;
+    }
+
+    private static bool IsMoveWideSourceName(string? sourceName) => sourceName is
+        MovzWSourceName or MovnWSourceName or MovkWSourceName
+        or MovzXSourceName or MovnXSourceName or MovkXSourceName;
+
+    private static bool IsMoveRegisterSourceName(string? sourceName) => sourceName is OrrWSourceName or OrrXSourceName;
+
+    private static bool IsMoveWideWidthConsistent(string? sourceName, int width) => width switch
+    {
+        32 => sourceName is MovzWSourceName or MovnWSourceName or MovkWSourceName,
+        64 => sourceName is MovzXSourceName or MovnXSourceName or MovkXSourceName,
+        _ => false,
+    };
+
+    private static bool IsCanonicalCompareImmediate(A64InstructionModel instruction, out int width)
+    {
+        width = 0;
+        if (instruction.SourceName is not ("SUBSWri" or "SUBSXri")
+            || instruction.Operands.Count != 3
+            || instruction.Operands[0] is not A64RegisterOperand destination
+            || instruction.Operands[1] is not A64RegisterOperand source
+            || instruction.Operands[2] is not A64ImmediateOperand)
+        {
+            return false;
+        }
+
+        width = instruction.SourceName == "SUBSWri" ? 32 : 64;
+        return destination.Register.Class == global::AsmStone.Model.A64RegisterClass.General
+            && destination.Register.Role == global::AsmStone.Model.A64RegisterRole.Zero
+            && destination.Register.Width == width
+            && source.Register.Class == global::AsmStone.Model.A64RegisterClass.General
+            && source.Register.Width == width
+            && source.Register.Role is global::AsmStone.Model.A64RegisterRole.None or global::AsmStone.Model.A64RegisterRole.StackPointer;
+    }
+
+    private static bool IsCanonicalMoveRegister(A64InstructionModel instruction)
+    {
+        if (!IsMoveRegisterSourceName(instruction.SourceName)
+            || instruction.Operands.Count != 3
+            || instruction.Operands[0] is not A64RegisterOperand destination
+            || instruction.Operands[1] is not A64RegisterOperand zeroSource
+            || instruction.Operands[2] is not A64ModifiedRegisterOperand source)
+        {
+            return false;
+        }
+
+        var width = destination.Register.Width;
+        var codec = width == 32 ? LogicalShiftedRegister32Codec : LogicalShiftedRegister64Codec;
+        return width is 32 or 64
+            && instruction.SourceName == (width == 32 ? OrrWSourceName : OrrXSourceName)
+            && destination.Register.Class == global::AsmStone.Model.A64RegisterClass.General
+            && (destination.Register.Role is global::AsmStone.Model.A64RegisterRole.None or global::AsmStone.Model.A64RegisterRole.Zero)
+            && zeroSource.Register.Class == global::AsmStone.Model.A64RegisterClass.General
+            && zeroSource.Register.Role == global::AsmStone.Model.A64RegisterRole.Zero
+            && zeroSource.Register.Width == width
+            && source.Register.Class == global::AsmStone.Model.A64RegisterClass.General
+            && (source.Register.Role is global::AsmStone.Model.A64RegisterRole.None or global::AsmStone.Model.A64RegisterRole.Zero)
+            && source.Register.Width == width
+            && source.Modifier == 0
+            && string.Equals(source.Codec, codec, StringComparison.Ordinal);
+    }
+
+    private static bool IsValidMoveWideShift(int width, int shift) => width switch
+    {
+        32 => shift is 0 or 16,
+        64 => shift is 0 or 16 or 32 or 48,
+        _ => false,
+    };
+
+    private static bool IsValidAddSubImmediate(ulong value) => value <= 0xFFF000
+        && (value <= 0xFFF || (value & 0xFFF) == 0);
+
     private static bool MatchesExpectedValue(
         A64InstructionModel instruction,
+        A64InstructionModel expectedInstruction,
         Aarch64InstructionEncodingFamily family,
         ulong expected)
     {
@@ -680,23 +1027,76 @@ public sealed class Aarch64InstructionEncoder : IAarch64InstructionEncoder
             or Aarch64InstructionEncodingFamily.AdrPrelPgHi21
             or Aarch64InstructionEncodingFamily.Literal19)
         {
-            if (family == Aarch64InstructionEncodingFamily.AdrPrelPgHi21)
+            var targetMatches = family == Aarch64InstructionEncodingFamily.AdrPrelPgHi21
+                ? (instruction.Operands.OfType<A64TargetOperand>().SingleOrDefault()?.Address & ~0xFFFUL)
+                    == (expected & ~0xFFFUL)
+                : instruction.Operands.OfType<A64TargetOperand>().SingleOrDefault()?.Address == expected;
+            if (!targetMatches)
             {
-                return (instruction.Operands.OfType<A64TargetOperand>().SingleOrDefault()?.Address & ~0xFFFUL)
-                    == (expected & ~0xFFFUL);
+                return false;
             }
 
-            return instruction.Operands.OfType<A64TargetOperand>().SingleOrDefault()?.Address == expected;
+            if (family == Aarch64InstructionEncodingFamily.ConditionalBranch19)
+            {
+                var actualCondition = instruction.Operands
+                    .OfType<A64ImmediateOperand>()
+                    .SingleOrDefault(operand => operand.EnumKind == A64EnumKind.ConditionCode)?.Value;
+                var expectedCondition = expectedInstruction.Operands
+                    .OfType<A64ImmediateOperand>()
+                    .SingleOrDefault(operand => operand.EnumKind == A64EnumKind.ConditionCode)?.Value;
+                return actualCondition == expectedCondition;
+            }
+
+            return true;
         }
 
-        if (family == Aarch64InstructionEncodingFamily.AddImmediate)
+        if (family == Aarch64InstructionEncodingFamily.MoveWideImmediate)
         {
-            return instruction.Operands.OfType<A64ImmediateOperand>().SingleOrDefault()?.Value == checked((long)expected);
+            var actualImmediates = instruction.Operands.OfType<A64ImmediateOperand>().ToArray();
+            var expectedImmediates = expectedInstruction.Operands.OfType<A64ImmediateOperand>().ToArray();
+            return actualImmediates.Length == 2
+                && expectedImmediates.Length == 2
+                && actualImmediates[0].Value == checked((long)expected)
+                && actualImmediates[1].Value == expectedImmediates[1].Value
+                && RegisterOperandsMatch(instruction, expectedInstruction);
+        }
+
+        if (family is Aarch64InstructionEncodingFamily.CompareImmediate
+            or Aarch64InstructionEncodingFamily.AddImmediate)
+        {
+            return instruction.Operands.OfType<A64ImmediateOperand>().FirstOrDefault()?.Value == checked((long)expected)
+                && RegisterOperandsMatch(instruction, expectedInstruction);
+        }
+
+        if (family == Aarch64InstructionEncodingFamily.MoveRegister)
+        {
+            return RegisterOperandsMatch(instruction, expectedInstruction)
+                && ModifiedRegisterOperandsMatch(instruction, expectedInstruction);
+        }
+
+        if (family == Aarch64InstructionEncodingFamily.Return)
+        {
+            return RegisterOperandsMatch(instruction, expectedInstruction);
         }
 
         return family == Aarch64InstructionEncodingFamily.LoadStoreUnsignedImmediate
             && instruction.Operands.OfType<A64MemoryOperand>().SingleOrDefault()?.Offset == checked((long)expected);
     }
+
+    private static bool RegisterOperandsMatch(
+        A64InstructionModel actual,
+        A64InstructionModel expected) => actual.Operands
+            .OfType<A64RegisterOperand>()
+            .Select(operand => operand.Register)
+            .SequenceEqual(expected.Operands
+                .OfType<A64RegisterOperand>()
+                .Select(operand => operand.Register));
+
+    private static bool ModifiedRegisterOperandsMatch(
+        A64InstructionModel actual,
+        A64InstructionModel expected) => actual.Operands
+            .OfType<A64ModifiedRegisterOperand>()
+            .SequenceEqual(expected.Operands.OfType<A64ModifiedRegisterOperand>());
 
     private static int GetExpectedAccessWidth(
         A64InstructionModel instruction,
