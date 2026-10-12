@@ -21,6 +21,7 @@ _Static_assert(offsetof(urp_launch_args_v1, argc) == 8, "Argument count offset c
 
 #define FIXTURE_ELF_HEADER_SIZE 64U
 #define FIXTURE_ELF_PROGRAM_HEADER_SIZE 56U
+#define FIXTURE_ELF_SECTION_HEADER_SIZE 64U
 #define FIXTURE_ELF_DYNAMIC_ENTRY_SIZE 16U
 #define FIXTURE_PT_LOAD 1U
 #define FIXTURE_PT_DYNAMIC 2U
@@ -918,7 +919,7 @@ static int fixture_run_real_adapter(const char *fixture_path)
     }
     memcpy(sectionless_image, source, source_size);
     fixture_write_u64_le(sectionless_image + 40U, 0U);
-    fixture_write_u16_le(sectionless_image + 58U, 0U);
+    fixture_write_u16_le(sectionless_image + 58U, FIXTURE_ELF_SECTION_HEADER_SIZE);
     fixture_write_u16_le(sectionless_image + 60U, 0U);
     fixture_write_u16_le(sectionless_image + 62U, 0U);
     uint8_t *sectionless_frame = NULL;
