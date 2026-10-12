@@ -56,6 +56,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_adapter.o
 RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl -pthread
+ENTRY_FIXTURE_LDFLAGS ?=
 
 .PHONY: all test runtime self-test host-context-launcher host-context-image-handoff host-image-validation-probe symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
@@ -164,7 +165,7 @@ $(SYMBOL_SELF_TEST): $(SYMBOL_SELF_TEST_OBJECT) $(BUILD_DIR)/host_adapter.o $(BU
 
 $(ENTRY_FIXTURE): $(ENTRY_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
+	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now $(ENTRY_FIXTURE_LDFLAGS) "$<" -o "$@"
 
 $(SYMBOL_FIXTURE): $(SYMBOL_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"

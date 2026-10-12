@@ -254,14 +254,16 @@ run_shell -c '
   make -C /workspace/native/urprotect-runtime \
     SHELL="${PREFIX}/bin/sh" \
     BUILD_DIR=/artifacts/host-context/build \
+    ENTRY_FIXTURE_LDFLAGS=--pack-dyn-relocs=none \
     CC=clang self-test > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
 ' -- "${compiler_package_specs[@]}"
 
-# The container's apt sandbox may leave its partial-download directory with
-# restrictive ownership; make the retained hash-locked archives readable by
-# the host evidence scanner/upload action.
+# The container's apt sandbox may leave its incomplete partial-download
+# directory root-owned and unreadable. It is not part of the locked package
+# evidence, so remove it before making retained archives readable.
+sudo rm -rf -- "${case_root}/apt-archives/partial"
 sudo chmod -R a+rX "${case_root}/apt-archives"
 
 python3 - "${case_root}/packages-before.txt" "${case_root}/packages.txt" \

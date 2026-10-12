@@ -145,14 +145,16 @@ The managed positive is independently covered by
 | Size/range | Requires `p_filesz <= p_memsz`, bounded file template, and checked virtual range | Global program-header checks require `p_memsz >= p_filesz`, file range in image, and checked alignment/congruence | Both reject basic malformed sizes, but managed diagnostics are more specific |
 | Alignment | Requires power-of-two alignment and `p_offset % p_align == p_vaddr % p_align` | Same generic program-header checks in [host_image_validation.c](/root/urprotect/native/urprotect-runtime/host_image_validation.c:1565) | Equivalent for the current bounded geometry |
 | Permissions | PT_TLS must be readable, non-executable, and have no unknown flags; if writable, owner load must be writable | PT_TLS must be non-executable and must lie in a writable PT_LOAD; it does not require PT_TLS `PF_R` explicitly | Managed/native acceptance can diverge on `PF_R`/`PF_W` combinations |
-| Owning PT_LOAD | Exactly one owner with matching file/virtual mapping; an observed Go zero-file marker at offset/address zero is retained with owner `-1` for observation only | Uses a writable-load containment check; no equivalent ownerless observation contract | Real-sample observation is separate from transform eligibility |
+| Owning PT_LOAD | Exactly one owner with matching file/virtual mapping; an observed Go zero-file marker with `p_vaddr=0`, `p_filesz=0`, a bounded `p_offset` (including the image end), and no owner is retained with owner `-1` for observation only | Uses a writable-load containment check; no equivalent ownerless observation contract | Real-sample observation is separate from transform eligibility |
 | Template/zero-fill | `TlsSegmentFacts` owns initialized bytes and exposes `MemorySize - FileSize` as zero-fill ([TlsFacts.cs](/root/urprotect/src/UrProtect.Core/StructuralElf/TlsFacts.cs:6)) | System loader owns allocation/initialization; native self-test only accepts the narrow adapter PT_TLS slice | Runtime evidence must compare both initialized bytes and zero-fill |
 
 The managed ownerless exception is deliberately narrow: only
-`p_offset=0, p_vaddr=0, p_filesz=0` is retained for structural observation;
-nonzero virtual addresses remain malformed, and projection fails with
-`TlsBindingUnresolved` ([ElfTlsParser.cs](/root/urprotect/src/UrProtect.Core/StructuralElf/ElfTlsParser.cs:160),
+`p_vaddr=0`, `p_filesz=0`, a bounded `p_offset`, and no owning load are
+retained for structural observation. Go's `micro` sample uses a nonzero
+`p_offset` at the image end; the parser retains that fact while projection
+still fails with `TlsBindingUnresolved` ([ElfTlsParser.cs](/root/urprotect/src/UrProtect.Core/StructuralElf/ElfTlsParser.cs:160),
 [ElfParserTests.cs](/root/urprotect/tests/UrProtect.Core.Tests/Structural/ElfParserTests.cs:274)).
+Nonzero virtual addresses and unbounded offsets remain malformed.
 This is compatible with the task's rule that a structurally observed real sample
 is not automatically transformable.
 

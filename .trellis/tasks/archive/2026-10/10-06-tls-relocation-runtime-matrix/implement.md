@@ -251,10 +251,11 @@ the loader-specific sectionless boundary in both its self-test log and
 remaining bionic adapter checks. This does not relax managed ELF structural
 validation.
 
-Go-produced AArch64 ET_DYN samples can contain the exact zero-file PT_TLS BSS
-marker `p_offset=0, p_vaddr=0, p_filesz=0` without an owning PT_LOAD.
-StructuralElf preserves only that bounded observation with an owning-load index
-of `-1`; other ownerless zero-file PT_TLS addresses remain malformed. Managed
+Go-produced AArch64 ET_DYN samples can contain a zero-file PT_TLS BSS
+marker with `p_vaddr=0`, `p_filesz=0`, and a bounded nonzero `p_offset` at the
+image end, without an owning PT_LOAD. StructuralElf preserves only that
+bounded observation with an owning-load index of `-1`; other ownerless
+zero-file PT_TLS addresses remain malformed. Managed
 TLS projection rejects the observed marker before semantic planning because a
 transformable TLS module requires a mapped owning load. This keeps real-sample
 structural validation separate from managed TLS rewrite eligibility.

@@ -283,7 +283,7 @@ public sealed class ElfParserTests
             0x1000);
         BinaryPrimitives.WriteUInt64LittleEndian(
             bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.FileOffset),
-            0);
+            0x200);
         BinaryPrimitives.WriteUInt64LittleEndian(
             bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress),
             0);
@@ -311,6 +311,38 @@ public sealed class ElfParserTests
         Assert.Contains(
             projection.Diagnostics,
             diagnostic => diagnostic.Code == DiagnosticCode.TlsBindingUnresolved);
+    }
+
+    [Fact]
+    public void RejectsOwnerlessZeroFileTlsWithAnUnboundedFileOffset()
+    {
+        var bytes = ElfFixture.TlsPie();
+        var tlsHeaderOffset = ElfFixture.FirstProgramHeaderOffset + (4 * ElfConstants.ProgramHeaderSize64);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(ElfFixture.FirstProgramHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress),
+            0x1000);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.FileOffset),
+            checked((ulong)bytes.Length + 8));
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress),
+            8);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.FileSize),
+            0);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.MemorySize),
+            16);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.Alignment),
+            8);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.TlsMetadataMalformed);
     }
 
     [Fact]

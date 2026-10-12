@@ -169,14 +169,15 @@ internal static class ElfTlsParser
             var isUnmappedZeroFileTlsObservation =
                 owners.Length == 0
                 && header.FileSize == 0
-                && header.Offset == 0
-                && header.VirtualAddress == 0;
+                && header.VirtualAddress == 0
+                && reader.Contains(header.Offset, 0);
             if (isUnmappedZeroFileTlsObservation)
             {
-                // Go's AArch64 linker emits this zero-file TLS BSS marker
-                // without a file/virtual mapping. Keep only this observed
-                // structural shape available for observation; managed TLS
-                // projection still requires an owning load.
+                // Go's AArch64 linker emits a zero-file TLS BSS marker with a
+                // zero virtual address and no owning load. Its file offset can
+                // point at the end of the image even though no template bytes
+                // are read. Keep this bounded structural shape observable;
+                // managed TLS projection still requires an owning load.
             }
             else if (owners.Length != 1)
             {
