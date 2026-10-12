@@ -158,7 +158,7 @@ projection remain valid.
 
 Verified locally:
 
-- `python3 -m unittest discover -s tests -p 'test_*.py'` — 300 passed;
+- `python3 -m unittest discover -s tests -p 'test_*.py'` — 305 passed;
 - `python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr`;
 - `python3 scripts/validate-regression-matrix.py tests/regression-matrix.json`;
 - `python3 ./.trellis/scripts/task.py validate .trellis/tasks/10-06-tls-relocation-runtime-matrix`;
@@ -192,11 +192,11 @@ promote musl, bionic, worker lifecycle, or the other four transformed TLS models
 
 The managed semantic gate is complete for all five typed models. Release
 verification after the AsmStone merge passed with zero build warnings/errors and
-387 managed tests; the focused AsmStone/TLS set passed 95 tests. The serial
-Python suite passed 304 tests, fixture and regression contracts passed 13 and 20
-cases respectively, the protected-image evidence suite passed 9 tests, and the
-native runtime contract, launcher integration, and glibc transformed TLSIE
-HostContext lane all passed.
+389 managed tests; the focused AsmStone/TLS set passed 95 tests. The serial
+Python suite passed 305 tests, fixture and regression contracts passed 13 and 20
+cases respectively, the protected-image evidence suite passed 10 tests, and the
+native runtime contract, launcher integration, bionic boundary evidence, and
+glibc transformed TLSIE HostContext lane all passed.
 
 The only promoted transformed TLS runtime row is
 `initial-exec × host-context-entry × glibc × current-thread`. Its retained
@@ -212,3 +212,21 @@ and transformed runtime rows for local-exec, local-dynamic, general-dynamic,
 and TLSDESC remain explicitly unpromoted. Missing musl tooling, Docker, or a
 bionic userspace must be represented as a feature-specific
 `environment-unavailable` result, never as a glibc-derived pass.
+
+## CI compatibility boundaries
+
+The native bionic linker rejects the ELF-valid sectionless header combination
+when `e_shstrndx=0` on API 26+ targets. The HostContext self-test therefore
+keeps the sectionless positive oracle on glibc, while the bionic build records
+the loader-specific sectionless boundary in both its self-test log and
+`hostContextAdapterOracle.sectionlessImageBoundary`, then continues the
+remaining bionic adapter checks. This does not relax managed ELF structural
+validation.
+
+Go-produced AArch64 ET_DYN samples can contain the exact zero-file PT_TLS BSS
+marker `p_offset=0, p_vaddr=0, p_filesz=0` without an owning PT_LOAD.
+StructuralElf preserves only that bounded observation with an owning-load index
+of `-1`; other ownerless zero-file PT_TLS addresses remain malformed. Managed
+TLS projection rejects the observed marker before semantic planning because a
+transformable TLS module requires a mapped owning load. This keeps real-sample
+structural validation separate from managed TLS rewrite eligibility.

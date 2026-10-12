@@ -31,6 +31,14 @@ public static class TlsStructuralAdapter
         }
 
         var segment = file.TlsMetadata.Segments[0];
+        if (segment.OwningLoadProgramHeaderIndex < 0)
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsBindingUnresolved,
+                "Managed TLS projection requires a PT_TLS template with an owning PT_LOAD.");
+            return Failure<TlsModuleIdentity>(diagnostics);
+        }
+
         var imageDigest = Convert.ToHexString(SHA256.HashData(file.Bytes.Span)).ToLowerInvariant();
         var templateDigest = Convert.ToHexString(SHA256.HashData(segment.InitializedTemplate.Span)).ToLowerInvariant();
         var template = new TlsTemplateContract(

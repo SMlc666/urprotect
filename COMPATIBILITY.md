@@ -244,8 +244,10 @@ builds and runs `native/urprotect-runtime` inside Termux. Its current v3
 HostContext frame is passed to the real fd-backed adapter, the self-test verifies all
 required memfd seals on the image, dispatches `urp_entry` through bionic's
 `dlopen`/`dlsym` path, checks status and release, and retains the build log,
-ELF report, and fixture hash. This validates the narrow bionic adapter
-handoff, with no executable temporary pathname. It does not upgrade the
+ELF report, and fixture hash. The retained result records the loader-specific
+sectionless-image boundary and its exact self-test marker, so removing that
+boundary witness fails evidence validation. This validates the narrow bionic
+adapter handoff, with no executable temporary pathname. It does not upgrade the
 separate production managed-pack integration row
 `runtime.host-context.production-pack`, which now has a retained managed v3
 profile oracle on the native glibc lane. The bionic adapter evidence remains a

@@ -553,6 +553,13 @@ document = {
         "entryDispatch": "urp_entry",
         "executableTemporaryPath": False,
         "loader": "Termux-bionic-dlopen-through-proc-self-fd",
+        "sectionlessImageBoundary": {
+            "status": "loader-unsupported",
+            "loader": "bionic",
+            "reason": "API 26+ bionic requires ELF section headers for the sectionless mutation",
+            "log": "host-context/build-and-test.log",
+            "marker": "HostContext self-test: sectionless image skipped on bionic; loader requires section headers",
+        },
     },
 }
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")

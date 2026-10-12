@@ -400,8 +400,11 @@ identity witness; presence of an unused QEMU executable on the host is not
 treated as emulated execution. The bionic lane now
 builds and runs the native HostContext self-test: a current HostContext frame
 exercises the real bionic adapter, verifies required memfd seals, dispatches
-the entry, releases the image, and retains its log and fixture ELF. This makes
-only `runtime.host-context.bionic-handoff` validated for that adapter slice.
+the entry, releases the image, and retains its log and fixture ELF. The retained
+result also records the bionic loader-specific sectionless-image boundary and
+the exact self-test marker, so removing that boundary witness fails evidence
+validation. This makes only `runtime.host-context.bionic-handoff` validated
+for that adapter slice.
 The managed production-pack row has its separate native-glibc oracle; the
 bionic adapter test does not silently change that runtime-specific claim.
 

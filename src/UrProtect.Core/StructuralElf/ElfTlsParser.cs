@@ -166,7 +166,19 @@ internal static class ElfTlsParser
                             && (header.VirtualAddress - item.Header.VirtualAddress
                                 == header.Offset - item.Header.Offset))))
                 .ToArray();
-            if (owners.Length != 1)
+            var isUnmappedZeroFileTlsObservation =
+                owners.Length == 0
+                && header.FileSize == 0
+                && header.Offset == 0
+                && header.VirtualAddress == 0;
+            if (isUnmappedZeroFileTlsObservation)
+            {
+                // Go's AArch64 linker emits this zero-file TLS BSS marker
+                // without a file/virtual mapping. Keep only this observed
+                // structural shape available for observation; managed TLS
+                // projection still requires an owning load.
+            }
+            else if (owners.Length != 1)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsMetadataMalformed,
@@ -198,7 +210,7 @@ internal static class ElfTlsParser
                 : bytes.Slice(checked((int)header.Offset), checked((int)header.FileSize)).ToArray();
             result.Add(new TlsSegmentFacts(
                 index,
-                owners[0].Index,
+                owners.Length == 1 ? owners[0].Index : -1,
                 new FileOffset(header.Offset),
                 new VirtualAddress(header.VirtualAddress),
                 header.FileSize,

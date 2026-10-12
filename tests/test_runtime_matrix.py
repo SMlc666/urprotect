@@ -378,7 +378,10 @@ Dynamic section at offset 0xf00 contains 1 entry:
             f"{fixture_digest}  fixture.so\n", encoding="utf-8"
         )
         (root / "host-context/build-and-test.log").write_text(
-            "HostContext runtime self-test: PASS\n", encoding="utf-8"
+            "HostContext self-test: sectionless image skipped on bionic; "
+            "loader requires section headers\n"
+            "HostContext runtime self-test: PASS\n",
+            encoding="utf-8",
         )
         (root / "host-context/result.txt").write_text(
             "status=validated\nentry=urp_entry\n", encoding="utf-8"
@@ -464,6 +467,13 @@ Dynamic section at offset 0xf00 contains 1 entry:
                 "entryDispatch": "urp_entry",
                 "executableTemporaryPath": False,
                 "fixtureSha256": fixture_digest,
+                "sectionlessImageBoundary": {
+                    "status": "loader-unsupported",
+                    "loader": "bionic",
+                    "reason": "API 26+ bionic requires ELF section headers for the sectionless mutation",
+                    "log": "host-context/build-and-test.log",
+                    "marker": "HostContext self-test: sectionless image skipped on bionic; loader requires section headers",
+                },
             },
         }
         (root / "result.json").write_text(json.dumps(document), encoding="utf-8")
@@ -477,6 +487,22 @@ Dynamic section at offset 0xf00 contains 1 entry:
             self.make_bionic_evidence(bionic)
             result = self.gate(root, bionic, self._fixture_manifest_path)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_bionic_sectionless_boundary_marker_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.make_core_evidence(root)
+            bionic = root / "bionic"
+            self.make_bionic_evidence(bionic)
+            (bionic / "host-context/build-and-test.log").write_text(
+                "HostContext runtime self-test: PASS\n",
+                encoding="utf-8",
+            )
+
+            result = self.gate(root, bionic, self._fixture_manifest_path)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sectionless image boundary marker", result.stderr)
 
     def test_unavailable_page_probe_cannot_claim_16k_support(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

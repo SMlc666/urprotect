@@ -910,6 +910,17 @@ static int fixture_run_real_adapter(const char *fixture_path)
         return 0;
     }
 
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    /*
+     * Android API 26+ bionic rejects the ELF-valid sectionless header
+     * combination (e_shoff/e_shnum/e_shstrndx all zero) before dynamic
+     * metadata is consulted. Keep this loader-specific boundary explicit;
+     * the glibc lane below remains the sectionless HostContext oracle.
+     */
+    fprintf(
+        stderr,
+        "HostContext self-test: sectionless image skipped on bionic; loader requires section headers\n");
+#else
     uint8_t *sectionless_image = (uint8_t *)malloc(source_size);
     if (!fixture_expect(
             sectionless_image != NULL,
@@ -951,6 +962,7 @@ static int fixture_run_real_adapter(const char *fixture_path)
         free(source);
         return 0;
     }
+#endif
     size_t rela_tag_offset;
     size_t rela_value_offset;
     size_t rela_size_tag_offset;

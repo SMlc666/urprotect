@@ -149,6 +149,22 @@ def check_bionic_evidence(
     ):
         fail("bionic HostContext adapter oracle is incomplete")
 
+    sectionless_boundary = oracle.get("sectionlessImageBoundary")
+    expected_sectionless_marker = (
+        "HostContext self-test: sectionless image skipped on bionic; "
+        "loader requires section headers"
+    )
+    if (
+        not isinstance(sectionless_boundary, dict)
+        or sectionless_boundary.get("status") != "loader-unsupported"
+        or sectionless_boundary.get("loader") != "bionic"
+        or sectionless_boundary.get("reason")
+        != "API 26+ bionic requires ELF section headers for the sectionless mutation"
+        or sectionless_boundary.get("log") != "host-context/build-and-test.log"
+        or sectionless_boundary.get("marker") != expected_sectionless_marker
+    ):
+        fail("bionic sectionless image boundary evidence is incomplete")
+
     required_artifacts = cell.get("requiredArtifacts")
     if not isinstance(required_artifacts, list) or not required_artifacts:
         fail("bionic requiredArtifacts must be a non-empty array")
@@ -234,8 +250,11 @@ def check_bionic_evidence(
     if hashlib.sha256(fixture_binary.read_bytes()).hexdigest() != fixture_digest:
         fail("bionic HostContext fixture bytes do not match result.json digest")
     self_test_path = root / "host-context/build-and-test.log"
-    if "HostContext runtime self-test: PASS" not in self_test_path.read_text(encoding="utf-8"):
+    self_test_text = self_test_path.read_text(encoding="utf-8")
+    if "HostContext runtime self-test: PASS" not in self_test_text:
         fail("bionic HostContext self-test lacks its PASS oracle")
+    if expected_sectionless_marker not in self_test_text:
+        fail("bionic sectionless image boundary marker is missing from the self-test log")
     host_result = (root / "host-context/result.txt").read_text(encoding="utf-8")
     if "status=validated" not in host_result or "entry=urp_entry" not in host_result:
         fail("bionic HostContext result lacks validated entry-dispatch evidence")
