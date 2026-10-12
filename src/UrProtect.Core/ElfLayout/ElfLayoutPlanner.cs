@@ -3,12 +3,14 @@ using System.Security.Cryptography;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
 using UrProtect.Core.SemanticPlanning;
+using UrProtect.Core.Aarch64Semantics;
 
 namespace UrProtect.Core.ElfLayout;
 
 public static class ElfLayoutPlanner
 {
     private const uint GeneratedSegmentPermissions = ElfConstants.PfR | ElfConstants.PfX;
+    private static readonly Aarch64InstructionEncoder InstructionEncoder = new();
     private static readonly int[] TlsDescPairOrdinals = { 0, 1, 2, 3 };
     private static readonly uint?[] TlsDescRelocationTypes =
     {
@@ -370,7 +372,7 @@ public static class ElfLayoutPlanner
                     return false;
                 }
 
-                if (TryEncodeBranch26(branch.Opcode, branchAddress, targetAddress, out var directEncoding, out var directDisplacement))
+                if (ElfLayoutBranchEncoding.TryEncode(branch.Opcode, branchAddress, targetAddress, out var directEncoding, out var directDisplacement))
                 {
                     var sourceRange = GetSourceRange(sourceFile, new VirtualAddress(branchAddress), sizeof(uint));
                     branchDecisions.Add(new ElfBranchPlacementDecision(
@@ -475,7 +477,7 @@ public static class ElfLayoutPlanner
                         cursorVirtual = checked(cursorVirtual + veneerPlacement.Size);
                     }
 
-                    if (!TryEncodeBranch26(
+                    if (!ElfLayoutBranchEncoding.TryEncode(
                             branch.Opcode,
                             branchAddress,
                             veneerPlacement.VirtualAddress.Value,
@@ -2044,6 +2046,86 @@ public static class ElfLayoutPlanner
         }
     }
 
+    private static bool TryEncodePreservedMoveWide(
+        uint sourceEncoding,
+        uint outputEncoding,
+        ulong sourceAddress,
+        ulong outputAddress,
+        uint relocationType,
+        out uint encoded)
+    {
+        encoded = 0;
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            sourceAddress,
+            outputAddress,
+            Aarch64InstructionEncodingFamily.MoveWideImmediate,
+            0,
+            OutputTemplateEncoding: outputEncoding,
+            PreserveSourceImmediate: true));
+        if (!result.IsSuccess)
+        {
+            return false;
+        }
+
+        encoded = result.Encoding;
+        return relocationType is
+            ElfConstants.RArm64TlsIeMovwGottprelG1
+            or ElfConstants.RArm64TlsIeMovwGottprelG0Nc
+            or ElfConstants.RArm64TlsLeMovwTprelG1
+            or ElfConstants.RArm64TlsLeMovwTprelG0Nc;
+    }
+
+    private static bool TryEncodePreservedAddImmediate(
+        uint sourceEncoding,
+        uint outputEncoding,
+        ulong sourceAddress,
+        ulong outputAddress,
+        out uint encoded)
+    {
+        encoded = 0;
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            sourceAddress,
+            outputAddress,
+            Aarch64InstructionEncodingFamily.AddImmediate,
+            0,
+            OutputTemplateEncoding: outputEncoding,
+            PreserveSourceImmediate: true));
+        if (!result.IsSuccess)
+        {
+            return false;
+        }
+
+        encoded = result.Encoding;
+        return true;
+    }
+
+    private static bool TryEncodePreservedLoadStore(
+        uint sourceEncoding,
+        uint outputEncoding,
+        ulong sourceAddress,
+        ulong outputAddress,
+        out uint encoded)
+    {
+        encoded = 0;
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            sourceAddress,
+            outputAddress,
+            Aarch64InstructionEncodingFamily.LoadStoreUnsignedImmediate,
+            0,
+            OutputTemplateEncoding: outputEncoding,
+            PreserveSourceImmediate: true));
+        if (!result.IsSuccess)
+        {
+            return false;
+        }
+
+        encoded = result.Encoding;
+        return true;
+    }
+
     private static bool IsLocalExecLdst32HiRelocation(ElfFile sourceFile, TlsSemanticFixup fixup)
     {
         if (fixup.RelocationSourceRange.VirtualAddress.Value > ulong.MaxValue - sizeof(uint))
@@ -2091,6 +2173,15 @@ public static class ElfLayoutPlanner
             sourceFile.Bytes.Span.Slice(checked((int)sourceOffset), sizeof(uint)));
         var outputIndex = checked((int)request.OutputOffset);
         var outputEncoding = BinaryPrimitives.ReadUInt32LittleEndian(outputCode.AsSpan(outputIndex, sizeof(uint)));
+        if (!TryAdd(placement.VirtualAddress.Value, (ulong)outputIndex, out var outputInstructionAddress))
+        {
+            diagnostics.Error(
+                DiagnosticCode.TlsLayoutMismatch,
+                "The TLS output instruction address overflows its planned placement.",
+                sourceOffset);
+            return false;
+        }
+
         uint fixedEncoding;
         if (fixup.AccessModel is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
             && fixup.Relocation.Kind == Aarch64RelocationKind.Call26)
@@ -2266,7 +2357,6 @@ public static class ElfLayoutPlanner
         }
         else if (relocationType is ElfConstants.RArm64TlsIeMovwGottprelG1 or ElfConstants.RArm64TlsIeMovwGottprelG0Nc)
         {
-            const uint relocationMask = 0x001F_FFE0u;
             if (!Aarch64TlsInstructionSemantics.IsSupportedInitialExecRelocationInstruction(relocationType, sourceEncoding)
                 || !Aarch64TlsInstructionSemantics.IsSupportedInitialExecRelocationInstruction(relocationType, outputEncoding)
                 || (sourceEncoding & 0xFFE0_0000u) != (outputEncoding & 0xFFE0_0000u))
@@ -2278,12 +2368,24 @@ public static class ElfLayoutPlanner
                 return false;
             }
 
-            fixedEncoding = (outputEncoding & ~relocationMask) | (sourceEncoding & relocationMask);
+            if (!TryEncodePreservedMoveWide(
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    outputInstructionAddress,
+                    relocationType,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The TLSIE MOVW GOTTPREL output instruction could not be re-encoded through the AArch64 adapter.",
+                    sourceOffset);
+                return false;
+            }
         }
         else if (relocationType == ElfConstants.RArm64TlsLeAddTprelHi12
             && IsLocalExecLdst32HiRelocation(sourceFile, fixup))
         {
-            const uint relocationMask = 0x003F_FC00u;
             var sourceNextOffset = checked(sourceOffset + sizeof(uint));
             var outputNextOffset = checked((ulong)outputIndex + sizeof(uint));
             if (sourceOffset < sizeof(uint)
@@ -2310,7 +2412,19 @@ public static class ElfLayoutPlanner
                 return false;
             }
 
-            fixedEncoding = (outputEncoding & ~relocationMask) | (sourceEncoding & relocationMask);
+            if (!TryEncodePreservedAddImmediate(
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    outputInstructionAddress,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The local-exec ADD HI12 output instruction could not be re-encoded through the AArch64 adapter.",
+                    sourceOffset);
+                return false;
+            }
         }
         else if (relocationType is ElfConstants.RArm64TlsLeAddTprelHi12
             or ElfConstants.RArm64TlsLeAddTprelLo12
@@ -2328,13 +2442,22 @@ public static class ElfLayoutPlanner
                 return false;
             }
 
-            // The linker-resolved ADD immediate is placement-independent. Copy only
-            // its typed relocation field; never infer a TPREL value from ELF layout.
-            fixedEncoding = (outputEncoding & ~relocationMask) | (sourceEncoding & relocationMask);
+            if (!TryEncodePreservedAddImmediate(
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    outputInstructionAddress,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The local-exec ADD TPREL output instruction could not be re-encoded through the AArch64 adapter.",
+                    sourceOffset);
+                return false;
+            }
         }
         else if (relocationType == ElfConstants.RArm64TlsLeLdst32TprelLo12Nc)
         {
-            const uint relocationMask = 0x003F_FC00u;
             if (!Aarch64TlsInstructionSemantics.IsSupportedLocalExecRelocationInstruction(relocationType, sourceEncoding)
                 || !Aarch64TlsInstructionSemantics.IsSupportedLocalExecRelocationInstruction(relocationType, outputEncoding)
                 || (sourceEncoding & 0x3FC0_0000u) != (outputEncoding & 0x3FC0_0000u)
@@ -2384,13 +2507,22 @@ public static class ElfLayoutPlanner
                 return false;
             }
 
-            // Preserve the linker-resolved byte offset; the emitted code owns the
-            // rewritten base/value registers and the verified LDR/STR opcode.
-            fixedEncoding = (outputEncoding & ~relocationMask) | (sourceEncoding & relocationMask);
+            if (!TryEncodePreservedLoadStore(
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    outputInstructionAddress,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The local-exec LDST32 output instruction could not be re-encoded through the AArch64 adapter.",
+                    sourceOffset);
+                return false;
+            }
         }
         else if (relocationType is ElfConstants.RArm64TlsLeMovwTprelG1 or ElfConstants.RArm64TlsLeMovwTprelG0Nc)
         {
-            const uint relocationMask = 0x001F_FFE0;
             if (!Aarch64TlsInstructionSemantics.IsSupportedLocalExecRelocationInstruction(relocationType, sourceEncoding)
                 || !Aarch64TlsInstructionSemantics.IsSupportedLocalExecRelocationInstruction(relocationType, outputEncoding)
                 || (sourceEncoding & 0xFFE0_0000u) != (outputEncoding & 0xFFE0_0000u))
@@ -2402,9 +2534,20 @@ public static class ElfLayoutPlanner
                 return false;
             }
 
-            // Preserve the already resolved linker immediate while leaving the
-            // register-permuted destination and opcode owned by the emitted code.
-            fixedEncoding = (outputEncoding & ~relocationMask) | (sourceEncoding & relocationMask);
+            if (!TryEncodePreservedMoveWide(
+                    sourceEncoding,
+                    outputEncoding,
+                    fixup.RelocationSourceRange.VirtualAddress.Value,
+                    outputInstructionAddress,
+                    relocationType,
+                    out fixedEncoding))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsLayoutMismatch,
+                    "The local-exec MOVW TPREL output instruction could not be re-encoded through the AArch64 adapter.",
+                    sourceOffset);
+                return false;
+            }
         }
         else
         {
@@ -2526,7 +2669,7 @@ public static class ElfLayoutPlanner
                 || (branch.TargetOffset & 3) != 0
                 || branch.TargetOffset > (uint)targetRegion.CodeBytes.Length
                 || targetRegion.CodeBytes.Length - branch.TargetOffset < sizeof(uint)
-                || !IsBranchOpcode(branch.Opcode))
+                || !ElfLayoutBranchEncoding.IsBranchOpcode(branch.Opcode))
             {
                 diagnostics.Error(
                     DiagnosticCode.ElfLayoutMalformed,
@@ -2874,62 +3017,6 @@ public static class ElfLayoutPlanner
         && value.Length <= ElfLayoutLimits.MaximumIdentityBytes
         && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_' or '/' or ':');
 
-    private static bool IsBranchOpcode(uint opcode) =>
-        (opcode & 0xFC000000u) is 0x14000000u or 0x94000000u;
-
-    private static bool TryEncodeBranch26(
-        uint opcode,
-        ulong source,
-        ulong target,
-        out byte[] encoding,
-        out long? displacement)
-    {
-        encoding = Array.Empty<byte>();
-        displacement = null;
-        if (!IsBranchOpcode(opcode)
-            || (source & 3) != 0
-            || (target & 3) != 0
-            || !TryGetDisplacement(source, target, out var delta)
-            || delta < ElfLayoutLimits.Branch26MinimumDisplacement
-            || delta >= ElfLayoutLimits.Branch26MaximumDisplacementExclusive)
-        {
-            return false;
-        }
-
-        var value = (opcode & 0xFC000000u) | (uint)((delta >> 2) & 0x03FFFFFF);
-        encoding = new byte[sizeof(uint)];
-        BinaryPrimitives.WriteUInt32LittleEndian(encoding, value);
-        displacement = delta;
-        return true;
-    }
-
-    private static bool TryGetDisplacement(ulong source, ulong target, out long displacement)
-    {
-        if (target >= source)
-        {
-            var delta = target - source;
-            if (delta > long.MaxValue)
-            {
-                displacement = 0;
-                return false;
-            }
-
-            displacement = (long)delta;
-            return true;
-        }
-
-        var reverse = source - target;
-        if (reverse > (ulong)long.MaxValue + 1)
-        {
-            displacement = 0;
-            return false;
-        }
-
-        displacement = reverse == (ulong)long.MaxValue + 1
-            ? long.MinValue
-            : -(long)reverse;
-        return true;
-    }
 
     private static bool TryAlignUp(ulong value, ulong alignment, out ulong result)
     {

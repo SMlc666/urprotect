@@ -433,7 +433,6 @@ public static class Aarch64TlsInstructionSemantics
     private const uint MovkOpcode = 0xF280_0000;
     private const uint AdrpOpcodeMask = 0x9F00_0000;
     private const uint AdrpOpcode = 0x9000_0000;
-    private const uint AdrpImmediateMask = 0x60FF_FFE0;
     private const uint Ld64UnsignedOpcodeMask = 0xFFC0_0000;
     private const uint Ld64UnsignedOpcode = 0xF940_0000;
     private const uint LdGotPrel19OpcodeMask = 0xFF00_0000;
@@ -1835,13 +1834,24 @@ public static class Aarch64TlsInstructionSemantics
             || outputAddress % sizeof(uint) != 0
             || !TryAddSigned(gotAddress, addend, out var targetAddress)
             || targetAddress % sizeof(uint) != 0
-            || !TryGetScaledSignedImmediate(targetAddress, outputAddress, sizeof(uint), 19, out var immediate))
+            || !TryGetScaledSignedImmediate(targetAddress, outputAddress, sizeof(uint), 19, out _))
         {
             return false;
         }
 
-        encoded = (outputEncoding & ~(0x7FFFFu << 5))
-            | ((unchecked((uint)immediate) & 0x7FFFFu) << 5);
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            outputAddress,
+            outputAddress,
+            Aarch64InstructionEncodingFamily.Literal19,
+            targetAddress,
+            OutputTemplateEncoding: outputEncoding));
+        if (!result.IsSuccess)
+        {
+            return false;
+        }
+
+        encoded = result.Encoding;
         return true;
     }
 
@@ -1986,7 +1996,7 @@ public static class Aarch64TlsInstructionSemantics
         }
 
         if (!TryAddSigned(gotAddress, addend, out var targetAddress)
-            || !TryGetPageImmediate(targetAddress, outputAdrAddress, out var pageImmediate)
+            || !TryGetPageImmediate(targetAddress, outputAdrAddress, out _)
             || targetAddress % sizeof(ulong) != 0)
         {
             return false;
@@ -1998,10 +2008,33 @@ public static class Aarch64TlsInstructionSemantics
             return false;
         }
 
-        encodedAdr = (outputAdrEncoding & ~AdrpImmediateMask)
-            | EncodePageImmediate(pageImmediate);
-        encodedLd = (outputLdEncoding & ~(0xFFFu << 10))
-            | (uint)(low12 / sizeof(ulong)) << 10;
+        var encodedAdrResult = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceAdrEncoding,
+            outputAdrAddress,
+            outputAdrAddress,
+            Aarch64InstructionEncodingFamily.AdrPrelPgHi21,
+            targetAddress,
+            OutputTemplateEncoding: outputAdrEncoding));
+        if (!encodedAdrResult.IsSuccess)
+        {
+            return false;
+        }
+
+        var encodedLdResult = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceLdEncoding,
+            checked(outputAdrAddress + sizeof(uint)),
+            checked(outputAdrAddress + sizeof(uint)),
+            Aarch64InstructionEncodingFamily.LoadStoreUnsignedImmediate,
+            low12,
+            AccessWidth: 64,
+            OutputTemplateEncoding: outputLdEncoding));
+        if (!encodedLdResult.IsSuccess)
+        {
+            return false;
+        }
+
+        encodedAdr = encodedAdrResult.Encoding;
+        encodedLd = encodedLdResult.Encoding;
         return true;
     }
 
@@ -2220,12 +2253,6 @@ public static class Aarch64TlsInstructionSemantics
         return true;
     }
 
-    private static uint EncodePageImmediate(long immediate)
-    {
-        var bits = unchecked((ulong)immediate);
-        return (uint)(bits & 0x3) << 29
-            | (uint)((bits >> 2) & 0x7FFFF) << 5;
-    }
     public static bool TryGetInitialExecGotLoadRegisters(
         uint encoding,
         out byte baseRegister,

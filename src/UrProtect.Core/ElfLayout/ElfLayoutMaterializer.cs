@@ -1642,9 +1642,13 @@ public static class ElfLayoutMaterializer
         out byte[] expected)
     {
         expected = Array.Empty<byte>();
-        if (decision.Displacement is not long displacement
-            || decision.SourceRange.Size != sizeof(uint)
-            || !ElfLayoutPlannerTryEncode(decision.Opcode, displacement, out expected))
+        if (decision.SourceRange.Size != sizeof(uint)
+            || !ElfLayoutBranchEncoding.TryEncode(
+                decision.Opcode,
+                decision.SourceRange.VirtualAddress.Value,
+                decision.TargetRange.VirtualAddress.Value,
+                out expected,
+                out _))
         {
             return false;
         }
@@ -1654,22 +1658,6 @@ public static class ElfLayoutMaterializer
             edit.Kind == ElfLayoutEditKind.BranchFixup
             && edit.Offset == decision.SourceRange.FileOffset
             && edit.Bytes.AsSpan().SequenceEqual(expectedBytes));
-    }
-
-    private static bool ElfLayoutPlannerTryEncode(uint opcode, long displacement, out byte[] encoding)
-    {
-        encoding = Array.Empty<byte>();
-        if ((opcode & 0xFC000000u) is not (0x14000000u or 0x94000000u)
-            || displacement < ElfLayoutLimits.Branch26MinimumDisplacement
-            || displacement >= ElfLayoutLimits.Branch26MaximumDisplacementExclusive
-            || (displacement & 3) != 0)
-        {
-            return false;
-        }
-
-        encoding = new byte[sizeof(uint)];
-        BinaryPrimitives.WriteUInt32LittleEndian(encoding, (opcode & 0xFC000000u) | (uint)((displacement >> 2) & 0x03FFFFFF));
-        return true;
     }
 
     private static bool TryAdd(ulong value, ulong amount, out ulong result)

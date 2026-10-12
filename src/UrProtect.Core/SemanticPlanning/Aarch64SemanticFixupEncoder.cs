@@ -16,7 +16,6 @@ namespace UrProtect.Core.SemanticPlanning;
 /// </remarks>
 public static class Aarch64SemanticFixupEncoder
 {
-    private const uint AddImmediateMask = 0x003F_FC00;
     private const int InstructionAlignment = sizeof(uint);
     private static readonly Aarch64InstructionEncoder InstructionEncoder = new();
 
@@ -264,15 +263,15 @@ public static class Aarch64SemanticFixupEncoder
                 or ElfConstants.RArm64TlsDescAdrPage21 =>
                 ResolveRelocationAdrp(fixup, outputSourceAddress, outputPlaceAddress, value.Value, targetAddress, diagnostics),
             Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsDescLd64Lo12 =>
-                ResolveLoadStoreLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
+                ResolveLoadStoreLo12(fixup, outputSourceAddress, outputPlaceAddress, targetAddress, value.Value, diagnostics),
             Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsDescAddLo12 =>
-                ResolveAddLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
+                ResolveAddLo12(fixup, outputSourceAddress, outputPlaceAddress, targetAddress, value.Value, diagnostics),
             Aarch64RelocationKind.AddAbsLo12 =>
-                ResolveAddLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
+                ResolveAddLo12(fixup, outputSourceAddress, outputPlaceAddress, targetAddress, value.Value, diagnostics),
             Aarch64RelocationKind.LoadStore =>
-                ResolveLoadStoreLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
+                ResolveLoadStoreLo12(fixup, outputSourceAddress, outputPlaceAddress, targetAddress, value.Value, diagnostics),
             Aarch64RelocationKind.ThreadLocal when relocation.RelocationType == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc =>
-                ResolveLoadStoreLo12(fixup, outputSourceAddress, targetAddress, value.Value, diagnostics),
+                ResolveLoadStoreLo12(fixup, outputSourceAddress, outputPlaceAddress, targetAddress, value.Value, diagnostics),
             _ => UnsupportedRelocation(fixup, outputSourceAddress, targetAddress, diagnostics),
         };
     }
@@ -481,6 +480,7 @@ public static class Aarch64SemanticFixupEncoder
     private static SemanticFixupResolution ResolveAddLo12(
         SemanticFixup fixup,
         VirtualAddress outputSourceAddress,
+        VirtualAddress outputPlaceAddress,
         VirtualAddress targetAddress,
         ulong value,
         DiagnosticBag diagnostics)
@@ -494,14 +494,28 @@ public static class Aarch64SemanticFixupEncoder
             return Failure(fixup, outputSourceAddress, diagnostics, targetAddress);
         }
 
-        var encoding = (fixup.OriginalEncoding & ~AddImmediateMask)
-            | ((uint)(value & 0xFFF) << 10);
-        return Success(fixup, outputSourceAddress, targetAddress, encoding, value, diagnostics);
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            fixup.OriginalEncoding,
+            fixup.SourceAddress.Value,
+            outputPlaceAddress.Value,
+            Aarch64InstructionEncodingFamily.AddImmediate,
+            value & 0xFFF));
+        if (!result.IsSuccess)
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticFixupMalformed,
+                $"AsmStone rejected the ADD low-12 semantic fixup: {result.Diagnostic}",
+                fixup.SourceFileOffset.Value);
+            return Failure(fixup, outputSourceAddress, diagnostics, targetAddress);
+        }
+
+        return Success(fixup, outputSourceAddress, targetAddress, result.Encoding, value, diagnostics);
     }
 
     private static SemanticFixupResolution ResolveLoadStoreLo12(
         SemanticFixup fixup,
         VirtualAddress outputSourceAddress,
+        VirtualAddress outputPlaceAddress,
         VirtualAddress targetAddress,
         ulong value,
         DiagnosticBag diagnostics)
@@ -540,9 +554,23 @@ public static class Aarch64SemanticFixupEncoder
             return Failure(fixup, outputSourceAddress, diagnostics, targetAddress);
         }
 
-        var encoding = (fixup.OriginalEncoding & ~AddImmediateMask)
-            | ((uint)(low12 / scale) << 10);
-        return Success(fixup, outputSourceAddress, targetAddress, encoding, value, diagnostics);
+        var result = InstructionEncoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            fixup.OriginalEncoding,
+            fixup.SourceAddress.Value,
+            outputPlaceAddress.Value,
+            Aarch64InstructionEncodingFamily.LoadStoreUnsignedImmediate,
+            low12,
+            AccessWidth: checked((int)(scale * 8))));
+        if (!result.IsSuccess)
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticFixupMalformed,
+                $"AsmStone rejected the load/store low-12 semantic fixup: {result.Diagnostic}",
+                fixup.SourceFileOffset.Value);
+            return Failure(fixup, outputSourceAddress, diagnostics, targetAddress);
+        }
+
+        return Success(fixup, outputSourceAddress, targetAddress, result.Encoding, value, diagnostics);
     }
 
     private static SemanticFixupResolution FinishInstructionEncoding(
