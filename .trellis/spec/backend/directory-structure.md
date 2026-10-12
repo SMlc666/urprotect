@@ -100,7 +100,10 @@ check for every production C# source file under `src/UrProtect.Core` and
 namespace, rejects forbidden dependency directions and side-effect APIs, and
 ignores comments and string/character literals so diagnostic text cannot create
 a false dependency. Qualified, global, and aliased project references are
-checked as source references rather than as raw text fragments.
+checked as source references rather than as raw text fragments. `ElfLayout`
+may depend one-way on `Aarch64Semantics` for the project-owned instruction
+encoder; `Aarch64Semantics` must not depend on layout, and AsmStone types must
+remain private to the adapter.
 
 The non-production fixture gate is:
 

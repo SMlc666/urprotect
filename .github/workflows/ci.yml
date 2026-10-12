@@ -179,6 +179,11 @@ jobs:
         run: python3 scripts/check-coverage.py
       - name: Check compatibility matrix contract
         run: python3 tests/test_fixture_matrix.py
+      - name: Check managed architecture boundaries
+        run: |
+          python3 scripts/check-architecture-boundaries.py --self-test
+          python3 scripts/check-aarch64-encoding-boundary.py
+          python3 tests/test_aarch64_encoding_boundary.py
       - name: Check regression matrix contract
         run: python3 tests/test_regression_matrix.py
       - name: Check runtime covering matrix

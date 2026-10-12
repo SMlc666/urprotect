@@ -115,9 +115,11 @@ validated separately by UrProtect; an individually encodable instruction does
 not repair inconsistent ELF/TLS metadata.
 
 No caller may catch an adapter failure and retain the original word, apply a
-local opcode/bitfield fallback, or publish a partial layout. Remaining manual
-writers are migration debt with an owner and focused replacement test; they
-must not gain new instruction families.
+local opcode/bitfield fallback, or publish a partial layout. Layout branch
+policy may choose direct, veneer, or long-branch placement, but final Branch26
+and Call26 words still come from the adapter-backed layout helper. Remaining
+raw masks are limited to recognition, invariant checks, ELF serialization, and
+byte-preserving copies; they must not gain new instruction families.
 
 ## Examples
 

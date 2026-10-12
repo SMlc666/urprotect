@@ -113,11 +113,11 @@ RULES = (
         (
             "UrProtect.Core.StructuralElf",
             "UrProtect.Core.SemanticPlanning",
+            "UrProtect.Core.Aarch64Semantics",
             "UrProtect.Core.Binary",
             "UrProtect.Core.Diagnostics",
         ),
         (
-            "UrProtect.Core.Aarch64Semantics",
             "UrProtect.Core.ArtifactProtocol",
             "UrProtect.Core.Application",
             "UrProtect.Core.Infrastructure",

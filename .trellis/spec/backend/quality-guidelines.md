@@ -170,12 +170,13 @@ Aarch64InstructionEncoder : IAarch64InstructionEncoder
 
 `Aarch64InstructionEncodeRequest` carries the source word/address, output
 address, one project-owned `Aarch64InstructionEncodingFamily`, the resolved
-target or immediate, optional access width, optional output template, and an
-explicit source-immediate preservation flag. `TryCreate` is reserved for
-adapter-backed fixture or generated-instruction construction. Current owned
-families are Branch26, Call26, ConditionalBranch19, TestBranch14,
-AdrPrelLo21, AdrPrelPgHi21, Literal19, AddImmediate, and
-LoadStoreUnsignedImmediate.
+target or immediate, optional access width, optional output template, an
+explicit source-immediate preservation flag, and optional register width.
+`TryCreate` is reserved for adapter-backed fixture or generated-instruction
+construction. Current owned families are Branch26, Call26,
+ConditionalBranch19, TestBranch14, AdrPrelLo21, AdrPrelPgHi21, Literal19,
+AddImmediate, LoadStoreUnsignedImmediate, MoveWideImmediate, MoveRegister,
+CompareImmediate, and Return.
 
 `Aarch64InstructionEncodeResult` returns `IsSuccess`, a word, the project-owned
 `Aarch64Instruction`, a stable adapter diagnostic code, and a bounded message.
@@ -198,10 +199,12 @@ range failure, backend failure, and round-trip failure.
   AsmStone and the project decoder. It returns a successful result only when
   the decoded family and requested target/immediate/width still match.
 - `Aarch64SemanticFixupEncoder` uses the adapter for Branch26/Call26,
-  conditional/test branches, ADR/ADRP, and literal loads. Dynamic TLS
-  resolver CALL26, module ADRP/ADD, and TLSLD DTPREL ADD output use the same
-  boundary. Remaining manual writers are transition debt, not permission to
-  add another writer.
+  conditional/test branches, ADR/ADRP, literal loads, ADD low-12, and
+  unsigned LDR/STR low-12. Dispatcher MOV/CMP/branch/RET generation,
+  layout direct and near-veneer branches, TLSIE literal/pairs, local-exec
+  field preservation, dynamic TLS resolver/module/DTPREL output, and TLSDESC
+  output use the same boundary. Remaining raw masks are recognition or
+  invariant checks only; they are not a second writer.
 - GNU assembler/linker output remains an independent ABI/toolchain oracle. It
   can provide a positive fixture, but it does not replace the project adapter
   in managed production paths.
