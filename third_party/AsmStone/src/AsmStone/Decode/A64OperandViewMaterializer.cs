@@ -64,7 +64,7 @@ internal static class A64OperandViewMaterializer
                         binding.FixedModifierKind,
                         binding.FixedModifierAmount,
                         binding.ElementWidth,
-                        Direction(binding.Direction),
+                        binding.Direction,
                         binding.IsImplicit,
                         binding.TiedTo);
                 continue;
@@ -89,7 +89,7 @@ internal static class A64OperandViewMaterializer
                     binding.FixedModifierKind,
                     binding.FixedModifierAmount,
                     binding.ElementWidth,
-                    Direction(binding.Direction),
+                    binding.Direction,
                     binding.IsImplicit,
                     binding.TiedTo);
         }
@@ -581,16 +581,6 @@ internal static class A64OperandViewMaterializer
             codec.RegClass,
             codec.ElementSize,
             codec.Type);
-    }
-
-    private static A64OperandDirection Direction(string direction)
-    {
-        return direction switch
-        {
-            "out" => A64OperandDirection.Output,
-            "inout" => A64OperandDirection.InputOutput,
-            _ => A64OperandDirection.Input,
-        };
     }
 
     private static bool IsRegister(string type, A64GeneratedOperand codec)

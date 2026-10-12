@@ -27,9 +27,55 @@ internal enum A64CompiledOperandKind : byte
     RegisterGroup,
 }
 
+internal readonly record struct A64GeneratedFieldMapping(
+    int EncodingBit,
+    int FieldBit);
+
+internal readonly record struct A64GeneratedFieldData(
+    string Name,
+    IReadOnlyList<A64GeneratedFieldMapping> Mappings);
+
+internal readonly record struct A64GeneratedBindingData(
+    string Name,
+    string Type,
+    A64OperandDirection Direction,
+    string? TiedTo,
+    A64PredicateMode PredicateMode)
+{
+    public bool IsTypedPlan { get; init; }
+    public int FieldIndex { get; init; } = -1;
+    public int SecondaryFieldIndex { get; init; } = -1;
+    public A64CompiledOperandKind Kind { get; init; }
+    public string RegisterType { get; init; } = string.Empty;
+    public int RegisterIndexBias { get; init; }
+    public int RegisterIndexScale { get; init; } = 1;
+    public int FieldWidth { get; init; }
+    public int Scale { get; init; } = 1;
+    public int RegisterWidth { get; init; }
+    public A64RegisterClass RegisterClass { get; init; } = A64RegisterClass.Special;
+    public bool AllowsStackPointer { get; init; }
+    public bool AllowsZeroRegister { get; init; }
+    public A64RegisterConstraint RegisterConstraint { get; init; } = A64RegisterConstraint.Any;
+    public int ShapeCount { get; init; }
+    public int ElementWidth { get; init; }
+    public int GroupStride { get; init; } = 1;
+    public int FractionalBits { get; init; }
+    public int LaneCount { get; init; }
+    public bool IsPageRelative { get; init; }
+    public int PcRelativeScale { get; init; }
+    public bool IsSigned { get; init; }
+    public A64ImmediateSemanticKind ImmediateSemanticKind { get; init; }
+    public A64EnumKind EnumKind { get; init; }
+    public string SemanticDomain { get; init; } = string.Empty;
+    public A64MatrixRegisterKind MatrixRegisterKind { get; init; }
+    public A64RegisterModifierKind FixedModifierKind { get; init; }
+    public int FixedModifierAmount { get; init; }
+}
+
 internal sealed class A64CompiledInstruction
 {
     public A64CompiledInstruction(
+        A64InstructionCode code,
         A64GeneratedInstruction source,
         A64EncodingInfo info,
         A64CompiledField[] fields,
@@ -39,6 +85,7 @@ internal sealed class A64CompiledInstruction
         int uncollapsedOperandCount,
         A64GeneratedMemoryBinding? memory)
     {
+        Code = code;
         Source = source;
         Info = info;
         Fields = fields;
@@ -48,6 +95,8 @@ internal sealed class A64CompiledInstruction
         UncollapsedOperandCount = uncollapsedOperandCount;
         Memory = memory;
     }
+
+    public A64InstructionCode Code { get; }
 
     public A64GeneratedInstruction Source { get; }
 
@@ -64,6 +113,15 @@ internal sealed class A64CompiledInstruction
     public int UncollapsedOperandCount { get; }
 
     public A64GeneratedMemoryBinding? Memory { get; }
+
+    private A64InstructionDescriptor? descriptor;
+
+    internal A64InstructionDescriptor GetDescriptor()
+    {
+        return descriptor ??= A64DescriptorBuilder.Build(this, Code);
+    }
+
+    internal A64InstructionDescriptor Descriptor => GetDescriptor();
 
     public bool TryGetField(string name, out A64CompiledField field)
     {
@@ -243,7 +301,7 @@ internal readonly record struct A64CompiledFieldMapping(int EncodingBit, int Fie
 internal readonly record struct A64CompiledBinding(
     string Name,
     string Type,
-    string Direction,
+    A64OperandDirection Direction,
     A64GeneratedOperand? Codec,
     int FieldIndex,
     int SecondaryFieldIndex,

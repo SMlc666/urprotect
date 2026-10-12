@@ -1,4 +1,5 @@
 using AsmStone.Decode;
+using AsmStone.Generated;
 
 namespace AsmStone.Model;
 
@@ -70,6 +71,32 @@ public sealed record A64Instruction(
     A64InstructionFlags Flags = A64InstructionFlags.None)
 {
     public string? SourceName { get; init; }
+
+    public A64InstructionCode Code { get; init; } = A64InstructionCode.Invalid;
+
+    public static A64Instruction Create(
+        A64InstructionCode code,
+        IReadOnlyList<A64Operand> operands,
+        ulong address = 0,
+        uint encoding = 0)
+    {
+        if (!A64InstructionCatalog.TryGetDescriptor(code, out var descriptor))
+        {
+            throw new ArgumentOutOfRangeException(nameof(code), "Unknown generated instruction code.");
+        }
+
+        return new A64Instruction(
+            A64InstructionId.Generated,
+            descriptor.Mnemonic,
+            operands,
+            encoding,
+            address,
+            descriptor.Flags)
+        {
+            Code = code,
+            SourceName = descriptor.SourceName,
+        };
+    }
 
     public IReadOnlyList<A64InstructionOperand> OperandSemantics => GetOperandSemantics();
 

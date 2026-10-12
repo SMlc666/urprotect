@@ -146,6 +146,17 @@ public static class AsmStoneApi
     }
 
     public static bool TryEncode(
+        A64InstructionCode code,
+        IReadOnlyList<A64Operand> operands,
+        ulong address,
+        out uint encoding,
+        out A64Diagnostic diagnostic)
+    {
+        var instruction = A64Instruction.Create(code, operands, address);
+        return A64Encoder.TryEncode(instruction, A64FeatureSet.All, out encoding, out diagnostic);
+    }
+
+    public static bool TryEncode(
         A64Instruction instruction,
         A64FeatureSet features,
         out uint encoding,

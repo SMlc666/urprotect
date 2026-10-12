@@ -1,5 +1,4 @@
 using AsmStone.Model;
-using System.Globalization;
 
 namespace AsmStone.Generated;
 
@@ -24,6 +23,21 @@ internal readonly record struct A64GeneratedMemoryBinding(
 internal static class A64GeneratedMemory
 {
     public static bool TryGet(
+        int instructionIndex,
+        out A64GeneratedMemoryBinding memory)
+    {
+        if ((uint)instructionIndex < (uint)A64GeneratedInstructionTable.All.Length
+            && A64GeneratedMemoryTable.Get(instructionIndex) is { } generatedMemory)
+        {
+            memory = generatedMemory;
+            return true;
+        }
+
+        memory = default;
+        return false;
+    }
+
+    public static bool TryGet(
         A64CompiledInstruction instruction,
         out A64GeneratedMemoryBinding memory)
     {
@@ -35,121 +49,6 @@ internal static class A64GeneratedMemory
 
         memory = default;
         return false;
-    }
-
-    public static bool TryGet(A64EncodingInfo info, out A64GeneratedMemoryBinding memory)
-    {
-        memory = default;
-        var bindings = ParseBindings(info.OperandBindings);
-        var open = -1;
-        var close = -1;
-        string[] inside = [];
-        for (var search = 0; ;)
-        {
-            var candidateOpen = info.Assembly.IndexOf('[', search);
-            if (candidateOpen < 0)
-            {
-                break;
-            }
-
-            var candidateClose = info.Assembly.IndexOf(']', candidateOpen + 1);
-            if (candidateClose < 0)
-            {
-                break;
-            }
-
-            var candidateInside = Placeholders(
-                info.Assembly[(candidateOpen + 1)..candidateClose]).ToArray();
-            if (candidateInside.Length != 0
-                && bindings.TryGetValue(candidateInside[0], out var candidateBaseType)
-                && IsGeneralRegister(candidateBaseType))
-            {
-                open = candidateOpen;
-                close = candidateClose;
-                inside = candidateInside;
-                break;
-            }
-
-            search = candidateClose + 1;
-        }
-
-        if (open < 0)
-        {
-            return false;
-        }
-
-        string? offsetName = null;
-        string? indexName = null;
-        string? modifierName = null;
-        var fixedOffset = ReadFixedOffset(info.Assembly[(open + 1)..close]);
-        foreach (var name in inside.Skip(1))
-        {
-            if (!bindings.TryGetValue(name, out var type))
-            {
-                continue;
-            }
-
-            if (IsImmediate(type))
-            {
-                if (offsetName is not null)
-                {
-                    return false;
-                }
-
-                offsetName = name;
-            }
-            else if (IsRegister(type))
-            {
-                if (indexName is not null)
-                {
-                    return false;
-                }
-
-                indexName = name;
-            }
-            else if (type.StartsWith("ro_", StringComparison.Ordinal))
-            {
-                modifierName = name;
-            }
-        }
-
-        var suffix = info.Assembly[(close + 1)..];
-        var mode = suffix.TrimStart().StartsWith('!')
-            ? A64MemoryAddressingMode.PreIndexed
-            : indexName is not null ? A64MemoryAddressingMode.RegisterOffset : A64MemoryAddressingMode.Offset;
-        if (suffix.Contains(','))
-        {
-            var suffixNames = Placeholders(suffix).Where(bindings.ContainsKey).ToArray();
-            foreach (var name in suffixNames)
-            {
-                if (IsImmediate(bindings[name]))
-                {
-                    if (offsetName is not null)
-                    {
-                        return false;
-                    }
-
-                    offsetName = name;
-                }
-                else if (IsRegister(bindings[name]))
-                {
-                    if (indexName is not null)
-                    {
-                        return false;
-                    }
-
-                    indexName = name;
-                }
-            }
-
-            if (suffixNames.Length != 0)
-            {
-                mode = A64MemoryAddressingMode.PostIndexed;
-            }
-        }
-
-        memory = new A64GeneratedMemoryBinding(inside[0], offsetName, indexName, modifierName, fixedOffset, mode);
-        return true;
     }
 
     public static bool TryDecodeIndexModifier(
@@ -319,96 +218,6 @@ internal static class A64GeneratedMemory
         }
 
         return A64MemoryOrdering.None;
-    }
-
-    private static long ReadFixedOffset(string text)
-    {
-        var marker = text.IndexOf('#');
-        if (marker < 0)
-        {
-            return 0;
-        }
-
-        var valueStart = marker + 1;
-        var valueEnd = valueStart;
-        if (valueEnd < text.Length && text[valueEnd] == '-')
-        {
-            valueEnd++;
-        }
-
-        while (valueEnd < text.Length && char.IsDigit(text[valueEnd]))
-        {
-            valueEnd++;
-        }
-
-        return long.TryParse(
-            text[valueStart..valueEnd],
-            NumberStyles.Integer,
-            CultureInfo.InvariantCulture,
-            out var value)
-            ? value
-            : 0;
-    }
-
-    public static IReadOnlyDictionary<string, string> ParseBindings(string encoded)
-    {
-        var bindings = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var item in encoded.Split('|', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = item.Split(':', 3);
-            if (parts.Length == 3)
-            {
-                bindings[parts[0]] = parts[1];
-            }
-        }
-
-        return bindings;
-    }
-
-    private static IEnumerable<string> Placeholders(string text)
-    {
-        for (var index = 0; index < text.Length; index++)
-        {
-            if (text[index] != '$' || index + 1 >= text.Length || !char.IsLetter(text[index + 1]))
-            {
-                continue;
-            }
-
-            var start = ++index;
-            while (index + 1 < text.Length
-                && (char.IsLetterOrDigit(text[index + 1]) || text[index + 1] == '_'))
-            {
-                index++;
-            }
-
-            yield return text[start..(index + 1)];
-        }
-    }
-
-    private static bool IsGeneralRegister(string type)
-    {
-        return type.StartsWith("GPR", StringComparison.Ordinal)
-            && !type.StartsWith("GPR32x", StringComparison.Ordinal);
-    }
-
-    private static bool IsRegister(string type)
-    {
-        return type.StartsWith("GPR", StringComparison.Ordinal)
-            || type.StartsWith("FPR", StringComparison.Ordinal)
-            || type.StartsWith("V", StringComparison.Ordinal)
-            || type.StartsWith("ZPR", StringComparison.Ordinal)
-            || type.StartsWith("PPR", StringComparison.Ordinal)
-            || type.StartsWith("PNR", StringComparison.Ordinal);
-    }
-
-    private static bool IsImmediate(string type)
-    {
-        // Address offsets use immediate fields; register modifiers are folded
-        // into the generated memory binding for the runtime plan.
-        return type.StartsWith("simm", StringComparison.OrdinalIgnoreCase)
-            || type.StartsWith("uimm", StringComparison.OrdinalIgnoreCase)
-            || type.StartsWith("imm", StringComparison.OrdinalIgnoreCase)
-            || type.StartsWith("timm", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int AccessWidth(string type)

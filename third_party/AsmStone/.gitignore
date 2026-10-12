@@ -1,0 +1,26 @@
+# Build output
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+
+# IDE files
+.vs/
+.idea/
+*.user
+*.suo
+
+# Test and coverage output
+TestResults/
+coverage/
+
+# Generated instruction data
+artifacts/
+generated/
+build/
+third_party/
+
+# OS files
+.DS_Store
+Thumbs.db
