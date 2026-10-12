@@ -434,3 +434,25 @@ Updated vendored AsmStone to ff961cff, expanded the project-owned Aarch64Instruc
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: Continue TLS runtime matrix
+<!-- trellis-session: v=2 fp=7cf2dfccbccc567c -->
+
+**Date**: 2026-10-12
+**Task**: Continue TLS runtime matrix
+**Branch**: `main`
+
+### Summary
+
+Resumed 10-06-tls-relocation-runtime-matrix after AsmStone merge. Verified the real glibc initial-exec transformed TLSIE HostContext lane end-to-end with entry status 43, added the retained evidence runner/manifest/CI/checker contract, preserved explicit no-promotion boundaries for musl, bionic, worker lifecycle, and the other four TLS models, and passed task validation, 387 managed tests, 95 focused TLS/AsmStone tests, 304 serial Python tests, fixture/regression/evidence checks, native runtime, and launcher tests. Task remains in_progress for remaining runtime promotion evidence.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee4ab84` | feat: retain transformed glibc TLSIE evidence |
+
+### Status
+
+[OK] **Completed**
