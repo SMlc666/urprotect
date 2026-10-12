@@ -253,7 +253,7 @@ separate production managed-pack integration row
 profile oracle on the native glibc lane. The bionic adapter evidence remains a
 peer runtime fact and does not silently promote the glibc production row.
 The bionic evidence intentionally excludes Android framework, OEM, SELinux,
-device-kernel, AVD, Waydroid, QEMU, and native-bridge claims.
+device-kernel, AVD, Waydroid, QEMU, and native-bridge claims. The bionic HostContext adapter also rejects `DT_RELR` metadata before loader handoff because the Termux/bionic loader lane does not apply that relocation table; the retained self-test log and result record this loader-unsupported boundary. The glibc adapter row continues to exercise the positive RELR path independently.
 
 The outer-execveat profile now has a separate dynamic `ET_EXEC` compatibility
 slice. Its exact acceptance predicate is ELF64 little-endian AArch64 with an

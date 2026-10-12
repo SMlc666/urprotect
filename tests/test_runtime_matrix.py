@@ -380,6 +380,8 @@ Dynamic section at offset 0xf00 contains 1 entry:
         (root / "host-context/build-and-test.log").write_text(
             "HostContext self-test: sectionless image skipped on bionic; "
             "loader requires section headers\n"
+            "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR\n"
+            "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff\n"
             "HostContext runtime self-test: PASS\n",
             encoding="utf-8",
         )
@@ -473,6 +475,20 @@ Dynamic section at offset 0xf00 contains 1 entry:
                     "reason": "API 26+ bionic requires ELF section headers for the sectionless mutation",
                     "log": "host-context/build-and-test.log",
                     "marker": "HostContext self-test: sectionless image skipped on bionic; loader requires section headers",
+                },
+                "relrImageBoundary": {
+                    "status": "loader-unsupported",
+                    "loader": "bionic",
+                    "reason": "Bionic ignores DT_RELR metadata; HostContext rejects it before loader handoff",
+                    "log": "host-context/build-and-test.log",
+                    "marker": "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR",
+                },
+                "dynamicMetadataBoundary": {
+                    "status": "loader-unsupported",
+                    "loader": "bionic",
+                    "reason": "Bionic dynamic metadata negatives may return loader-specific failure statuses before handoff",
+                    "log": "host-context/build-and-test.log",
+                    "marker": "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff",
                 },
             },
         }

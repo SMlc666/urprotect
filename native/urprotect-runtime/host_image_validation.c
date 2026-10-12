@@ -1142,6 +1142,11 @@ static urp_status urp_validate_relr(
     if (!dynamic->has_relr) {
         return URP_STATUS_OK;
     }
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    /* Bionic/Termux currently ignores DT_RELR metadata; reject before dlopen
+     * rather than allowing an unrelocated pointer to reach the entry point. */
+    return URP_STATUS_UNSUPPORTED;
+#endif
     if (!dynamic->has_relrsz || !dynamic->has_relrent
         || dynamic->relrent != sizeof(uint64_t)
         || dynamic->relrsz % dynamic->relrent != 0U) {

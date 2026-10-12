@@ -158,6 +158,14 @@ Nonzero virtual addresses and unbounded offsets remain malformed.
 This is compatible with the task's rule that a structurally observed real sample
 is not automatically transformable.
 
+Bionic evidence also retains two loader-specific negative boundaries. Standard
+`DT_RELR` metadata is rejected by the native HostContext preflight before
+`dlopen`, because the Termux/bionic loader lane does not apply that table. The
+self-test's remaining dynamic-metadata mutations may return loader-specific
+non-OK statuses rather than the glibc preflight status; the bionic result keeps a
+separate `dynamicMetadataBoundary` marker and never promotes those observations
+to general HostContext semantics.
+
 ### Relocation and dynamic metadata behavior
 
 | Topic | Managed pipeline | Native HostContext adapter | Classification |

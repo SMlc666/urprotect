@@ -11,6 +11,11 @@ container_runtime="${BIONIC_CONTAINER_RUNTIME:-docker}"
 mkdir -p "${case_root}"
 chmod a+rwx "${case_root}"
 
+cleanup_incomplete_apt_download() {
+  sudo rm -rf -- "${case_root}/apt-archives/partial" 2>/dev/null || true
+}
+trap cleanup_incomplete_apt_download EXIT
+
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "bionic fixture requires a native aarch64 host; got $(uname -m)" >&2
   exit 2
@@ -255,6 +260,8 @@ run_shell -c '
     SHELL="${PREFIX}/bin/sh" \
     BUILD_DIR=/artifacts/host-context/build \
     ENTRY_FIXTURE_LDFLAGS=--pack-dyn-relocs=none \
+    HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ \
+    LD=ld.lld \
     CC=clang self-test > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
@@ -561,6 +568,20 @@ document = {
             "reason": "API 26+ bionic requires ELF section headers for the sectionless mutation",
             "log": "host-context/build-and-test.log",
             "marker": "HostContext self-test: sectionless image skipped on bionic; loader requires section headers",
+        },
+        "relrImageBoundary": {
+            "status": "loader-unsupported",
+            "loader": "bionic",
+            "reason": "Bionic ignores DT_RELR metadata; HostContext rejects it before loader handoff",
+            "log": "host-context/build-and-test.log",
+            "marker": "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR",
+        },
+        "dynamicMetadataBoundary": {
+            "status": "loader-unsupported",
+            "loader": "bionic",
+            "reason": "Bionic dynamic metadata negatives may return loader-specific failure statuses before handoff",
+            "log": "host-context/build-and-test.log",
+            "marker": "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff",
         },
     },
 }

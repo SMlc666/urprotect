@@ -258,7 +258,11 @@ bounded observation with an owning-load index of `-1`; other ownerless
 zero-file PT_TLS addresses remain malformed. Managed
 TLS projection rejects the observed marker before semantic planning because a
 transformable TLS module requires a mapped owning load. This keeps real-sample
-structural validation separate from managed TLS rewrite eligibility.
+structural validation separate from managed TLS rewrite eligibility. The bionic
+HostContext lane also retains explicit loader boundaries for standard `DT_RELR`
+and loader-specific dynamic-metadata negative mutations: the native validator
+rejects those mutations before `dlopen`, while glibc continues to exercise the
+positive RELR and uniform rejection paths independently.
 
 ## Final transformed matrix evidence
 

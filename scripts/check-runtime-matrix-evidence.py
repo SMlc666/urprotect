@@ -165,6 +165,38 @@ def check_bionic_evidence(
     ):
         fail("bionic sectionless image boundary evidence is incomplete")
 
+    relr_boundary = oracle.get("relrImageBoundary")
+    expected_relr_marker = (
+        "HostContext self-test: DT_RELR rejected on bionic; "
+        "loader does not apply DT_RELR"
+    )
+    if (
+        not isinstance(relr_boundary, dict)
+        or relr_boundary.get("status") != "loader-unsupported"
+        or relr_boundary.get("loader") != "bionic"
+        or relr_boundary.get("reason")
+        != "Bionic ignores DT_RELR metadata; HostContext rejects it before loader handoff"
+        or relr_boundary.get("log") != "host-context/build-and-test.log"
+        or relr_boundary.get("marker") != expected_relr_marker
+    ):
+        fail("bionic DT_RELR boundary evidence is incomplete")
+
+    dynamic_boundary = oracle.get("dynamicMetadataBoundary")
+    expected_dynamic_marker = (
+        "HostContext self-test: bionic dynamic metadata negatives rejected "
+        "before loader handoff"
+    )
+    if (
+        not isinstance(dynamic_boundary, dict)
+        or dynamic_boundary.get("status") != "loader-unsupported"
+        or dynamic_boundary.get("loader") != "bionic"
+        or dynamic_boundary.get("reason")
+        != "Bionic dynamic metadata negatives may return loader-specific failure statuses before handoff"
+        or dynamic_boundary.get("log") != "host-context/build-and-test.log"
+        or dynamic_boundary.get("marker") != expected_dynamic_marker
+    ):
+        fail("bionic dynamic metadata boundary evidence is incomplete")
+
     required_artifacts = cell.get("requiredArtifacts")
     if not isinstance(required_artifacts, list) or not required_artifacts:
         fail("bionic requiredArtifacts must be a non-empty array")

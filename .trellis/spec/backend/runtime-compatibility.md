@@ -371,6 +371,7 @@ executable pathname.
   profile/launcher mismatches fail closed. `runtime.host-context.production-pack` is validated
   by the retained managed HostContext pack/dispatch oracle on the native
   AArch64 glibc lane.
+- The bionic HostContext adapter rejects `DT_RELR` metadata before loader handoff because the Termux/bionic loader lane does not apply that relocation table; the retained result includes a `relrImageBoundary` loader-unsupported witness. The glibc adapter continues to exercise the positive RELR path independently.
 - The Android `android.jni.native-bridge` row is an unwrapped JNI baseline and
   does not upgrade HostContext runtime support.
 

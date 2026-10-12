@@ -57,6 +57,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl -pthread
 ENTRY_FIXTURE_LDFLAGS ?=
+HOST_CONTEXT_PLATFORM_CFLAGS ?=
 
 .PHONY: all test runtime self-test host-context-launcher host-context-image-handoff host-image-validation-probe symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
@@ -299,7 +300,7 @@ $(PROPERTY_FIXTURE_OBJECT): host_context_property_fixture.c include/urp/host_con
 
 $(BUILD_DIR)/host_context_self_test.o: host_context_self_test.c host_image_validation.h android_packed_relocation_tags.h include/urp/host_context.h include/urp/runtime.h
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_CONTEXT_PLATFORM_CFLAGS) -c "$<" -o "$@"
 
 $(BUILD_DIR)/host_context_launcher.o: host_context_launcher.c include/urp/host_context.h include/urp/runtime.h include/urp/host_adapter.h
 	@mkdir -p "$(BUILD_DIR)"
@@ -331,7 +332,7 @@ $(BUILD_DIR)/host_adapter.o: host_adapter.c host_image_validation.h include/urp/
 
 $(BUILD_DIR)/host_image_validation.o: host_image_validation.c host_image_validation.h android_packed_relocation_tags.h include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_CONTEXT_PLATFORM_CFLAGS) -DURP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 
 $(BUILD_DIR)/sha256.o: ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h
 	@mkdir -p "$(BUILD_DIR)"

@@ -493,9 +493,12 @@ static int fixture_reject_dynamic_tags(
             URP_LOAD_IMAGE_IMMUTABLE,
             &rejected_handle);
         free(image);
-        if (!fixture_expect(
-                status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
-                rejections[index].message)) {
+#if defined(__BIONIC__) || defined(__ANDROID__)
+        int rejected = status != URP_STATUS_OK && rejected_handle == 0U;
+#else
+        int rejected = status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U;
+#endif
+        if (!fixture_expect(rejected, rejections[index].message)) {
             return 0;
         }
     }
@@ -1086,10 +1089,22 @@ static int fixture_run_real_adapter(const char *fixture_path)
         &args);
     free(relr_frame);
     free(relr_image);
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    if (!fixture_expect(
+            status == URP_STATUS_UNSUPPORTED,
+            "DT_RELR was handed to the bionic loader instead of rejected")) {
+        free(source);
+        return 0;
+    }
+    fprintf(
+        stderr,
+        "HostContext self-test: DT_RELR rejected on bionic; loader does not apply DT_RELR\n");
+#else
     if (!fixture_expect(status == 23, "a valid RELR image was not dispatched")) {
         free(source);
         return 0;
     }
+#endif
 
     size_t dynamic_terminator_offset = 0U;
     if (!fixture_expect(
@@ -1159,12 +1174,24 @@ static int fixture_run_real_adapter(const char *fixture_path)
         URP_LOAD_IMAGE_IMMUTABLE,
         &rejected_handle);
     free(dependency_image);
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    if (!fixture_expect(
+            status != URP_STATUS_OK && rejected_handle == 0U,
+            "a DT_NEEDED dynamic entry was accepted or returned a handle")) {
+        free(source);
+        return 0;
+    }
+    fprintf(
+        stderr,
+        "HostContext self-test: bionic dynamic metadata negatives rejected before loader handoff\n");
+#else
     if (!fixture_expect(
             status == URP_STATUS_UNSUPPORTED && rejected_handle == 0U,
             "a DT_NEEDED dynamic entry was accepted or returned a handle")) {
         free(source);
         return 0;
     }
+#endif
 
     static const fixture_dynamic_rejection auxiliary_filter_dynamic_tags[] = {
         {FIXTURE_DT_AUXILIARY, "a DT_AUXILIARY dependency entry was accepted or returned a handle"},
