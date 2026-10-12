@@ -77,10 +77,14 @@ public sealed partial class FunctionProtectionService
         new Dictionary<byte, byte> { [9] = 10, [10] = 9 };
 
     private readonly AsmStoneAdapter decoder;
+    private readonly IAarch64InstructionEncoder encoder;
 
-    public FunctionProtectionService(AsmStoneAdapter? decoder = null)
+    public FunctionProtectionService(
+        AsmStoneAdapter? decoder = null,
+        IAarch64InstructionEncoder? encoder = null)
     {
         this.decoder = decoder ?? new AsmStoneAdapter();
+        this.encoder = encoder ?? new Aarch64InstructionEncoder();
     }
 
 }

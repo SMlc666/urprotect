@@ -76,7 +76,7 @@ public sealed partial class FunctionProtectionService
         }
 
         var codeBase = codeBaseOverride ?? 0UL;
-        var emitter = new CodeEmitter(codeBase);
+        var emitter = new CodeEmitter(codeBase, encoder);
         foreach (var builder in builders)
         {
             var resourcePlan = Aarch64RegisterResourcePlanner.Plan(
@@ -85,7 +85,7 @@ public sealed partial class FunctionProtectionService
                 hasFlattening,
                 hasPermutation);
             var start = emitter.PositionAddress;
-            if (!builder.Emit(emitter, decoder, diagnosticBag))
+            if (!builder.Emit(emitter, encoder, diagnosticBag))
             {
                 foreach (var alias in analysisGroups.First(group =>
                              group.Any(analysis => analysis.Function.Value == builder.Source.Function.Value
@@ -131,16 +131,9 @@ public sealed partial class FunctionProtectionService
             return false;
         }
 
-        byte[] emitted;
-        try
+        if (!emitter.TryToBytes(out var emitted, out var emissionDiagnostic))
         {
-            emitted = emitter.ToBytes();
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or OverflowException)
-        {
-            diagnosticBag.Error(
-                DiagnosticCode.ProtectionBranchOutOfRange,
-                exception.Message);
+            diagnosticBag.Add(emissionDiagnostic);
             code = default!;
             results = resultList;
             diagnostics = diagnosticBag.ToArray();
@@ -489,14 +482,15 @@ public sealed partial class FunctionProtectionService
 
         public bool Emit(
             CodeEmitter emitter,
-            AsmStoneAdapter decoder,
+            IAarch64InstructionEncoder encoder,
             DiagnosticBag diagnostics)
         {
             OutputAddress = emitter.PositionAddress;
             var scratchRegister = Flatten && Permutation ? (byte)17 : (byte)16;
-            if (Permutation)
+            if (Permutation
+                && !EmitRegisterSwap(emitter, scratchRegister, diagnostics))
             {
-                EmitRegisterSwap(emitter, scratchRegister);
+                return false;
             }
 
             if (!Flatten)
@@ -508,10 +502,13 @@ public sealed partial class FunctionProtectionService
                     {
                         // The inverse shuffle restores the caller-visible values
                         // before the function returns.
-                        EmitRegisterSwap(emitter, scratchRegister);
+                        if (!EmitRegisterSwap(emitter, scratchRegister, diagnostics))
+                        {
+                            return false;
+                        }
                     }
 
-                    if (!EmitSourceInstruction(emitter, decoder, instruction, diagnostics))
+                    if (!EmitSourceInstruction(emitter, encoder, instruction, diagnostics))
                     {
                         return false;
                     }
@@ -524,7 +521,11 @@ public sealed partial class FunctionProtectionService
                 .Select((block, index) => (block.StartAddress, Id: index))
                 .ToDictionary(value => value.StartAddress, value => value.Id);
             emitter.MarkLabel($"entry-{Source.Function.Value:X}");
-            emitter.EmitWord(EncodeMovW(StateRegister, 0));
+            if (!EmitState(emitter, 0, diagnostics))
+            {
+                return false;
+            }
+
             emitter.EmitBranch($"dispatcher-{Source.Function.Value:X}");
             foreach (var block in Source.Blocks)
             {
@@ -563,7 +564,7 @@ public sealed partial class FunctionProtectionService
                         return false;
                     }
 
-                    if (!EmitSourceInstruction(emitter, decoder, instruction, diagnostics))
+                    if (!EmitSourceInstruction(emitter, encoder, instruction, diagnostics))
                     {
                         return false;
                     }
@@ -586,7 +587,7 @@ public sealed partial class FunctionProtectionService
                         return false;
                     }
 
-                    if (!EmitSourceInstruction(emitter, decoder, last, diagnostics))
+                    if (!EmitSourceInstruction(emitter, encoder, last, diagnostics))
                     {
                         return false;
                     }
@@ -598,12 +599,13 @@ public sealed partial class FunctionProtectionService
 
                 if (last.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.Return)
                 {
-                    if (Permutation)
+                    if (Permutation
+                        && !EmitRegisterSwap(emitter, scratchRegister, diagnostics))
                     {
-                        EmitRegisterSwap(emitter, scratchRegister);
+                        return false;
                     }
 
-                    if (!EmitSourceInstruction(emitter, decoder, last, diagnostics))
+                    if (!EmitSourceInstruction(emitter, encoder, last, diagnostics))
                     {
                         return false;
                     }
@@ -629,11 +631,19 @@ public sealed partial class FunctionProtectionService
                     var trueEdge = edges.First(edge => edge.Kind == Aarch64ControlFlowEdgeKind.ConditionalBranch);
                     var falseEdge = edges.First(edge => edge.Kind == Aarch64ControlFlowEdgeKind.Fallthrough);
                     var trueLabel = $"set-{Source.Function.Value:X}-{blockIds[trueEdge.TargetAddress!.Value]}";
-                    emitter.EmitConditionalBranch(last.Encoding & 0xF, trueLabel);
-                    emitter.EmitWord(EncodeMovW(StateRegister, checked((uint)blockIds[falseEdge.TargetAddress!.Value])));
+                    emitter.EmitConditionalBranch((int)(last.Encoding & 0xF), trueLabel);
+                    if (!EmitState(emitter, checked((uint)blockIds[falseEdge.TargetAddress!.Value]), diagnostics))
+                    {
+                        return false;
+                    }
+
                     emitter.EmitBranch($"dispatcher-{Source.Function.Value:X}");
                     emitter.MarkLabel(trueLabel);
-                    emitter.EmitWord(EncodeMovW(StateRegister, checked((uint)blockIds[trueEdge.TargetAddress!.Value])));
+                    if (!EmitState(emitter, checked((uint)blockIds[trueEdge.TargetAddress!.Value]), diagnostics))
+                    {
+                        return false;
+                    }
+
                     emitter.EmitBranch($"dispatcher-{Source.Function.Value:X}");
                     continue;
                 }
@@ -648,24 +658,41 @@ public sealed partial class FunctionProtectionService
                     return false;
                 }
 
-                emitter.EmitWord(EncodeMovW(StateRegister, checked((uint)blockIds[nextTarget])));
+                if (!EmitState(emitter, checked((uint)blockIds[nextTarget]), diagnostics))
+                {
+                    return false;
+                }
+
                 emitter.EmitBranch($"dispatcher-{Source.Function.Value:X}");
             }
 
             emitter.MarkLabel($"dispatcher-{Source.Function.Value:X}");
             foreach (var block in Source.Blocks)
             {
-                emitter.EmitWord(EncodeCmpW(StateRegister, checked((uint)blockIds[block.StartAddress])));
+                if (!emitter.TryEmitCreate(new Aarch64InstructionBuildRequest(
+                        Aarch64InstructionEncodingFamily.CompareImmediate,
+                        emitter.PositionAddress,
+                        checked((uint)blockIds[block.StartAddress]),
+                        BaseRegister: StateRegister,
+                        DestinationWidth: 32),
+                    diagnostics))
+                {
+                    return false;
+                }
+
                 emitter.EmitConditionalBranch(0, BlockLabel(block.StartAddress));
             }
 
-            emitter.EmitWord(0xD65F03C0); // RET: unreachable invalid-state guard.
-            return true;
+            return emitter.TryEmitCreate(new Aarch64InstructionBuildRequest(
+                    Aarch64InstructionEncodingFamily.Return,
+                    emitter.PositionAddress,
+                    0),
+                diagnostics);
         }
 
         private bool EmitSourceInstruction(
             CodeEmitter emitter,
-            AsmStoneAdapter decoder,
+            IAarch64InstructionEncoder encoder,
             Aarch64FunctionInstruction instruction,
             DiagnosticBag diagnostics)
         {
@@ -676,7 +703,7 @@ public sealed partial class FunctionProtectionService
                 return true;
             }
 
-            var result = decoder.TryPermuteGeneralRegisters(
+            var result = encoder.TryPermuteGeneralRegisters(
                 instruction.Encoding,
                 instruction.Address,
                 RegisterPermutation);
@@ -693,23 +720,51 @@ public sealed partial class FunctionProtectionService
             return true;
         }
 
-        private static void EmitRegisterSwap(CodeEmitter emitter, byte scratchRegister)
-        {
-            emitter.EmitWord(EncodeMovX(scratchRegister, 9));
-            emitter.EmitWord(EncodeMovX(9, 10));
-            emitter.EmitWord(EncodeMovX(10, scratchRegister));
-        }
+        private static bool EmitState(
+            CodeEmitter emitter,
+            uint state,
+            DiagnosticBag diagnostics) => emitter.TryEmitCreate(
+                new Aarch64InstructionBuildRequest(
+                    Aarch64InstructionEncodingFamily.MoveWideImmediate,
+                    emitter.PositionAddress,
+                    state,
+                    DestinationRegister: StateRegister,
+                    DestinationWidth: 32),
+                diagnostics);
+
+        private static bool EmitRegisterSwap(
+            CodeEmitter emitter,
+            byte scratchRegister,
+            DiagnosticBag diagnostics) =>
+            emitter.TryEmitCreate(
+                    new Aarch64InstructionBuildRequest(
+                        Aarch64InstructionEncodingFamily.MoveRegister,
+                        emitter.PositionAddress,
+                        0,
+                        DestinationRegister: scratchRegister,
+                        DestinationWidth: 64,
+                        SourceRegister: 9),
+                    diagnostics)
+                && emitter.TryEmitCreate(
+                    new Aarch64InstructionBuildRequest(
+                        Aarch64InstructionEncodingFamily.MoveRegister,
+                        emitter.PositionAddress,
+                        0,
+                        DestinationRegister: 9,
+                        DestinationWidth: 64,
+                        SourceRegister: 10),
+                    diagnostics)
+                && emitter.TryEmitCreate(
+                    new Aarch64InstructionBuildRequest(
+                        Aarch64InstructionEncodingFamily.MoveRegister,
+                        emitter.PositionAddress,
+                        0,
+                        DestinationRegister: 10,
+                        DestinationWidth: 64,
+                        SourceRegister: scratchRegister),
+                    diagnostics);
 
         private static string BlockLabel(ulong address) => $"block-{address:X}";
-
-        private static uint EncodeMovW(byte register, uint immediate) =>
-            0x52800000u | ((immediate & 0xFFFF) << 5) | register;
-
-        private static uint EncodeMovX(byte destination, byte source) =>
-            0xAA0003E0u | ((uint)source << 16) | destination;
-
-        private static uint EncodeCmpW(byte register, uint immediate) =>
-            0x7100001Fu | ((immediate & 0xFFF) << 10) | ((uint)register << 5);
     }
 
     private sealed record ProtectedCode(
@@ -727,13 +782,15 @@ public sealed partial class FunctionProtectionService
     private sealed class CodeEmitter
     {
         private readonly ulong baseAddress;
+        private readonly IAarch64InstructionEncoder encoder;
         private readonly List<uint> words = new();
         private readonly Dictionary<string, int> labels = new(StringComparer.Ordinal);
         private readonly List<BranchPatch> branches = new();
 
-        public CodeEmitter(ulong baseAddress)
+        public CodeEmitter(ulong baseAddress, IAarch64InstructionEncoder encoder)
         {
             this.baseAddress = baseAddress;
+            this.encoder = encoder ?? throw new ArgumentNullException(nameof(encoder));
         }
 
         public ulong PositionAddress => baseAddress + checked((ulong)words.Count * sizeof(uint));
@@ -742,86 +799,104 @@ public sealed partial class FunctionProtectionService
 
         public void EmitWord(uint word) => words.Add(word);
 
-        public void EmitBranch(string label)
+        public bool TryEmitCreate(
+            Aarch64InstructionBuildRequest request,
+            DiagnosticBag diagnostics)
         {
-            branches.Add(new BranchPatch(words.Count, label, false, 0));
-            words.Add(0x14000000);
-        }
-
-        public void EmitConditionalBranch(uint condition, string label)
-        {
-            branches.Add(new BranchPatch(words.Count, label, true, condition & 0xF));
-            words.Add(0x54000000u | (condition & 0xF));
-        }
-
-        public byte[] ToBytes()
-        {
-            foreach (var patch in branches)
+            var result = encoder.TryCreate(request);
+            if (!result.IsSuccess)
             {
-                if (!labels.TryGetValue(patch.Label, out var targetIndex))
-                {
-                    throw new InvalidOperationException($"Missing protected-code label '{patch.Label}'.");
-                }
-
-                var source = baseAddress + checked((ulong)patch.Index * sizeof(uint));
-                var target = baseAddress + checked((ulong)targetIndex * sizeof(uint));
-                if (!TrySignedDifference(source, target, out var displacement))
-                {
-                    throw new InvalidOperationException("Protected-code branch address overflowed.");
-                }
-                if ((displacement & 3) != 0
-                    || (patch.Conditional
-                        ? displacement < -(1L << 20) || displacement >= (1L << 20)
-                        : displacement < -(128L * 1024 * 1024) || displacement >= 128L * 1024 * 1024))
-                {
-                    throw new InvalidOperationException("Protected-code branch is out of range.");
-                }
-
-                words[patch.Index] = patch.Conditional
-                    ? 0x54000000u
-                        | (uint)((displacement >> 2) & 0x7FFFF) << 5
-                        | patch.Condition
-                    : 0x14000000u | (uint)((displacement >> 2) & 0x03FFFFFF);
-            }
-
-            var bytes = new byte[checked(words.Count * sizeof(uint))];
-            for (var index = 0; index < words.Count; index++)
-            {
-                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(index * sizeof(uint)), words[index]);
-            }
-
-            return bytes;
-        }
-
-        private static bool TrySignedDifference(ulong source, ulong target, out long difference)
-        {
-            if (target >= source)
-            {
-                var delta = target - source;
-                if (delta > long.MaxValue)
-                {
-                    difference = default;
-                    return false;
-                }
-
-                difference = (long)delta;
-                return true;
-            }
-
-            var reverse = source - target;
-            if (reverse > (ulong)long.MaxValue)
-            {
-                difference = default;
+                diagnostics.Error(
+                    DiagnosticCode.ProtectionUnsupportedInstruction,
+                    $"The AArch64 encoder rejected generated {request.Family}: {result.Diagnostic}");
                 return false;
             }
 
-            difference = -(long)reverse;
+            words.Add(result.Encoding);
             return true;
+        }
+
+        public void EmitBranch(string label)
+        {
+            branches.Add(new BranchPatch(words.Count, label, false, 0));
+            words.Add(0);
+        }
+
+        public void EmitConditionalBranch(int condition, string label)
+        {
+            if ((uint)condition > 15)
+            {
+                throw new ArgumentOutOfRangeException(nameof(condition));
+            }
+
+            branches.Add(new BranchPatch(words.Count, label, true, condition));
+            words.Add(0);
+        }
+
+        public bool TryToBytes(out byte[] bytes, out Diagnostic diagnostic)
+        {
+            bytes = Array.Empty<byte>();
+            diagnostic = default;
+            try
+            {
+                foreach (var patch in branches)
+                {
+                    if (!labels.TryGetValue(patch.Label, out var targetIndex))
+                    {
+                        diagnostic = new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.ProtectionUnsupportedInstruction,
+                            $"Missing protected-code label '{patch.Label}'.");
+                        return false;
+                    }
+
+                    var source = baseAddress + checked((ulong)patch.Index * sizeof(uint));
+                    var target = baseAddress + checked((ulong)targetIndex * sizeof(uint));
+                    var family = patch.Conditional
+                        ? Aarch64InstructionEncodingFamily.ConditionalBranch19
+                        : Aarch64InstructionEncodingFamily.Branch26;
+                    var result = encoder.TryCreate(new Aarch64InstructionBuildRequest(
+                        family,
+                        source,
+                        target,
+                        ConditionCode: patch.Condition));
+                    if (!result.IsSuccess)
+                    {
+                        diagnostic = new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.ProtectionBranchOutOfRange,
+                            $"The AArch64 encoder rejected protected-code {family}: {result.Diagnostic}",
+                            source);
+                        return false;
+                    }
+
+                    words[patch.Index] = result.Encoding;
+                }
+
+                bytes = new byte[checked(words.Count * sizeof(uint))];
+                for (var index = 0; index < words.Count; index++)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(
+                        bytes.AsSpan(index * sizeof(uint)),
+                        words[index]);
+                }
+
+                return true;
+            }
+            catch (Exception exception) when (exception is OverflowException or ArgumentOutOfRangeException)
+            {
+                diagnostic = new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    DiagnosticCode.ProtectionBranchOutOfRange,
+                    exception.Message);
+                return false;
+            }
         }
 
         private readonly record struct BranchPatch(
             int Index,
             string Label,
             bool Conditional,
-            uint Condition);
-    }}
+            int Condition);
+    }
+}
