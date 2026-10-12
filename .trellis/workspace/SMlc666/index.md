@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
-- **Last Active**: 2026-10-12
+- **Total Sessions**: 17
+- **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~458 | Active |
+| `journal-1.md` | ~498 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-10-13 | Complete TLS runtime matrix evidence | `8a04e38` | `feat/tls-relocation-runtime-matrix` |
 | 16 | 2026-10-12 | Continue TLS runtime matrix | `ee4ab84` | `main` |
 | 15 | 2026-10-12 | Complete AsmStone encoder unification | `7ba3268`, `ca340d5`, `53e8bcd`, `b40e31e`, `86bb3c0` | `task/10-11-asmstone-encoder-unification` |
 | 14 | 2026-10-07 | Record HostContext evidence runner follow-up | `fe14891` | `main` |

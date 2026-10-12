@@ -456,3 +456,43 @@ Resumed 10-06-tls-relocation-runtime-matrix after AsmStone merge. Verified the r
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: Complete TLS runtime matrix evidence
+<!-- trellis-session: v=2 fp=18d86f96c544511b -->
+
+**Date**: 2026-10-13
+**Task**: Complete TLS runtime matrix evidence
+**Branch**: `feat/tls-relocation-runtime-matrix`
+
+### Summary
+
+Completed and committed TLS runtime matrix follow-up. Added canonical Android packed-relocation tag alignment and eight-row managed/native rejection probes, explicit HostContext PT_TLS handoff predicate parity with six mutation cases, a closed 60-row model/profile/runtime/lifecycle transformed TLS evidence registry and checker, CI/regression/manifest wiring, and retained the sole promoted glibc initial-exec current-thread transformed row. Musl/bionic and other model/profile/lifecycle rows remain explicitly row-local not-applicable or environment-unavailable without cross-runtime promotion. Archive commit follows separately; .pi/settings.json remains user-owned dirty state.
+
+### Main Changes
+
+- Added canonical managed/native Android packed-relocation tag definitions and rejection probes
+- Added PT_TLS predicate parity fixtures and HostContext profile validation
+- Added 60-row transformed TLS evidence producer/checker and CI wiring
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8a04e38` | feat: complete TLS runtime matrix evidence |
+
+### Testing
+
+- [OK] 390 managed tests
+- [OK] 309 Python tests
+- [OK] native runtime and launcher suites
+- [OK] fixture, regression, evaluator, architecture, and Trellis checks
+- [OK] TLS prerequisite probes and 60-row matrix checker
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Push feat/tls-relocation-runtime-matrix and observe CI musl/bionic evidence lanes
