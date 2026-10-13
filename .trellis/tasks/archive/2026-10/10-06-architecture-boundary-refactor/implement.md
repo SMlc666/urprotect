@@ -21,7 +21,7 @@ Each phase is a separately reviewable commit boundary. No compatibility alias, f
 6. Remove the direct `FunctionProtectionService.Protect` production route only after the current workflow seam exists in G2; before then, mark the call sites and freeze new use.
 7. Reconcile current documentation/specs so retired behavior is described as absent, not as migration evidence or an available historical path.
 
-**G0 gate:** repository-wide search finds no reachable retired alias/version/fallback path, current manifests contain only current rows, and current managed/native contract tests pass.
+**G0 gate: PASSED.** The archived `purge-historical-contract` child established the sole current contract, removed retired aliases/versions/fixtures, and passed its managed/native/evidence gates.
 
 ## G1 — Establish namespace-first ownership boundaries
 
@@ -46,7 +46,7 @@ Each phase is a separately reviewable commit boundary. No compatibility alias, f
 4. Keep the number of assemblies unchanged unless a concrete invalid dependency cannot be prevented inside the current project. Record any assembly split and its forbidden dependency in the contract inventory.
 5. Split tests by ownership: structural/core, CLI/application, integration/workflow, artifact/protocol, and native contract; move cross-layer tests to the integration owner rather than hiding them in Core tests.
 
-**G1 gate:** each extracted boundary has one reason to change, dependency checks pass, no duplicate model/codec/writer exists, and the full managed suite remains green.
+**G1 gate: PASSED.** The archived `responsibility-boundaries` child established namespace ownership, dependency checks, service decomposition, and passed managed/architecture gates.
 
 ## G2 — Build one current workflow and complete HostContext materialization
 
@@ -74,9 +74,11 @@ Each phase is a separately reviewable commit boundary. No compatibility alias, f
 6. Make profile-specific failures occur before any output/evidence publication. HostContext materialization must not be represented by a generic late `RehydrationLayoutUnavailable` branch.
 7. Add current positive, nearest malformed, profile mismatch, and rollback tests for both profiles. Do not add retired-format fixtures.
 
-**G2 gate:** all three commands share the same current workflow, direct writer is gone from production routing, both current profiles complete materialization and validation, and native outer/HostContext oracles pass independently.
+**G2 gate: PASSED.** The archived `unified-protection-workflow` child routed all commands through the shared workflow, removed the direct writer, completed both profile paths, and passed native HostContext/outer handoff evidence.
 
 ## G3 — Contract and evidence convergence
+
+**Parent prerequisite closure:** G0-G2 are complete and archived. Downstream TLS, indirect-control, and CFI/unwind implementation may consume the established contracts.
 
 1. Update current CLI help, reports, contract inventory, README, compatibility spec, native README, fixture manifest, runtime matrix, and evidence checkers to describe only current behavior.
 2. Remove migration/fallback wording from parent and child plans; record G0-G2 as hard prerequisites for TLS, CFI, indirect-control, and runtime-promotion work.

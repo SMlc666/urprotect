@@ -29,16 +29,18 @@ The user requires a strict current-only architecture: no historical migration pa
 
 ## Acceptance Criteria
 
-- [ ] G0 provides a current-contract inventory with exactly one canonical production API/CLI/frame/artifact/workflow route per boundary.
-- [ ] No retired Payload Frame v1/v2 encoder/decoder/dispatch branch, legacy host projection, old CLI alias, deprecated public wrapper/API, direct writer, migration-format test data, or current migration feature row remains. Current Protected Image ABI v1 and HostContext ABI v1 remain as the sole current ABI contracts.
-- [ ] Current frame packaging and both native consumers use only the current v3 format and explicitly selected current profile contract.
-- [ ] G1 establishes the documented namespace-first ownership map, dependency rules are automatically checked, and central files no longer mix unrelated domain, application, codec, publication, process, or native-handoff concerns.
-- [ ] G2 makes `protect`, `protect-image`, and `rehydrate-image` use the same planning/layout/materialization/publication owners; no separate production writer or fallback remains.
-- [ ] Both `OuterExecveat` and `HostContextEntry` produce and validate their profile-specific native image through the shared workflow. HostContext materialization passes a native AArch64 handoff oracle and does not fail later in a generic outer-only materializer.
-- [ ] Structural validation remains decoder-independent by default, unrelated executable bytes do not affect selected-function analysis, and whole-image observation is explicit and non-gating.
-- [ ] The parent and remaining feature-child plans record G0-G2 as hard implementation prerequisites and prohibit migration paths, aliases, and parallel models/writers.
-- [ ] Managed, native, CLI, fixture, regression, evidence, and applicable runtime checks pass for the sole current contract; unavailable runtime environments remain unpromoted.
-- [ ] No failure path publishes a partial image, role, stage, report, or evidence set.
+- [x] G0 provides a current-contract inventory with exactly one canonical production API/CLI/frame/artifact/workflow route per boundary.
+- [x] No retired Payload Frame v1/v2 encoder/decoder/dispatch branch, legacy host projection, old CLI alias, deprecated public wrapper/API, direct writer, migration-format test data, or current migration feature row remains. Current Protected Image ABI v1 and HostContext ABI v1 remain as the sole current ABI contracts.
+- [x] Current frame packaging and both native consumers use only the current v3 format and explicitly selected current profile contract.
+- [x] G1 establishes the documented namespace-first ownership map, dependency rules are automatically checked, and central files no longer mix unrelated domain, application, codec, publication, process, or native-handoff concerns.
+- [x] G2 makes `protect`, `protect-image`, and `rehydrate-image` use the same planning/layout/materialization/publication owners; no separate production writer or fallback remains.
+- [x] Both `OuterExecveat` and `HostContextEntry` produce and validate their profile-specific native image through the shared workflow. HostContext materialization passes a native AArch64 handoff oracle and does not fail later in a generic outer-only materializer.
+- [x] Structural validation remains decoder-independent by default, unrelated executable bytes do not affect selected-function analysis, and whole-image observation is explicit and non-gating.
+- [x] The parent and remaining feature-child plans record G0-G2 as hard implementation prerequisites and prohibit migration paths, aliases, and parallel models/writers.
+- [x] Managed, native, CLI, fixture, regression, evidence, and applicable runtime checks pass for the sole current contract; unavailable runtime environments remain unpromoted.
+- [x] No failure path publishes a partial image, role, stage, report, or evidence set.
+
+Completion evidence: archived G0/G1/G2 children `purge-historical-contract`, `responsibility-boundaries`, and `unified-protection-workflow`; 390 managed tests at architecture completion, 309 Python tests, native HostContext/launcher checks, structural-default validation, architecture boundary checks, and current-contract evidence gates passed. Downstream CFI and TLS tasks consumed these boundaries without adding migration paths or alternate writers.
 
 ## Child-task map and ordering
 
