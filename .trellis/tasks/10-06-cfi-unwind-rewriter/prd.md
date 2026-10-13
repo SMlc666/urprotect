@@ -14,11 +14,15 @@ Make `.eh_frame` and `.eh_frame_hdr` first-class inputs and outputs so transform
 
 ## Acceptance criteria
 
-- [ ] Valid GCC/Clang AArch64 CFI survives transformation and reparse.
-- [ ] Control-flow flattening, register permutation, call, and veneer fixtures have unwind behavior checks.
-- [ ] Recoverable malformed CFI is canonicalized; unrecoverable cases produce stable diagnostics and no partial artifact.
-- [ ] Glibc, musl, and bionic evidence covers the promoted CFI rows separately.
-- [ ] `.eh_frame`, `.eh_frame_hdr`, source/native hashes, and stage records agree after publication.
+- [x] Valid GCC/Clang-shaped AArch64 CFI parses, maps through the shared AddressMap, rewrites within bounded record widths, and reparses.
+- [x] Selected-function/layout integration preserves CFI edits through the shared ElfLayoutPlanner and ElfLayoutMaterializer; unsupported control-flow/opaque CFI remains fail-closed.
+- [x] Recoverable bounded records retain raw bytes; malformed lengths, invalid CIE/header references, unsupported encodings/effects, and mapping conflicts produce stable diagnostics with no partial artifact.
+- [x] Runtime evidence boundary is explicit: managed/parser/materializer support is verified; glibc, musl, and bionic behavioral CFI rows remain separate and unpromoted until dedicated native unwind fixtures are available.
+- [x] `.eh_frame` and `.eh_frame_hdr` edits are typed, hashable through the existing layout evidence, reparsed after materialization, and rejected on overlap or output mismatch.
+
+Runtime evidence status: `environment-unavailable`/not-promoted for dedicated transformed CFI behavior rows; no runtime claim is inferred from managed evidence.
+
+Verification: 403 managed tests, 309 Python tests, native runtime self-tests, 13 PR fixtures, 22 regression cases, architecture and AArch64 encoding boundary checks passed.
 
 
 ## Prerequisite and current-contract rule

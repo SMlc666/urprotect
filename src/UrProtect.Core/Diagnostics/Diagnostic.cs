@@ -105,6 +105,11 @@ public enum DiagnosticCode
     SemanticPlanSnapshotUnsupported,
     SemanticPlanSnapshotLimitExceeded,
     SemanticPlanSnapshotIntegrityMismatch,
+    UnwindMetadataUnavailable,
+    UnwindMetadataMalformed,
+    UnwindMetadataUnsupported,
+    UnwindAddressMapMissing,
+    UnwindRewriteOverlap,
 }
 
 public readonly record struct Diagnostic(

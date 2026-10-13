@@ -43,6 +43,7 @@ public enum ElfLayoutEditKind
     ProgramHeader = 4,
     ElfHeader = 5,
     ProgramHeaderTable = 6,
+    UnwindMetadata = 7,
 }
 
 public enum ElfLayoutBranchEncodingKind
@@ -354,6 +355,8 @@ public sealed record ElfLayoutPlan(
     IReadOnlyList<ElfLayoutByteEdit> Edits)
 {
     public IReadOnlyList<ElfLayoutTlsFixupDecision> TlsFixups { get; init; } = Array.Empty<ElfLayoutTlsFixupDecision>();
+
+    public IReadOnlyList<ElfLayoutByteEdit> UnwindEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
 }
 
 /// <summary>Bounded serializable projection of a selected physical layout.</summary>
@@ -371,6 +374,8 @@ public sealed record ElfLayoutEvidence(
     IReadOnlyList<ElfBranchPlacementDecision> BranchDecisions)
 {
     public IReadOnlyList<ElfLayoutTlsFixupDecision> TlsFixups { get; init; } = Array.Empty<ElfLayoutTlsFixupDecision>();
+
+    public IReadOnlyList<ElfLayoutByteEdit> UnwindEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
 
     public const int CurrentSchemaVersion = 1;
 

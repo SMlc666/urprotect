@@ -136,6 +136,35 @@ RULES = (
         ),
     ),
     OwnershipRule(
+        "UnwindMetadata",
+        "UrProtect.Core.UnwindMetadata",
+        Path("src/UrProtect.Core/UnwindMetadata"),
+        (
+            "UrProtect.Core.StructuralElf",
+            "UrProtect.Core.SemanticPlanning",
+            "UrProtect.Core.ElfLayout",
+            "UrProtect.Core.Binary",
+            "UrProtect.Core.Diagnostics",
+        ),
+        (
+            "UrProtect.Core.Application",
+            "UrProtect.Core.ArtifactProtocol",
+            "UrProtect.Core.Infrastructure",
+            "UrProtect.Cli",
+        ),
+        (
+            "System.IO",
+            "System.Diagnostics",
+            "System.Runtime.InteropServices",
+            "DllImport",
+            "LibraryImport",
+            "NativeLibrary",
+            "SafeFileHandle",
+            "Marshal",
+            "Process",
+        ),
+    ),
+    OwnershipRule(
         "Application",
         "UrProtect.Core.Application",
         Path("src/UrProtect.Core/Application"),
@@ -148,6 +177,7 @@ RULES = (
             "UrProtect.Core.Binary",
             "UrProtect.Core.Diagnostics",
             "UrProtect.Core.Infrastructure",
+            "UrProtect.Core.UnwindMetadata",
         ),
         (
             "UrProtect.Cli",

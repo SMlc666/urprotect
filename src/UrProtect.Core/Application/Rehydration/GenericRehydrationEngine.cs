@@ -5,6 +5,7 @@ using UrProtect.Core.Application.Protection;
 using UrProtect.Core.SemanticPlanning;
 
 using UrProtect.Core.ElfLayout;
+using UrProtect.Core.UnwindMetadata;
 using UrProtect.Core.ArtifactProtocol;
 using UrProtect.Core.Infrastructure;
 namespace UrProtect.Core.Application.Rehydration;
@@ -627,6 +628,7 @@ public static class GenericRehydrationEngine
             .ToArray();
 
         var tlsFixupRequests = BuildTlsFixupRequests(image, semanticSnapshot, sourceFile, diagnostics);
+        var unwindEdits = BuildUnwindEdits(semanticSnapshot, sourceFile, diagnostics);
         if (diagnostics.HasErrors)
         {
             return null;
@@ -648,7 +650,8 @@ public static class GenericRehydrationEngine
             regionRequests,
             branchRequests,
             options,
-            tlsFixupRequests);
+            tlsFixupRequests,
+            unwindEdits);
         diagnostics.AddRange(planning.Diagnostics);
         if (planning.Plan is null || planning.Diagnostics.Any(diagnostic => diagnostic.IsError))
         {
@@ -657,6 +660,19 @@ public static class GenericRehydrationEngine
 
         var materialized = ElfLayoutMaterializer.Materialize(source, sourceFile, planning.Plan);
         diagnostics.AddRange(materialized.Diagnostics);
+        if (unwindEdits.Count > 0 && materialized.ParsedOutput is not null)
+        {
+            var reparsedUnwind = UnwindMetadataParser.Parse(materialized.ParsedOutput);
+            diagnostics.AddRange(reparsedUnwind.Diagnostics);
+            if (!reparsedUnwind.IsSuccess)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnwindMetadataMalformed,
+                    "The materialized Native Image failed its bounded unwind metadata reparse.");
+                return null;
+            }
+        }
+
         return materialized;
     }
 
@@ -689,6 +705,36 @@ public static class GenericRehydrationEngine
         }
 
         return true;
+    }
+
+    private static IReadOnlyList<ElfLayoutByteEdit> BuildUnwindEdits(
+        SemanticPlanSnapshot? snapshot,
+        ElfFile sourceFile,
+        DiagnosticBag diagnostics)
+    {
+        if (snapshot is null)
+        {
+            return Array.Empty<ElfLayoutByteEdit>();
+        }
+
+        var cfiEffects = snapshot.Plan.Extensions
+            .OfType<SemanticCfiEffectExtension>()
+            .ToArray();
+        if (cfiEffects.Length == 0)
+        {
+            return Array.Empty<ElfLayoutByteEdit>();
+        }
+
+        var mapResult = AddressMap.Create(snapshot.Plan.AddressMap.Entries);
+        diagnostics.AddRange(mapResult.Diagnostics);
+        if (!mapResult.IsSuccess || mapResult.Map is null)
+        {
+            return Array.Empty<ElfLayoutByteEdit>();
+        }
+
+        var rewrite = UnwindMetadataRewriter.Rewrite(sourceFile, mapResult.Map, cfiEffects);
+        diagnostics.AddRange(rewrite.Diagnostics);
+        return rewrite.IsSuccess ? rewrite.Edits : Array.Empty<ElfLayoutByteEdit>();
     }
 
     private static IReadOnlyList<ElfLayoutTlsFixupRequest> BuildTlsFixupRequests(

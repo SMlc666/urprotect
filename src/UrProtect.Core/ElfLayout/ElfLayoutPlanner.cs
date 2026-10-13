@@ -26,7 +26,8 @@ public static class ElfLayoutPlanner
         IEnumerable<ElfLayoutRegionRequest> regionRequests,
         IEnumerable<ElfLayoutBranchRequest> branchRequests,
         ElfLayoutOptions? options = null,
-        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null)
+        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null,
+        IEnumerable<ElfLayoutByteEdit>? unwindEdits = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFile);
         ArgumentNullException.ThrowIfNull(regionRequests);
@@ -39,7 +40,8 @@ public static class ElfLayoutPlanner
         var regions = ReadBounded(regionRequests, maximumRequests, out var regionsExceeded);
         var branches = ReadBounded(branchRequests, maximumRequests, out var branchesExceeded);
         var tlsFixups = ReadBounded(tlsFixupRequests ?? Array.Empty<ElfLayoutTlsFixupRequest>(), maximumRequests, out var tlsFixupsExceeded);
-        if (regionsExceeded || branchesExceeded || tlsFixupsExceeded)
+        var requestedUnwindEdits = ReadBounded(unwindEdits ?? Array.Empty<ElfLayoutByteEdit>(), maximumRequests, out var unwindEditsExceeded);
+        if (regionsExceeded || branchesExceeded || tlsFixupsExceeded || unwindEditsExceeded)
         {
             diagnostics.Error(DiagnosticCode.ElfLayoutOutputLimitExceeded, "The layout request stream exceeds its configured edit bound.");
         }
@@ -57,6 +59,7 @@ public static class ElfLayoutPlanner
         ValidateSource(sourceFile, sourceLength, options, diagnostics);
         ValidateRequests(sourceFile, sourceLength, regions, branches, options, diagnostics);
         ValidateTlsFixupRequests(sourceFile, regions, tlsFixups, diagnostics);
+        ValidateUnwindEdits(sourceFile, sourceLength, requestedUnwindEdits, diagnostics);
         if (diagnostics.HasErrors)
         {
             return new ElfLayoutPlanningResult(null, null, diagnostics.ToArray());
@@ -82,6 +85,7 @@ public static class ElfLayoutPlanner
                     regions,
                     branches,
                     tlsFixups,
+                    requestedUnwindEdits,
                     options,
                     strategy,
                     out var candidate,
@@ -124,8 +128,9 @@ public static class ElfLayoutPlanner
         IEnumerable<ElfLayoutRegionRequest> regionRequests,
         IEnumerable<ElfLayoutBranchRequest> branchRequests,
         ElfLayoutOptions? options = null,
-        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null) =>
-        Plan(sourceFile.Bytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests);
+        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null,
+        IEnumerable<ElfLayoutByteEdit>? unwindEdits = null) =>
+        Plan(sourceFile.Bytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests, unwindEdits);
 
     public static ElfLayoutPlanningResult CreatePlan(
         ReadOnlyMemory<byte> sourceBytes,
@@ -133,8 +138,9 @@ public static class ElfLayoutPlanner
         IEnumerable<ElfLayoutRegionRequest> regionRequests,
         IEnumerable<ElfLayoutBranchRequest> branchRequests,
         ElfLayoutOptions? options = null,
-        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null) =>
-        Plan(sourceBytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests);
+        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null,
+        IEnumerable<ElfLayoutByteEdit>? unwindEdits = null) =>
+        Plan(sourceBytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests, unwindEdits);
 
     private static bool TryBuildCandidate(
         ReadOnlyMemory<byte> sourceBytes,
@@ -144,6 +150,7 @@ public static class ElfLayoutPlanner
         IReadOnlyList<ElfLayoutRegionRequest> regions,
         IReadOnlyList<ElfLayoutBranchRequest> branches,
         IReadOnlyList<ElfLayoutTlsFixupRequest> tlsFixups,
+        IReadOnlyList<ElfLayoutByteEdit> unwindEdits,
         ElfLayoutOptions options,
         ElfLayoutStrategy strategy,
         out LayoutCandidate? candidate,
@@ -272,7 +279,8 @@ public static class ElfLayoutPlanner
             var tlsFixupDecisions = new List<ElfLayoutTlsFixupDecision>(tlsFixups.Count);
             var addressMap = new List<ElfLayoutAddressMapEntry>(regions.Count + options.MaximumVeneerCount);
             var placementByIdentity = new Dictionary<string, ElfLayoutPlacement>(StringComparer.Ordinal);
-            var edits = new List<ElfLayoutByteEdit>();
+            var edits = new List<ElfLayoutByteEdit>(unwindEdits.Count + regions.Count + branches.Count);
+            edits.AddRange(unwindEdits);
             var cursorFile = codeFileStart;
             var cursorVirtual = codeVirtualStart;
             foreach (var region in regions.OrderBy(region => region.Identity, StringComparer.Ordinal))
@@ -800,6 +808,7 @@ public static class ElfLayoutPlanner
                     .OrderBy(decision => decision.OutputVirtualAddress.Value)
                     .ThenBy(decision => decision.OutputFileOffset.Value)
                     .ToArray()),
+                UnwindEdits = Array.AsReadOnly(unwindEdits.ToArray()),
             };
 
             if (!ValidateCandidate(
@@ -1210,6 +1219,52 @@ public static class ElfLayoutPlanner
         {
             diagnostics.Error(DiagnosticCode.TableOutOfBounds, "The source section-header table is not fully represented by the layout snapshot.", header.SectionHeaderOffset);
         }
+    }
+
+    private static void ValidateUnwindEdits(
+        ElfFile sourceFile,
+        ulong sourceLength,
+        IReadOnlyList<ElfLayoutByteEdit> edits,
+        DiagnosticBag diagnostics)
+    {
+        if (edits.Count > ElfLayoutLimits.DefaultMaximumEditCount)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ElfLayoutOutputLimitExceeded,
+                "The unwind metadata edit count exceeds the shared layout bound.");
+            return;
+        }
+
+        foreach (var edit in edits)
+        {
+            if (edit.Kind != ElfLayoutEditKind.UnwindMetadata
+                || edit.Bytes is null
+                || edit.Bytes.Length == 0
+                || edit.Offset.Value > sourceLength
+                || (ulong)edit.Bytes.Length > sourceLength - edit.Offset.Value
+                || !IsUnwindSectionRange(sourceFile, edit.Offset.Value, (ulong)edit.Bytes.Length)
+                || !sourceFile.ProgramHeaders.Any(header =>
+                    header.Type == ElfConstants.PtLoad
+                    && edit.Offset.Value >= header.Offset
+                    && edit.Offset.Value - header.Offset <= header.FileSize
+                    && (ulong)edit.Bytes.Length <= header.FileSize - (edit.Offset.Value - header.Offset)))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnwindRewriteOverlap,
+                    "An unwind edit is not a bounded, load-mapped unwind metadata range.",
+                    edit.Offset.Value);
+                return;
+            }
+        }
+    }
+
+    private static bool IsUnwindSectionRange(ElfFile file, ulong offset, ulong size)
+    {
+        return file.SectionHeaders.Any(section =>
+            section.Type == 1
+            && section.Address != 0
+            && section.Offset == offset
+            && section.Size == size);
     }
 
     private static void ValidateTlsFixupRequests(
@@ -2981,6 +3036,7 @@ public static class ElfLayoutPlanner
             plan.BranchDecisions)
         {
             TlsFixups = plan.TlsFixups,
+            UnwindEdits = plan.UnwindEdits,
         };
 
     private static string ComputePreservedMetadataFingerprint(IReadOnlyList<ProgramHeader> headers)
