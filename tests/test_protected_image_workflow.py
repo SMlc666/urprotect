@@ -72,6 +72,24 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         self.assertTrue(CHECKER.stat().st_mode & 0o111)
         self.assertRegex(RUNNER.read_text(encoding="utf-8"), r"protect-image")
 
+    def test_transformed_cfi_and_indirect_control_evidence_runs_before_upload(self) -> None:
+        cfi = self.workflow.index("Run transformed CFI unwind evidence")
+        jump_table = self.workflow.index("Run transformed indirect-control jump-table evidence")
+        declarations = self.workflow.index(
+            "Check transformed CFI and indirect-control feature declarations",
+            jump_table,
+        )
+        upload = self.workflow.index("- name: Upload test evidence", declarations)
+        block = self.workflow[cfi:upload]
+        self.assertIn("run-cfi-host-context-e2e.sh", block)
+        self.assertIn("check-cfi-evidence.py", block)
+        self.assertIn("run-indirect-control-e2e.sh", block)
+        self.assertIn("check-indirect-control-evidence.py", block)
+        self.assertIn("runtime.cfi.transformed-backtrace.glibc.host-context-entry", block)
+        self.assertIn("runtime.indirect-control.jump-table.glibc.host-context-entry", block)
+        self.assertIn(".artifacts/cfi/", block)
+        self.assertIn(".artifacts/indirect-control/", block)
+
     def test_strict_corpus_growth_runs_before_evidence_upload(self) -> None:
         corpus = self.workflow.index("Run strict compatibility corpus growth evidence")
         upload = self.workflow.index("- name: Upload test evidence", corpus)

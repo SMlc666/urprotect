@@ -10,7 +10,7 @@
     {
       "registryId": "fixture-matrix",
       "path": "fixtures/manifest.json",
-      "sha256": "5f6b62cbc7d65b645588d0b4e09a46b92bcecaa09bcdf06e82ff8fa5183d729a",
+      "sha256": "036ad70c7e3f7996d0a237271bb271d522b7cbebf439746b8fe383166be8743f",
       "role": "auxiliary-not-strict-chain"
     },
     {

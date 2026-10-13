@@ -55,6 +55,8 @@ public enum DiagnosticCode
     FunctionNotFound,
     FunctionSelectorAmbiguous,
     FunctionAnalysisIncomplete,
+    IndirectTargetUnresolved,
+    IndirectTargetUnsupported,
     FunctionResourceUnavailable,
     ProtectionPassFailed,
     ProtectionLayoutUnavailable,

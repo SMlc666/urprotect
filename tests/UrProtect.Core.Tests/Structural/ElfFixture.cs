@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using UrProtect.Core.Aarch64Semantics;
 using UrProtect.Core.StructuralElf;
 using UrProtect.Core.ArtifactProtocol;
 
@@ -203,6 +204,131 @@ internal static partial class ElfFixture
         for (var index = 0; index < words.Length; index++)
         {
             WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return bytes;
+    }
+
+    public static byte[] ExactIndirectBranchFunctionPie(
+        ulong targetAddress = 0x1208,
+        bool useIndirectCall = false)
+    {
+        var bytes = TlsLocalExecFunctionPie();
+        const int codeOffset = 0x200;
+        const int codeSize = 3 * sizeof(uint);
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int relocationTableOffset = 0x600;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+
+        // Remove the TLS relocation table from this non-TLS control-flow fixture.
+        WriteUInt64(bytes.AsSpan(), DynamicTableOffset, ElfConstants.DtNull);
+        WriteUInt64(bytes.AsSpan(), DynamicTableOffset + 8, 0);
+        WriteSectionHeader(
+            bytes.AsSpan(),
+            sectionHeaderStart + (5 * ElfConstants.SectionHeaderSize64),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0);
+        bytes.AsSpan(relocationTableOffset, 2 * ElfConstants.RelaEntrySize64).Clear();
+
+        var encoder = new Aarch64InstructionEncoder();
+        var movz = encoder.TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.MoveWideImmediate,
+            0x1200,
+            targetAddress,
+            DestinationRegister: 0,
+            DestinationWidth: 64,
+            ImmediateShift: 0));
+        if (!movz.IsSuccess)
+        {
+            throw new InvalidOperationException(movz.Diagnostic);
+        }
+
+        WriteUInt32(bytes.AsSpan(), codeOffset, movz.Encoding);
+        WriteUInt32(bytes.AsSpan(), codeOffset + sizeof(uint), useIndirectCall ? 0xD63F0000u : 0xD61F0000u);
+        WriteUInt32(bytes.AsSpan(), codeOffset + (2 * sizeof(uint)), 0xD65F03C0u);
+        return bytes;
+    }
+
+    public static byte[] RelativeJumpTableFunctionPie(bool malformedTableEntry = false)
+    {
+        var bytes = ExactIndirectBranchFunctionPie();
+        const int codeOffset = 0x200;
+        const int codeSize = 0x48;
+        const int tableOffset = codeOffset + codeSize;
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            0x1200,
+            0x58,
+            0x58,
+            0x1000);
+        WriteUInt64(
+            bytes.AsSpan(),
+            sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32,
+            codeSize);
+        WriteUInt64(
+            bytes.AsSpan(),
+            symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16,
+            codeSize);
+
+        var words = new uint[]
+        {
+            0x71000C1F, // CMP W0, #3
+            0x540001E8, // B.HI default
+            0x90000001, // ADRP X1, table page
+            0x91092021, // ADD X1, X1, #0x248
+            0xB8A05822, // LDRSW X2, [X1, W0, UXTW #2]
+            0x10000063, // ADR X3, case0
+            0x8B020061, // ADD X1, X3, X2
+            0xD61F0020, // BR X1
+            0x52800220, // case0: MOV W0, #17
+            0xD65F03C0, // RET
+            0x52800CE0, // case1: MOV W0, #103
+            0xD65F03C0, // RET
+            0x128000C0, // case2: MOV W0, #-7
+            0xD65F03C0, // RET
+            0x52800B60, // case3: MOV W0, #91
+            0xD65F03C0, // RET
+            0x12800000, // default: MOV W0, #-1
+            0xD65F03C0, // RET
+        };
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        var entries = malformedTableEntry
+            ? new[] { unchecked((uint)-0x1000), 8u, 16u, 24u }
+            : new[] { 0u, 8u, 16u, 24u };
+        for (var index = 0; index < entries.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), tableOffset + (index * sizeof(uint)), entries[index]);
         }
 
         return bytes;

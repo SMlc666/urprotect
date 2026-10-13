@@ -1,6 +1,7 @@
 SHELL := /bin/sh
 
 CC ?= cc
+AS ?= as
 BUILD_DIR ?= build
 CFLAGS ?= -std=c11 -O2 -g0 -Wall -Wextra -Werror -Wshadow -Wconversion -pthread
 CPPFLAGS := -Iinclude -I../urprotect-launcher -I../../third_party/miniz
@@ -44,6 +45,11 @@ THREADED_TLS_HARNESS := $(BUILD_DIR)/host-context-threaded-tls-harness
 THREADED_TLS_TRACE_TEST := $(BUILD_DIR)/host-context-threaded-tls-trace-test
 THREADED_TLS_RUNTIME_TEST := $(BUILD_DIR)/host-context-threaded-tls-runtime-test
 THREAD_ADAPTER_TEST := $(BUILD_DIR)/host-context-thread-adapter-test
+CFI_FIXTURE := $(BUILD_DIR)/host-context-cfi-fixture.so
+CFI_FIXTURE_OBJECT := $(BUILD_DIR)/host-context-cfi-fixture.o
+CFI_RUNTIME_TEST := $(BUILD_DIR)/host-context-cfi-runtime-test
+JUMP_TABLE_FIXTURE := $(BUILD_DIR)/host-context-jump-table-fixture.so
+JUMP_TABLE_FIXTURE_S := $(BUILD_DIR)/host-context-jump-table-fixture.S.o
 NATIVE_IMAGE_HANDOFF := $(BUILD_DIR)/native-image-handoff
 HOST_CONTEXT_IMAGE_HANDOFF := $(BUILD_DIR)/host-context-image-handoff
 HOST_IMAGE_VALIDATION_PROBE := $(BUILD_DIR)/host-image-validation-probe
@@ -59,7 +65,7 @@ LDLIBS ?= -ldl -pthread
 ENTRY_FIXTURE_LDFLAGS ?=
 HOST_CONTEXT_PLATFORM_CFLAGS ?=
 
-.PHONY: all test runtime self-test host-context-launcher host-context-image-handoff host-image-validation-probe symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
+.PHONY: all test runtime self-test host-context-launcher host-context-image-handoff host-image-validation-probe symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test cfi-fixture cfi-runtime-test jump-table-fixture native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -105,6 +111,12 @@ threaded-tls-runtime-test: $(THREADED_TLS_RUNTIME_TEST)
 
 thread-adapter-test: $(THREAD_ADAPTER_TEST) $(THREADED_TLS_FIXTURE) $(DYNAMIC_TLS_FIXTURE)
 	"$(THREAD_ADAPTER_TEST)" "$(THREADED_TLS_FIXTURE)" "$(DYNAMIC_TLS_FIXTURE)"
+
+cfi-fixture: $(CFI_FIXTURE)
+
+cfi-runtime-test: $(CFI_RUNTIME_TEST)
+
+jump-table-fixture: $(JUMP_TABLE_FIXTURE)
 
 property-fixture: $(PROPERTY_FIXTURE)
 
@@ -257,6 +269,26 @@ $(THREADED_TLS_TRACE_TEST): host_context_threaded_tls_trace_test.c host_context_
 $(THREAD_ADAPTER_TEST): host_context_thread_adapter_test.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 "$<" $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -pthread -o "$@"
+
+$(CFI_FIXTURE): $(CFI_FIXTURE_OBJECT)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --build-id=none -z now --eh-frame-hdr -Bsymbolic "$<" -o "$@"
+
+$(CFI_FIXTURE_OBJECT): host_context_cfi_fixture.c include/urp/host_context.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -O0 -fPIC -fno-plt -fno-omit-frame-pointer -c "$<" -o "$@"
+
+$(CFI_RUNTIME_TEST): host_context_cfi_runtime_test.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) "$<" $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o -ldl -rdynamic -o "$@"
+
+$(JUMP_TABLE_FIXTURE): $(JUMP_TABLE_FIXTURE_S)
+	@mkdir -p "$(BUILD_DIR)"
+	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
+
+$(JUMP_TABLE_FIXTURE_S): host_context_jump_table_fixture.S
+	@mkdir -p "$(BUILD_DIR)"
+	$(AS) -o "$@" "$<"
 
 $(THREADED_TLS_RUNTIME_TEST): host_context_threaded_tls_runtime_test.c $(RUNTIME_OBJECTS)
 	@mkdir -p "$(BUILD_DIR)"

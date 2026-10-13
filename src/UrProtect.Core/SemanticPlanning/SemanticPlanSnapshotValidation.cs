@@ -610,6 +610,7 @@ public static partial class SemanticPlanSnapshotCodec
                 ValidateRange(jumpTable.TableRange, "jump-table range", diagnostics);
                 ValidatePositiveWidth(jumpTable.EntrySize, "jump-table entry size", diagnostics, jumpTable.TableRange.FileOffset.Value);
                 ValidateOptionalString(jumpTable.Encoding, "jump-table encoding", diagnostics);
+                ValidateOptionalString(jumpTable.Diagnostic, "jump-table diagnostic", diagnostics);
                 ValidateCount(
                     jumpTable.Targets.Count,
                     SemanticPlanSnapshotLimits.MaximumTargetsPerJumpTable,
@@ -618,6 +619,60 @@ public static partial class SemanticPlanSnapshotCodec
                 foreach (var target in jumpTable.Targets)
                 {
                     ValidateTarget(target, "jump-table target", diagnostics, jumpTable.TableRange.FileOffset.Value, required: true);
+                }
+
+                if (!Enum.IsDefined(typeof(SemanticJumpTableOwnership), jumpTable.Ownership)
+                    || !Enum.IsDefined(typeof(SemanticJumpTableRewritePolicy), jumpTable.RewritePolicy)
+                    || jumpTable.Scale <= 0
+                    || jumpTable.LowerBound > jumpTable.UpperBound && jumpTable.Entries.Count > 0)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticPlanSnapshotMalformed,
+                        "The jump-table structured contract contains an invalid ownership, rewrite policy, scale, or bound.",
+                        jumpTable.TableRange.FileOffset.Value);
+                }
+
+                if (jumpTable.HasStructuredProof)
+                {
+                    ValidateEntityId(jumpTable.SourceInstruction!.Value, "jump-table source instruction", diagnostics, jumpTable.TableRange.FileOffset.Value);
+                    if (jumpTable.TargetBaseAddress is null
+                        || jumpTable.TableRange.Size != checked((ulong)jumpTable.Entries.Count * (ulong)jumpTable.EntrySize)
+                        || jumpTable.OutputRange is null
+                        || jumpTable.Entries.Count == 0)
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.SemanticPlanSnapshotMalformed,
+                            "A structured jump table must retain a base, exact entry range, output range, and non-empty entry bindings.",
+                            jumpTable.TableRange.FileOffset.Value);
+                    }
+
+                    if (jumpTable.OutputRange is { } outputRange)
+                    {
+                        ValidateRange(outputRange, "jump-table output range", diagnostics);
+                    }
+                    ValidateTarget(jumpTable.DefaultTarget, "jump-table default target", diagnostics, jumpTable.TableRange.FileOffset.Value, required: true);
+                    ValidateCount(
+                        jumpTable.Entries.Count,
+                        SemanticPlanSnapshotLimits.MaximumTargetsPerJumpTable,
+                        "jump-table entry",
+                        diagnostics);
+                    var entryIndices = new HashSet<int>();
+                    foreach (var entry in jumpTable.Entries)
+                    {
+                        ValidateEntityId(entry.EntryIdentity, "jump-table entry identity", diagnostics, entry.SourceRange.FileOffset.Value);
+                        ValidateRange(entry.SourceRange, "jump-table entry range", diagnostics);
+                        ValidateTarget(entry.Target, "jump-table entry target", diagnostics, entry.SourceRange.FileOffset.Value, required: true);
+                        if (!entryIndices.Add(entry.Index)
+                            || entry.Index < jumpTable.LowerBound
+                            || entry.Index > jumpTable.UpperBound
+                            || entry.SourceRange.Size != (ulong)jumpTable.EntrySize)
+                        {
+                            diagnostics.Error(
+                                DiagnosticCode.SemanticPlanSnapshotMalformed,
+                                "A structured jump-table entry has a duplicate index, invalid bound, or width.",
+                                entry.SourceRange.FileOffset.Value);
+                        }
+                    }
                 }
 
                 break;

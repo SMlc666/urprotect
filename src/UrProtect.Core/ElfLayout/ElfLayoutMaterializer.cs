@@ -108,6 +108,7 @@ public static class ElfLayoutMaterializer
             {
                 TlsFixups = plan.TlsFixups,
                 UnwindEdits = plan.UnwindEdits,
+                JumpTableEdits = plan.JumpTableEdits,
             };
             return new ElfLayoutResult(plan, output, parsed.File, evidence, diagnostics.ToArray());
         }

@@ -69,25 +69,19 @@ public static class UnwindMetadataRewriter
                 continue;
             }
 
-            if (!addressMap.TryMapSourceRange(sourceRange, out var outputRange))
+            if (!addressMap.TryMapSourceRangeToContainingOutput(
+                    sourceRange,
+                    SemanticEntityKind.Function,
+                    out var outputRange))
             {
                 if (addressMap.TryMapSourceAddress(new VirtualAddress(fde.InitialLocation), out _))
                 {
                     diagnostics.Error(
                         DiagnosticCode.UnwindAddressMapMissing,
-                        "An FDE range is only partially covered by the selected address map.",
+                        "An FDE range is not contained by one selected output mapping.",
                         fde.EntryOffset.Value);
                 }
 
-                continue;
-            }
-
-            if (outputRange.Size != sourceRange.Size)
-            {
-                diagnostics.Error(
-                    DiagnosticCode.UnwindMetadataUnsupported,
-                    "CFI rewriting requires a piecewise-linear range with unchanged code size.",
-                    fde.EntryOffset.Value);
                 continue;
             }
 
@@ -128,7 +122,8 @@ public static class UnwindMetadataRewriter
                 outputRange,
                 matchingEffects,
                 cie.FdePointerEncoding ?? new UnwindEncoding(0),
-                cie.CodeAlignmentFactor);
+                cie.CodeAlignmentFactor,
+                addressMap);
         }
 
         if (diagnostics.HasErrors)
@@ -316,7 +311,38 @@ public static class UnwindMetadataRewriter
             fde => checked(model.EhFrameSection.Address
                 + (fde.EntryOffset.Value - model.EhFrameSection.Offset)),
             fde => fde);
-        for (var index = 0; index < header.Entries.Count; index++)
+        var orderedEntries = header.Entries
+            .Select(entry =>
+            {
+                if (!fdesByAddress.TryGetValue(entry.FdeAddress, out var fde)
+                    || !outputFdeOffsets.TryGetValue(fde.EntryOffset.Value, out var outputOffset))
+                {
+                    return (Entry: entry, Fde: (UnwindFde?)null, InitialLocation: entry.InitialLocation, FdeAddress: entry.FdeAddress);
+                }
+
+                var initialLocation = transforms.TryGetValue(fde.EntryOffset.Value, out var transform)
+                    ? transform.OutputRange.VirtualAddress.Value
+                    : entry.InitialLocation;
+                return (
+                    Entry: entry,
+                    Fde: fde,
+                    InitialLocation: initialLocation,
+                    FdeAddress: checked(model.EhFrameSection.Address + outputOffset));
+            })
+            .OrderBy(item => item.InitialLocation)
+            .ThenBy(item => item.FdeAddress)
+            .ToArray();
+
+        if (orderedEntries.Any(item => item.Fde is null))
+        {
+            diagnostics.Error(
+                DiagnosticCode.UnwindMetadataMalformed,
+                "The .eh_frame_hdr table contains an entry without a parsed FDE owner.",
+                header.SectionRange.Offset);
+            return null;
+        }
+
+        for (var index = 0; index < orderedEntries.Length; index++)
         {
             var initialOffset = cursor;
             if (!TryGetEncodedWidth(header.TableEncoding, bytes, cursor, out var initialWidth)
@@ -334,36 +360,31 @@ public static class UnwindMetadataRewriter
                 + model.EhFrameHeaderSection.Value.Address
                 + (ulong)initialOffset);
             var fdeFieldAddress = checked(initialFieldAddress + (ulong)initialWidth);
-            var entry = header.Entries[index];
-            if (fdesByAddress.TryGetValue(entry.FdeAddress, out var fde)
-                && transforms.TryGetValue(fde.EntryOffset.Value, out var transform))
+            var ordered = orderedEntries[index];
+            if (!TryWriteEncoded(
+                    header.TableEncoding,
+                    bytes,
+                    initialOffset,
+                    initialFieldAddress,
+                    header.SectionRange.Offset
+                        - model.EhFrameHeaderSection.Value.Offset
+                        + model.EhFrameHeaderSection.Value.Address,
+                    ordered.InitialLocation)
+                || !TryWriteEncoded(
+                    header.TableEncoding,
+                    bytes,
+                    initialOffset + initialWidth,
+                    fdeFieldAddress,
+                    header.SectionRange.Offset
+                        - model.EhFrameHeaderSection.Value.Offset
+                        + model.EhFrameHeaderSection.Value.Address,
+                    ordered.FdeAddress))
             {
-                if (!TryWriteEncoded(
-                        header.TableEncoding,
-                        bytes,
-                        initialOffset,
-                        initialFieldAddress,
-                        header.SectionRange.Offset
-                            - model.EhFrameHeaderSection.Value.Offset
-                            + model.EhFrameHeaderSection.Value.Address,
-                        transform.OutputRange.VirtualAddress.Value)
-                    || !outputFdeOffsets.TryGetValue(fde.EntryOffset.Value, out var outputOffset)
-                    || !TryWriteEncoded(
-                        header.TableEncoding,
-                        bytes,
-                        initialOffset + initialWidth,
-                        fdeFieldAddress,
-                        header.SectionRange.Offset
-                            - model.EhFrameHeaderSection.Value.Offset
-                            + model.EhFrameHeaderSection.Value.Address,
-                        checked(model.EhFrameSection.Address + outputOffset)))
-                {
-                    diagnostics.Error(
-                        DiagnosticCode.UnwindMetadataUnsupported,
-                        "A mapped FDE cannot be represented by the existing .eh_frame_hdr encodings.",
-                        header.SectionRange.Offset);
-                    return null;
-                }
+                diagnostics.Error(
+                    DiagnosticCode.UnwindMetadataUnsupported,
+                    "A mapped FDE cannot be represented by the existing .eh_frame_hdr encodings.",
+                    header.SectionRange.Offset);
+                return null;
             }
 
             cursor = checked(cursor + initialWidth + fdeWidth);
@@ -444,19 +465,28 @@ public static class UnwindMetadataRewriter
         bytes = new byte[checked(instructionOffset + instructionBytes.Length)];
         fde.RawBytes.Span[..instructionOffset].CopyTo(bytes);
         instructionBytes.CopyTo(bytes, instructionOffset);
+        var initialFieldAddress = checked(
+            ehFrameSection.Address
+                + (fde.EntryOffset.Value - ehFrameSection.Offset)
+                + (ulong)initialOffset);
         if (!TryWriteEncoded(
                 pointerEncoding,
                 bytes,
                 initialOffset,
-                checked(ehFrameSection.Address
-                    + (fde.EntryOffset.Value - ehFrameSection.Offset)
-                    + (ulong)initialOffset),
+                initialFieldAddress,
                 ehFrameSection.Address,
-                transform.OutputRange.VirtualAddress.Value))
+                transform.OutputRange.VirtualAddress.Value)
+            || !TryWriteEncoded(
+                new UnwindEncoding((byte)(pointerEncoding.Raw & 0x0F)),
+                bytes,
+                initialOffset + initialWidth,
+                checked(initialFieldAddress + (ulong)initialWidth),
+                ehFrameSection.Address,
+                transform.OutputRange.Size))
         {
             diagnostics.Error(
                 DiagnosticCode.UnwindMetadataUnsupported,
-                "The mapped FDE initial location cannot be represented by its CIE encoding.",
+                "The mapped FDE location or range cannot be represented by its CIE encoding.",
                 fde.EntryOffset.Value);
             return false;
         }
@@ -470,19 +500,16 @@ public static class UnwindMetadataRewriter
         DiagnosticBag diagnostics)
     {
         var effects = transform.Effects;
-        if (effects.Length == 0)
-        {
-            return fde.Instructions.SelectMany(instruction => instruction.RawBytes.ToArray()).ToArray();
-        }
-
         var result = new List<byte>();
         var pending = effects.ToList();
-        var current = fde.InitialLocation;
+        var sourceCurrent = fde.InitialLocation;
+        var outputCurrent = transform.OutputRange.VirtualAddress.Value;
+
         foreach (var instruction in fde.Instructions)
         {
             var replaced = false;
             while (pending.Count > 0
-                && pending[0].SourceRange.VirtualAddress.Value == current)
+                && pending[0].SourceRange.VirtualAddress.Value == sourceCurrent)
             {
                 var encoded = new List<byte>();
                 if (!TryEncodeEffect(pending[0], encoded, diagnostics)
@@ -500,18 +527,41 @@ public static class UnwindMetadataRewriter
                 replaced = true;
             }
 
-            if (!replaced)
+            if (replaced)
             {
-                result.AddRange(instruction.RawBytes.ToArray());
+                // The effect owns this CFI instruction boundary. In
+                // particular, replacing an advance opcode must not also emit
+                // the original advance, or the bounded FDE length changes.
+                continue;
             }
+
             if (instruction.Kind == UnwindInstructionKind.AdvanceLocation)
             {
-                var delta = checked(instruction.Operand * (ulong)transform.CodeAlignmentFactor);
-                current = checked(current + delta);
+                var sourceDelta = checked(instruction.Operand * (ulong)transform.CodeAlignmentFactor);
+                var sourceNext = checked(sourceCurrent + sourceDelta);
+                if (!TryMapCfiLocation(transform, sourceNext, out var outputNext)
+                    || !TryEncodeAdvanceLocation(
+                        instruction.RawBytes.Span,
+                        outputNext - outputCurrent,
+                        transform.CodeAlignmentFactor,
+                        result))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.UnwindAddressMapMissing,
+                        "A CFI location transition has no representable output address mapping.",
+                        instruction.FileOffset);
+                    return null;
+                }
+
+                sourceCurrent = sourceNext;
+                outputCurrent = outputNext;
+                continue;
             }
+
+            result.AddRange(instruction.RawBytes.ToArray());
         }
 
-        while (pending.Count > 0 && pending[0].SourceRange.VirtualAddress.Value == current)
+        while (pending.Count > 0 && pending[0].SourceRange.VirtualAddress.Value == sourceCurrent)
         {
             if (!TryEncodeEffect(pending[0], result, diagnostics))
             {
@@ -531,6 +581,79 @@ public static class UnwindMetadataRewriter
         }
 
         return result.ToArray();
+    }
+
+    private static bool TryMapCfiLocation(
+        FdeTransform transform,
+        ulong sourceAddress,
+        out ulong outputAddress)
+    {
+        if (transform.SourceRange.Size <= ulong.MaxValue - transform.SourceRange.VirtualAddress.Value
+            && sourceAddress == transform.SourceRange.VirtualAddress.Value + transform.SourceRange.Size)
+        {
+            if (transform.OutputRange.Size > ulong.MaxValue - transform.OutputRange.VirtualAddress.Value)
+            {
+                outputAddress = default;
+                return false;
+            }
+
+            outputAddress = transform.OutputRange.VirtualAddress.Value + transform.OutputRange.Size;
+            return true;
+        }
+
+        if (!transform.AddressMap.TryMapSourceAddress(
+                new VirtualAddress(sourceAddress),
+                out var mapped))
+        {
+            outputAddress = default;
+            return false;
+        }
+
+        outputAddress = mapped.Value;
+        return true;
+    }
+    private static bool TryEncodeAdvanceLocation(
+        ReadOnlySpan<byte> raw,
+        ulong byteDelta,
+        long codeAlignmentFactor,
+        List<byte> destination)
+    {
+        if (codeAlignmentFactor <= 0
+            || byteDelta % checked((ulong)codeAlignmentFactor) != 0)
+        {
+            return false;
+        }
+
+        var units = byteDelta / checked((ulong)codeAlignmentFactor);
+        if (raw.Length == 1 && units <= 63)
+        {
+            destination.Add((byte)(0x40U + units));
+            return true;
+        }
+
+        if (raw.Length == 2 && units <= byte.MaxValue)
+        {
+            destination.Add(0x02);
+            destination.Add((byte)units);
+            return true;
+        }
+
+        if (raw.Length == 3 && units <= ushort.MaxValue)
+        {
+            destination.Add(0x03);
+            destination.Add((byte)units);
+            destination.Add((byte)(units >> 8));
+            return true;
+        }
+
+        if (raw.Length == 5 && units <= uint.MaxValue)
+        {
+            destination.Add(0x04);
+            destination.AddRange(BitConverter.GetBytes(checked((uint)units)));
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryEncodeEffect(
@@ -861,18 +984,22 @@ public static class UnwindMetadataRewriter
 
         public long CodeAlignmentFactor { get; }
 
+        public AddressMap AddressMap { get; }
+
         public FdeTransform(
             SemanticSourceRange sourceRange,
             SemanticSourceRange outputRange,
             SemanticCfiEffectExtension[] effects,
             UnwindEncoding pointerEncoding,
-            long codeAlignmentFactor)
+            long codeAlignmentFactor,
+            AddressMap addressMap)
         {
             SourceRange = sourceRange;
             OutputRange = outputRange;
             Effects = effects;
             PointerEncoding = pointerEncoding;
             CodeAlignmentFactor = codeAlignmentFactor;
+            AddressMap = addressMap;
         }
     }
 }

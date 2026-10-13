@@ -96,6 +96,8 @@ public sealed class AddressMap
 
     public IReadOnlyList<AddressMapEntry> Tables => GetEntries(SemanticEntityKind.Table);
 
+    public IReadOnlyList<AddressMapEntry> TableEntries => GetEntries(SemanticEntityKind.TableEntry);
+
     public IReadOnlyList<AddressMapEntry> RelocationTargets =>
         GetEntries(SemanticEntityKind.RelocationTarget);
 
@@ -244,6 +246,58 @@ public sealed class AddressMap
         SemanticSourceRange sourceRange,
         out SemanticSourceRange outputRange) =>
         TryMapSourceRange(sourceRange, preferredKind: null, out outputRange);
+
+    /// <summary>
+    /// Maps a source range to the complete output range of the smallest owning
+    /// address-map entry. This is used by metadata that describes a whole
+    /// transformed function while its output is larger than the source range.
+    /// </summary>
+    public bool TryMapSourceRangeToContainingOutput(
+        SemanticSourceRange sourceRange,
+        out SemanticSourceRange outputRange) =>
+        TryMapSourceRangeToContainingOutput(sourceRange, preferredKind: null, out outputRange);
+
+    public bool TryMapSourceRangeToContainingOutput(
+        SemanticSourceRange sourceRange,
+        SemanticEntityKind preferredKind,
+        out SemanticSourceRange outputRange) =>
+        TryMapSourceRangeToContainingOutput(sourceRange, (SemanticEntityKind?)preferredKind, out outputRange);
+
+    private bool TryMapSourceRangeToContainingOutput(
+        SemanticSourceRange sourceRange,
+        SemanticEntityKind? preferredKind,
+        out SemanticSourceRange outputRange)
+    {
+        if (sourceRange.Size == 0
+            || !sourceRange.TryGetFileEnd(out _)
+            || !sourceRange.TryGetVirtualEnd(out _))
+        {
+            outputRange = default;
+            return false;
+        }
+
+        var candidates = entries
+            .Where(entry =>
+                ContainsRange(
+                    entry.SourceRange.FileOffset.Value,
+                    entry.SourceRange.Size,
+                    sourceRange.FileOffset.Value,
+                    sourceRange.Size)
+                && ContainsRange(
+                    entry.SourceRange.VirtualAddress.Value,
+                    entry.SourceRange.Size,
+                    sourceRange.VirtualAddress.Value,
+                    sourceRange.Size));
+        var smallestCandidates = SelectSmallestCandidates(candidates, preferredKind);
+        if (smallestCandidates.Length != 1)
+        {
+            outputRange = default;
+            return false;
+        }
+
+        outputRange = smallestCandidates[0].OutputRange;
+        return true;
+    }
 
     public bool TryMapSourceRange(
         SemanticSourceRange sourceRange,

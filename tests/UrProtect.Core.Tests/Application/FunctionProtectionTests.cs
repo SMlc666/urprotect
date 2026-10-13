@@ -98,6 +98,94 @@ public sealed class FunctionProtectionTests
 
     [Fact]
     [Trait("Category", "Protect")]
+    public void ExactSelectedIndirectBranchFlowsThroughFlatteningAndSemanticSnapshot()
+    {
+        var source = ElfFixture.ExactIndirectBranchFunctionPie();
+        var parse = ElfParser.Parse(source);
+        Assert.True(parse.IsSuccess, string.Join(Environment.NewLine, parse.Diagnostics));
+
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.OutputBytes);
+        Assert.Contains(
+            result.Functions,
+            function => function.Transformed && function.Function.Value == 0x1200);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void RelativeJumpTableFlowsThroughBoundedResolutionAndSnapshot()
+    {
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        var parse = ElfParser.Parse(source);
+        Assert.True(parse.IsSuccess, string.Join(Environment.NewLine, parse.Diagnostics));
+        var selected = Assert.Single(
+            parse.File!.FunctionSymbols,
+            function => function.Table == ElfSymbolTableKind.Static
+                && function.Value == 0x1200);
+
+        var result = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(ElfSymbolTableKind.Static, selected.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var table = Assert.Single(
+            result.Plan!.SemanticSnapshot!.Extensions.OfType<SemanticJumpTableExtension>());
+        Assert.Equal(4, table.Entries.Count);
+        Assert.Equal(4, table.EntrySize);
+        Assert.True(table.IsSigned);
+        Assert.Equal(0, table.LowerBound);
+        Assert.Equal(3, table.UpperBound);
+        Assert.Equal(SemanticJumpTableOwnership.SelectedFunctionPrivate, table.Ownership);
+        Assert.Equal(SemanticJumpTableRewritePolicy.InPlace, table.RewritePolicy);
+        Assert.Equal(4, result.Plan.SemanticSnapshot.AddressMap.TableEntries.Count);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void RelativeJumpTableWithOutOfClosureEntryFailsClosed()
+    {
+        var source = ElfFixture.RelativeJumpTableFunctionPie(malformedTableEntry: true);
+        var result = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Plan);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void IndirectCallRemainsFailClosedWithStableDiagnostic()
+    {
+        var source = ElfFixture.ExactIndirectBranchFunctionPie(useIndirectCall: true);
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
     public void CombinedPassesUseTheRequiredFlattenThenPermutationOrder()
     {
         var order = ProtectionPassOrdering.Normalize(new[]

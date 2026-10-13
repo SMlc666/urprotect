@@ -83,14 +83,14 @@ The user value is a protection artifact that remains executable and behaviorally
 - [x] A valid fixture with every program-header slot occupied is transformed through the unified path without requiring `PT_NULL`, and the resulting ELF passes structural and native behavior checks.
 - [x] Layout plans and emitted ELF preserve required program-header semantics and record their chosen placement strategy and address mappings.
 - [x] The semantic rewrite model handles the agreed initial PC-relative, call, literal-pool, and relocation families with positive and nearest-negative fixtures.
-- [x] Bounded indirect targets and ambiguous jump tables are resolved/rewritten and behaviorally exercised; opaque targets follow the declared runtime mapping strategy.
-- [x] The agreed TLS relocation models execute with preserved per-thread values and lifecycle evidence on every runtime claimed by the feature row.
-- [x] Valid CFI is preserved or regenerated for transformed code, and malformed CFI follows the repair/canonicalization contract with retained evidence.
+- [ ] Bounded indirect targets and ambiguous jump tables are resolved/rewritten and behaviorally exercised; the archived child has only the analysis-boundary correction, while the required target/table implementation and evidence remain unfinished.
+- [ ] The agreed TLS relocation models execute with preserved per-thread values and lifecycle evidence across the declared runtime/profile/lifecycle matrix; only the glibc initial-exec current-thread control row is promoted, with the remaining rows explicitly unpromoted.
+- [ ] Valid CFI is preserved or regenerated for transformed code, malformed CFI follows the repair/canonicalization contract, and dedicated transformed unwind behavior is verified on each claimed runtime; managed parser/layout work is complete, but the native CFI behavior rows remain unpromoted.
 - [x] Branch-range, relocation, TLS, indirect-target, jump-table, CFI, layout, overflow, and publication failures return stable diagnostics and publish no partial output.
 - [x] Existing narrow protection, rehydration, native handoff, regression, fuzz, and current-contract tests remain green after the architecture refactor.
 - [x] Documentation, compatibility matrix, contract inventory, reports, fixtures, CI commands, and evidence checkers describe the unified workflow and each promoted semantic feature accurately.
 
-Completion evidence: all seven child deliveries are archived, including the CFI/unwind implementation merged at `a5bdc2c`/`7582b40`; current managed, Python, native, fixture, regression, architecture, encoding, TLS, layout, and evidence gates passed locally. Dedicated transformed CFI native behavior rows remain explicitly not-promoted until their independent fixtures/oracles exist.
+Status correction: the architecture prerequisite, layout, semantic-relocator, TLS semantic, CFI parser/layout, and AsmStone work are implemented and locally verified, but this parent remains `in_progress`. The indirect-control/jump-table acceptance criteria are still open, transformed TLS promotion is limited to the independently verified glibc initial-exec current-thread row, and dedicated transformed CFI native behavior rows remain open. The task must not be archived again until those declared gaps are either completed with independent evidence or the parent scope is explicitly revised and approved.
 
 ## Scope decision
 

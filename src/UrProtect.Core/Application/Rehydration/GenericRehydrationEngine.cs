@@ -238,7 +238,7 @@ public static class GenericRehydrationEngine
         SemanticPlanSnapshot? semanticSnapshot = null;
         if (document is not null && sourceFile is not null)
         {
-            semanticSnapshot = ValidateTlsSemanticSnapshotPresence(sourceFile, document, diagnostics);
+            semanticSnapshot = ValidateSemanticPlanSnapshotPresence(sourceFile, document, diagnostics);
         }
 
         if (document is not null && sourceFile is not null && profilePolicy is not null && !diagnostics.HasErrors)
@@ -338,7 +338,7 @@ public static class GenericRehydrationEngine
             diagnostics.ToArray());
     }
 
-    private static SemanticPlanSnapshot? ValidateTlsSemanticSnapshotPresence(
+    private static SemanticPlanSnapshot? ValidateSemanticPlanSnapshotPresence(
         ElfFile source,
         ProtectedImageDocument document,
         DiagnosticBag diagnostics)
@@ -351,22 +351,34 @@ public static class GenericRehydrationEngine
                 && relocation.Relocation.Offset - region.SourceAddress.Value < region.SourceSize))
             .ToArray();
         var snapshots = document.Operations.OfType<ProtectedImageSemanticPlanSnapshot>().ToArray();
-        if (selectedTlsRelocations.Length == 0 && snapshots.Length == 0)
+        if (snapshots.Length == 0)
         {
+            if (selectedTlsRelocations.Length > 0)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TlsBindingUnresolved,
+                    "A transformed TLS relocation requires exactly one canonical semantic-plan snapshot operation.",
+                    selectedTlsRelocations[0].Relocation.Offset);
+            }
+
             return null;
         }
 
-        if (selectedTlsRelocations.Length > 0 && snapshots.Length != 1)
+        if (snapshots.Length != 1)
         {
             diagnostics.Error(
-                DiagnosticCode.TlsBindingUnresolved,
-                "A transformed TLS relocation requires exactly one canonical semantic-plan snapshot operation.",
-                selectedTlsRelocations[0].Relocation.Offset);
+                selectedTlsRelocations.Length > 0
+                    ? DiagnosticCode.TlsBindingUnresolved
+                    : DiagnosticCode.ProtectedImageMalformed,
+                "The Protected Image operation stream must contain exactly one canonical semantic-plan snapshot operation.",
+                selectedTlsRelocations.Length > 0
+                    ? selectedTlsRelocations[0].Relocation.Offset
+                    : null);
             return null;
         }
 
         // Decode at the publication boundary as well as in the operation codec so the
-        // selected source's relocation inventory is bound to the snapshot being applied.
+        // selected source's semantic plan is bound to the snapshot being applied.
         var decoded = SemanticPlanSnapshotCodec.Decode(snapshots[0].CanonicalBytes);
         diagnostics.AddRange(decoded.Diagnostics);
         if (!decoded.IsSuccess || decoded.Snapshot is null)
@@ -381,7 +393,10 @@ public static class GenericRehydrationEngine
             .ToArray();
         if (tlsBindings.Length == 0 && selectedTlsRelocations.Length == 0)
         {
-            return null;
+            // Non-TLS semantic plans, including indirect-target plans, are
+            // validated by the canonical codec and retained as the rehydration
+            // handoff contract. They do not require PT_TLS projection.
+            return decoded.Snapshot;
         }
 
         var sourceModule = TlsStructuralAdapter.CreateImageModule(source);
@@ -628,7 +643,7 @@ public static class GenericRehydrationEngine
             .ToArray();
 
         var tlsFixupRequests = BuildTlsFixupRequests(image, semanticSnapshot, sourceFile, diagnostics);
-        var unwindEdits = BuildUnwindEdits(semanticSnapshot, sourceFile, diagnostics);
+        var jumpTableRequests = BuildJumpTableRequests(semanticSnapshot, sourceFile, diagnostics);
         if (diagnostics.HasErrors)
         {
             return null;
@@ -644,17 +659,59 @@ public static class GenericRehydrationEngine
             SegmentAlignment: RehydrationLimits.PageAlignment,
             CodeAlignment: ElfLayoutLimits.DefaultCodeAlignment,
             MaximumAlignment: ElfLayoutLimits.DefaultMaximumAlignment);
-        var planning = ElfLayoutPlanner.Plan(
+        var initialPlanning = ElfLayoutPlanner.Plan(
             source,
             sourceFile,
             regionRequests,
             branchRequests,
             options,
             tlsFixupRequests,
-            unwindEdits);
-        diagnostics.AddRange(planning.Diagnostics);
+            Array.Empty<ElfLayoutByteEdit>(),
+            jumpTableRequests);
+        diagnostics.AddRange(initialPlanning.Diagnostics);
+        if (initialPlanning.Plan is null || initialPlanning.Diagnostics.Any(diagnostic => diagnostic.IsError))
+        {
+            return null;
+        }
+
+        var unwindEdits = BuildUnwindEdits(
+            semanticSnapshot,
+            sourceFile,
+            image,
+            initialPlanning.Plan,
+            diagnostics);
+        if (diagnostics.HasErrors)
+        {
+            return null;
+        }
+
+        var planning = unwindEdits.Count == 0
+            ? initialPlanning
+            : ElfLayoutPlanner.Plan(
+                source,
+                sourceFile,
+                regionRequests,
+                branchRequests,
+                options,
+                tlsFixupRequests,
+                unwindEdits,
+                jumpTableRequests);
+        if (!ReferenceEquals(planning, initialPlanning))
+        {
+            diagnostics.AddRange(planning.Diagnostics);
+        }
+
         if (planning.Plan is null || planning.Diagnostics.Any(diagnostic => diagnostic.IsError))
         {
+            return null;
+        }
+
+        if (unwindEdits.Count > 0
+            && !HaveSamePlacements(initialPlanning.Plan, planning.Plan))
+        {
+            diagnostics.Error(
+                DiagnosticCode.UnwindAddressMapMissing,
+                "Adding unwind edits changed the physical code placement after the CFI address map was resolved.");
             return null;
         }
 
@@ -707,9 +764,65 @@ public static class GenericRehydrationEngine
         return true;
     }
 
+    private static IReadOnlyList<ElfLayoutJumpTableEditRequest> BuildJumpTableRequests(
+        SemanticPlanSnapshot? snapshot,
+        ElfFile sourceFile,
+        DiagnosticBag diagnostics)
+    {
+        if (snapshot is null)
+        {
+            return Array.Empty<ElfLayoutJumpTableEditRequest>();
+        }
+
+        var requests = new List<ElfLayoutJumpTableEditRequest>();
+        foreach (var table in snapshot.Extensions.OfType<SemanticJumpTableExtension>())
+        {
+            if (!table.HasStructuredProof
+                || table.BaseAddress is null
+                || table.TargetBaseAddress is null
+                || table.SourceInstruction is null
+                || table.OutputRange is null)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanSnapshotMalformed,
+                    "A jump-table extension consumed by rehydration is missing its structured proof contract.",
+                    table.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            if (!sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+                    table.TableRange.VirtualAddress,
+                    table.TableRange.Size,
+                    out var tableFileOffset)
+                || tableFileOffset != table.TableRange.FileOffset)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "A jump-table snapshot range is not the structural source mapping.",
+                    table.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            requests.Add(new ElfLayoutJumpTableEditRequest(
+                table.TableIdentity,
+                table.TableRange,
+                table.TargetBaseAddress.Value,
+                table.EntrySize,
+                table.IsSigned,
+                table.Scale,
+                table.Addend,
+                table.RewritePolicy,
+                table.Entries));
+        }
+
+        return Array.AsReadOnly(requests.ToArray());
+    }
+
     private static IReadOnlyList<ElfLayoutByteEdit> BuildUnwindEdits(
         SemanticPlanSnapshot? snapshot,
         ElfFile sourceFile,
+        ProtectedImageDocument image,
+        ElfLayoutPlan layoutPlan,
         DiagnosticBag diagnostics)
     {
         if (snapshot is null)
@@ -717,25 +830,149 @@ public static class GenericRehydrationEngine
             return Array.Empty<ElfLayoutByteEdit>();
         }
 
+        var addressMap = BuildPhysicalSemanticAddressMap(snapshot, image, layoutPlan, diagnostics);
+        if (addressMap is null)
+        {
+            return Array.Empty<ElfLayoutByteEdit>();
+        }
+
         var cfiEffects = snapshot.Plan.Extensions
             .OfType<SemanticCfiEffectExtension>()
             .ToArray();
-        if (cfiEffects.Length == 0)
+        var unwind = UnwindMetadataParser.Parse(sourceFile);
+        if (!unwind.IsSuccess)
         {
+            if (cfiEffects.Length > 0)
+            {
+                diagnostics.AddRange(unwind.Diagnostics);
+            }
+
             return Array.Empty<ElfLayoutByteEdit>();
         }
 
-        var mapResult = AddressMap.Create(snapshot.Plan.AddressMap.Entries);
-        diagnostics.AddRange(mapResult.Diagnostics);
-        if (!mapResult.IsSuccess || mapResult.Map is null)
-        {
-            return Array.Empty<ElfLayoutByteEdit>();
-        }
-
-        var rewrite = UnwindMetadataRewriter.Rewrite(sourceFile, mapResult.Map, cfiEffects);
+        // FDE locations and ranges are derived from the canonical address map.
+        // Explicit CFI effects are additive; a transformed function with valid
+        // unwind metadata still needs its FDE/header remapped when its output
+        // range or internal instruction offsets changed.
+        var rewrite = UnwindMetadataRewriter.Rewrite(sourceFile, addressMap, cfiEffects);
         diagnostics.AddRange(rewrite.Diagnostics);
         return rewrite.IsSuccess ? rewrite.Edits : Array.Empty<ElfLayoutByteEdit>();
     }
+
+    private static AddressMap? BuildPhysicalSemanticAddressMap(
+        SemanticPlanSnapshot snapshot,
+        ProtectedImageDocument image,
+        ElfLayoutPlan layoutPlan,
+        DiagnosticBag diagnostics)
+    {
+        var regions = image.Operations
+            .OfType<ProtectedImageEmitRegion>()
+            .ToArray();
+        var functionMappings = snapshot.Plan.AddressMap.Entries
+            .Where(entry => entry.Identity.Kind == SemanticEntityKind.Function)
+            .ToArray();
+        var physicalEntries = new List<AddressMapEntry>(snapshot.Plan.AddressMap.Entries.Count);
+
+        foreach (var entry in snapshot.Plan.AddressMap.Entries)
+        {
+            var owners = functionMappings
+                .Where(function => ContainsRange(
+                    function.SourceRange.VirtualAddress.Value,
+                    function.SourceRange.Size,
+                    entry.SourceRange.VirtualAddress.Value,
+                    entry.SourceRange.Size))
+                .ToArray();
+            if (owners.Length != 1)
+            {
+                physicalEntries.Add(entry);
+                continue;
+            }
+
+            var owner = owners[0];
+            var sourceFunction = regions
+                .Where(region => region.SourceAddress == owner.SourceRange.VirtualAddress
+                    && region.SourceSize == owner.SourceRange.Size)
+                .ToArray();
+            if (sourceFunction.Length != 1)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnwindAddressMapMissing,
+                    "A semantic function mapping does not match exactly one emitted Protected Image region.",
+                    owner.SourceRange.FileOffset.Value);
+                continue;
+            }
+
+            var identity = RegionIdentity(sourceFunction[0].RegionId);
+            var placement = layoutPlan.Placements
+                .Where(candidate => candidate.Identity == identity
+                    && candidate.SourceIdentity == identity)
+                .ToArray();
+            if (placement.Length != 1)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnwindAddressMapMissing,
+                    "A transformed function has no unique physical layout placement.",
+                    owner.SourceRange.FileOffset.Value);
+                continue;
+            }
+
+            var logicalOutput = owner.OutputRange;
+            if (entry.OutputRange.VirtualAddress.Value < logicalOutput.VirtualAddress.Value
+                || entry.OutputRange.VirtualAddress.Value - logicalOutput.VirtualAddress.Value
+                    > logicalOutput.Size
+                || entry.OutputRange.Size > logicalOutput.Size
+                    - (entry.OutputRange.VirtualAddress.Value - logicalOutput.VirtualAddress.Value))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMalformed,
+                    "A semantic entity output range escapes its transformed function mapping.",
+                    entry.SourceRange.FileOffset.Value);
+                continue;
+            }
+
+            var delta = entry.OutputRange.VirtualAddress.Value - logicalOutput.VirtualAddress.Value;
+            if (placement[0].FileOffset.Value > ulong.MaxValue - delta
+                || placement[0].VirtualAddress.Value > ulong.MaxValue - delta)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapOverflow,
+                    "A physical semantic output mapping overflows its address domain.",
+                    entry.SourceRange.FileOffset.Value);
+                continue;
+            }
+
+            physicalEntries.Add(entry with
+            {
+                OutputRange = new SemanticSourceRange(
+                    new FileOffset(placement[0].FileOffset.Value + delta),
+                    new VirtualAddress(placement[0].VirtualAddress.Value + delta),
+                    entry.OutputRange.Size),
+            });
+        }
+
+        if (diagnostics.HasErrors)
+        {
+            return null;
+        }
+
+        var result = AddressMap.Create(physicalEntries);
+        diagnostics.AddRange(result.Diagnostics);
+        return result.Map;
+    }
+
+    private static bool ContainsRange(ulong outerStart, ulong outerSize, ulong innerStart, ulong innerSize) =>
+        innerStart >= outerStart
+        && innerStart - outerStart <= outerSize
+        && innerSize <= outerSize - (innerStart - outerStart);
+
+    private static bool HaveSamePlacements(ElfLayoutPlan first, ElfLayoutPlan second) =>
+        first.Placements.Count == second.Placements.Count
+        && first.Placements.Zip(second.Placements).All(pair =>
+            pair.First.Identity == pair.Second.Identity
+            && pair.First.SourceIdentity == pair.Second.SourceIdentity
+            && pair.First.FileOffset == pair.Second.FileOffset
+            && pair.First.VirtualAddress == pair.Second.VirtualAddress
+            && pair.First.Size == pair.Second.Size);
 
     private static IReadOnlyList<ElfLayoutTlsFixupRequest> BuildTlsFixupRequests(
         ProtectedImageDocument image,

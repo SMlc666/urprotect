@@ -60,6 +60,7 @@ static void urp_trace_validation_failure(const char *stage, urp_status status)
 #define URP_R_AARCH64_GLOB_DAT 1025U
 #define URP_R_AARCH64_JUMP_SLOT 1026U
 #define URP_R_AARCH64_TLS_TPREL64 1030U
+#define URP_R_AARCH64_TLSDESC 1031U
 #define URP_DT_INIT 12U
 #define URP_DT_FINI 13U
 #define URP_DT_SONAME 14U
@@ -97,6 +98,7 @@ static void urp_trace_validation_failure(const char *stage, urp_status status)
 #define URP_DF_1_NOW UINT64_C(0x1)
 #define URP_STB_WEAK 2U
 #define URP_STT_FUNC 2U
+#define URP_STT_TLS 6U
 #define URP_STV_DEFAULT 0U
 #define URP_SHN_UNDEF 0U
 #define URP_R_AARCH64_RELATIVE 1027U
@@ -590,7 +592,7 @@ static urp_status urp_validate_plt_rela_table(
     uint16_t program_header_count)
 {
     if (dynamic->pltrelsz == 0U || dynamic->pltrelsz % 24U != 0U
-        || dynamic->relaent != 24U || !dynamic->has_relaent
+        || (dynamic->has_relaent && dynamic->relaent != 24U)
         || !dynamic->has_symtab || !dynamic->has_syment
         || dynamic->syment != 24U || dynamic->needed_count != 0U
         || dynamic->has_version_tags || dynamic->has_symbolic
@@ -625,7 +627,8 @@ static urp_status urp_validate_plt_rela_table(
         uint64_t symbol_delta;
         uint64_t symbol_address;
         size_t symbol_offset;
-        if (type != URP_R_AARCH64_JUMP_SLOT || symbol == 0U
+        if ((type != URP_R_AARCH64_JUMP_SLOT && type != URP_R_AARCH64_TLSDESC)
+            || symbol == 0U
             || !urp_checked_mul_u64(symbol, dynamic->syment, &symbol_delta)
             || !urp_checked_add_u64(dynamic->symtab, symbol_delta, &symbol_address)
             || !urp_find_load_range(
@@ -639,13 +642,35 @@ static urp_status urp_validate_plt_rela_table(
         uint8_t info_byte = symbol_record[4U];
         uint8_t other = symbol_record[5U];
         uint16_t section_index = urp_read_u16_le(symbol_record + 6U);
-        if ((info_byte >> 4U) != URP_STB_WEAK
-            || (info_byte & 0x0fU) != URP_STT_FUNC
-            || other != URP_STV_DEFAULT
-            || section_index != URP_SHN_UNDEF
+        uint8_t symbol_binding = (uint8_t)(info_byte >> 4U);
+        uint8_t symbol_type = (uint8_t)(info_byte & 0x0fU);
+        if (other != URP_STV_DEFAULT
             || !dynamic->has_strtab || !dynamic->has_strsz
             || dynamic->strsz == 0U || name_offset >= dynamic->strsz
             || dynamic->strsz > (uint64_t)SIZE_MAX) {
+            return URP_STATUS_UNSUPPORTED;
+        }
+        if (type == URP_R_AARCH64_JUMP_SLOT) {
+            if (!dynamic->has_relaent
+                || symbol_binding != URP_STB_WEAK
+                || symbol_type != URP_STT_FUNC
+                || section_index != URP_SHN_UNDEF) {
+                return URP_STATUS_UNSUPPORTED;
+            }
+        } else if (symbol_type != URP_STT_TLS
+            || section_index == URP_SHN_UNDEF
+            || (symbol_binding != 0U && symbol_binding != 1U && symbol_binding != URP_STB_WEAK)
+            || target % sizeof(uint64_t) != 0U
+            || !urp_find_load_range(
+                image,
+                image_size,
+                program_header_offset,
+                program_header_count,
+                target,
+                16U,
+                URP_PF_W,
+                0,
+                NULL)) {
             return URP_STATUS_UNSUPPORTED;
         }
 
@@ -660,8 +685,9 @@ static urp_status urp_validate_plt_rela_table(
         size_t remaining = (size_t)dynamic->strsz - (size_t)name_offset;
         if (remaining == 0U || image[name_file_offset] == 0U
             || memchr(image + name_file_offset, 0, remaining) == NULL
-            || !urp_validate_relocation_target(
-                image, image_size, program_header_offset, program_header_count, target)) {
+            || (type == URP_R_AARCH64_JUMP_SLOT
+                && !urp_validate_relocation_target(
+                    image, image_size, program_header_offset, program_header_count, target))) {
             return URP_STATUS_UNSUPPORTED;
         }
     }

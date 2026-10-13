@@ -158,6 +158,8 @@ public static partial class SemanticPlanSnapshotCodec
         context.Writer.Write(value.AccessSize);
         context.WriteString(value.Ordering);
         context.Writer.Write(value.WritesBack ? (byte)1 : (byte)0);
+        context.WriteOptionalString(value.IndexModifierKind);
+        context.Writer.Write(value.IndexModifierAmount);
     }
 
     private static void WriteOptionalTarget(
@@ -364,6 +366,30 @@ public static partial class SemanticPlanSnapshotCodec
                 WriteRange(context, jumpTable.TableRange);
                 context.Writer.Write(jumpTable.EntrySize);
                 context.WriteOptionalString(jumpTable.Encoding);
+                context.Writer.Write(jumpTable.BaseAddress.HasValue ? (byte)1 : (byte)0);
+                if (jumpTable.BaseAddress is { } baseAddress)
+                {
+                    context.Writer.Write(baseAddress.Value);
+                }
+
+                context.Writer.Write(jumpTable.TargetBaseAddress.HasValue ? (byte)1 : (byte)0);
+                if (jumpTable.TargetBaseAddress is { } targetBaseAddress)
+                {
+                    context.Writer.Write(targetBaseAddress.Value);
+                }
+
+                WriteOptionalEntityId(context, jumpTable.SourceInstruction);
+                context.Writer.Write(jumpTable.IsSigned ? (byte)1 : (byte)0);
+                context.Writer.Write(jumpTable.Scale);
+                context.Writer.Write(jumpTable.Addend);
+                context.Writer.Write(jumpTable.LowerBound);
+                context.Writer.Write(jumpTable.UpperBound);
+                WriteOptionalTarget(context, jumpTable.DefaultTarget);
+                context.Writer.Write((byte)jumpTable.Ownership);
+                context.Writer.Write((byte)jumpTable.RewritePolicy);
+                WriteOptionalRange(context, jumpTable.OutputRange);
+                context.WriteOptionalString(jumpTable.Diagnostic);
+
                 var targets = jumpTable.Targets
                     .OrderBy(target => GetTargetSortKey(target), StringComparer.Ordinal)
                     .ToArray();
@@ -371,6 +397,21 @@ public static partial class SemanticPlanSnapshotCodec
                 foreach (var target in targets)
                 {
                     WriteTarget(context, target);
+                    context.EnsureWithinCanonicalLimit();
+                }
+
+                var entries = jumpTable.Entries
+                    .OrderBy(entry => entry.Index)
+                    .ThenBy(entry => entry.EntryIdentity.Value, StringComparer.Ordinal)
+                    .ToArray();
+                context.WriteCount(entries.Length);
+                foreach (var entry in entries)
+                {
+                    WriteEntityId(context, entry.EntryIdentity);
+                    context.Writer.Write(entry.Index);
+                    context.Writer.Write(entry.EncodedValue);
+                    WriteRange(context, entry.SourceRange);
+                    WriteTarget(context, entry.Target);
                     context.EnsureWithinCanonicalLimit();
                 }
 
