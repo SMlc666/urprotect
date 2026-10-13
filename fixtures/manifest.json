@@ -399,7 +399,7 @@
         "src/UrProtect.Core/Aarch64Semantics/Aarch64JumpTableResolver.cs",
         "src/UrProtect.Core/ElfLayout/ElfLayoutPlanner.cs",
         "src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs",
-        ".artifacts/indirect-control/pr/jump-table.glibc.host-context-entry"
+        ".artifacts/indirect-control/pr/runtime.indirect-control.jump-table.glibc.host-context-entry"
       ],
       "constraints": [
         "The fixture contains ADRP/ADD/LDRSW/ADD/BR over a private signed relative table; the native handoff invokes the transformed table-bearing entry itself.",

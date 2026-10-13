@@ -857,12 +857,13 @@ def _product_canonical_protected_image(
         _product_failure("Protected Image request metadata is not canonically bound", stage)
 
     operation_end = len(data) - 32
-    if operation_count < 2 or operation_count % 2 != 0:
+    if operation_count < 2:
         _product_failure("Protected Image operation count is outside its bound", stage)
     operations: list[tuple[int, int, dict[str, Any]]] = []
     regions: dict[int, dict[str, Any]] = {}
     source_ranges: list[tuple[int, int]] = []
     fixups: list[dict[str, Any]] = []
+    semantic_snapshot_count = 0
     for _ in range(operation_count):
         if cursor + 8 > operation_end:
             _product_failure("Protected Image operation header is truncated", stage)
@@ -921,6 +922,22 @@ def _product_canonical_protected_image(
             }
             fixups.append(fixup)
             operations.append((source_region_id, code, fixup))
+        elif code == 3:
+            semantic_snapshot_count += 1
+            if semantic_snapshot_count > 1 or record_size < 44:
+                _product_failure("Protected Image semantic-plan snapshot count or length is invalid", stage)
+            snapshot_length = struct.unpack_from("<I", data, body)[0]
+            if (
+                snapshot_length == 0
+                or snapshot_length > 8 * 1024 * 1024
+                or body + 36 + snapshot_length != record_end
+            ):
+                _product_failure("Protected Image semantic-plan snapshot bounds are invalid", stage)
+            snapshot_digest = data[body + 4 : body + 36]
+            snapshot_bytes = data[body + 36 : record_end]
+            if snapshot_digest != bytes.fromhex(sha256_bytes(snapshot_bytes)):
+                _product_failure("Protected Image semantic-plan snapshot digest does not match its bytes", stage)
+            operations.append((0xFFFFFFFF, code, {"length": snapshot_length}))
         else:
             _product_failure("Protected Image operation code is unsupported", stage)
         cursor = record_end
