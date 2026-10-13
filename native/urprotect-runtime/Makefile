@@ -272,7 +272,7 @@ $(THREAD_ADAPTER_TEST): host_context_thread_adapter_test.c $(BUILD_DIR)/host_ada
 
 $(CFI_FIXTURE): $(CFI_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none -z now --eh-frame-hdr -Bsymbolic "$<" -o "$@"
+	$(LD) -shared --build-id=none -z now --eh-frame-hdr "$<" -o "$@"
 
 $(CFI_FIXTURE_OBJECT): host_context_cfi_fixture.c include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"

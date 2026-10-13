@@ -1,7 +1,7 @@
 #include "urp/host_context.h"
 #include <stdint.h>
 
-__attribute__((noinline, visibility("default")))
+__attribute__((noinline, visibility("hidden")))
 int32_t urp_transform_target(
     const urp_host_context_v1 *host,
     const urp_launch_args_v1 *args)

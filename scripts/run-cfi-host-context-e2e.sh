@@ -21,7 +21,7 @@ mkdir -p "$artifact_root"
 make -C "$native_root" cfi-fixture cfi-runtime-test >"$artifact_root/native-build.stdout" 2>"$artifact_root/native-build.stderr" || exit 1
 source_file="$native_root/build/host-context-cfi-fixture.so"
 harness="$native_root/build/host-context-cfi-runtime-test"
-function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_transform_target" && $1 ~ /^[0-9]+:/ { sub(":", "", $1); print "dynsym:" $1; exit }')"
+function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_transform_target" && $1 ~ /^[0-9]+:/ && $5 == "LOCAL" { sub(":", "", $1); print "symtab:" $1; exit }')"
 positive="$artifact_root/positive/$unit"
 mkdir -p "$artifact_root/positive"
 PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-rehydration-e2e.sh" \
