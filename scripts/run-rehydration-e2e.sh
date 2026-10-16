@@ -406,7 +406,12 @@ printf '%s\n' "$baseline_status" >"$artifact_root/baseline.status"
 
 native_helper="$repo_root/native/urprotect-runtime/build/native-image-handoff"
 helper_build_status=0
-make -C "$repo_root/native/urprotect-runtime" native-image-handoff >"$artifact_root/handoff-build.stdout" 2>"$artifact_root/handoff-build.stderr" || helper_build_status=$?
+if [[ "${URPROTECT_NATIVE_HANDOFF_PREBUILT:-0}" == '1' ]]; then
+  printf '%s\n' 'Native handoff helper prebuilt before parallel workers.' >"$artifact_root/handoff-build.stdout"
+  : >"$artifact_root/handoff-build.stderr"
+else
+  make -C "$repo_root/native/urprotect-runtime" native-image-handoff >"$artifact_root/handoff-build.stdout" 2>"$artifact_root/handoff-build.stderr" || helper_build_status=$?
+fi
 if [[ "$helper_build_status" -ne 0 || ! -x "$native_helper" ]]; then
   failure_stage='native-handoff'
   failure_reason="native handoff helper build failed with status ${helper_build_status}"
