@@ -1119,6 +1119,20 @@ jobs:
         with:
           pattern: strict-compatibility-shard-*-${{ github.run_id }}
           path: .artifacts/shards/
+      - name: Normalize downloaded evidence paths
+        if: always()
+        run: |
+          set -euo pipefail
+          checkout_root="${GITHUB_WORKSPACE}"
+          destination="${checkout_root}/.artifacts/protected-image"
+          while IFS= read -r -d '' source; do
+            [[ "${source}" == "${destination}" ]] && continue
+            mkdir -p "${destination}"
+            cp -a -- "${source}/." "${destination}/"
+          done < <(find "${checkout_root}" -type d -path '*/.artifacts/protected-image' -print0)
+          if [[ ! -d "${destination}" ]]; then
+            echo "No downloaded Protected Image evidence path found; evaluator will retain unavailable evidence."
+          fi
       - name: Merge and verify strict compatibility shard evidence
         if: github.event_name != 'push'
         run: |
@@ -1138,20 +1152,6 @@ jobs:
           python3 scripts/strict_corpus_shards.py verify \
             --evidence-root "$destination" --tier "$tier" \
             --runtime glibc --shard-count 4
-      - name: Normalize downloaded evidence paths
-        if: always()
-        run: |
-          set -euo pipefail
-          checkout_root="${GITHUB_WORKSPACE}"
-          destination="${checkout_root}/.artifacts/protected-image"
-          while IFS= read -r -d '' source; do
-            [[ "${source}" == "${destination}" ]] && continue
-            mkdir -p "${destination}"
-            cp -a -- "${source}/." "${destination}/"
-          done < <(find "${checkout_root}" -type d -path '*/.artifacts/protected-image' -print0)
-          if [[ ! -d "${destination}" ]]; then
-            echo "No downloaded Protected Image evidence path found; evaluator will retain unavailable evidence."
-          fi
       - name: Select evaluator tier
         run: |
           case "${GITHUB_EVENT_NAME}" in
