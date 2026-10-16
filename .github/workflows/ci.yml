@@ -104,10 +104,6 @@ jobs:
           esac
           python3 scripts/check-protection-evidence.py \
             ".artifacts/protection/${tier}/glibc" --tier "${tier}" --runtime glibc
-      - name: Test
-        run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
-      - name: Check coverage floor
-        run: python3 scripts/check-coverage.py
       - name: Check compatibility matrix contract
         run: python3 tests/test_fixture_matrix.py
       - name: Check managed architecture boundaries
@@ -157,7 +153,6 @@ jobs:
         with:
           name: test-evidence-${{ github.run_id }}
           path: |
-            tests/**/TestResults/**
             .artifacts/stress/
             .artifacts/regression-matrix/
             .artifacts/environment/
@@ -169,6 +164,52 @@ jobs:
 
   # Native product evidence is still produced and checked on the target host,
   # but does not block the managed test/fixture/fuzz lanes.
+  # Run all managed tests and the unchanged coverage collector/floor on
+  # an independent ARM64 runner. The local solution build avoids cross-job
+  # artifact dependencies, keeping the verification DAG flat.
+  managed-tests:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/environment
+          ./.github/scripts/record-environment.sh \
+            .artifacts/environment/managed-tests.txt \
+            aarch64 native-linux-glibc
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            tests/UrProtect.Fuzz/packages.lock.json
+            third_party/SharpFuzzCompat/SharpFuzz/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
+      - name: Test
+        run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
+      - name: Check coverage floor
+        run: python3 scripts/check-coverage.py
+      - name: Upload managed test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-test-evidence-${{ github.run_id }}
+          path: |
+            tests/**/TestResults/**
+            .artifacts/environment/
+          include-hidden-files: true
+          if-no-files-found: error
+
   protection-and-tls:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
@@ -1341,6 +1382,7 @@ jobs:
     if: always()
     needs:
       - build-and-test
+      - managed-tests
       - protection-and-tls
       - fixture-and-pack
       - native-host-context
@@ -1355,6 +1397,7 @@ jobs:
     timeout-minutes: 5
     env:
       BUILD_RESULT: ${{ needs['build-and-test'].result }}
+      MANAGED_RESULT: ${{ needs['managed-tests'].result }}
       PROTECTION_RESULT: ${{ needs['protection-and-tls'].result }}
       FIXTURE_RESULT: ${{ needs['fixture-and-pack'].result }}
       HOST_CONTEXT_RESULT: ${{ needs['native-host-context'].result }}
@@ -1372,6 +1415,7 @@ jobs:
           set -euo pipefail
           for result in \
             "${BUILD_RESULT}" \
+            "${MANAGED_RESULT}" \
             "${PROTECTION_RESULT}" \
             "${FIXTURE_RESULT}" \
             "${HOST_CONTEXT_RESULT}" \
