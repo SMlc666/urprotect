@@ -1,0 +1,765 @@
+{
+  "abiId": "urprotect.protected-image.v1",
+  "abiVersion": 1,
+  "architecture": "AArch64",
+  "consumerBuildSha256": "eabe4809fd9ece5774c1192e6f706de0cb972fa86521ca301f8510493e7e6b1b",
+  "consumerId": "urprotect.rehydrator.v1",
+  "cpuMilliseconds": 710,
+  "diagnostics": [],
+  "durationMilliseconds": 707,
+  "entryStatus": 91,
+  "entrySymbol": "urp_entry",
+  "handoffRecordPath": "handoff.json",
+  "handoffRecordSha256": "07abcdbf037eebb2d2c1dbc72341aaad27105da135018ebf909767ce058f363c",
+  "handoffStatus": "passed",
+  "hostContextAbiVersion": 1,
+  "isPassed": true,
+  "layoutEvidence": {
+    "addressMap": [
+      {
+        "identity": "0x2B8",
+        "outputRange": {
+          "fileOffset": {
+            "value": 70036
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 131476
+          }
+        },
+        "sourceIdentity": "0x2B8",
+        "sourceRange": {
+          "fileOffset": {
+            "value": 696
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 696
+          }
+        }
+      },
+      {
+        "identity": "0x2C0",
+        "outputRange": {
+          "fileOffset": {
+            "value": 70048
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 131488
+          }
+        },
+        "sourceIdentity": "0x2C0",
+        "sourceRange": {
+          "fileOffset": {
+            "value": 704
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 704
+          }
+        }
+      },
+      {
+        "identity": "0x2C8",
+        "outputRange": {
+          "fileOffset": {
+            "value": 70060
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 131500
+          }
+        },
+        "sourceIdentity": "0x2C8",
+        "sourceRange": {
+          "fileOffset": {
+            "value": 712
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 712
+          }
+        }
+      },
+      {
+        "identity": "0x2D0",
+        "outputRange": {
+          "fileOffset": {
+            "value": 70072
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 131512
+          }
+        },
+        "sourceIdentity": "0x2D0",
+        "sourceRange": {
+          "fileOffset": {
+            "value": 720
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 720
+          }
+        }
+      },
+      {
+        "identity": "0x32C:4:0:3",
+        "outputRange": {
+          "fileOffset": {
+            "value": 73728
+          },
+          "hasVirtualAddress": true,
+          "size": 16,
+          "virtualAddress": {
+            "value": 135168
+          }
+        },
+        "sourceIdentity": "0x32C:4:0:3",
+        "sourceRange": {
+          "fileOffset": {
+            "value": 812
+          },
+          "hasVirtualAddress": true,
+          "size": 16,
+          "virtualAddress": {
+            "value": 812
+          }
+        }
+      },
+      {
+        "identity": "region:0000000001",
+        "outputRange": {
+          "fileOffset": {
+            "value": 69968
+          },
+          "hasVirtualAddress": true,
+          "size": 280,
+          "virtualAddress": {
+            "value": 131408
+          }
+        },
+        "sourceIdentity": "region:0000000001",
+        "sourceRange": {
+          "fileOffset": {
+            "value": 656
+          },
+          "hasVirtualAddress": true,
+          "size": 124,
+          "virtualAddress": {
+            "value": 656
+          }
+        }
+      }
+    ],
+    "branchDecisions": [
+      {
+        "decision": 1,
+        "displacement": 130752,
+        "identity": "entry:1:0",
+        "maximumDisplacementExclusive": 134217728,
+        "minimumDisplacement": -134217728,
+        "opcode": 335544320,
+        "sourceIdentity": "region:0000000001",
+        "sourceRange": {
+          "fileOffset": {
+            "value": 656
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 656
+          }
+        },
+        "targetIdentity": "region:0000000001",
+        "targetRange": {
+          "fileOffset": {
+            "value": 69968
+          },
+          "hasVirtualAddress": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 131408
+          }
+        }
+      }
+    ],
+    "jumpTableClones": [
+      {
+        "outputRange": {
+          "fileOffset": {
+            "value": 73728
+          },
+          "hasVirtualAddress": true,
+          "size": 16,
+          "virtualAddress": {
+            "value": 135168
+          }
+        },
+        "ownerInventoryComplete": false,
+        "ownerReferences": [
+          {
+            "addend": 0,
+            "instructionAddress": 672,
+            "isSelectedFunction": true,
+            "ownerFunctionName": "urp_entry",
+            "ownerFunctionSection": {
+              "address": 656,
+              "addressAlignment": 4,
+              "entrySize": 0,
+              "flags": 6,
+              "info": 0,
+              "link": 0,
+              "name": 58,
+              "offset": 656,
+              "size": 156,
+              "type": 1
+            },
+            "ownerFunctionSectionIndex": 4,
+            "ownerFunctionSize": 124,
+            "ownerFunctionStart": 656,
+            "relocationSectionIndex": 5,
+            "relocationSourceAddress": 0,
+            "relocationType": 275,
+            "symbolBinding": 0,
+            "symbolIndex": 15,
+            "symbolName": "urp_shared_jump_table",
+            "symbolSectionIndex": 6,
+            "symbolSize": 16,
+            "symbolTableSectionIndex": 11,
+            "symbolType": 1,
+            "symbolValue": 812,
+            "symbolVisibility": 0,
+            "targetSectionIndex": 4
+          },
+          {
+            "addend": 0,
+            "instructionAddress": 676,
+            "isSelectedFunction": true,
+            "ownerFunctionName": "urp_entry",
+            "ownerFunctionSection": {
+              "address": 656,
+              "addressAlignment": 4,
+              "entrySize": 0,
+              "flags": 6,
+              "info": 0,
+              "link": 0,
+              "name": 58,
+              "offset": 656,
+              "size": 156,
+              "type": 1
+            },
+            "ownerFunctionSectionIndex": 4,
+            "ownerFunctionSize": 124,
+            "ownerFunctionStart": 656,
+            "relocationSectionIndex": 5,
+            "relocationSourceAddress": 24,
+            "relocationType": 277,
+            "symbolBinding": 0,
+            "symbolIndex": 15,
+            "symbolName": "urp_shared_jump_table",
+            "symbolSectionIndex": 6,
+            "symbolSize": 16,
+            "symbolTableSectionIndex": 11,
+            "symbolType": 1,
+            "symbolValue": 812,
+            "symbolVisibility": 0,
+            "targetSectionIndex": 4
+          },
+          {
+            "addend": 0,
+            "instructionAddress": 788,
+            "isSelectedFunction": false,
+            "ownerFunctionName": "urp_observer",
+            "ownerFunctionSection": {
+              "address": 656,
+              "addressAlignment": 4,
+              "entrySize": 0,
+              "flags": 6,
+              "info": 0,
+              "link": 0,
+              "name": 58,
+              "offset": 656,
+              "size": 156,
+              "type": 1
+            },
+            "ownerFunctionSectionIndex": 4,
+            "ownerFunctionSize": 32,
+            "ownerFunctionStart": 780,
+            "relocationSectionIndex": 5,
+            "relocationSourceAddress": 48,
+            "relocationType": 275,
+            "symbolBinding": 0,
+            "symbolIndex": 15,
+            "symbolName": "urp_shared_jump_table",
+            "symbolSectionIndex": 6,
+            "symbolSize": 16,
+            "symbolTableSectionIndex": 11,
+            "symbolType": 1,
+            "symbolValue": 812,
+            "symbolVisibility": 0,
+            "targetSectionIndex": 4
+          },
+          {
+            "addend": 0,
+            "instructionAddress": 792,
+            "isSelectedFunction": false,
+            "ownerFunctionName": "urp_observer",
+            "ownerFunctionSection": {
+              "address": 656,
+              "addressAlignment": 4,
+              "entrySize": 0,
+              "flags": 6,
+              "info": 0,
+              "link": 0,
+              "name": 58,
+              "offset": 656,
+              "size": 156,
+              "type": 1
+            },
+            "ownerFunctionSectionIndex": 4,
+            "ownerFunctionSize": 32,
+            "ownerFunctionStart": 780,
+            "relocationSectionIndex": 5,
+            "relocationSourceAddress": 72,
+            "relocationType": 277,
+            "symbolBinding": 0,
+            "symbolIndex": 15,
+            "symbolName": "urp_shared_jump_table",
+            "symbolSectionIndex": 6,
+            "symbolSize": 16,
+            "symbolTableSectionIndex": 11,
+            "symbolType": 1,
+            "symbolValue": 812,
+            "symbolVisibility": 0,
+            "targetSectionIndex": 4
+          }
+        ],
+        "ownership": 2,
+        "permissions": 4,
+        "requestedOutputRange": {
+          "fileOffset": {
+            "value": 936
+          },
+          "isInstructionRange": false,
+          "size": 16,
+          "virtualAddress": {
+            "value": 936
+          }
+        },
+        "rewritePolicy": 1,
+        "sourceTableRange": {
+          "fileOffset": {
+            "value": 812
+          },
+          "isInstructionRange": false,
+          "size": 16,
+          "virtualAddress": {
+            "value": 812
+          }
+        },
+        "tableIdentity": {
+          "kind": 5,
+          "value": "0x32C:4:0:3"
+        },
+        "tableReferenceProducers": [
+          {
+            "instructionAddress": 672,
+            "kind": 1
+          },
+          {
+            "instructionAddress": 676,
+            "kind": 2
+          }
+        ]
+      }
+    ],
+    "jumpTableEdits": [
+      {
+        "bytes": "AAAAAA==",
+        "kind": 8,
+        "offset": {
+          "value": 73728
+        }
+      },
+      {
+        "bytes": "DAAAAA==",
+        "kind": 8,
+        "offset": {
+          "value": 73732
+        }
+      },
+      {
+        "bytes": "GAAAAA==",
+        "kind": 8,
+        "offset": {
+          "value": 73736
+        }
+      },
+      {
+        "bytes": "JAAAAA==",
+        "kind": 8,
+        "offset": {
+          "value": 73740
+        }
+      }
+    ],
+    "jumpTableTargetBindings": [
+      {
+        "addend": 0,
+        "entryIdentity": {
+          "kind": 6,
+          "value": "0x32C:4:0:3:0"
+        },
+        "entryIndex": 0,
+        "entryWidth": 4,
+        "isSigned": true,
+        "outputEncodedValue": 0,
+        "outputEntryRange": {
+          "fileOffset": {
+            "value": 73728
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 135168
+          }
+        },
+        "outputTargetAddress": {
+          "value": 131476
+        },
+        "outputTargetBaseAddress": {
+          "value": 131476
+        },
+        "scale": 1,
+        "sourceEncodedValue": 0,
+        "sourceEntryRange": {
+          "fileOffset": {
+            "value": 812
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 812
+          }
+        },
+        "sourceTableRange": {
+          "fileOffset": {
+            "value": 812
+          },
+          "isInstructionRange": false,
+          "size": 16,
+          "virtualAddress": {
+            "value": 812
+          }
+        },
+        "sourceTargetAddress": {
+          "value": 696
+        },
+        "sourceTargetBaseAddress": {
+          "value": 696
+        },
+        "tableIdentity": {
+          "kind": 5,
+          "value": "0x32C:4:0:3"
+        },
+        "targetBaseIdentity": {
+          "kind": 1,
+          "value": "0x2B8"
+        },
+        "targetIdentity": {
+          "kind": 1,
+          "value": "0x2B8"
+        }
+      },
+      {
+        "addend": 0,
+        "entryIdentity": {
+          "kind": 6,
+          "value": "0x32C:4:0:3:1"
+        },
+        "entryIndex": 1,
+        "entryWidth": 4,
+        "isSigned": true,
+        "outputEncodedValue": 12,
+        "outputEntryRange": {
+          "fileOffset": {
+            "value": 73732
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 135172
+          }
+        },
+        "outputTargetAddress": {
+          "value": 131488
+        },
+        "outputTargetBaseAddress": {
+          "value": 131476
+        },
+        "scale": 1,
+        "sourceEncodedValue": 8,
+        "sourceEntryRange": {
+          "fileOffset": {
+            "value": 816
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 816
+          }
+        },
+        "sourceTableRange": {
+          "fileOffset": {
+            "value": 812
+          },
+          "isInstructionRange": false,
+          "size": 16,
+          "virtualAddress": {
+            "value": 812
+          }
+        },
+        "sourceTargetAddress": {
+          "value": 704
+        },
+        "sourceTargetBaseAddress": {
+          "value": 696
+        },
+        "tableIdentity": {
+          "kind": 5,
+          "value": "0x32C:4:0:3"
+        },
+        "targetBaseIdentity": {
+          "kind": 1,
+          "value": "0x2B8"
+        },
+        "targetIdentity": {
+          "kind": 1,
+          "value": "0x2C0"
+        }
+      },
+      {
+        "addend": 0,
+        "entryIdentity": {
+          "kind": 6,
+          "value": "0x32C:4:0:3:2"
+        },
+        "entryIndex": 2,
+        "entryWidth": 4,
+        "isSigned": true,
+        "outputEncodedValue": 24,
+        "outputEntryRange": {
+          "fileOffset": {
+            "value": 73736
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 135176
+          }
+        },
+        "outputTargetAddress": {
+          "value": 131500
+        },
+        "outputTargetBaseAddress": {
+          "value": 131476
+        },
+        "scale": 1,
+        "sourceEncodedValue": 16,
+        "sourceEntryRange": {
+          "fileOffset": {
+            "value": 820
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 820
+          }
+        },
+        "sourceTableRange": {
+          "fileOffset": {
+            "value": 812
+          },
+          "isInstructionRange": false,
+          "size": 16,
+          "virtualAddress": {
+            "value": 812
+          }
+        },
+        "sourceTargetAddress": {
+          "value": 712
+        },
+        "sourceTargetBaseAddress": {
+          "value": 696
+        },
+        "tableIdentity": {
+          "kind": 5,
+          "value": "0x32C:4:0:3"
+        },
+        "targetBaseIdentity": {
+          "kind": 1,
+          "value": "0x2B8"
+        },
+        "targetIdentity": {
+          "kind": 1,
+          "value": "0x2C8"
+        }
+      },
+      {
+        "addend": 0,
+        "entryIdentity": {
+          "kind": 6,
+          "value": "0x32C:4:0:3:3"
+        },
+        "entryIndex": 3,
+        "entryWidth": 4,
+        "isSigned": true,
+        "outputEncodedValue": 36,
+        "outputEntryRange": {
+          "fileOffset": {
+            "value": 73740
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 135180
+          }
+        },
+        "outputTargetAddress": {
+          "value": 131512
+        },
+        "outputTargetBaseAddress": {
+          "value": 131476
+        },
+        "scale": 1,
+        "sourceEncodedValue": 24,
+        "sourceEntryRange": {
+          "fileOffset": {
+            "value": 824
+          },
+          "isInstructionRange": true,
+          "size": 4,
+          "virtualAddress": {
+            "value": 824
+          }
+        },
+        "sourceTableRange": {
+          "fileOffset": {
+            "value": 812
+          },
+          "isInstructionRange": false,
+          "size": 16,
+          "virtualAddress": {
+            "value": 812
+          }
+        },
+        "sourceTargetAddress": {
+          "value": 720
+        },
+        "sourceTargetBaseAddress": {
+          "value": 696
+        },
+        "tableIdentity": {
+          "kind": 5,
+          "value": "0x32C:4:0:3"
+        },
+        "targetBaseIdentity": {
+          "kind": 1,
+          "value": "0x2B8"
+        },
+        "targetIdentity": {
+          "kind": 1,
+          "value": "0x2D0"
+        }
+      }
+    ],
+    "newProgramHeaderTable": {
+      "fileOffset": {
+        "value": 69632
+      },
+      "hasVirtualAddress": true,
+      "size": 336,
+      "virtualAddress": {
+        "value": 131072
+      }
+    },
+    "oldProgramHeaderTable": {
+      "fileOffset": {
+        "value": 64
+      },
+      "hasVirtualAddress": true,
+      "size": 224,
+      "virtualAddress": {
+        "value": 64
+      }
+    },
+    "outputLength": 73744,
+    "outputSha256": "908a454354be3f6dcd6614b06704e2d17ac04ead1fe0491b30a8f99446217a42",
+    "placements": [
+      {
+        "alignment": 4,
+        "fileOffset": {
+          "value": 69968
+        },
+        "identity": "region:0000000001",
+        "permissions": 5,
+        "range": {
+          "fileOffset": {
+            "value": 69968
+          },
+          "hasVirtualAddress": true,
+          "size": 280,
+          "virtualAddress": {
+            "value": 131408
+          }
+        },
+        "size": 280,
+        "sourceIdentity": "region:0000000001",
+        "virtualAddress": {
+          "value": 131408
+        }
+      }
+    ],
+    "preservedMetadataSha256": "c0abf0ad7ec700ff7d1e0d07e571eb6dfab11d2c057c7c55c48ae1c7d52aacb6",
+    "schemaVersion": 3,
+    "sourceSha256": "138e96724ef11294ada8e96803ca45cd02d3d038708134ffff8e8aaacf9fd473",
+    "strategy": 3,
+    "strategyValue": "relocated-program-header-table",
+    "tlsFixups": [],
+    "unwindEdits": []
+  },
+  "layoutStrategy": "relocated-program-header-table",
+  "loaderIdentity": "host-context.sealed-memfd.dlopen",
+  "materializationStatus": "passed",
+  "nativeImageSha256": "908a454354be3f6dcd6614b06704e2d17ac04ead1fe0491b30a8f99446217a42",
+  "nativeImageSize": 73744,
+  "preHandoffRecordSha256": "bcd544bc4fb322746ebc21df0ee0b70ddfe85d0bcee0e7f0cd1d6e50d10811ce",
+  "processStatus": 91,
+  "producerBuildSha256": "eabe4809fd9ece5774c1192e6f706de0cb972fa86521ca301f8510493e7e6b1b",
+  "producerId": "gcc-aarch64-shared-jump-table-fixture",
+  "profile": "host-context-entry",
+  "profileValidationStatus": "host-context-entry-validated",
+  "protectedImageSha256": "4b06cc8c0b6356e05a475be9217b99d8ef3a3ec95bc6253c03314fb9fcdc17b2",
+  "protectedImageSize": 17620,
+  "rawEvidenceManifestPath": "SHA256SUMS",
+  "releaseOrder": "entry-dispatch-before-release-image",
+  "requestSha256": "8b4dc37e1b284a4d9e5bdd0fa2888cf35842a689ebf0f72f33c102f881201cd0",
+  "requiredCapabilities": 11,
+  "schemaVersion": 1,
+  "sourceSha256": "138e96724ef11294ada8e96803ca45cd02d3d038708134ffff8e8aaacf9fd473",
+  "stage": "rehydration",
+  "status": "passed",
+  "unitId": "runtime.indirect-control.shared-table.glibc.host-context-entry",
+  "workflowOwner": "urprotect.core.protection-workflow.v1",
+  "workingSetBytes": 105000960
+}
