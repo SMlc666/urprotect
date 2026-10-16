@@ -41,6 +41,31 @@
 3. Run baseline/protected comparisons for status, streams, signals, TLS values, lifecycle, unwind/exception, and indirect target coverage.
 4. Update `fixtures/manifest.json`, `fixtures/runtime-matrix.json`, regression matrix, compatibility report, evidence checkers, and real-sample impact table.
 
+## Native configured-provider candidate preflight boundary
+
+The configured-provider consumer candidate preflight owns a single 8 MiB aggregate
+work budget initialized before any candidate program-header or dynamic-tag scan.
+Debit it before the program-header walk and each PT_LOAD range lookup, before
+iterating dynamic entries, and for bounded `DT_NEEDED` bytes, version traversal,
+RELA/PLT/RELR validation, GNU-hash bucket/chain traversal, dynsym work, and
+provider-specific consumer checks. Pass the same work object through the
+consumer RELA path; never initialize a replacement budget there. In candidate
+mode, NEEDED strings are scanned for at most the maximum accepted configured
+provider/libc/loader SONAME length plus its terminator, then overlong or unknown
+names are rejected. A configured provider must not reject a valid generic
+libc/versioned image; without a configured provider, preserve the ordinary
+non-provider path. The provider DSO parser retains a separate, independent 8 MiB
+budget. Keep exact-limit and one-under candidate tests, bounded long-NEEDED
+rejection, early provider version-tag rejection, and configured versioned-libc
+positive coverage. This implementation-plan addition does not close any
+external-table acceptance criterion or claim parent completion.
+
+Native AArch64/glibc verification, each using a unique isolated build directory:
+
+- `make -C native/urprotect-runtime BUILD_DIR=/tmp/urp-provider-preflight-focused-<unique> clean external-provider-self-test`
+- `make -C native/urprotect-runtime BUILD_DIR=/tmp/urp-provider-preflight-full-<unique> clean test`
+- `git diff --check`
+
 ## Validation commands
 
 - `dotnet restore UrProtect.sln --locked-mode`

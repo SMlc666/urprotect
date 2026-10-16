@@ -1503,3 +1503,66 @@ claimable = true
 explicit immutable baseline-v2 -> candidate=1, baseline=1, factor=1.0
 -> future growth target=100 -> Scheme-A still independent -> claimable=false
 ```
+- `runtime.host-context.external-table-provider` is a separate, bounded native
+  AArch64/glibc row; it does not widen the libc singleton/pair or arbitrary
+  dependency-graph rules. The host supplies a provider path and pins its exact
+  `DT_SONAME`, GNU build ID, and SHA-256 outside the image. The adapter snapshots
+  a bounded no-follow regular file, compares SHA-256 before ELF parsing, and
+  accepts only the dependency-free provider DSO with a 16-byte defined table
+  object in a file-backed read-only `PT_LOAD` and bounded executable targets.
+  The consumer may declare exactly that one configured provider SONAME; missing,
+  extra, duplicate, or mismatched provider dependencies and the provider table
+  import without its exact `DT_NEEDED` fail before memfd creation or loader
+  activity. The consumer's undefined global/default `STT_OBJECT` may have
+  `st_size == 0` (as GNU ld emits); its size/range is established by the pinned
+  provider definition and checked runtime binding, not by the undefined row.
+  Provider RPATH/RUNPATH and dependencies are rejected; `LD_LIBRARY_PATH`,
+  `LD_PRELOAD`, and `LD_AUDIT` must be unset or empty. No payload path, search
+  root, or environment variable selects the provider. After `DT_NEEDED` parsing
+  identifies the configured provider dependency, any consumer `DT_VERSYM`,
+  `DT_VERNEED`, `DT_VERNEEDNUM`, `DT_VERDEF`, or `DT_VERDEFNUM` tag is rejected
+  with `URP_STATUS_UNSUPPORTED` before generic symbol-version traversal or
+  provider-specific RELA accounting. The RELA-side version-tag check remains as
+  defense-in-depth. This provider-only ordering does not change the accepted
+  non-provider libc version-requirement path.
+
+  The glibc adapter hashes before parsing, loads the sealed provider descriptor
+  with `dlmopen(LM_ID_NEWLM, ..., RTLD_NOW | RTLD_LOCAL)`, then loads the
+  consumer into that exact `Lmid_t` with local visibility. It verifies the
+  actual provider link map, read-only table mapping/bytes, and consumer GOT
+  pointer against that provider before publishing the consumer handle, and
+  retains the provider until all consumer images are released. A pre-existing
+  same-SONAME base-namespace mapping is rejected by policy; unrelated
+  different-SONAME global definitions do not affect isolated binding. The
+  configured-provider consumer candidate preflight has one aggregate 8 MiB
+  work budget initialized before its program-header walk or dynamic-tag scan.
+  It charges program-header scans and PT_LOAD range lookups, the bounded
+  dynamic-entry scan, each byte examined in a `DT_NEEDED` name, version records,
+  version-name scans/hash work, RELA/PLT/RELR entries and target queries,
+  GNU-hash buckets/chains, dynsym scans, and provider-specific consumer checks.
+  The same work object continues through consumer RELA validation; entering the
+  RELA path does not reset it. Candidate `DT_NEEDED` scanning stops after the
+  longest accepted configured-provider, libc, or loader SONAME plus its
+  terminator; longer and unrecognized names are rejected before version,
+  relocation, provider-parser, memfd, or loader work. This budget applies in
+  configured mode even when classification ends at an otherwise valid generic
+  libc image, so the libc symbol-version positive must continue to pass. With
+  no configured provider, the established generic non-provider preflight path
+  is unchanged. The pinned provider DSO parser retains its own independent
+  aggregate 8 MiB budget for its program-header/indexed-range, GNU-hash,
+  dynsym, and string work. Exact-limit and one-under consumer-candidate tests
+  include dynamic entries, range lookups, and NEEDED bytes; the one-under case
+  must fail before provider parsing, memfd creation, or loader attempts. A long
+  adversarial NEEDED-name regression checks bounded rejection, and provider
+  version-tag negatives remain before generic symbol-version traversal.
+
+  On native AArch64/glibc, verify this boundary with a focused clean provider
+  self-test and the complete isolated runtime suite (use distinct `/tmp` build
+  directories for each run):
+  `make -C native/urprotect-runtime BUILD_DIR=/tmp/urp-provider-preflight-focused-<unique> clean external-provider-self-test`
+  `make -C native/urprotect-runtime BUILD_DIR=/tmp/urp-provider-preflight-full-<unique> clean test`
+  `git diff --check`
+  The native self-test also checks missing-`DT_NEEDED` rejection with configured
+  and unconfigured adapters and unchanged memfd/loader-attempt counters. This is
+  native source/loader evidence only, not managed transformation or rehydration
+  evidence, and does not establish musl or bionic support.

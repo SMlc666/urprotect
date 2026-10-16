@@ -26,12 +26,21 @@ executable filesystem pathname and keeps the sealed descriptor open until
 program headers and rejects an
 interpreter, unsupported TLS model, unsupported GNU property, unsupported
 dependency graph, text-relocation, or path-search requirement that this first
-entry slice does not define. The
-current bounded P3 slice accepts one recognized system-libc dependency with no
-RPATH/RUNPATH and delegates constructor-before-entry/destructor-before-release
-ordering to the system loader. The bounded P4-A slice accepts AArch64
-initial-exec PT_TLS with `R_AARCH64_TLS_TPREL64`. Its optional registered-worker
-extension is advertised only in a verified glibc build/runtime. Thread creation,
+entry slice does not define. The current bounded P3 slice accepts the recognized
+system-libc singleton or the exact glibc pair `libc.so.6` plus
+`ld-linux-aarch64.so.1`, with no RPATH/RUNPATH, and delegates
+constructor-before-entry/destructor-before-release ordering to the system
+loader. The bounded P4-A metadata preflight validates AArch64
+`R_AARCH64_TLS_TPREL64`, `R_AARCH64_TLS_DTPMOD64`,
+`R_AARCH64_TLS_DTPREL64`, and `R_AARCH64_TLSDESC` owners against PT_TLS.
+For ELF64 `ET_DYN`, `STT_TLS.st_value` is interpreted only as a TLS-block-relative
+offset, with symbol extent and addend bounds checked before loader handoff.
+Separate transformed current-thread HostContext glibc oracles exercise
+initial-exec, local-dynamic, general-dynamic, and TLSDESC using distinct source
+fixtures, status 43, retained lifecycle evidence, and baseline-vs-transformed
+behavior comparisons. These rows do not promote outer-execveat, registered
+workers, musl, or bionic. The optional registered-worker extension remains
+limited to the separately evidenced initial-exec glibc path. Thread creation,
 join, and release are restricted to the image owner; routine addresses are
 checked against the root `link_map`; opaque thread handles are monotonic and
 never reused. Release closes the spawn gate, joins all workers and their native
@@ -39,15 +48,15 @@ TLS-key teardown, then calls `dlclose`. A linker-produced fixture and packed
 wrapper harness observe initialized data/zero-fill, deterministic worker gates,
 constructor/entry/worker/TLS teardown/destructor ordering, explicit and
 automatic joins, serial reruns, and concurrent independent dispatches. Dynamic
-TLS, unmanaged workers, recursive dispatch, and musl/bionic threaded claims
-remain outside the contract. Failed
-adapter loads clear the output image handle before returning their stable
-status.
+TLS worker lifecycle, unmanaged workers, recursive dispatch, and musl/bionic
+threaded claims remain outside the contract. Failed adapter loads clear the
+output image handle before returning their stable status.
 The system loader remains the authority for applying relocation and memory
 protection. This adapter accepts AArch64 `RELATIVE`/`RELR` forms with checked
-writable targets, the existing bounded GLOB_DAT form, and the exact
-weak-undefined JUMP_SLOT PLT subset described below. The PLT subset requires
-immediate binding; other PLT/symbol combinations remain rejected. Section
+writable targets, the bounded GLOB_DAT form, the validated TLS metadata forms
+listed above, and the exact weak-undefined JUMP_SLOT PLT subset described
+below. The PLT subset requires immediate binding; other PLT/symbol combinations
+remain rejected. Section
 headers are not consulted by this adapter; bounded program headers and mapped
 dynamic metadata are authoritative for the sectionless image slice.
 
@@ -72,9 +81,9 @@ streams, native self-test, and release marker.
 This dependency-pair claim is glibc-only and does not promote musl or bionic. It directly
 loads that fixture through the adapter, checks the test-visible seal invariant,
 and releases the image before exercising frame dispatch. It therefore
-validates this narrow adapter slice while leaving broader relocation, TLS,
-dynamic path-search, dependency graphs, and instruction-property combinations explicit in
-the compatibility matrix. The real fixture is the positive HostContext
+validates this narrow adapter dependency slice without broadening relocation,
+TLS lifecycle, dynamic path-search, dependency graph, or instruction-property
+claims beyond their separately evidenced rows in the compatibility matrix. The real fixture is the positive HostContext
 baseline; bounded copies that turn a PT_LOAD-covered metadata segment into a
 structurally valid PT_TLS mutation, and a malformed `p_filesz > p_memsz`
 mutation, are rejected before image creation. PT_GNU_PROPERTY has a bounded
@@ -88,8 +97,11 @@ The same `libc.so.6` slice has a separate validated
 `runtime.host-context.dependency-symbol-version-requirements` row: the adapter
 requires `DT_GNU_HASH`, rejects `DT_SYMBOLIC`, and requires a complete
 `DT_VERSYM`/`DT_VERNEED`/`DT_VERNEEDNUM` tuple, bounds every
-version-need and auxiliary record, requires each `vn_file` to match the sole
-`DT_NEEDED` basename `libc.so.6`, and checks the version-name hash/index fields.
+version-need and auxiliary record, requires each `vn_file` to match a declared
+`DT_NEEDED` basename, and checks the version-name hash/index fields. The only
+admitted names are the `libc.so.6` singleton or the already-validated exact
+`libc.so.6` plus `ld-linux-aarch64.so.1` pair; this does not admit other
+libraries or dependency graphs.
 SysV `DT_HASH` alone or combined with `DT_GNU_HASH` is outside this slice.
 `RTLD_NOW` delegates resolution of those imported libc versions to the native
 loader. The retained fixture has a versioned `libc.so.6` import and returns
@@ -183,3 +195,63 @@ Run the native contract self-test on a native AArch64 host:
 ```sh
 make -C native/urprotect-runtime test
 ```
+
+The transformed CFI runtime oracle is a separate native C++ unwinding test.
+Its C fixture and C traversal frames retain asynchronous unwind tables without
+adding C++ runtime dependencies to the fixture. A typed exception is thrown
+from the host callback while the target and register-call assembly frames are
+active, then caught at the outer C++ boundary; the oracle records the throw-site
+target frame, typed token, RAII cleanup, no-normal-return condition, and release
+status. The transformed run invokes the address and size from the rehydration
+address map. Legacy C `setjmp`/`longjmp` and cancellation observations remain
+separate evidence. Retained records bind the exact C/C++ compiler and
+libstdc++/libgcc/glibc identities, raw baseline/transformed observations, and
+readelf frame witnesses; see `scripts/run-cfi-host-context-e2e.sh` and
+`scripts/check-cfi-evidence.py`.
+
+## Trusted external jump-table provider (glibc-only native slice)
+
+An explicitly configured HostContext adapter may load one dependency-free
+AArch64 provider DSO for the bounded external signed-relative jump-table
+fixture. The host supplies the provider path plus the exact expected SONAME,
+GNU build ID, and SHA-256; none of these values or paths come from the consumer
+ELF or Protected Image. The provider file is opened without following symlinks,
+snapshotted as a bounded regular file, hashed, and compared with the pinned
+SHA-256 before ELF parsing. It must have the exact SONAME, no dependencies or
+RPATH/RUNPATH, one 16-byte defined table object in a file-backed read-only
+`PT_LOAD`, and the validated provider-local executable targets.
+
+The consumer may have exactly one `DT_NEEDED`, naming that configured provider.
+Missing, extra, duplicate, or mismatched provider dependencies—and the exact
+undefined table-object GLOB_DAT import without that dependency—are rejected
+before memfd creation or loader activity. The consumer's undefined global,
+default-visible `STT_OBJECT` may have `st_size == 0` (GNU ld's normal output);
+the authenticated provider definition supplies the 16-byte size/range, and the
+adapter verifies the runtime table mapping and GOT pointer against it. The GOT
+slot remains a pointer, not table storage. Provider and consumer RPATH/RUNPATH
+are not accepted, and `LD_LIBRARY_PATH`, `LD_PRELOAD`, and `LD_AUDIT` must be
+unset or empty; no environment or payload path selects a provider.
+
+On glibc, the adapter loads the sealed provider descriptor into a fresh
+`dlmopen(LM_ID_NEWLM, ..., RTLD_NOW | RTLD_LOCAL)` namespace and loads the
+consumer into that exact link-map namespace with local visibility. Before
+publishing the consumer handle it verifies the actual provider `link_map`, the
+provider's read-only table mapping/bytes, and the consumer GOT value. The
+provider handle remains pinned until the last dependent consumer is released;
+consumer teardown precedes provider teardown. A pre-existing same-SONAME
+base-namespace object is rejected by policy, while a different-SONAME global
+object exporting the same symbol cannot alter the isolated binding.
+
+Configured consumer candidate preflight uses an aggregate 8 MiB work budget,
+initialized before the program-header walk and carried through `PT_DYNAMIC`/
+`DT_NEEDED` processing, relocation validation, GNU-hash traversal, and dynsym
+checks. The pinned provider DSO parser has a separate, independent aggregate
+8 MiB budget for its program-header/indexed-range, GNU-hash, dynsym, and string
+work. The indexed load ranges avoid rescanning program headers for each symbol.
+The native regression covers an exact-limit pass and a one-unit-under-limit
+rejection, missing `DT_NEEDED` with both configured and unconfigured adapters,
+unchanged memfd/loader counters for preflight failures, same-SONAME collision
+rejection, and successful binding in the presence of a different-SONAME global
+symbol collision. This is source fixture/native-loader evidence only; it is not
+proof of managed transformation or rehydration. No musl or bionic provider
+support is claimed.
