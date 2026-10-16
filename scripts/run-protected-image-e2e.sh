@@ -215,8 +215,16 @@ if [[ ! -s "$work_root/input" ]]; then
 fi
 
 source_sha256="$(sha256sum "$work_root/input" | cut -d' ' -f1)"
-producer_command=(
-  dotnet run --project "$repo_root/src/UrProtect.Cli" --configuration Release --no-restore --
+# Concurrent corpus workers share read-only CLI binaries. Avoid dotnet run's
+# implicit build (and potential writes to bin/obj) after the one-time job build.
+if [[ "${URPROTECT_PREBUILT_CLI:-0}" == '1' ]]; then
+  cli_path="$repo_root/src/UrProtect.Cli/bin/Release/net8.0/urprotect.dll"
+  [[ -s "$cli_path" ]] || { echo "prebuilt UrProtect CLI is unavailable" >&2; exit 1; }
+  producer_command=(dotnet "$cli_path")
+else
+  producer_command=(dotnet run --project "$repo_root/src/UrProtect.Cli" --configuration Release --no-restore --)
+fi
+producer_command+=(
   protect-image "$work_root/input"
   --artifact "$artifact_path"
   --role "$role_path"
