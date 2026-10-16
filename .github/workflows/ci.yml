@@ -220,15 +220,9 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-prerequisite-probes
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-transformed-runtime-matrix
 
-      - name: Run strict compatibility corpus growth evidence
-        if: always()
-        run: |
-          case "${GITHUB_EVENT_NAME}" in
-            schedule) tier=nightly ;;
-            release) tier=release ;;
-            *) tier=pr ;;
-          esac
-          ./scripts/run-strict-compatibility-corpus.sh --tier "${tier}" --runtime glibc
+      - name: Run strict compatibility corpus growth evidence (push fallback)
+        if: github.event_name == 'push'
+        run: ./scripts/run-strict-compatibility-corpus.sh --tier pr --runtime glibc
       - name: Run required bionic Node.js Python contracts
         run: |
           python3 tests/test_bionic_node_runner.py
@@ -387,6 +381,53 @@ jobs:
   # The current approved public real-sample slice is a required full-corpus gate on every PR.
   # Scheduled and release runs reuse the exact registry/orchestrator and only
   # change the tier's retention/repeat policy; they never select a subset.
+  # Shards run on independent native ARM64 runners. No test coverage is dropped:
+  # every registered unit is allocated exactly once and validated before evaluation.
+  strict-compatibility-shard:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Validate shard partition contracts
+        run: python3 tests/test_strict_corpus_shards.py
+      - name: Execute strict compatibility shard
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-strict-compatibility-corpus.sh \
+            --tier "${tier}" --runtime glibc \
+            --shard-index "${{ matrix.shard }}" --shard-count 4
+      - name: Upload strict compatibility shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-compatibility-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: .artifacts/protected-image/
+          include-hidden-files: true
+          if-no-files-found: error
+
   real-sample-matrix:
     if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
@@ -1036,6 +1077,7 @@ jobs:
     if: always()
     needs:
       - build-and-test
+      - strict-compatibility-shard
       - real-sample-matrix
       - runtime-matrix-native-arm64
       - bionic-native-arm64
@@ -1044,6 +1086,7 @@ jobs:
     timeout-minutes: 15
     env:
       EVALUATOR_BUILD_RESULT: ${{ needs['build-and-test'].result }}
+      EVALUATOR_SHARDS_RESULT: ${{ needs['strict-compatibility-shard'].result }}
       EVALUATOR_REAL_SAMPLE_RESULT: ${{ needs['real-sample-matrix'].result }}
       EVALUATOR_RUNTIME_RESULT: ${{ needs['runtime-matrix-native-arm64'].result }}
       EVALUATOR_BIONIC_RESULT: ${{ needs['bionic-native-arm64'].result }}
@@ -1067,6 +1110,31 @@ jobs:
         with:
           name: test-evidence-${{ github.run_id }}
           path: .
+      - name: Download strict compatibility shard evidence
+        if: github.event_name != 'push'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: strict-compatibility-shard-*-${{ github.run_id }}
+          path: .artifacts/shards/
+      - name: Merge and verify strict compatibility shard evidence
+        if: github.event_name != 'push'
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          destination=".artifacts/protected-image/${tier}/glibc"
+          mkdir -p "$destination"
+          for shard in 0 1 2 3; do
+            root=".artifacts/shards/strict-compatibility-shard-${shard}-${GITHUB_RUN_ID}/${tier}/glibc"
+            [[ -d "$root" ]] || { echo "missing strict shard $shard" >&2; exit 1; }
+            cp -a -- "$root/." "$destination/"
+          done
+          python3 scripts/strict_corpus_shards.py verify \
+            --evidence-root "$destination" --tier "$tier" \
+            --runtime glibc --shard-count 4
       - name: Normalize downloaded evidence paths
         if: always()
         run: |
@@ -1123,6 +1191,7 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == pull_request || "${GITHUB_EVENT_NAME}" == schedule || "${GITHUB_EVENT_NAME}" == release || "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
             for result in \
               "${EVALUATOR_BUILD_RESULT}" \
+              "${EVALUATOR_SHARDS_RESULT}" \
               "${EVALUATOR_REAL_SAMPLE_RESULT}" \
               "${EVALUATOR_RUNTIME_RESULT}" \
               "${EVALUATOR_BIONIC_RESULT}" \
