@@ -1142,16 +1142,22 @@ jobs:
             release) tier=release ;;
             *) tier=pr ;;
           esac
+          # Build-and-test also contributes additive (non-strict) producer
+          # evidence under the same tier. Verify the exact 100-unit inventory in
+          # an isolated shard-only tree, then publish only the verified product
+          # units back into the evaluator's historical product evidence path.
           destination=".artifacts/protected-image/${tier}/glibc"
-          mkdir -p "$destination"
+          shard_only=".artifacts/strict-corpus-merge/${tier}/glibc"
+          mkdir -p "$destination" "$shard_only"
           for shard in 0 1 2 3; do
             root=".artifacts/shards/strict-compatibility-shard-${shard}-${GITHUB_RUN_ID}/${tier}/glibc"
             [[ -d "$root" ]] || { echo "missing strict shard $shard" >&2; exit 1; }
-            cp -a -- "$root/." "$destination/"
+            cp -a -- "$root/." "$shard_only/"
           done
           python3 scripts/strict_corpus_shards.py verify \
-            --evidence-root "$destination" --tier "$tier" \
+            --evidence-root "$shard_only" --tier "$tier" \
             --runtime glibc --shard-count 4
+          cp -a -- "$shard_only/." "$destination/"
       - name: Select evaluator tier
         run: |
           case "${GITHUB_EVENT_NAME}" in
