@@ -2,12 +2,13 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--skip-existing] [--shard-index N --shard-count N]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--skip-existing] [--shard-index N --shard-count N] [--workers 1..8]\n' "$0" >&2
 }
 
 tier=''
 runtime=''
 skip_existing=0
+workers=1
 shard_index=''
 shard_count=''
 while [[ $# -gt 0 ]]; do
@@ -15,6 +16,7 @@ while [[ $# -gt 0 ]]; do
     --tier) [[ $# -ge 2 ]] || { usage; exit 2; }; tier="$2"; shift 2 ;;
     --runtime) [[ $# -ge 2 ]] || { usage; exit 2; }; runtime="$2"; shift 2 ;;
     --skip-existing) skip_existing=1; shift ;;
+    --workers) [[ $# -ge 2 ]] || { usage; exit 2; }; workers="$2"; shift 2 ;;
     --shard-index) [[ $# -ge 2 ]] || { usage; exit 2; }; shard_index="$2"; shift 2 ;;
     --shard-count) [[ $# -ge 2 ]] || { usage; exit 2; }; shard_count="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -31,6 +33,19 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 artifact_root="${PROTECTED_IMAGE_ARTIFACT_ROOT:-${repo_root}/.artifacts/protected-image/${tier}/${runtime}}"
 mkdir -p "$artifact_root"
+
+if [[ ! "$workers" =~ ^[1-8]$ ]]; then
+  echo "workers must be between 1 and 8" >&2
+  exit 2
+fi
+if (( workers > 1 )); then
+  command=(python3 "$repo_root/scripts/run_strict_compatibility_corpus.py" --tier "$tier" --runtime "$runtime" --workers "$workers")
+  if [[ -n "$shard_index" ]]; then
+    command+=(--shard-index "$shard_index" --shard-count "$shard_count")
+  fi
+  if (( skip_existing )); then command+=(--skip-existing); fi
+  exec "${command[@]}"
+fi
 
 if [[ -n "$shard_index" ]]; then
   mapfile -t rows < <(python3 "$repo_root/scripts/strict_corpus_shards.py" select --shard-index "$shard_index" --shard-count "$shard_count") || exit 2
