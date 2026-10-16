@@ -1279,7 +1279,9 @@ jobs:
   # Independent evaluator control plane. It is additive: existing product,
   # fixture, runtime, benchmark, and fuzz jobs remain unchanged.
   independent-evaluator:
-    if: always()
+    # Execute after dependency failure to report evidence errors, but avoid
+    # obsolete slow Scheme-A evaluations when a newer run cancels this one.
+    if: ${{ !cancelled() }}
     # The evaluator consumes frozen manifests plus the 100 strict product units.
     # Other validation lanes are checked by the final quality gate instead of
     # unnecessarily serializing independent evaluation after the longest lane.
@@ -1379,7 +1381,9 @@ jobs:
   # A lightweight terminal barrier, not an evaluator. Every required producer and
   # evaluator remains a hard gate. Platform jobs remain conditional on event.
   ci-quality-gate:
-    if: always()
+    # Still enforce fail-closed results on failed jobs; never prolong a
+    # workflow explicitly cancelled by a superseding revision.
+    if: ${{ !cancelled() }}
     needs:
       - build-and-test
       - managed-tests
