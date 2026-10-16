@@ -26,7 +26,6 @@ import subprocess
 import traceback
 import runpy
 import sys
-import time
 sys.dont_write_bytecode = True
 from pathlib import Path
 from typing import Any
@@ -983,20 +982,6 @@ def _reject_output_symlink_components(path: Path, root: Path) -> None:
 
 def main() -> int:
     args = parse_args()
-    # Diagnostic stderr only: never change the cryptographically bound output
-    # evidence tree or the independent evaluator's approval decisions.
-    timing_enabled = os.environ.get("URPROTECT_EVALUATOR_TIMING") == "1"
-    last_tick = time.monotonic()
-    def timing_checkpoint(stage: str) -> None:
-        nonlocal last_tick
-        now = time.monotonic()
-        if timing_enabled:
-            print(
-                f"[evaluator-timing] {stage}: {now - last_tick:.3f}s",
-                file=sys.stderr, flush=True,
-            )
-        last_tick = now
-
     evaluator_root = DEFAULT_EVALUATOR_ROOT.resolve()
     requested_output = args.output_root or (evaluator_root / args.tier)
     try:
@@ -1063,7 +1048,6 @@ def main() -> int:
             manifests.get("schemeBaselineReferencePath"),
             manifests.get("schemeBaselineArtifactPath"),
         )
-        timing_checkpoint("validate-and-copy-manifests")
         product_evidence_root = args.product_evidence_root
         environment_product_root = product_evidence_root or default_product_evidence_root(args.tier, STRICT_UNIT_ID)
         environment_product_root = environment_product_root.resolve()
@@ -1078,7 +1062,6 @@ def main() -> int:
             for row in manifests["rows"]
             if row.get("required") and row.get("applicable")
         ]
-        timing_checkpoint("project-100-compatibility-units")
         signal.setitimer(signal.ITIMER_REAL, float(manifests["protocol"]["budgets"]["wallSeconds"]))
         environment = build_environment(
             output_root,
@@ -1087,7 +1070,6 @@ def main() -> int:
             product_evidence_root=environment_product_root,
             units=units,
         )
-        timing_checkpoint("validate-evaluator-environment")
         os.environ["EVALUATOR_SCHEME_A_MANIFEST"] = str(scheme_manifest_path)
         compatibility = calculate_compatibility(manifests["corpus"], manifests["baseline"], units)
         attempts: dict[tuple[str, str, int], dict[str, Any]] = {}
@@ -1103,7 +1085,6 @@ def main() -> int:
                         product_root=environment_product_root,
                     )
                     attempts[(family["familyId"], role, replica)] = attempt
-        timing_checkpoint("evaluate-scheme-a-attempts")
         scheme_gate = calculate_scheme_gate(
             manifests["scheme"],
             attempts,
@@ -1134,7 +1115,6 @@ def main() -> int:
                 "minimumFactorDiagnostic": scheme_gate["minimumFactorDiagnostic"],
             },
         )
-        timing_checkpoint("score-and-record-scheme-a")
         # Close the generated tree's structural boundary before deriving any
         # anti-gaming marker or gate digest.
         validate_no_symlinks(output_root)
@@ -1149,7 +1129,6 @@ def main() -> int:
             output_root / "baseline-artifact.json",
             scheme_manifest_path,
         )
-        timing_checkpoint("build-evaluator-gate")
         write_json(output_root / "gate.json", gate)
         analysis_input = build_analysis_input(output_root, gate, units, attempts)
         write_json(output_root / "analysis-input.json", analysis_input)
@@ -1161,7 +1140,6 @@ def main() -> int:
         write_json(output_root / "analysis-input.json", build_analysis_input(output_root, gate, units, attempts))
         write_top_level_manifest(output_root)
         validate_no_symlinks(output_root)
-        timing_checkpoint("seal-content-addressed-evidence")
     except (EvaluatorError, OSError, ValueError) as error:
         print(f"FAIL evaluator: {error}", file=sys.stderr)
         return 1
