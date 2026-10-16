@@ -2,17 +2,21 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--skip-existing]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--skip-existing] [--shard-index N --shard-count N]\n' "$0" >&2
 }
 
 tier=''
 runtime=''
 skip_existing=0
+shard_index=''
+shard_count=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier) [[ $# -ge 2 ]] || { usage; exit 2; }; tier="$2"; shift 2 ;;
     --runtime) [[ $# -ge 2 ]] || { usage; exit 2; }; runtime="$2"; shift 2 ;;
     --skip-existing) skip_existing=1; shift ;;
+    --shard-index) [[ $# -ge 2 ]] || { usage; exit 2; }; shard_index="$2"; shift 2 ;;
+    --shard-count) [[ $# -ge 2 ]] || { usage; exit 2; }; shard_count="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
@@ -20,20 +24,21 @@ done
 case "$tier" in pr|nightly|release) ;; *) echo "invalid strict corpus tier: $tier" >&2; exit 2 ;; esac
 case "$runtime" in glibc) ;; *) echo "strict compatibility corpus currently requires glibc" >&2; exit 2 ;; esac
 
+if [[ -n "$shard_index" || -n "$shard_count" ]]; then
+  [[ "$shard_index" =~ ^[0-9]+$ && "$shard_count" =~ ^[1-9][0-9]*$ ]] || { echo "both shard parameters must be nonnegative integers (count positive)" >&2; exit 2; }
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 artifact_root="${PROTECTED_IMAGE_ARTIFACT_ROOT:-${repo_root}/.artifacts/protected-image/${tier}/${runtime}}"
 mkdir -p "$artifact_root"
 
-mapfile -t rows < <(python3 - "$repo_root/fixtures/evaluator/compatibility-corpus.json" <<'PY'
-import json
-import pathlib
-import sys
-corpus = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-for row in corpus['rows']:
-    if row.get('required') and row.get('applicable'):
-        print(f"{row['unitId']}\t{row['sourceProvenance']}")
-PY
-)
+if [[ -n "$shard_index" ]]; then
+  mapfile -t rows < <(python3 "$repo_root/scripts/strict_corpus_shards.py" select --shard-index "$shard_index" --shard-count "$shard_count") || exit 2
+  # mapfile/process substitution does not propagate producer failures.
+  python3 "$repo_root/scripts/strict_corpus_shards.py" select --shard-index "$shard_index" --shard-count "$shard_count" >/dev/null || exit 2
+else
+  mapfile -t rows < <(python3 "$repo_root/scripts/strict_corpus_shards.py" select --shard-index 0 --shard-count 1) || exit 2
+fi
 
 status=0
 completed=0
@@ -58,11 +63,15 @@ for row in "${rows[@]}"; do
   fi
 done
 
-python3 - "$artifact_root/strict-corpus-summary.json" "$tier" "$runtime" "$completed" "$failed" "${#rows[@]}" <<'PY'
+summary_path="$artifact_root/strict-corpus-summary.json"
+if [[ -n "$shard_index" ]]; then
+  summary_path="$artifact_root/strict-corpus-summary-shard-${shard_index}-of-${shard_count}.json"
+fi
+python3 - "$summary_path" "$tier" "$runtime" "$completed" "$failed" "${#rows[@]}" "$shard_index" "$shard_count" <<'PY'
 import json
 import pathlib
 import sys
-path, tier, runtime, completed, failed, total = sys.argv[1:]
+path, tier, runtime, completed, failed, total, shard_index, shard_count = sys.argv[1:]
 document = {
     'schemaVersion': 1,
     'kind': 'strict-compatibility-corpus-run',
@@ -73,6 +82,16 @@ document = {
     'failedRows': int(failed),
     'status': 'passed' if int(failed) == 0 else 'failed',
 }
+if shard_index:
+    document["shardIndex"] = int(shard_index)
+    document["shardCount"] = int(shard_count)
+    document["unitIds"] = [
+        row["unitId"] for row in json.loads(
+            (pathlib.Path(sys.argv[0]).resolve().parent if False else pathlib.Path.cwd() / "fixtures/evaluator/compatibility-corpus.json")
+            .read_text(encoding="utf-8")
+        )["rows"]
+        if row.get("required") and row.get("applicable")
+    ][int(shard_index)::int(shard_count)]
 pathlib.Path(path).write_text(json.dumps(document, sort_keys=True, indent=2) + '\n', encoding='utf-8')
 PY
 
