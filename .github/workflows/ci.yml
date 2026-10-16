@@ -220,9 +220,6 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-prerequisite-probes
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-transformed-runtime-matrix
 
-      - name: Run strict compatibility corpus growth evidence (push fallback)
-        if: github.event_name == 'push'
-        run: ./scripts/run-strict-compatibility-corpus.sh --tier pr --runtime glibc
       - name: Run required bionic Node.js Python contracts
         run: |
           python3 tests/test_bionic_node_runner.py
@@ -384,7 +381,6 @@ jobs:
   # Shards run on independent native ARM64 runners. No test coverage is dropped:
   # every registered unit is allocated exactly once and validated before evaluation.
   strict-compatibility-shard:
-    if: github.event_name != 'push'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     strategy:
@@ -1114,7 +1110,6 @@ jobs:
           name: test-evidence-${{ github.run_id }}
           path: .
       - name: Download strict compatibility shard evidence
-        if: github.event_name != 'push'
         uses: actions/download-artifact@v4
         with:
           pattern: strict-compatibility-shard-*-${{ github.run_id }}
@@ -1134,7 +1129,6 @@ jobs:
             echo "No downloaded Protected Image evidence path found; evaluator will retain unavailable evidence."
           fi
       - name: Merge and verify strict compatibility shard evidence
-        if: github.event_name != 'push'
         run: |
           set -euo pipefail
           case "${GITHUB_EVENT_NAME}" in
@@ -1197,10 +1191,17 @@ jobs:
       - name: Preserve existing required evidence gates
         if: always()
         run: |
+          # Both producer and strict shard matrix are mandatory on every event,
+          # including push. The other platform matrices are intentionally
+          # skipped on push and remain mandatory for the existing event tiers.
+          for result in "${EVALUATOR_BUILD_RESULT}" "${EVALUATOR_SHARDS_RESULT}"; do
+            if [[ "${result}" != success ]]; then
+              echo "required build or strict compatibility shard job did not pass: ${result}" >&2
+              exit 1
+            fi
+          done
           if [[ "${GITHUB_EVENT_NAME}" == pull_request || "${GITHUB_EVENT_NAME}" == schedule || "${GITHUB_EVENT_NAME}" == release || "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
             for result in \
-              "${EVALUATOR_BUILD_RESULT}" \
-              "${EVALUATOR_SHARDS_RESULT}" \
               "${EVALUATOR_REAL_SAMPLE_RESULT}" \
               "${EVALUATOR_RUNTIME_RESULT}" \
               "${EVALUATOR_BIONIC_RESULT}" \
