@@ -1289,7 +1289,6 @@ jobs:
     timeout-minutes: 15
     env:
       EVALUATOR_CI_ISOLATION: "1"
-      URPROTECT_EVALUATOR_TIMING: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Install evaluator sandbox runtime
