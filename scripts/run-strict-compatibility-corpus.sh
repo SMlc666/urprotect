@@ -67,11 +67,11 @@ summary_path="$artifact_root/strict-corpus-summary.json"
 if [[ -n "$shard_index" ]]; then
   summary_path="$artifact_root/strict-corpus-summary-shard-${shard_index}-of-${shard_count}.json"
 fi
-python3 - "$summary_path" "$tier" "$runtime" "$completed" "$failed" "${#rows[@]}" "$shard_index" "$shard_count" <<'PY'
+python3 - "$summary_path" "$tier" "$runtime" "$completed" "$failed" "${#rows[@]}" "$shard_index" "$shard_count" "$repo_root/fixtures/evaluator/compatibility-corpus.json" <<'PY'
 import json
 import pathlib
 import sys
-path, tier, runtime, completed, failed, total, shard_index, shard_count = sys.argv[1:]
+path, tier, runtime, completed, failed, total, shard_index, shard_count, manifest = sys.argv[1:]
 document = {
     'schemaVersion': 1,
     'kind': 'strict-compatibility-corpus-run',
@@ -87,7 +87,7 @@ if shard_index:
     document["shardCount"] = int(shard_count)
     document["unitIds"] = [
         row["unitId"] for row in json.loads(
-            (pathlib.Path(sys.argv[0]).resolve().parent if False else pathlib.Path.cwd() / "fixtures/evaluator/compatibility-corpus.json")
+            pathlib.Path(manifest)
             .read_text(encoding="utf-8")
         )["rows"]
         if row.get("required") and row.get("applicable")
