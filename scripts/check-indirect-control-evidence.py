@@ -19,8 +19,22 @@ def main():
   if not DIGEST.fullmatch(d.get(key,"")) or digest(file(p,rel))!=d[key]:fail("jump-table hash mismatch")
  if d.get("baselineStatus")!=91 or d.get("transformedStatus")!=91 or not d.get("statusEqual"):fail("jump-table behavior differs")
  if d.get("jumpTableEditCount",0)<1 or d.get("addressMapBindings",0)<1 or d.get("targetResolutionMode")!="bounded-relative-table":fail("jump-table rewrite evidence is incomplete")
+ # Require the *actual* producer diagnostic, not a self-declared success
+ # field in negative-result.json. Any unrelated failure must fail closed.
+ actual=json.loads(file(r,"negative-malformed-table/producer.stdout").read_text())
+ observed=json.loads(file(r,"negative-malformed-table/stage.json").read_text())
+ if (actual.get("success") is not False or actual.get("stage")!=observed
+     or observed.get("status")!="failed"
+     or observed.get("firstFailureStage")!="protected-image-producer"
+     or observed.get("publicationComplete") is not False
+     or observed.get("unitId")!=a.unit+".negative"
+     or observed.get("sourceSha256")!=digest(file(r,"negative-malformed-table/source-image.bin"))
+     or not any(isinstance(d,dict) and d.get("severity")=="Error"
+                and d.get("code")=="IndirectTargetUnresolved"
+                for d in observed.get("diagnostics",[]))):
+  fail("negative producer failed for an unrelated reason or diagnostic is unverified")
  n=json.loads(file(r,"negative-malformed-table/negative-result.json").read_text())
- if n.get("status")!="passed" or n.get("producerExitStatus")==0 or n.get("protectedImagePublished") or n.get("nativeImagePublished") or n.get("loaderInvoked"):fail("jump-table negative published output")
+ if n.get("status")!="passed" or n.get("producerExitStatus")==0 or n.get("expectedDiagnosticFamily")!="IndirectTargetUnresolved" or n.get("protectedImagePublished") or n.get("nativeImagePublished") or n.get("loaderInvoked"):fail("jump-table negative published output or diagnostic claim mismatch")
  entries={}
  for line in file(r,"SHA256SUMS").read_text().splitlines():
   h,rel=line.split("  ",1)
