@@ -163,6 +163,26 @@ public static class Aarch64JumpTableResolver
         }
 
         recognized = true;
+        // The source bounds check proves Wn only while that register survives
+        // the complete producer chain. Wn and Xn alias in AArch64, so comparing
+        // register views (including Width) would miss ADRP Xn overwriting Wn.
+        // Flattened output dispatches on the live index at BR, not the stale
+        // value seen by CMP: reject every producer that clobbers that index.
+        if (tableBaseRegister.Index == indexRegister.Index
+            || loadedOutputRegister.Index == indexRegister.Index
+            || targetBaseRegister.Index == indexRegister.Index
+            || addTargetRegister.Index == indexRegister.Index)
+        {
+            failure = "The bounded jump-table index is overwritten between CMP/B.HI and BR.";
+            return false;
+        }
+
+        if (loadedOutputRegister.Index == targetBaseRegister.Index)
+        {
+            failure = "The relative jump-table target-base ADR overwrites the loaded signed displacement.";
+            return false;
+        }
+
         if (!TryGetBoundedUnsignedSwitch(
                 instructions,
                 branchIndex - 5,
