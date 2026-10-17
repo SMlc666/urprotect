@@ -4,6 +4,11 @@
 .coverage/
 .tmp/
 **/TestResults/
+
+# Python bytecode and cache directories
+**/__pycache__/
+*.py[cod]
+
 *.user
 *.suo
 
