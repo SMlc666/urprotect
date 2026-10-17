@@ -342,7 +342,7 @@ $(TLSLE_FIXTURE_OBJECT): host_context_tlsle_fixture.S
 
 $(TLSLD_FIXTURE): $(TLSLD_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
 
 $(TLSLD_FIXTURE_OBJECT): host_context_tlsld_fixture.S
 	@mkdir -p "$(BUILD_DIR)"
