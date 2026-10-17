@@ -95,7 +95,7 @@ async function check(ref, headSha, pulls, throws = false) {
         self.assertIn("continue-on-error: true", section)
         self.assertIn('PROBE_OUTCOME: ${{ steps.pr-probe.outcome }}', section)
         self.assertIn('"${PROBE_OUTCOME}" == success', section)
-        self.assertIn('echo $\'run_full=true$\' >> "$GITHUB_OUTPUT"', section)
+        self.assertIn("echo 'run_full=true' >> \"$GITHUB_OUTPUT\"", section)
         self.assertIn("pull-requests: read", section)
         self.assertIn("runs-on: ubuntu-latest", section)
 
@@ -103,12 +103,13 @@ async function check(ref, headSha, pulls, throws = false) {
         jobs = re.findall(r"^  ([a-z][a-z0-9-]*):\n", self.text.split("\njobs:\n", 1)[1], re.M)
         self.assertEqual(len(jobs), 19)
         self.assertEqual(jobs[0], "ci-event-gate")
-        matches = list(re.finditer(r"^  ([a-z][a-z0-9-]*):\n", self.text, re.M))
+        base = self.text.index("\njobs:\n") + len("\njobs:\n")
+        matches = list(re.finditer(r"^  ([a-z][a-z0-9-]*):\n", self.text[base:], re.M))
         for i, match in enumerate(matches):
             if match.group(1) == "ci-event-gate":
                 continue
-            end = matches[i+1].start() if i+1 < len(matches) else len(self.text)
-            block = self.text[match.start():end]
+            end = matches[i+1].start() if i+1 < len(matches) else len(self.text) - base
+            block = self.text[base+match.start():base+end]
             self.assertIn("needs['ci-event-gate'].outputs.run_full == 'true'", block)
             self.assertIn("ci-event-gate", block.split("\n    steps:", 1)[0])
         self.assertIn("needs: [ci-event-gate, bionic-native-arm64]", self.text)
