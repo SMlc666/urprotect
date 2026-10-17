@@ -117,7 +117,7 @@ record={
  "baseline":b,"transformed":t,"baselineStatus":0,"transformedStatus":0,
  "frameCountEqual":b.get("frameCount")==t.get("frameCount"),
  "transformedFrameObserved":t.get("transformedFrameObserved")==1,
- "entryStatusEqual":b.get("entryStatus")==t.get("entryStatus")==42,
+ "entryStatusEqual":b.get("targetStatus")==t.get("targetStatus")==42,
  "releaseStatusEqual":b.get("releaseStatus")==t.get("releaseStatus")==0,
  "firstFailureStage":None}
 (root/"cfi-behavior.json").write_text(json.dumps(record,indent=2,sort_keys=True)+"\n")
