@@ -21,6 +21,20 @@ def main():
  b,t=d.get("baseline"),d.get("transformed")
  if not isinstance(b,dict) or not isinstance(t,dict) or not d.get("frameCountEqual") or not d.get("entryStatusEqual") or not d.get("releaseStatusEqual") or not d.get("transformedFrameObserved"):fail("CFI behavior mismatch")
  if b.get("transformedImage")!=0 or t.get("transformedImage")!=1 or b.get("transformedFrameObserved")!=0 or t.get("transformedFrameObserved")!=1:fail("CFI harness flags invalid")
+ # Require the *actual* producer diagnostic, not a self-declared success
+ # field in negative-result.json. Any unrelated failure must fail closed.
+ actual=json.loads(file(r,"negative-malformed-eh-frame/producer.stdout").read_text())
+ observed=json.loads(file(r,"negative-malformed-eh-frame/stage.json").read_text())
+ if (actual.get("success") is not False or actual.get("stage")!=observed
+     or observed.get("status")!="failed"
+     or observed.get("firstFailureStage")!="protected-image-producer"
+     or observed.get("publicationComplete") is not False
+     or observed.get("unitId")!=a.unit+".negative"
+     or observed.get("sourceSha256")!=digest(file(r,"negative-malformed-eh-frame/source-image.bin"))
+     or not any(isinstance(d,dict) and d.get("severity")=="Error"
+                and d.get("code")=="UnwindMetadataMalformed"
+                for d in observed.get("diagnostics",[]))):
+  fail("negative producer failed for an unrelated reason or diagnostic is unverified")
  n=json.loads(file(r,"negative-malformed-eh-frame/negative-result.json").read_text())
  if n.get("status")!="passed" or n.get("producerExitStatus")==0 or n.get("nativeImagePublished") or n.get("protectedImagePublished") or n.get("loaderInvoked") or n.get("expectedDiagnosticFamily")!="UnwindMetadataMalformed":fail("CFI negative invalid")
  entries={}
