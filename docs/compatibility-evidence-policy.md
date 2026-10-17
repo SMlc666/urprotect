@@ -7,9 +7,9 @@ were not measurements of real attacker effort.
 
 ## Required CI evidence
 
-- The producer runs the registered 100-unit strict corpus and emits six-stage,
+- Four native ARM64 shards collectively run the registered 100-unit strict corpus and emit six-stage,
   hash-bound execution evidence for every required and applicable unit.
-- The independent compatibility gate **rechecks all 100 product trees** with
+- The independent compatibility gate first validates four exact shard summaries and **rechecks all 100 product trees** with
   `check-rehydration-evidence.py` and refuses missing, symlinked, invalid or
   incomplete product evidence. The corpus execution summary is checked but
   is never sufficient on its own.
