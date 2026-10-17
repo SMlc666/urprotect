@@ -46,22 +46,49 @@ def required_units(manifest: Path) -> list[dict]:
     return selected
 
 
-def check(manifest: Path, root: Path, tier: str, runtime: str) -> dict:
+def check(manifest: Path, root: Path, tier: str, runtime: str, shard_count: int = 4) -> dict:
     rows = required_units(manifest)
     if root.is_symlink() or not root.is_dir():
         raise ValueError("strict product evidence directory is missing or symlinked")
-    summary = root / "strict-corpus-summary.json"
-    if summary.is_symlink() or not summary.is_file():
-        raise ValueError("missing strict corpus execution summary")
-    record = json.loads(summary.read_text(encoding="utf-8"))
-    expected = {
-        "schemaVersion": 1, "kind": "strict-compatibility-corpus-run",
-        "tier": tier, "runtime": runtime, "totalRows": len(rows),
-        "completedRows": len(rows), "failedRows": 0, "status": "passed",
+    if shard_count != 4:
+        raise ValueError("strict product corpus must use four required shards")
+    expected_ids = {row["unitId"] for row in rows}
+    actual_ids = {entry.name for entry in root.iterdir() if entry.is_dir()}
+    if actual_ids != expected_ids:
+        raise ValueError(
+            "strict corpus inventory mismatch: "
+            f"missing={sorted(expected_ids - actual_ids)[:8]} "
+            f"unexpected={sorted(actual_ids - expected_ids)[:8]}"
+        )
+    found_summaries = {
+        path.name for path in root.glob("strict-corpus-summary*.json")
     }
-    for key, value in expected.items():
-        if record.get(key) != value:
-            raise ValueError(f"strict corpus summary mismatch: {key}")
+    expected_summaries = {
+        f"strict-corpus-summary-shard-{index}-of-{shard_count}.json"
+        for index in range(shard_count)
+    }
+    if found_summaries != expected_summaries:
+        raise ValueError("strict shard summary inventory mismatch")
+    for index in range(shard_count):
+        summary_file = root / f"strict-corpus-summary-shard-{index}-of-{shard_count}.json"
+        if summary_file.is_symlink() or not summary_file.is_file():
+            raise ValueError(f"missing or symlinked strict shard summary {index}")
+        selected = rows[index::shard_count]
+        expected = {
+            "schemaVersion": 1,
+            "kind": "strict-compatibility-corpus-run",
+            "tier": tier,
+            "runtime": runtime,
+            "shardIndex": index,
+            "shardCount": shard_count,
+            "totalRows": len(selected),
+            "completedRows": len(selected),
+            "failedRows": 0,
+            "status": "passed",
+            "unitIds": [row["unitId"] for row in selected],
+        }
+        if json.loads(summary_file.read_text(encoding="utf-8")) != expected:
+            raise ValueError(f"invalid/incomplete strict shard summary {index}")
     report = []
     for row in rows:
         unit = row["unitId"]
@@ -98,6 +125,7 @@ def check(manifest: Path, root: Path, tier: str, runtime: str) -> dict:
         "stages": list(REQUIRED_STAGES),
         "units": report,
         "securityStrengthClaim": None,
+        "shardCount": shard_count,
     }
 
 
@@ -105,12 +133,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tier", choices=("pr", "nightly", "release"), required=True)
     parser.add_argument("--runtime", choices=("glibc",), default="glibc")
+    parser.add_argument("--shard-count", type=int, default=4)
     parser.add_argument("--evidence-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     try:
-        data = check(args.manifest, args.evidence_root, args.tier, args.runtime)
+        data = check(args.manifest, args.evidence_root, args.tier, args.runtime, args.shard_count)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8")
