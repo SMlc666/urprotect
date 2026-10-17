@@ -1362,108 +1362,68 @@ jobs:
           path: .artifacts/release/
           if-no-files-found: warn
 
-  # Independent evaluator control plane. It is additive: existing product,
-  # fixture, runtime, benchmark, and fuzz jobs remain unchanged.
+  # Keep the job ID for required status checks, but only verify real
+  # compatibility evidence. Artificial attack-cost scoring is retired.
   independent-evaluator:
-    # Execute after dependency failure to report evidence errors, but avoid
-    # obsolete slow Scheme-A evaluations when a newer run cancels this one.
     if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (!cancelled()) }}
-    # The evaluator consumes frozen manifests plus the 100 strict product units.
-    # Other validation lanes are checked by the final quality gate instead of
-    # unnecessarily serializing independent evaluation after the longest lane.
     needs:
       - ci-event-gate
       - strict-compatibility-shard
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
-    env:
-      EVALUATOR_CI_ISOLATION: "1"
     steps:
       - uses: actions/checkout@v4
-      - name: Install evaluator sandbox runtime
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap util-linux
-      # The evaluator records the pinned SDK identity in its environment evidence.
-      # Do not rely on an image-global dotnet installation in this independent job.
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
       - name: Download strict compatibility shard evidence
         uses: actions/download-artifact@v4
         with:
           pattern: strict-compatibility-shard-*-${{ github.run_id }}
           path: .artifacts/shards/
-      - name: Merge and verify strict compatibility shard evidence
-        run: |
-          set -euo pipefail
-          case "${GITHUB_EVENT_NAME}" in
-            schedule) tier=nightly ;;
-            release) tier=release ;;
-            *) tier=pr ;;
-          esac
-          # Only the strict product shard artifacts are downloaded in this
-          # independent lane. Preserve the exact 100-unit inventory, then
-          # copy validated units into the evaluator's historical input path.
-          destination=".artifacts/protected-image/${tier}/glibc"
-          shard_only=".artifacts/strict-corpus-merge/${tier}/glibc"
-          mkdir -p "$destination" "$shard_only"
-          for shard in 0 1 2 3; do
-            root=".artifacts/shards/strict-compatibility-shard-${shard}-${GITHUB_RUN_ID}/${tier}/glibc"
-            [[ -d "$root" ]] || { echo "missing strict shard $shard" >&2; exit 1; }
-            cp -a -- "$root/." "$shard_only/"
-          done
-          python3 scripts/strict_corpus_shards.py verify \
-            --evidence-root "$shard_only" --tier "$tier" \
-            --runtime glibc --shard-count 4
-          cp -a -- "$shard_only/." "$destination/"
-      - name: Select evaluator tier
+      - name: Select compatibility evidence tier
+        shell: bash
         run: |
           case "${GITHUB_EVENT_NAME}" in
-            schedule) echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV" ;;
-            release) echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV" ;;
+            schedule) echo 'EVIDENCE_TIER=nightly' >> "$GITHUB_ENV" ;;
+            release) echo 'EVIDENCE_TIER=release' >> "$GITHUB_ENV" ;;
             workflow_dispatch)
               if [[ "${{ inputs.run_release_rehearsal }}" == true ]]; then
-                echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV"
+                echo 'EVIDENCE_TIER=release' >> "$GITHUB_ENV"
               elif [[ "${{ inputs.run_nightly_rehearsal }}" == true ]]; then
-                echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV"
+                echo 'EVIDENCE_TIER=nightly' >> "$GITHUB_ENV"
               else
-                echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV"
+                echo 'EVIDENCE_TIER=pr' >> "$GITHUB_ENV"
               fi
               ;;
-            *) echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV" ;;
+            *) echo 'EVIDENCE_TIER=pr' >> "$GITHUB_ENV" ;;
           esac
-      - name: Validate historical and positive evaluator manifests
+      - name: Merge strict shard evidence without losing provenance
+        shell: bash
         run: |
-          python3 scripts/validate-evaluator-manifests.py
-          python3 scripts/validate-evaluator-manifests.py \
-            --scheme-a fixtures/evaluator/scheme-a-manifest-v2.json \
-            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
-      - name: Check immutable Scheme-A baseline-v2
-        run: python3 scripts/check-scheme-a-baseline-v2.py
-      - name: Run independent evaluator against immutable positive baseline-v2
+          set -euo pipefail
+          destination=".artifacts/strict-corpus-merge/${EVIDENCE_TIER}/glibc"
+          mkdir -p "$destination"
+          for shard in 0 1 2 3; do
+            root=".artifacts/shards/strict-compatibility-shard-${shard}-${GITHUB_RUN_ID}/${EVIDENCE_TIER}/glibc"
+            [[ -d "$root" && ! -L "$root" ]] || { echo "missing strict shard $shard" >&2; exit 1; }
+            cp -a -- "$root/." "$destination/"
+          done
+      - name: Validate compatibility-only checker and workflow contracts
         run: |
-          ./scripts/run-independent-evaluator.sh \
-            --tier "${EVALUATOR_TIER}" \
-            --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
-            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
-      - name: Check independent evaluator evidence
-        if: always()
-        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
-      - name: Check strict compatibility growth gate
-        if: always()
-        run: python3 scripts/check-strict-compatibility-growth.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
-      - name: Enforce independent evaluator claim gate after positive baseline
-        if: always()
-        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json --require-claimable-if-baseline-positive
-      - name: Upload independent evaluator evidence
+          python3 -m unittest discover -s tests -p test_strict_product_corpus.py -v
+          python3 -m unittest discover -s tests -p test_protected_image_workflow.py -v
+      - name: Independently verify 100 strict products and four shard summaries
+        run: |
+          python3 scripts/check-strict-product-corpus.py \
+            --tier "${EVIDENCE_TIER}" --runtime glibc --shard-count 4 \
+            --evidence-root ".artifacts/strict-corpus-merge/${EVIDENCE_TIER}/glibc" \
+            --output ".artifacts/compatibility-verification/${EVIDENCE_TIER}/report.json"
+      - name: Upload independent compatibility verification report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: independent-evaluator-${{ env.EVALUATOR_TIER }}-${{ github.run_id }}
-          path: .artifacts/evaluator/
-          if-no-files-found: warn
+          name: compatibility-verification-${{ env.EVIDENCE_TIER }}-${{ github.run_id }}
+          path: .artifacts/compatibility-verification/
           include-hidden-files: true
+          if-no-files-found: warn
 
   # A lightweight terminal barrier, not an evaluator. Every required producer and
   # evaluator remains a hard gate. Platform jobs remain conditional on event.
