@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "stage": "protected-image-producer",
+  "status": "passed",
+  "unitId": "runtime.indirect-control.shared-table.glibc.host-context-entry",
+  "profile": "host-context-entry",
+  "sourceSha256": "138e96724ef11294ada8e96803ca45cd02d3d038708134ffff8e8aaacf9fd473",
+  "requestSha256": "8b4dc37e1b284a4d9e5bdd0fa2888cf35842a689ebf0f72f33c102f881201cd0",
+  "producerId": "gcc-aarch64-shared-jump-table-fixture",
+  "producerBuildSha256": "eabe4809fd9ece5774c1192e6f706de0cb972fa86521ca301f8510493e7e6b1b",
+  "rehydratorConsumerId": "urprotect.rehydrator.v1",
+  "artifactSha256": "4b06cc8c0b6356e05a475be9217b99d8ef3a3ec95bc6253c03314fb9fcdc17b2",
+  "artifactSize": 17620,
+  "commandDigest": "184f8305e49431a95347325536a0aefd5e2883571eef928b66a9b02c22baf0f8",
+  "environmentDigest": "4fad84760944b13e12effbf1d9ed79493a7530727a89256b4ab0929c76d71261",
+  "artifactPath": "/root/urprotect/.artifacts/indirect-control/review-remediation-20261019T160000Z/runtime.indirect-control.shared-table.glibc.host-context-entry/protected-image.bin",
+  "rolePath": "/root/urprotect/.artifacts/indirect-control/review-remediation-20261019T160000Z/runtime.indirect-control.shared-table.glibc.host-context-entry/protected-image.json",
+  "rawEvidenceManifestPath": "/root/urprotect/.artifacts/indirect-control/review-remediation-20261019T160000Z/runtime.indirect-control.shared-table.glibc.host-context-entry/SHA256SUMS",
+  "transformationStatus": "passed",
+  "transformedFunctionCount": 1,
+  "selectors": [
+    "table=dynsym, index=2"
+  ],
+  "passes": [
+    "control-flow-flattening"
+  ],
+  "diagnostics": [],
+  "artifactRole": "protected-image",
+  "abiId": "urprotect.protected-image.v1",
+  "abiVersion": 1,
+  "publicationComplete": true,
+  "analysisDurationMilliseconds": 749,
+  "emissionDurationMilliseconds": 16,
+  "workflowOwner": "urprotect.core.protection-workflow.v1",
+  "isPassed": true
+}

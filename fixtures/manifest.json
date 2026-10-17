@@ -367,6 +367,47 @@
       ]
     },
     {
+      "id": "runtime.cfi.transformed-backtrace.glibc.host-context-entry",
+      "status": "validated",
+      "obligation": "A transformed HostContext image preserves native backtrace frame coverage through regenerated .eh_frame/.eh_frame_hdr metadata, with baseline/transformed register-frame behavior and malformed-CFI publication rollback.",
+      "witness": "scripts/run-cfi-host-context-e2e.sh",
+      "oracle": "scripts/check-cfi-evidence.py",
+      "evidence": [
+        "scripts/run-cfi-host-context-e2e.sh",
+        "scripts/check-cfi-evidence.py",
+        "native/urprotect-runtime/host_context_cfi_fixture.c",
+        "native/urprotect-runtime/host_context_cfi_runtime_test.c",
+        "src/UrProtect.Core/UnwindMetadata/UnwindMetadataRewriter.cs",
+        ".artifacts/cfi/pr/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry",
+        ".artifacts/cfi/pr/negative-malformed-eh-frame"
+      ],
+      "constraints": [
+        "The promoted row is an independent native AArch64 glibc HostContext entry row; musl and bionic CFI rows require their own loader/unwinder evidence.",
+        "The positive artifact binds source/protected/native hashes, transformed FDE/header readelf output, baseline/transformed backtrace records, and a closed SHA256SUMS.",
+        "The nearest malformed .eh_frame mutation fails during protect-image with UnwindMetadataMalformed and publishes no Protected Image."
+      ]
+    },
+    {
+      "id": "runtime.indirect-control.jump-table.glibc.host-context-entry",
+      "status": "validated",
+      "obligation": "A compiler-shaped AArch64 relative jump table is resolved, rewritten through the shared layout plan, and executed through native glibc HostContext with the transformed entry returning the same case result.",
+      "witness": "native/urprotect-runtime/host_context_jump_table_fixture.S",
+      "oracle": "tests/UrProtect.Core.Tests/Integration/GenericRehydrationWorkflowTests.cs",
+      "evidence": [
+        "native/urprotect-runtime/host_context_jump_table_fixture.S",
+        "native/urprotect-runtime/Makefile",
+        "src/UrProtect.Core/Aarch64Semantics/Aarch64JumpTableResolver.cs",
+        "src/UrProtect.Core/ElfLayout/ElfLayoutPlanner.cs",
+        "src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs",
+        ".artifacts/indirect-control/pr/runtime.indirect-control.jump-table.glibc.host-context-entry"
+      ],
+      "constraints": [
+        "The fixture contains ADRP/ADD/LDRSW/ADD/BR over a private signed relative table; the native handoff invokes the transformed table-bearing entry itself.",
+        "Layout evidence must retain JumpTableEdits and the source/native hashes; malformed or out-of-closure table entries remain fail-closed in managed negative tests.",
+        "This row promotes the native glibc lane only; musl and bionic require independent jump-table loader/behavior rows."
+      ]
+    },
+    {
       "id": "runtime.host-context.protected-image-tls-initial-exec",
       "status": "validated",
       "obligation": "The managed protection and rehydration workflow preserves a real GCC initial-exec TLSIE image through HostContext handoff and releases it after the TLS-backed entry returns status 43 on native AArch64 glibc.",

@@ -98,7 +98,9 @@ public sealed record Aarch64MemoryReference(
     uint? IndexModifier,
     int AccessSize,
     string Ordering,
-    bool WritesBack);
+    bool WritesBack,
+    string? IndexModifierKind = null,
+    int IndexModifierAmount = 0);
 
 public sealed record Aarch64SemanticOperand(
     string Name,
@@ -422,7 +424,9 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
                     value.IndexModifier,
                     value.AccessSize,
                     value.Ordering.ToString(),
-                    value.WritesBack);
+                    value.WritesBack,
+                    value.IndexModifierSemantics?.Kind.ToString(),
+                    value.IndexModifierSemantics?.Amount ?? 0);
                 return Aarch64OperandKind.Memory;
             case global::AsmStone.Model.SystemRegisterOperand value:
                 immediate = value.Encoding;

@@ -575,7 +575,9 @@ public static partial class SemanticPlanSnapshotCodec
             || !TryReadOptionalUInt32(reader, out var indexModifier)
             || !reader.TryReadInt32(out var accessSize)
             || !reader.TryReadUtf8String(out var ordering)
-            || !reader.TryReadBool(out var writesBack))
+            || !reader.TryReadBool(out var writesBack)
+            || !reader.TryReadOptionalString(out var indexModifierKind)
+            || !reader.TryReadInt32(out var indexModifierAmount))
         {
             return false;
         }
@@ -588,7 +590,9 @@ public static partial class SemanticPlanSnapshotCodec
             indexModifier,
             accessSize,
             ordering,
-            writesBack);
+            writesBack,
+            indexModifierKind,
+            indexModifierAmount);
         return true;
     }
 
@@ -1011,6 +1015,49 @@ public static partial class SemanticPlanSnapshotCodec
                     || !TryReadRange(reader, out var tableRange)
                     || !reader.TryReadInt32(out var entrySize)
                     || !reader.TryReadOptionalString(out var tableEncoding)
+                    || !reader.TryReadBool(out var hasBaseAddress))
+                {
+                    return false;
+                }
+
+                ulong? baseAddress = null;
+                if (hasBaseAddress)
+                {
+                    if (!reader.TryReadUInt64(out var rawBaseAddress))
+                    {
+                        return false;
+                    }
+
+                    baseAddress = rawBaseAddress;
+                }
+
+                if (!reader.TryReadBool(out var hasTargetBaseAddress))
+                {
+                    return false;
+                }
+
+                ulong? targetBaseAddress = null;
+                if (hasTargetBaseAddress)
+                {
+                    if (!reader.TryReadUInt64(out var rawTargetBaseAddress))
+                    {
+                        return false;
+                    }
+
+                    targetBaseAddress = rawTargetBaseAddress;
+                }
+
+                if (!TryReadOptionalEntityId(reader, out var sourceInstruction)
+                    || !reader.TryReadBool(out var isSigned)
+                    || !reader.TryReadInt32(out var scale)
+                    || !reader.TryReadInt64(out var addend)
+                    || !reader.TryReadInt32(out var lowerBound)
+                    || !reader.TryReadInt32(out var upperBound)
+                    || !TryReadOptionalTarget(reader, out var defaultTarget)
+                    || !reader.TryReadByte(out var ownership)
+                    || !reader.TryReadByte(out var rewritePolicy)
+                    || !TryReadOptionalRange(reader, out var outputRange)
+                    || !reader.TryReadOptionalString(out var tableDiagnostic)
                     || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTargetsPerJumpTable, out var targetCount))
                 {
                     return false;
@@ -1029,11 +1076,39 @@ public static partial class SemanticPlanSnapshotCodec
                     targets.Add(target);
                 }
 
-                if (entrySize <= 0)
+                if (entrySize <= 0
+                    || !Enum.IsDefined(typeof(SemanticJumpTableOwnership), (SemanticJumpTableOwnership)ownership)
+                    || !Enum.IsDefined(typeof(SemanticJumpTableRewritePolicy), (SemanticJumpTableRewritePolicy)rewritePolicy))
                 {
                     return reader.Fail(
                         DiagnosticCode.SemanticPlanSnapshotMalformed,
-                        "The jump-table extension has an invalid entry size.");
+                        "The jump-table extension has an invalid structured contract.");
+                }
+
+                if (!reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTargetsPerJumpTable, out var entryCount))
+                {
+                    return false;
+                }
+
+                var entries = new List<SemanticJumpTableEntryBinding>(entryCount);
+                for (var index = 0; index < entryCount; index++)
+                {
+                    if (!TryReadEntityId(reader, out var entryIdentity)
+                        || !reader.TryReadInt32(out var entryIndex)
+                        || !reader.TryReadInt32(out var encodedValue)
+                        || !TryReadRange(reader, out var entryRange)
+                        || !TryReadTarget(reader, out var entryTarget)
+                        || entryTarget is null)
+                    {
+                        return false;
+                    }
+
+                    entries.Add(new SemanticJumpTableEntryBinding(
+                        entryIdentity,
+                        entryIndex,
+                        encodedValue,
+                        entryRange,
+                        entryTarget));
                 }
 
                 extension = new SemanticJumpTableExtension(
@@ -1041,7 +1116,21 @@ public static partial class SemanticPlanSnapshotCodec
                     tableRange,
                     entrySize,
                     targets,
-                    tableEncoding);
+                    tableEncoding,
+                    baseAddress is { } rawBase ? new VirtualAddress(rawBase) : null,
+                    targetBaseAddress is { } rawTargetBase ? new VirtualAddress(rawTargetBase) : null,
+                    sourceInstruction,
+                    isSigned,
+                    scale,
+                    addend,
+                    lowerBound,
+                    upperBound,
+                    defaultTarget,
+                    (SemanticJumpTableOwnership)ownership,
+                    (SemanticJumpTableRewritePolicy)rewritePolicy,
+                    outputRange,
+                    entries,
+                    tableDiagnostic);
                 return true;
             case SemanticPlanExtensionKind.CfiEffect:
                 if (!TryReadEntityId(reader, out var cfiIdentity)

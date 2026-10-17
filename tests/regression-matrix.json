@@ -439,9 +439,42 @@
       ]
     },
     {
+      "id": "fixture.cfi-transformed-unwind",
+      "class": "host-context",
+      "command": "scripts/run-cfi-host-context-e2e.sh --tier pr",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/cfi/*/SHA256SUMS",
+        ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/cfi-behavior.json",
+        ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/rehydration.json",
+        ".artifacts/cfi/*/negative-malformed-eh-frame/negative-result.json"
+      ]
+    },
+    {
+      "id": "fixture.indirect-control-jump-table",
+      "class": "host-context",
+      "command": "scripts/run-indirect-control-e2e.sh --tier pr",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/*/SHA256SUMS",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/jump-table-behavior.json",
+        ".artifacts/indirect-control/*/negative-malformed-table/negative-result.json"
+      ]
+    },
+    {
       "id": "fixture.tls-transformed-runtime-matrix",
       "class": "host-context",
-      "command": "python3 scripts/run-tls-runtime-matrix.py --tier ${TLS_MATRIX_TIER:-pr} && python3 scripts/check-tls-runtime-matrix-evidence.py .artifacts/tls-runtime/${TLS_MATRIX_TIER:-pr} --registry fixtures/tls-runtime-matrix.json",
+      "command": "python3 scripts/run-tls-runtime-matrix.py --tier pr && python3 scripts/check-tls-runtime-matrix-evidence.py .artifacts/tls-runtime/pr --registry fixtures/tls-runtime-matrix.json",
       "tiers": ["pr", "nightly", "release"],
       "platform": "native-arm64",
       "budgetSeconds": 1200,

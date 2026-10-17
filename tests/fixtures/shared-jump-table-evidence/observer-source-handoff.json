@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "stage": "host-context-handoff",
+  "status": "passed",
+  "loaderId": "host-context.sealed-memfd.dlopen",
+  "nativeImageSha256": "138e96724ef11294ada8e96803ca45cd02d3d038708134ffff8e8aaacf9fd473",
+  "entrySymbol": "urp_observer",
+  "entryStatus": 91,
+  "processStatus": 91,
+  "releaseStatus": "passed",
+  "releaseOrder": "entry-dispatch-before-release-image",
+  "firstFailureStage": null
+}

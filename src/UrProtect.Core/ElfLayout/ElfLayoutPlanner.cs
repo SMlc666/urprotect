@@ -26,7 +26,9 @@ public static class ElfLayoutPlanner
         IEnumerable<ElfLayoutRegionRequest> regionRequests,
         IEnumerable<ElfLayoutBranchRequest> branchRequests,
         ElfLayoutOptions? options = null,
-        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null)
+        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null,
+        IEnumerable<ElfLayoutByteEdit>? unwindEdits = null,
+        IEnumerable<ElfLayoutJumpTableEditRequest>? jumpTableRequests = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFile);
         ArgumentNullException.ThrowIfNull(regionRequests);
@@ -39,7 +41,9 @@ public static class ElfLayoutPlanner
         var regions = ReadBounded(regionRequests, maximumRequests, out var regionsExceeded);
         var branches = ReadBounded(branchRequests, maximumRequests, out var branchesExceeded);
         var tlsFixups = ReadBounded(tlsFixupRequests ?? Array.Empty<ElfLayoutTlsFixupRequest>(), maximumRequests, out var tlsFixupsExceeded);
-        if (regionsExceeded || branchesExceeded || tlsFixupsExceeded)
+        var requestedUnwindEdits = ReadBounded(unwindEdits ?? Array.Empty<ElfLayoutByteEdit>(), maximumRequests, out var unwindEditsExceeded);
+        var requestedJumpTables = ReadBounded(jumpTableRequests ?? Array.Empty<ElfLayoutJumpTableEditRequest>(), maximumRequests, out var jumpTablesExceeded);
+        if (regionsExceeded || branchesExceeded || tlsFixupsExceeded || unwindEditsExceeded || jumpTablesExceeded)
         {
             diagnostics.Error(DiagnosticCode.ElfLayoutOutputLimitExceeded, "The layout request stream exceeds its configured edit bound.");
         }
@@ -57,6 +61,8 @@ public static class ElfLayoutPlanner
         ValidateSource(sourceFile, sourceLength, options, diagnostics);
         ValidateRequests(sourceFile, sourceLength, regions, branches, options, diagnostics);
         ValidateTlsFixupRequests(sourceFile, regions, tlsFixups, diagnostics);
+        ValidateUnwindEdits(sourceFile, sourceLength, requestedUnwindEdits, diagnostics);
+        ValidateJumpTableRequests(sourceFile, sourceLength, requestedJumpTables, diagnostics);
         if (diagnostics.HasErrors)
         {
             return new ElfLayoutPlanningResult(null, null, diagnostics.ToArray());
@@ -82,6 +88,8 @@ public static class ElfLayoutPlanner
                     regions,
                     branches,
                     tlsFixups,
+                    requestedUnwindEdits,
+                    requestedJumpTables,
                     options,
                     strategy,
                     out var candidate,
@@ -124,8 +132,10 @@ public static class ElfLayoutPlanner
         IEnumerable<ElfLayoutRegionRequest> regionRequests,
         IEnumerable<ElfLayoutBranchRequest> branchRequests,
         ElfLayoutOptions? options = null,
-        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null) =>
-        Plan(sourceFile.Bytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests);
+        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null,
+        IEnumerable<ElfLayoutByteEdit>? unwindEdits = null,
+        IEnumerable<ElfLayoutJumpTableEditRequest>? jumpTableRequests = null) =>
+        Plan(sourceFile.Bytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests, unwindEdits, jumpTableRequests);
 
     public static ElfLayoutPlanningResult CreatePlan(
         ReadOnlyMemory<byte> sourceBytes,
@@ -133,8 +143,10 @@ public static class ElfLayoutPlanner
         IEnumerable<ElfLayoutRegionRequest> regionRequests,
         IEnumerable<ElfLayoutBranchRequest> branchRequests,
         ElfLayoutOptions? options = null,
-        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null) =>
-        Plan(sourceBytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests);
+        IEnumerable<ElfLayoutTlsFixupRequest>? tlsFixupRequests = null,
+        IEnumerable<ElfLayoutByteEdit>? unwindEdits = null,
+        IEnumerable<ElfLayoutJumpTableEditRequest>? jumpTableRequests = null) =>
+        Plan(sourceBytes, sourceFile, regionRequests, branchRequests, options, tlsFixupRequests, unwindEdits, jumpTableRequests);
 
     private static bool TryBuildCandidate(
         ReadOnlyMemory<byte> sourceBytes,
@@ -144,6 +156,8 @@ public static class ElfLayoutPlanner
         IReadOnlyList<ElfLayoutRegionRequest> regions,
         IReadOnlyList<ElfLayoutBranchRequest> branches,
         IReadOnlyList<ElfLayoutTlsFixupRequest> tlsFixups,
+        IReadOnlyList<ElfLayoutByteEdit> unwindEdits,
+        IReadOnlyList<ElfLayoutJumpTableEditRequest> jumpTables,
         ElfLayoutOptions options,
         ElfLayoutStrategy strategy,
         out LayoutCandidate? candidate,
@@ -272,7 +286,8 @@ public static class ElfLayoutPlanner
             var tlsFixupDecisions = new List<ElfLayoutTlsFixupDecision>(tlsFixups.Count);
             var addressMap = new List<ElfLayoutAddressMapEntry>(regions.Count + options.MaximumVeneerCount);
             var placementByIdentity = new Dictionary<string, ElfLayoutPlacement>(StringComparer.Ordinal);
-            var edits = new List<ElfLayoutByteEdit>();
+            var edits = new List<ElfLayoutByteEdit>(unwindEdits.Count + regions.Count + branches.Count + jumpTables.Count);
+            edits.AddRange(unwindEdits);
             var cursorFile = codeFileStart;
             var cursorVirtual = codeVirtualStart;
             foreach (var region in regions.OrderBy(region => region.Identity, StringComparer.Ordinal))
@@ -325,6 +340,18 @@ public static class ElfLayoutPlanner
                 edits.Add(new ElfLayoutByteEdit(placement.FileOffset, materializedCode, ElfLayoutEditKind.GeneratedCode));
                 cursorFile = checked(cursorFile + placement.Size);
                 cursorVirtual = checked(cursorVirtual + placement.Size);
+            }
+
+            var jumpTableEdits = BuildJumpTableEdits(
+                sourceFile,
+                jumpTables,
+                addressMap,
+                diagnostics);
+            edits.AddRange(jumpTableEdits);
+            if (diagnostics.HasErrors)
+            {
+                rejected = diagnostics.ToArray();
+                return false;
             }
 
             var branchDecisions = new List<ElfBranchPlacementDecision>(branches.Count);
@@ -800,6 +827,8 @@ public static class ElfLayoutPlanner
                     .OrderBy(decision => decision.OutputVirtualAddress.Value)
                     .ThenBy(decision => decision.OutputFileOffset.Value)
                     .ToArray()),
+                UnwindEdits = Array.AsReadOnly(unwindEdits.ToArray()),
+                JumpTableEdits = Array.AsReadOnly(jumpTableEdits.ToArray()),
             };
 
             if (!ValidateCandidate(
@@ -1210,6 +1239,52 @@ public static class ElfLayoutPlanner
         {
             diagnostics.Error(DiagnosticCode.TableOutOfBounds, "The source section-header table is not fully represented by the layout snapshot.", header.SectionHeaderOffset);
         }
+    }
+
+    private static void ValidateUnwindEdits(
+        ElfFile sourceFile,
+        ulong sourceLength,
+        IReadOnlyList<ElfLayoutByteEdit> edits,
+        DiagnosticBag diagnostics)
+    {
+        if (edits.Count > ElfLayoutLimits.DefaultMaximumEditCount)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ElfLayoutOutputLimitExceeded,
+                "The unwind metadata edit count exceeds the shared layout bound.");
+            return;
+        }
+
+        foreach (var edit in edits)
+        {
+            if (edit.Kind != ElfLayoutEditKind.UnwindMetadata
+                || edit.Bytes is null
+                || edit.Bytes.Length == 0
+                || edit.Offset.Value > sourceLength
+                || (ulong)edit.Bytes.Length > sourceLength - edit.Offset.Value
+                || !IsUnwindSectionRange(sourceFile, edit.Offset.Value, (ulong)edit.Bytes.Length)
+                || !sourceFile.ProgramHeaders.Any(header =>
+                    header.Type == ElfConstants.PtLoad
+                    && edit.Offset.Value >= header.Offset
+                    && edit.Offset.Value - header.Offset <= header.FileSize
+                    && (ulong)edit.Bytes.Length <= header.FileSize - (edit.Offset.Value - header.Offset)))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.UnwindRewriteOverlap,
+                    "An unwind edit is not a bounded, load-mapped unwind metadata range.",
+                    edit.Offset.Value);
+                return;
+            }
+        }
+    }
+
+    private static bool IsUnwindSectionRange(ElfFile file, ulong offset, ulong size)
+    {
+        return file.SectionHeaders.Any(section =>
+            section.Type == 1
+            && section.Address != 0
+            && section.Offset == offset
+            && section.Size == size);
     }
 
     private static void ValidateTlsFixupRequests(
@@ -2575,6 +2650,272 @@ public static class ElfLayoutPlanner
         return true;
     }
 
+    private static List<ElfLayoutByteEdit> BuildJumpTableEdits(
+        ElfFile sourceFile,
+        IReadOnlyList<ElfLayoutJumpTableEditRequest> requests,
+        IReadOnlyList<ElfLayoutAddressMapEntry> addressMap,
+        DiagnosticBag diagnostics)
+    {
+        var edits = new List<ElfLayoutByteEdit>();
+        foreach (var request in requests)
+        {
+            if (request.RewritePolicy != SemanticJumpTableRewritePolicy.InPlace)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutUnsupported,
+                    "Only in-place selected-function-private jump-table rewrites are currently materialized.",
+                    request.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            if (!sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+                    request.TableRange.VirtualAddress,
+                    request.TableRange.Size,
+                    out var tableFileOffset))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.AddressUnmapped,
+                    "The jump-table source range is not file-backed by the structural load map.",
+                    request.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            if (tableFileOffset != request.TableRange.FileOffset)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMalformed,
+                    "The jump-table source range disagrees with the structural load map.",
+                    request.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            if (!TryMapPhysicalAddress(
+                    addressMap,
+                    request.TargetBaseAddress,
+                    out var outputTargetBase))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "The jump-table target-base address has no physical output mapping.",
+                    request.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            foreach (var entry in request.Entries.OrderBy(entry => entry.Index))
+            {
+                if (entry.Target.SourceAddress is not { } sourceTarget
+                    || !TryMapPhysicalAddress(addressMap, sourceTarget, out var outputTarget))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticAddressMapMissing,
+                        "A jump-table entry target has no physical output mapping.",
+                        entry.SourceRange.FileOffset.Value);
+                    continue;
+                }
+
+                if (!TryGetRelativeEntryValue(
+                        outputTarget.Value,
+                        outputTargetBase.Value,
+                        request.Addend,
+                        request.Scale,
+                        request.IsSigned,
+                        request.EntryWidth,
+                        out var encoded))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticFixupOutOfRange,
+                        "A jump-table entry target cannot be represented by its signed relative encoding.",
+                        entry.SourceRange.FileOffset.Value);
+                    continue;
+                }
+
+                var entryOffset = entry.SourceRange.FileOffset;
+                var bytes = new byte[request.EntryWidth];
+                switch (request.EntryWidth)
+                {
+                    case 1:
+                        bytes[0] = unchecked((byte)encoded);
+                        break;
+                    case 2:
+                        BinaryPrimitives.WriteInt16LittleEndian(bytes, checked((short)encoded));
+                        break;
+                    case 4:
+                        BinaryPrimitives.WriteInt32LittleEndian(bytes, checked((int)encoded));
+                        break;
+                    case 8:
+                        BinaryPrimitives.WriteInt64LittleEndian(bytes, encoded);
+                        break;
+                    default:
+                        diagnostics.Error(
+                            DiagnosticCode.ElfLayoutUnsupported,
+                            "The jump-table entry width is outside the supported rewrite families.",
+                            entryOffset.Value);
+                        continue;
+                }
+
+                edits.Add(new ElfLayoutByteEdit(
+                    entryOffset,
+                    bytes,
+                    ElfLayoutEditKind.JumpTableEntry));
+            }
+        }
+
+        return edits;
+    }
+
+    private static void ValidateJumpTableRequests(
+        ElfFile sourceFile,
+        ulong sourceLength,
+        IReadOnlyList<ElfLayoutJumpTableEditRequest> requests,
+        DiagnosticBag diagnostics)
+    {
+        foreach (var request in requests)
+        {
+            if (!Enum.IsDefined(request.RewritePolicy)
+                || request.EntryWidth is not (1 or 2 or 4 or 8)
+                || request.Scale <= 0
+                || request.Entries.Count == 0
+                || request.TableRange.Size != checked((ulong)request.Entries.Count * (ulong)request.EntryWidth)
+                || request.TableRange.FileOffset.Value > sourceLength
+                || request.TableRange.Size > sourceLength - request.TableRange.FileOffset.Value)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutMalformed,
+                    "A jump-table layout request has an invalid bounded range, width, scale, or entry set.",
+                    request.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            if (request.RewritePolicy != SemanticJumpTableRewritePolicy.InPlace)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutUnsupported,
+                    "Only in-place jump-table rewrite policy is supported by this layout slice.",
+                    request.TableRange.FileOffset.Value);
+            }
+
+            var seen = new HashSet<int>();
+            foreach (var entry in request.Entries)
+            {
+                if (!seen.Add(entry.Index)
+                    || entry.SourceRange.FileOffset.Value < request.TableRange.FileOffset.Value
+                    || entry.SourceRange.FileOffset.Value - request.TableRange.FileOffset.Value
+                        > request.TableRange.Size - (ulong)request.EntryWidth
+                    || entry.SourceRange.Size != (ulong)request.EntryWidth
+                    || entry.Target.SourceAddress is null)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutMalformed,
+                        "A jump-table entry is duplicated, outside its source table, or lacks an exact source target.",
+                        entry.SourceRange.FileOffset.Value);
+                }
+            }
+        }
+    }
+
+    private static bool TryMapPhysicalAddress(
+        IReadOnlyList<ElfLayoutAddressMapEntry> addressMap,
+        VirtualAddress sourceAddress,
+        out VirtualAddress outputAddress)
+    {
+        foreach (var entry in addressMap)
+        {
+            if (entry.SourceRange is not { } sourceRange
+                || sourceAddress.Value < sourceRange.VirtualAddress.Value
+                || sourceAddress.Value - sourceRange.VirtualAddress.Value >= sourceRange.Size)
+            {
+                continue;
+            }
+
+            var delta = sourceAddress.Value - sourceRange.VirtualAddress.Value;
+            if (delta >= entry.OutputRange.Size
+                || entry.OutputRange.VirtualAddress.Value > ulong.MaxValue - delta)
+            {
+                continue;
+            }
+
+            outputAddress = new VirtualAddress(entry.OutputRange.VirtualAddress.Value + delta);
+            return true;
+        }
+
+        outputAddress = default;
+        return false;
+    }
+
+    private static bool TryGetRelativeEntryValue(
+        ulong target,
+        ulong targetBase,
+        long addend,
+        int scale,
+        bool isSigned,
+        int width,
+        out long encoded)
+    {
+        encoded = default;
+        if (scale <= 0
+            || !TryGetSignedDelta(target, targetBase, out var delta)
+            || !TrySubtractSigned(delta, addend, out var adjusted)
+            || adjusted % scale != 0)
+        {
+            return false;
+        }
+
+        encoded = adjusted / scale;
+        if (isSigned)
+        {
+            var bits = checked(width * 8);
+            var minimum = bits == 64 ? long.MinValue : -(1L << (bits - 1));
+            var maximum = bits == 64 ? long.MaxValue : (1L << (bits - 1)) - 1;
+            return encoded >= minimum && encoded <= maximum;
+        }
+
+        return encoded >= 0 && (width == 8 || (ulong)encoded <= ((1UL << (width * 8)) - 1));
+    }
+
+    private static bool TryGetSignedDelta(
+        ulong left,
+        ulong right,
+        out long delta)
+    {
+        if (left >= right)
+        {
+            var difference = left - right;
+            if (difference > long.MaxValue)
+            {
+                delta = default;
+                return false;
+            }
+
+            delta = (long)difference;
+            return true;
+        }
+
+        var reverse = right - left;
+        if (reverse > 0x8000000000000000UL)
+        {
+            delta = default;
+            return false;
+        }
+
+        delta = reverse == 0x8000000000000000UL
+            ? long.MinValue
+            : -(long)reverse;
+        return true;
+    }
+
+    private static bool TrySubtractSigned(long left, long right, out long result)
+    {
+        if (right > 0 && left < long.MinValue + right
+            || right < 0 && left > long.MaxValue + right)
+        {
+            result = default;
+            return false;
+        }
+
+        result = left - right;
+        return true;
+    }
+
     private static void ValidateRequests(
         ElfFile sourceFile,
         ulong sourceLength,
@@ -2981,6 +3322,7 @@ public static class ElfLayoutPlanner
             plan.BranchDecisions)
         {
             TlsFixups = plan.TlsFixups,
+            UnwindEdits = plan.UnwindEdits,
         };
 
     private static string ComputePreservedMetadataFingerprint(IReadOnlyList<ProgramHeader> headers)

@@ -192,9 +192,32 @@ int main(int argc, char **argv)
     urp_status dynamic_status = adapter.context.load_image(adapter.context.userdata,
         dynamic_bytes, dynamic_size, URP_LOAD_IMAGE_IMMUTABLE, &dynamic_image);
     free(dynamic_bytes);
-    if (!expect(dynamic_status == URP_STATUS_UNSUPPORTED && dynamic_image == 0U
-            && urp_host_adapter_memfd_create_attempts() == attempts_before,
-            "dynamic TLS reached memfd creation or published an image")) return 25;
-    puts("thread adapter ownership/join/order and dynamic-TLS negatives: PASS");
+    if ((adapter.context.capabilities & URP_HOST_CAP_THREAD_LIFETIME) == 0U) {
+        if (!expect(dynamic_status == URP_STATUS_UNSUPPORTED && dynamic_image == 0U
+                && urp_host_adapter_memfd_create_attempts() == attempts_before,
+                "dynamic TLS reached memfd creation or published an image")) return 25;
+        puts("thread adapter ownership/join/order and dynamic-TLS negatives: PASS");
+        return 0;
+    }
+
+    if (!expect(dynamic_status == URP_STATUS_OK && dynamic_image != 0U,
+            "glibc dynamic TLS fixture was rejected before handoff")) return 25;
+    uintptr_t dynamic_raw = 0U;
+    if (!expect(adapter.context.lookup_symbol(
+            adapter.context.userdata,
+            dynamic_image,
+            "urp_dynamic_tls_probe",
+            NULL,
+            &dynamic_raw) == URP_STATUS_OK && dynamic_raw != 0U,
+            "dynamic TLS probe symbol lookup failed")) return 26;
+    int32_t (*dynamic_probe)(void) = NULL;
+    memcpy(&dynamic_probe, &dynamic_raw, sizeof(dynamic_probe));
+    if (!expect(dynamic_probe() == 7,
+            "dynamic TLS probe returned the wrong module-local value")) return 27;
+    if (!expect(adapter.context.release_image(
+            adapter.context.userdata,
+            dynamic_image) == URP_STATUS_OK,
+            "dynamic TLS image release failed")) return 28;
+    puts("thread adapter ownership/join/order and dynamic-TLS positive/negative lanes: PASS");
     return 0;
 }

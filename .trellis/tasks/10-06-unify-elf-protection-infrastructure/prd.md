@@ -77,18 +77,20 @@ The user value is a protection artifact that remains executable and behaviorally
 
 ## Acceptance criteria
 
-- [ ] `protect`, `protect-image`, and `rehydrate-image` use one production rewrite/materialization workflow; no direct writer remains as a separate production behavior.
-- [ ] The current `HostContextEntry` profile has a complete profile-specific materialization path through the shared workflow and passes its native AArch64 HostContext handoff oracle; it is not accepted and then rejected by a generic outer-profile materializer.
-- [ ] All historical migration paths and formats are absent from production, current test data, manifests, and evidence gates; no compatibility aliases or alternate direct writer remain.
-- [ ] A valid fixture with every program-header slot occupied is transformed through the unified path without requiring `PT_NULL`, and the resulting ELF passes structural and native behavior checks.
-- [ ] Layout plans and emitted ELF preserve required program-header semantics and record their chosen placement strategy and address mappings.
-- [ ] The semantic rewrite model handles the agreed initial PC-relative, call, literal-pool, and relocation families with positive and nearest-negative fixtures.
-- [ ] Bounded indirect targets and ambiguous jump tables are resolved/rewritten and behaviorally exercised; opaque targets follow the declared runtime mapping strategy.
-- [ ] The agreed TLS relocation models execute with preserved per-thread values and lifecycle evidence on every runtime claimed by the feature row.
-- [ ] Valid CFI is preserved or regenerated for transformed code, and malformed CFI follows the repair/canonicalization contract with retained evidence.
-- [ ] Branch-range, relocation, TLS, indirect-target, jump-table, CFI, layout, overflow, and publication failures return stable diagnostics and publish no partial output.
-- [ ] Existing narrow protection, rehydration, native handoff, regression, fuzz, and current-contract tests remain green after the architecture refactor.
-- [ ] Documentation, compatibility matrix, contract inventory, reports, fixtures, CI commands, and evidence checkers describe the unified workflow and each promoted semantic feature accurately.
+- [x] `protect`, `protect-image`, and `rehydrate-image` use one production rewrite/materialization workflow; no direct writer remains as a separate production behavior.
+- [x] The current `HostContextEntry` profile has a complete profile-specific materialization path through the shared workflow and passes its native AArch64 HostContext handoff oracle; it is not accepted and then rejected by a generic outer-profile materializer.
+- [x] All historical migration paths and formats are absent from production, current test data, manifests, and evidence gates; no compatibility aliases or alternate direct writer remain.
+- [x] A valid fixture with every program-header slot occupied is transformed through the unified path without requiring `PT_NULL`, and the resulting ELF passes structural and native behavior checks.
+- [x] Layout plans and emitted ELF preserve required program-header semantics and record their chosen placement strategy and address mappings.
+- [x] The semantic rewrite model handles the agreed initial PC-relative, call, literal-pool, and relocation families with positive and nearest-negative fixtures.
+- [ ] Bounded indirect targets and ambiguous jump tables are resolved/rewritten and behaviorally exercised; the archived child has only the analysis-boundary correction, while the required target/table implementation and evidence remain unfinished.
+- [ ] The agreed TLS relocation models execute with preserved per-thread values and lifecycle evidence across the declared runtime/profile/lifecycle matrix; only the glibc initial-exec current-thread control row is promoted, with the remaining rows explicitly unpromoted.
+- [ ] Valid CFI is preserved or regenerated for transformed code, malformed CFI follows the repair/canonicalization contract, and dedicated transformed unwind behavior is verified on each claimed runtime; managed parser/layout work is complete, but the native CFI behavior rows remain unpromoted.
+- [x] Branch-range, relocation, TLS, indirect-target, jump-table, CFI, layout, overflow, and publication failures return stable diagnostics and publish no partial output.
+- [x] Existing narrow protection, rehydration, native handoff, regression, fuzz, and current-contract tests remain green after the architecture refactor.
+- [x] Documentation, compatibility matrix, contract inventory, reports, fixtures, CI commands, and evidence checkers describe the unified workflow and each promoted semantic feature accurately.
+
+Status correction: the architecture prerequisite, layout, semantic-relocator, TLS semantic, CFI parser/layout, and AsmStone work are implemented and locally verified, but this parent remains `in_progress`. The indirect-control/jump-table acceptance criteria are still open, transformed TLS promotion is limited to the independently verified glibc initial-exec current-thread row, and dedicated transformed CFI native behavior rows remain open. The task must not be archived again until those declared gaps are either completed with independent evidence or the parent scope is explicitly revised and approved.
 
 ## Scope decision
 

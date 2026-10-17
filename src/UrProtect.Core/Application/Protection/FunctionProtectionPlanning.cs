@@ -5,6 +5,7 @@ using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
 using UrProtect.Core.ElfLayout;
 using UrProtect.Core.ArtifactProtocol;
+using UrProtect.Core.UnwindMetadata;
 
 namespace UrProtect.Core.Application.Protection;
 
@@ -55,7 +56,7 @@ public sealed partial class FunctionProtectionService
         }
 
         functionResults.AddRange(transformedResults);
-        var semanticSnapshot = BuildTlsSemanticSnapshot(
+        var semanticSnapshot = BuildSemanticSnapshot(
             selectedPlan.File,
             analyses,
             protectedCode.Patches,
@@ -121,6 +122,295 @@ public sealed partial class FunctionProtectionService
             SemanticSnapshot = semanticSnapshot,
         };
         return new FunctionProtectionPlanResult(plan, functionResults, diagnostics.ToArray());
+    }
+
+    private static SemanticPlanSnapshot? BuildSemanticSnapshot(
+        ElfFile file,
+        IReadOnlyList<Aarch64FunctionAnalysis> analyses,
+        IReadOnlyList<FunctionPatch> patches,
+        DiagnosticBag diagnostics)
+    {
+        var hasIndirectTargets = analyses.Any(analysis =>
+            analysis.IndirectTargetResolutions.Count > 0
+            || analysis.JumpTableResolutions.Count > 0
+            || analysis.RuntimeIndirectCallResolutions.Count > 0);
+        var hasTls = analyses.Any(analysis =>
+            file.TlsMetadata.StaticRelocations
+                .Concat(file.TlsMetadata.Dynamic.Relocations)
+                .Any(fact => analysis.Function.TryGetEnd(out var end)
+                    && fact.Relocation.Offset >= analysis.Function.Value
+                    && fact.Relocation.Offset < end));
+
+        if (hasIndirectTargets && hasTls)
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanMalformed,
+                "A selected function cannot combine the bounded indirect-target slice with a TLS semantic slice in one current snapshot.",
+                analyses.First(analysis =>
+                    analysis.IndirectTargetResolutions.Count > 0
+                    || analysis.JumpTableResolutions.Count > 0
+                    || analysis.RuntimeIndirectCallResolutions.Count > 0).Function.Value);
+            return null;
+        }
+
+        var unwindParse = UnwindMetadataParser.Parse(file);
+        var hasEhFrameProgramHeader = file.ProgramHeaders.Any(
+            header => header.Type == ElfConstants.PtGnuEhFrame);
+        if (hasEhFrameProgramHeader && !unwindParse.IsSuccess)
+        {
+            // An advertised GNU EH-frame table is part of the runtime
+            // contract. Do not silently transform code while discarding
+            // malformed unwind metadata.
+            diagnostics.AddRange(unwindParse.Diagnostics);
+            return null;
+        }
+
+        var hasValidUnwindMetadata = unwindParse.IsSuccess;
+        if (hasValidUnwindMetadata
+            && analyses.Any(analysis =>
+                !file.TlsMetadata.StaticRelocations
+                    .Concat(file.TlsMetadata.Dynamic.Relocations)
+                    .Any(fact => analysis.Function.TryGetEnd(out var end)
+                        && fact.Relocation.Offset >= analysis.Function.Value
+                        && fact.Relocation.Offset < end)))
+        {
+            // The CFI snapshot factory also carries indirect-target extensions
+            // projected by Aarch64SemanticPlanFactory. CFI must win this
+            // selection because callback-shaped BLR instructions can coexist
+            // with unwind-covered transformed code.
+            return BuildCfiSemanticSnapshot(file, analyses, patches, diagnostics);
+        }
+
+        if (hasIndirectTargets)
+        {
+            return BuildIndirectSemanticSnapshot(file, analyses, patches, diagnostics);
+        }
+
+        return BuildTlsSemanticSnapshot(file, analyses, patches, diagnostics);
+    }
+
+    private static SemanticPlanSnapshot? BuildIndirectSemanticSnapshot(
+        ElfFile file,
+        IReadOnlyList<Aarch64FunctionAnalysis> analyses,
+        IReadOnlyList<FunctionPatch> patches,
+        DiagnosticBag diagnostics)
+    {
+        var indirectAnalyses = analyses
+            .Where(analysis =>
+                analysis.IndirectTargetResolutions.Count > 0
+                || analysis.JumpTableResolutions.Count > 0
+                || analysis.RuntimeIndirectCallResolutions.Count > 0)
+            .ToArray();
+        if (indirectAnalyses.Length != 1 || analyses.Count != 1)
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanMalformed,
+                "The bounded indirect-target slice requires exactly one selected function and cannot be combined with another selected function in the current snapshot.",
+                indirectAnalyses.FirstOrDefault()?.Function.Value);
+            return null;
+        }
+
+        var result = Aarch64SemanticPlanFactory.Create(
+            indirectAnalyses[0],
+            Array.Empty<RelaRelocation>(),
+            new Aarch64SemanticPlanFactoryOptions(loadMap: file.LoadMap));
+        diagnostics.AddRange(result.Diagnostics);
+        if (!result.IsSuccess || result.Plan is null)
+        {
+            return null;
+        }
+
+        var patch = patches.SingleOrDefault(candidate =>
+            candidate.SourceAddress == indirectAnalyses[0].Function.Value
+            && candidate.SourceSize == indirectAnalyses[0].Function.Size);
+        if (patch.SourceSize == 0
+            || !file.LoadMap.TryVirtualAddressToFileOffset(
+                new VirtualAddress(indirectAnalyses[0].Function.Value),
+                indirectAnalyses[0].Function.Size,
+                out var sourceFunctionFileOffset))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticAddressMapMissing,
+                "The selected indirect-control function has no emitted logical output map.",
+                indirectAnalyses[0].Function.Value);
+            return null;
+        }
+
+        var plannedEntries = result.Plan.AddressMap.Entries
+            .Select(entry => MapIndirectEntry(
+                entry,
+                indirectAnalyses[0],
+                patch,
+                sourceFunctionFileOffset,
+                diagnostics))
+            .ToArray();
+        if (diagnostics.HasErrors)
+        {
+            return null;
+        }
+
+        var plannedMap = AddressMap.Create(plannedEntries);
+        diagnostics.AddRange(plannedMap.Diagnostics);
+        if (!plannedMap.IsSuccess || plannedMap.Map is null)
+        {
+            return null;
+        }
+
+        var placed = Aarch64SemanticPlanFactory.CreateWithPlacement(
+            indirectAnalyses[0],
+            plannedMap.Map,
+            Array.Empty<RelaRelocation>(),
+            file.LoadMap);
+        diagnostics.AddRange(placed.Diagnostics);
+        if (!placed.IsSuccess || placed.Plan is null)
+        {
+            return null;
+        }
+
+        var snapshot = SemanticPlanSnapshotCodec.Create(placed.Plan);
+        diagnostics.AddRange(snapshot.Diagnostics);
+        return snapshot.Snapshot;
+    }
+
+    private static SemanticPlanSnapshot? BuildCfiSemanticSnapshot(
+        ElfFile file,
+        IReadOnlyList<Aarch64FunctionAnalysis> analyses,
+        IReadOnlyList<FunctionPatch> patches,
+        DiagnosticBag diagnostics)
+    {
+        if (analyses.Count != 1)
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanMalformed,
+                "The bounded CFI snapshot slice requires exactly one selected function.",
+                analyses.Count == 0 ? null : analyses[0].Function.Value);
+            return null;
+        }
+
+        var analysis = analyses[0];
+        var patch = patches.SingleOrDefault(candidate =>
+            candidate.SourceAddress == analysis.Function.Value
+            && candidate.SourceSize == analysis.Function.Size);
+        if (patch.SourceSize == 0
+            || !file.LoadMap.TryVirtualAddressToFileOffset(
+                new VirtualAddress(analysis.Function.Value),
+                analysis.Function.Size,
+                out var sourceFileOffset))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticAddressMapMissing,
+                "The selected CFI function has no emitted output map.",
+                analysis.Function.Value);
+            return null;
+        }
+
+        var projected = Aarch64SemanticPlanFactory.Create(
+            analysis,
+            Array.Empty<RelaRelocation>(),
+            new Aarch64SemanticPlanFactoryOptions(loadMap: file.LoadMap));
+        diagnostics.AddRange(projected.Diagnostics);
+        if (!projected.IsSuccess || projected.Plan is null)
+        {
+            return null;
+        }
+
+        var plannedEntries = projected.Plan.AddressMap.Entries
+            .Select(entry =>
+            {
+                var outputRange = entry.SourceRange;
+                if (entry.Identity.Kind == SemanticEntityKind.Function)
+                {
+                    outputRange = new SemanticSourceRange(
+                        new FileOffset(checked(sourceFileOffset.Value + patch.TargetAddress)),
+                        new VirtualAddress(checked(analysis.Function.Value + patch.TargetAddress)),
+                        patch.OutputSize);
+                }
+                else if (entry.Identity.Kind is SemanticEntityKind.Instruction or SemanticEntityKind.BasicBlock)
+                {
+                    if (!patch.InstructionOutputOffsets.TryGetValue(
+                            entry.SourceRange.VirtualAddress.Value,
+                            out var outputOffset))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.SemanticAddressMapMissing,
+                            "A selected CFI entity has no emitted instruction output offset.",
+                            entry.SourceRange.FileOffset.Value);
+                        return entry;
+                    }
+
+                    outputRange = new SemanticSourceRange(
+                        new FileOffset(checked(sourceFileOffset.Value + patch.TargetAddress + outputOffset)),
+                        new VirtualAddress(checked(analysis.Function.Value + patch.TargetAddress + outputOffset)),
+                        entry.SourceRange.Size);
+                }
+
+                return entry with { OutputRange = outputRange };
+            })
+            .ToArray();
+
+        if (diagnostics.HasErrors)
+        {
+            return null;
+        }
+
+        var mapResult = AddressMap.Create(plannedEntries);
+        diagnostics.AddRange(mapResult.Diagnostics);
+        if (!mapResult.IsSuccess || mapResult.Map is null)
+        {
+            return null;
+        }
+
+        var snapshotPlan = new SemanticRewritePlan(
+            mapResult.Map,
+            projected.Plan.Instructions,
+            projected.Plan.Fixups,
+            projected.Plan.Extensions,
+            projected.Plan.Diagnostics);
+        var snapshot = SemanticPlanSnapshotCodec.Create(snapshotPlan);
+        diagnostics.AddRange(snapshot.Diagnostics);
+        return snapshot.Snapshot;
+    }
+
+    private static AddressMapEntry MapIndirectEntry(
+        AddressMapEntry entry,
+        Aarch64FunctionAnalysis analysis,
+        FunctionPatch patch,
+        FileOffset sourceFunctionFileOffset,
+        DiagnosticBag diagnostics)
+    {
+        var outputRange = entry.SourceRange;
+        if (entry.Identity.Kind == SemanticEntityKind.Function)
+        {
+            outputRange = new SemanticSourceRange(
+                new FileOffset(checked(sourceFunctionFileOffset.Value + patch.TargetAddress)),
+                new VirtualAddress(checked(analysis.Function.Value + patch.TargetAddress)),
+                patch.OutputSize);
+        }
+        else if (entry.Identity.Kind is SemanticEntityKind.Instruction or SemanticEntityKind.BasicBlock)
+        {
+            if (!patch.InstructionOutputOffsets.TryGetValue(
+                    entry.SourceRange.VirtualAddress.Value,
+                    out var instructionOffset)
+                || instructionOffset > patch.OutputSize
+                || sizeof(uint) > patch.OutputSize - instructionOffset)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    $"The selected indirect-control entity '{entry.Identity.Value}' has no emitted output binding.",
+                    entry.SourceRange.FileOffset.Value);
+                return entry;
+            }
+
+            var outputSize = entry.Identity.Kind == SemanticEntityKind.Instruction
+                ? (ulong)sizeof(uint)
+                : (ulong)sizeof(uint);
+            outputRange = new SemanticSourceRange(
+                new FileOffset(checked(sourceFunctionFileOffset.Value + patch.TargetAddress + instructionOffset)),
+                new VirtualAddress(checked(analysis.Function.Value + patch.TargetAddress + instructionOffset)),
+                outputSize);
+        }
+
+        return entry with { OutputRange = outputRange };
     }
 
     private static SemanticPlanSnapshot? BuildTlsSemanticSnapshot(

@@ -83,10 +83,21 @@ internal sealed class SelectedFunctionProtectionPlanner
             analyses.Add(analysis);
             if (!analysis.IsComplete)
             {
-                diagnostics.Error(
-                    DiagnosticCode.FunctionAnalysisIncomplete,
-                    $"Function '{function.Name}' cannot be transformed because analysis is incomplete.",
-                    function.Value);
+                var analysisErrors = analysis.Diagnostics
+                    .Where(diagnostic => diagnostic.IsError)
+                    .ToArray();
+                if (analysisErrors.Length == 0)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.FunctionAnalysisIncomplete,
+                        $"Function '{function.Name}' cannot be transformed because analysis is incomplete.",
+                        function.Value);
+                }
+                else
+                {
+                    diagnostics.AddRange(analysisErrors);
+                }
+
                 functions.Add(new FunctionProtectionFunctionResult(
                     function,
                     true,

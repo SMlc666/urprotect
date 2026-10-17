@@ -7,6 +7,7 @@ namespace UrProtect.Core.Tests.Semantics;
 
 public sealed class Aarch64SemanticPlanFactoryTests
 {
+    private static readonly ulong[] IndirectProducerAddresses = { 0x1000UL };
     [Fact]
     public void ProjectsFunctionBlocksFixupsAndDiscoverableRelocationSites()
     {
@@ -274,6 +275,96 @@ public sealed class Aarch64SemanticPlanFactoryTests
     }
 
     [Fact]
+    public void ResolvedIndirectTargetIsCarriedIntoTheCanonicalSnapshot()
+    {
+        var instructions = new[]
+        {
+            CreateInstruction(
+                0x1000,
+                0xD2800000,
+                "MOVZ",
+                Aarch64InstructionProperties.None,
+                Aarch64ControlFlowKind.None,
+                null),
+            CreateInstruction(
+                0x1004,
+                0xD61F0000,
+                "BR",
+                Aarch64InstructionProperties.Branch | Aarch64InstructionProperties.Terminator,
+                Aarch64ControlFlowKind.IndirectBranch,
+                null,
+                RegisterOperand(0)),
+            CreateInstruction(
+                0x1008,
+                0xD503201F,
+                "NOP",
+                Aarch64InstructionProperties.None,
+                Aarch64ControlFlowKind.None,
+                null),
+            CreateInstruction(
+                0x100C,
+                0xD65F03C0,
+                "RET",
+                Aarch64InstructionProperties.Return | Aarch64InstructionProperties.Terminator,
+                Aarch64ControlFlowKind.Return,
+                null),
+        };
+        var analysis = new Aarch64FunctionAnalysis(
+            new ElfFunctionSymbol(
+                "indirect_fixture",
+                ElfSymbolTableKind.Static,
+                2,
+                0,
+                0,
+                0,
+                0x1000,
+                0x10),
+            Aarch64FunctionAnalysisStatus.Complete,
+            new[]
+            {
+                CreateBlock(0x1000, 0, 2, instructions),
+                CreateBlock(0x1008, 2, 2, instructions),
+            },
+            instructions,
+            Array.Empty<Diagnostic>())
+        {
+            IndirectTargetResolutions = new[]
+            {
+                new Aarch64IndirectTargetResolution(
+                    0x1004,
+                    new VirtualAddress(0x1008),
+                    new Aarch64RegisterView(
+                        Aarch64RegisterClass.General,
+                        0,
+                        64,
+                        Aarch64RegisterRole.None),
+                    IndirectProducerAddresses,
+                    "exact selected-function producer proof"),
+            },
+        };
+
+        var result = Aarch64SemanticPlanFactory.Create(analysis);
+        Assert.True(result.IsSuccess, Describe(result.Diagnostics));
+        Assert.NotNull(result.Plan);
+        var extension = Assert.Single(
+            result.Plan!.Extensions.OfType<SemanticIndirectTargetExtension>(),
+            candidate => candidate.SourceAddress == new VirtualAddress(0x1004));
+        Assert.Equal(SemanticTargetResolution.Exact, extension.Target.Resolution);
+        Assert.Equal(new VirtualAddress(0x1008), extension.Target.SourceAddress);
+        Assert.Equal("exact selected-function producer proof", extension.Diagnostic);
+
+        var snapshot = SemanticPlanSnapshotCodec.Create(result.Plan);
+        Assert.True(snapshot.IsSuccess, Describe(snapshot.Diagnostics));
+        var decoded = SemanticPlanSnapshotCodec.Decode(snapshot.CanonicalBytes!);
+        Assert.True(decoded.IsSuccess, Describe(decoded.Diagnostics));
+        var decodedExtension = Assert.Single(
+            decoded.Snapshot!.Extensions.OfType<SemanticIndirectTargetExtension>(),
+            candidate => candidate.SourceAddress == new VirtualAddress(0x1004));
+        Assert.Equal(SemanticTargetResolution.Exact, decodedExtension.Target.Resolution);
+        Assert.Equal(new VirtualAddress(0x1008), decodedExtension.Target.SourceAddress);
+    }
+
+    [Fact]
     public void IndirectAndUnmappedLiteralTargetsBecomeExtensionsInsteadOfGuesses()
     {
         var indirect = CreateInstruction(
@@ -418,6 +509,32 @@ public sealed class Aarch64SemanticPlanFactoryTests
                 decoded,
                 string.Empty));
     }
+
+    private static Aarch64SemanticOperand RegisterOperand(byte index) =>
+        new(
+            "register",
+            Aarch64OperandKind.Register,
+            Aarch64OperandDirection.Input,
+            false,
+            "gpr64",
+            null,
+            new Aarch64RegisterView(
+                Aarch64RegisterClass.General,
+                index,
+                64,
+                Aarch64RegisterRole.None),
+            Array.Empty<Aarch64RegisterView>(),
+            null,
+            null,
+            null,
+            new Aarch64RegisterConstraint(0, 31, 1, 0),
+            64,
+            5,
+            1,
+            false,
+            false,
+            false,
+            "register");
 
     private static Aarch64SemanticOperand TargetOperand(
         string codec,

@@ -55,6 +55,8 @@ public enum DiagnosticCode
     FunctionNotFound,
     FunctionSelectorAmbiguous,
     FunctionAnalysisIncomplete,
+    IndirectTargetUnresolved,
+    IndirectTargetUnsupported,
     FunctionResourceUnavailable,
     ProtectionPassFailed,
     ProtectionLayoutUnavailable,
@@ -105,6 +107,11 @@ public enum DiagnosticCode
     SemanticPlanSnapshotUnsupported,
     SemanticPlanSnapshotLimitExceeded,
     SemanticPlanSnapshotIntegrityMismatch,
+    UnwindMetadataUnavailable,
+    UnwindMetadataMalformed,
+    UnwindMetadataUnsupported,
+    UnwindAddressMapMissing,
+    UnwindRewriteOverlap,
 }
 
 public readonly record struct Diagnostic(

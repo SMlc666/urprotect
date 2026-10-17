@@ -77,6 +77,7 @@ static int write_record(
     const char *image_hash,
     const char *entry_symbol,
     int entry_status,
+    int process_status,
     const char *release_status,
     const char *first_failure)
 {
@@ -101,6 +102,7 @@ static int write_record(
         "  \"nativeImageSha256\": \"%s\",\n"
         "  \"entrySymbol\": \"%s\",\n"
         "  \"entryStatus\": %d,\n"
+        "  \"processStatus\": %d,\n"
         "  \"releaseStatus\": \"%s\",\n"
         "  \"releaseOrder\": \"entry-dispatch-before-release-image\",\n"
         "  \"firstFailureStage\": %s\n"
@@ -109,6 +111,7 @@ static int write_record(
         image_hash,
         entry_symbol,
         entry_status,
+        process_status,
         release_status,
         strcmp(first_failure, "null") == 0 ? "null" : "\"host-context-handoff\"");
     if (fclose(stream) != 0 || rename(temporary, path) != 0) {
@@ -153,7 +156,7 @@ int main(int argc, char **argv)
             URP_LOAD_IMAGE_IMMUTABLE,
             &handle) != URP_STATUS_OK
         || handle == 0U) {
-        (void)write_record(record_path, status, image_hash, entry_symbol, -1, release_status_text, first_failure);
+        (void)write_record(record_path, status, image_hash, entry_symbol, -1, exit_status, release_status_text, first_failure);
         free(image);
         return 1;
     }
@@ -165,7 +168,7 @@ int main(int argc, char **argv)
             &entry_address) != URP_STATUS_OK
         || entry_address == 0U) {
         (void)adapter.context.release_image(adapter.context.userdata, handle);
-        (void)write_record(record_path, status, image_hash, entry_symbol, -1, "passed", first_failure);
+        (void)write_record(record_path, status, image_hash, entry_symbol, -1, exit_status, "passed", first_failure);
         free(image);
         return 1;
     }
@@ -190,6 +193,7 @@ int main(int argc, char **argv)
         image_hash,
         entry_symbol,
         entry_status,
+        exit_status,
         release_status_text,
         first_failure);
     free(image);

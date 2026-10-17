@@ -48,7 +48,8 @@ public static class ElfLayoutMaterializer
             || plan.AddressMap is null
             || plan.BranchDecisions is null
             || plan.Edits is null
-            || plan.TlsFixups is null)
+            || plan.TlsFixups is null
+            || plan.UnwindEdits is null)
         {
             diagnostics.Error(DiagnosticCode.ElfLayoutMalformed, "The layout plan collections or strategy are malformed.");
             return Failure(plan, diagnostics);
@@ -106,6 +107,8 @@ public static class ElfLayoutMaterializer
                 plan.BranchDecisions)
             {
                 TlsFixups = plan.TlsFixups,
+                UnwindEdits = plan.UnwindEdits,
+                JumpTableEdits = plan.JumpTableEdits,
             };
             return new ElfLayoutResult(plan, output, parsed.File, evidence, diagnostics.ToArray());
         }
@@ -1569,6 +1572,23 @@ public static class ElfLayoutMaterializer
                     && segment.IsExecutable))
             {
                 diagnostics.Error(DiagnosticCode.ElfLayoutPostValidationFailed, $"Placement '{placement.Identity}' is not mapped by an executable output PT_LOAD.");
+                return false;
+            }
+        }
+
+        foreach (var unwindEdit in plan.UnwindEdits)
+        {
+            if (unwindEdit.Kind != ElfLayoutEditKind.UnwindMetadata
+                || unwindEdit.Bytes.Length == 0
+                || unwindEdit.Offset.Value > (ulong)output.Length
+                || (ulong)unwindEdit.Bytes.Length > (ulong)output.Length - unwindEdit.Offset.Value
+                || !output.AsSpan(checked((int)unwindEdit.Offset.Value), unwindEdit.Bytes.Length)
+                    .SequenceEqual(unwindEdit.Bytes))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutPostValidationFailed,
+                    "An unwind metadata edit does not match the materialized output.",
+                    unwindEdit.Offset.Value);
                 return false;
             }
         }

@@ -43,6 +43,8 @@ public enum ElfLayoutEditKind
     ProgramHeader = 4,
     ElfHeader = 5,
     ProgramHeaderTable = 6,
+    UnwindMetadata = 7,
+    JumpTableEntry = 8,
 }
 
 public enum ElfLayoutBranchEncodingKind
@@ -326,6 +328,17 @@ public sealed record ElfBranchPlacementDecision(
     long MinimumDisplacement,
     long MaximumDisplacementExclusive);
 
+public sealed record ElfLayoutJumpTableEditRequest(
+    SemanticEntityId TableIdentity,
+    SemanticSourceRange TableRange,
+    VirtualAddress TargetBaseAddress,
+    int EntryWidth,
+    bool IsSigned,
+    int Scale,
+    long Addend,
+    SemanticJumpTableRewritePolicy RewritePolicy,
+    IReadOnlyList<SemanticJumpTableEntryBinding> Entries);
+
 public sealed record ElfLayoutTlsFixupRequest(
     string RegionIdentity,
     ulong OutputOffset,
@@ -354,6 +367,10 @@ public sealed record ElfLayoutPlan(
     IReadOnlyList<ElfLayoutByteEdit> Edits)
 {
     public IReadOnlyList<ElfLayoutTlsFixupDecision> TlsFixups { get; init; } = Array.Empty<ElfLayoutTlsFixupDecision>();
+
+    public IReadOnlyList<ElfLayoutByteEdit> UnwindEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
+
+    public IReadOnlyList<ElfLayoutByteEdit> JumpTableEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
 }
 
 /// <summary>Bounded serializable projection of a selected physical layout.</summary>
@@ -371,6 +388,10 @@ public sealed record ElfLayoutEvidence(
     IReadOnlyList<ElfBranchPlacementDecision> BranchDecisions)
 {
     public IReadOnlyList<ElfLayoutTlsFixupDecision> TlsFixups { get; init; } = Array.Empty<ElfLayoutTlsFixupDecision>();
+
+    public IReadOnlyList<ElfLayoutByteEdit> UnwindEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
+
+    public IReadOnlyList<ElfLayoutByteEdit> JumpTableEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
 
     public const int CurrentSchemaVersion = 1;
 
