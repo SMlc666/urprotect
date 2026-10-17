@@ -201,6 +201,34 @@ public sealed class FunctionProtectionTests
 
     [Fact]
     [Trait("Category", "Protect")]
+    public void JumpTableWhoseIndexIsClobberedThroughXRegisterFailsClosed()
+    {
+        // The bounds check proves W0 in [0,3], but ADRP/ADD now write X0
+        // before LDRSW indexes the table using W0. W0 and X0 alias.
+        // Without the cross-width clobber guard this source may be wrongly
+        // promoted as a bounded jump table.
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + 8, sizeof(uint)), 0x90000000u); // ADRP X0
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + 12, sizeof(uint)), 0x91092000u); // ADD X0,X0,#0x248
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + 16, sizeof(uint)), 0xB8A05802u); // LDRSW X2,[X0,W0,UXTW#2]
+
+        var result = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+            && diagnostic.Message.Contains("overwritten", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
     public void RelativeJumpTableWithOutOfClosureEntryFailsClosed()
     {
         var source = ElfFixture.RelativeJumpTableFunctionPie(malformedTableEntry: true);
