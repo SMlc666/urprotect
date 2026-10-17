@@ -1,38 +1,56 @@
 #include "urp/host_context.h"
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
-__attribute__((noinline, visibility("hidden")))
-int32_t urp_transform_target(
-    const urp_host_context_v1 *host,
-    const urp_launch_args_v1 *args)
-{
-    /* The unwind test must cover a genuinely conditional, transformed frame.
-     * AArch64 GCC -O2 lowers ordinary null guards into CBZ, outside the
-     * currently supported NZCV b.cond flattening family. Force actual CMP +
-     * B.EQ decisions in this fixture, using compiler-derived ABI offsets.
-     * This does not claim support for CBZ in arbitrary user functions.
-     */
-    volatile uint32_t frame_anchor = 0;
-    (void)frame_anchor;
-    (void)args;
+/*
+ * CFI/unwind fixture for the *narrow, proven* HostContext callback ABI.
+ * It intentionally uses CMP + B.EQ and the exact BLR X3 producer chain that
+ * the native control-flow analyzer validates. This does NOT certify CBZ,
+ * arbitrary BLR, or interprocedural transformations.
+ *
+ * This is real AArch64 code and carries a real .eh_frame FDE. A normal GCC
+ * -O2 build of a C null check creates CBZ, an unsupported instruction in
+ * the initial flattening pass. The explicit assembly keeps the fixture's
+ * claim matched to the implemented instruction subset.
+ */
+_Static_assert(
+    offsetof(urp_host_context_v1, userdata) == 16U,
+    "HostContext CFI fixture requires the audited userdata ABI offset");
+_Static_assert(
+    offsetof(urp_host_context_v1, emit_diagnostic) == 48U,
+    "HostContext CFI fixture requires the audited callback ABI offset");
 
-    __asm__ volatile goto (
-        "cmp %x[host], #0\n\t"
-        "b.eq %l[skip_diagnostic]\n\t"
-        "ldr x16, [%x[host], #%c[callback_offset]]\n\t"
-        "cmp x16, #0\n\t"
-        "b.eq %l[skip_diagnostic]\n\t"
-        :
-        : [host] "r" (host),
-          [callback_offset] "i" (offsetof(urp_host_context_v1, emit_diagnostic))
-        : "cc", "x16", "memory"
-        : skip_diagnostic);
-
-    (void)host->emit_diagnostic(host->userdata, UINT32_C(0xCF10), 0);
-skip_diagnostic:
-    return 42;
-}
-
-extern __typeof__(urp_transform_target) urp_entry
-    __attribute__((alias("urp_transform_target"), visibility("default")));
+__asm__(
+    ".text\n"
+    ".p2align 2\n"
+    ".globl urp_transform_target\n"
+    ".hidden urp_transform_target\n"
+    ".type urp_transform_target, %function\n"
+    "urp_transform_target:\n"
+    ".cfi_startproc\n"
+    "stp x29, x30, [sp, #-32]!\n"
+    ".cfi_def_cfa_offset 32\n"
+    ".cfi_offset x29, -32\n"
+    ".cfi_offset x30, -24\n"
+    "mov x29, sp\n"
+    "str wzr, [sp, #28]\n"
+    "ldr w1, [sp, #28]\n"
+    "cmp x0, #0\n"
+    "b.eq 1f\n"
+    "ldr x3, [x0, #48]\n"
+    "cmp x3, #0\n"
+    "b.eq 1f\n"
+    "ldr x0, [x0, #16]\n"
+    "mov w1, #0xcf10\n"
+    "mov x2, xzr\n"
+    "blr x3\n"
+    "1:\n"
+    "mov w0, #42\n"
+    "ldp x29, x30, [sp], #32\n"
+    ".cfi_def_cfa sp, 0\n"
+    "ret\n"
+    ".cfi_endproc\n"
+    ".size urp_transform_target, .-urp_transform_target\n"
+    ".globl urp_entry\n"
+    ".type urp_entry, %function\n"
+    ".set urp_entry, urp_transform_target\n");
