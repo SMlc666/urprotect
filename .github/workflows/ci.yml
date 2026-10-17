@@ -1085,8 +1085,10 @@ jobs:
               ;;
             *) echo 'EVIDENCE_TIER=pr' >> "$GITHUB_ENV" ;;
           esac
-      - name: Validate compatibility-only checker regressions
-        run: python3 -m unittest discover -s tests -p test_strict_product_corpus.py -v
+      - name: Validate compatibility-only checker and workflow contracts
+        run: |
+          python3 -m unittest discover -s tests -p test_strict_product_corpus.py -v
+          python3 -m unittest discover -s tests -p test_protected_image_workflow.py -v
       - name: Independently verify 100 strict product chains
         run: |
           python3 scripts/check-strict-product-corpus.py \
