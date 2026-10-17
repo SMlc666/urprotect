@@ -552,5 +552,58 @@ bash "$worker_script" _ "$3"
         self.assertEqual(result.stderr, "")
 
 
+    def test_refill_pool_waits_for_first_finished_and_preserves_failure(self):
+        source = MATRIX.read_text(encoding="utf-8")
+        self.assertNotIn("project_batch=()", source)
+        self.assertIn('while (( ${#active_pids[@]} >= parallelism )); do', source)
+        prefix = source.split("reap_next_project_worker() {\n", 1)[1]
+        scheduler = "reap_next_project_worker() {\n" + prefix.split("\n}\n\nworker_registry_index=0", 1)[0] + "\n}\n"
+        fixture = r'''
+set -euo pipefail
+active_pids=(); active_pgids=(); active_pid_registries=(); active_container_registries=()
+overall_status=0
+log_file=$(mktemp)
+trap 'rm -f "$log_file"' EXIT
+urp_stop_worker_group() { echo "$1" >> "$log_file"; }
+(sleep 0.3; exit 0) & slow=$!
+(sleep 0.03; exit 9) & fast=$!
+active_pids=("$slow" "$fast")
+active_pgids=(0 0)
+active_pid_registries=(x y)
+active_container_registries=(x y)
+reap_next_project_worker
+[[ "${#active_pids[@]}" == 1 ]]
+[[ "${active_pids[0]}" == "$slow" && "$overall_status" == 1 ]]
+grep -Fxq "$fast" "$log_file"
+reap_next_project_worker
+[[ "${#active_pids[@]}" == 0 && "$overall_status" == 1 ]]
+'''
+        result = subprocess.run(
+            ["bash", "-c", scheduler + fixture],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_refill_pool_cleanup_failure_does_not_forget_worker(self):
+        source = MATRIX.read_text(encoding="utf-8")
+        prefix = source.split("reap_next_project_worker() {\n", 1)[1]
+        scheduler = "reap_next_project_worker() {\n" + prefix.split("\n}\n\nworker_registry_index=0", 1)[0] + "\n}\n"
+        fixture = r'''
+set -euo pipefail
+urp_stop_worker_group() { return 1; }
+overall_status=0
+(sleep 0.02; exit 0) & worker=$!
+active_pids=("$worker"); active_pgids=(0)
+active_pid_registries=(x); active_container_registries=(x)
+if reap_next_project_worker; then exit 88; fi
+[[ "${#active_pids[@]}" == 1 ]]
+'''
+        result = subprocess.run(
+            ["bash", "-c", scheduler + fixture],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
