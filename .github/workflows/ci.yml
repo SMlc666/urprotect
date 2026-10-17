@@ -47,9 +47,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Keep the legacy job ID stable for existing required checks.
-  # This lane owns managed tests, regression contracts and coverage evidence.
+
+  # Skip heavy Push verification only if a matching open PR is proven.
+  # PR, schedule, release and manual validation always execute in full.
+  ci-event-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run_full: ${{ steps.decision.outputs.run_full }}
+    steps:
+      - name: Find an exact same-head open PR
+        id: pr-probe
+        if: github.event_name == 'push'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const { owner, repo } = context.repo;
+            if (!context.ref.startsWith('refs/heads/')) return 'run';
+            const branch = context.ref.slice('refs/heads/'.length);
+            const fullName = (owner + '/' + repo).toLowerCase();
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', head: owner + ':' + branch,
+              per_page: 100
+            });
+            const match = pulls.find(pr =>
+              pr.state === 'open' &&
+              pr.head.ref === branch &&
+              pr.head.sha === context.sha &&
+              pr.head.repo?.full_name?.toLowerCase() === fullName &&
+              pr.base.repo?.full_name?.toLowerCase() === fullName
+            );
+            if (match) {
+              core.info('Exact open PR #' + match.number + ' covers ' + context.sha);
+              return 'skip';
+            }
+            return 'run';
+      - name: Decide full verification (probe failure means full CI)
+        id: decision
+        if: always()
+        shell: bash
+        env:
+          PROBE_RESULT: ${{ steps.pr-probe.outputs.result }}
+          PROBE_OUTCOME: ${{ steps.pr-probe.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == push &&
+                "${PROBE_OUTCOME}" == success &&
+                "${PROBE_RESULT}" == skip ]]; then
+            echo 'run_full=false' >> "$GITHUB_OUTPUT"
+            echo 'Exact open PR: duplicate Push heavy checks omitted.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'run_full=true' >> "$GITHUB_OUTPUT"
+            if [[ "${GITHUB_EVENT_NAME}" == push && "${PROBE_OUTCOME}" != success ]]; then
+              echo 'PR API unavailable: full Push validation retained.' >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo 'Full validation is required.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
   build-and-test:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -168,6 +230,8 @@ jobs:
   # an independent ARM64 runner. The local solution build avoids cross-job
   # artifact dependencies, keeping the verification DAG flat.
   managed-tests:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -211,6 +275,8 @@ jobs:
           if-no-files-found: error
 
   protection-and-tls:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -402,6 +468,8 @@ jobs:
   # Fixtures and packed fixture handoff share the same runner by design.
   # Their evidence must pass its original strict local gates.
   fixture-and-pack:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -463,6 +531,8 @@ jobs:
   # HostContext native tests and the managed packaging oracle remain adjacent:
   # they share the same native make outputs but no other job's mutable state.
   native-host-context:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -541,6 +611,8 @@ jobs:
 
   # Fuzz instrumentation/publish has independent writable build products.
   coverage-fuzz:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -587,6 +659,8 @@ jobs:
   # Shards run on independent native ARM64 runners. No test coverage is dropped:
   # every registered unit is allocated exactly once and validated before evaluation.
   strict-compatibility-shard:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     strategy:
@@ -634,7 +708,8 @@ jobs:
           if-no-files-found: error
 
   real-sample-matrix:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     permissions:
@@ -772,8 +847,8 @@ jobs:
           if-no-files-found: error
 
   runtime-matrix-native-arm64:
-    needs: bionic-native-arm64
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: [ci-event-gate, bionic-native-arm64]
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -847,7 +922,8 @@ jobs:
           include-hidden-files: true
 
   bionic-native-arm64:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -919,7 +995,8 @@ jobs:
           if-no-files-found: warn
 
   android-container-probe:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
@@ -952,7 +1029,8 @@ jobs:
 
   # Scheduled/release runs exercise this slow path; manual runs opt in explicitly.
   android-arm64-native-bridge-on-x64:
-    if: github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_android_native_bridge == true)
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_android_native_bridge == true)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -1027,7 +1105,8 @@ jobs:
           if-no-files-found: warn
 
   fixture-nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -1113,7 +1192,8 @@ jobs:
           if-no-files-found: warn
 
   musl-container-smoke:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     container:
@@ -1176,7 +1256,8 @@ jobs:
           if-no-files-found: warn
 
   benchmark:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
@@ -1215,7 +1296,8 @@ jobs:
           if-no-files-found: warn
 
   release-package:
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_release_rehearsal == true)
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_release_rehearsal == true)) }}
     permissions:
       contents: write
     runs-on: ubuntu-24.04-arm
@@ -1281,11 +1363,12 @@ jobs:
   independent-evaluator:
     # Execute after dependency failure to report evidence errors, but avoid
     # obsolete slow Scheme-A evaluations when a newer run cancels this one.
-    if: ${{ !cancelled() }}
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (!cancelled()) }}
     # The evaluator consumes frozen manifests plus the 100 strict product units.
     # Other validation lanes are checked by the final quality gate instead of
     # unnecessarily serializing independent evaluation after the longest lane.
     needs:
+      - ci-event-gate
       - strict-compatibility-shard
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
@@ -1383,8 +1466,9 @@ jobs:
   ci-quality-gate:
     # Still enforce fail-closed results on failed jobs; never prolong a
     # workflow explicitly cancelled by a superseding revision.
-    if: ${{ !cancelled() }}
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (!cancelled()) }}
     needs:
+      - ci-event-gate
       - build-and-test
       - managed-tests
       - protection-and-tls
