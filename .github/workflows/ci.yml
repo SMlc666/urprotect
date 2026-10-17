@@ -464,7 +464,7 @@ jobs:
           if ! ./scripts/run-cfi-host-context-e2e.sh --tier "${tier}"; then
             echo 'CFI evidence producer failed; retained producer diagnostics:' >&2
             find ".artifacts/cfi/${tier}" -type f \
-              \( -name producer.json -o -name rehydration.stderr -o -name native-build.stderr \) \
+              \( -name producer.json -o -name rehydration.stderr -o -name native-build.stderr -o -name transformed-unwind.txt -o -name transformed-unwind.stderr -o -name baseline-unwind.txt \) \
               -print -exec cat -- {} \; >&2 || true
             exit 1
           fi
