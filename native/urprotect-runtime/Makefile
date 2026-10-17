@@ -348,12 +348,12 @@ $(TLSLD_FIXTURE_OBJECT): host_context_tlsld_fixture.S
 	@mkdir -p "$(BUILD_DIR)"
 	$(AS) -o "$@" "$<"
 
-$(TLSGD_FIXTURE): $(TLSGD_FIXTURE_OBJECT) normalize_tls_fixture.py
+$(TLSGD_FIXTURE): $(TLSGD_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
-	# Normalize only the precise STT_TLS VA-shaped fixture layout. The
-	# runtime validator and malformed symbol negative cases are unchanged.
-	$(PYTHON) normalize_tls_fixture.py "$@" tls_gd_value
+	# The strict runtime parser deliberately does not accept DT_HASH alongside
+	# glibc version requirements. Build this legitimate TLSGD test DSO with
+	# GNU hash, like the runtime's approved glibc versioned-dependency subset.
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
 
 $(TLSGD_FIXTURE_OBJECT): host_context_tlsgd_fixture.S
 	@mkdir -p "$(BUILD_DIR)"
