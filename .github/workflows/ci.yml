@@ -1363,7 +1363,7 @@ jobs:
           if-no-files-found: warn
 
   # Keep the job ID for required status checks, but only verify real
-  # compatibility evidence. Scheme-A artificial attack scoring is retired.
+  # compatibility evidence. Artificial attack-cost scoring is retired.
   independent-evaluator:
     if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (!cancelled()) }}
     needs:
