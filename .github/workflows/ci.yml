@@ -950,10 +950,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bionic-native-arm64-${{ github.run_id }}
-          path: |
-            .artifacts/bionic/
-            !.artifacts/bionic/**/apt-archives/**
-            !.artifacts/bionic/**/apt-indexes/**
+          path: .artifacts/bionic
       - name: Validate registry and run native/container covering set
         env:
           RUNTIME_MATRIX_ARTIFACT_ROOT: .artifacts/runtime-matrix/${{ env.RUNTIME_MATRIX_TIER }}
@@ -1049,7 +1046,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bionic-native-arm64-${{ github.run_id }}
-          path: .artifacts/bionic/
+          path: |
+            .artifacts/bionic/
+            !.artifacts/bionic/**/apt-archives/**
+            !.artifacts/bionic/**/apt-indexes/**
           if-no-files-found: warn
 
   android-container-probe:
