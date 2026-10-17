@@ -70,6 +70,8 @@ jobs:
             const { owner, repo } = context.repo;
             if (!context.ref.startsWith('refs/heads/')) return 'run';
             const branch = context.ref.slice('refs/heads/'.length);
+            // Never suppress verification of the repository default branch.
+            if (branch === context.payload.repository?.default_branch) return 'run';
             const fullName = (owner + '/' + repo).toLowerCase();
             const pulls = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', head: owner + ':' + branch,
@@ -263,6 +265,8 @@ jobs:
         run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
       - name: Check coverage floor
         run: python3 scripts/check-coverage.py
+      - name: Verify Push/PR dedup policy regressions
+        run: python3 tests/test_ci_push_pr_dedup.py
       - name: Upload managed test evidence
         if: always()
         uses: actions/upload-artifact@v4
