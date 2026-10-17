@@ -757,6 +757,33 @@ public sealed partial class FunctionProtectionService
                     return false;
                 }
 
+                // Direct B branches are replaced by the state transition;
+                // bind their semantic instruction identity to that emitted
+                // transition. A plain fallthrough block instead retains its
+                // *last instruction* before the transition: otherwise its
+                // register/memory effects would be silently discarded.
+                var lastFlow = last.Decode.Instruction.ControlFlow;
+                if (lastFlow == Aarch64ControlFlowKind.None)
+                {
+                    if (!EmitSourceInstruction(emitter, encoder, last, diagnostics))
+                    {
+                        return false;
+                    }
+                }
+                else if (lastFlow == Aarch64ControlFlowKind.DirectBranch)
+                {
+                    InstructionOutputOffsets[last.Address] =
+                        emitter.PositionAddress - OutputAddress;
+                }
+                else
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ProtectionUnsupportedInstruction,
+                        "The last instruction requires an unsupported direct-call or indirect-flow rewrite.",
+                        last.FileOffset);
+                    return false;
+                }
+
                 if (!EmitState(emitter, checked((uint)blockIds[nextTarget]), diagnostics))
                 {
                     return false;
