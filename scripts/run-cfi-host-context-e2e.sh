@@ -33,7 +33,65 @@ PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-r
 set +e
 "$harness" "$positive/source-image.bin" >"$positive/baseline-unwind.txt" 2>"$positive/baseline-unwind.stderr"
 baseline_status=$?
-"$harness" "$positive/native-image.bin" --expect-transformed >"$positive/transformed-unwind.txt" 2>"$positive/transformed-unwind.stderr"
+# The public urp_entry remains the original stub, while the protected body
+# and its .eh_frame FDE are relocated into the emitted executable LOAD.
+# Independently extract the *one* real FDE coverage range from GNU readelf,
+# prove it belongs to that new executable range, and pass it as the observed
+# frame extent. Calling the stub and observing its relocated frame are distinct.
+read -r emitted_frame_vaddr emitted_frame_size < <(
+  python3 - "$positive/source-image.bin" "$positive/native-image.bin" <<'PY'
+import re, subprocess, sys
+
+def fdes(path):
+    dump = subprocess.check_output(
+        ["readelf", "--debug-dump=frames", path], text=True)
+    return [(int(a, 16), int(b, 16)) for a, b in re.findall(
+        r"\bFDE cie=[0-9a-fA-F]+\s+pc=([0-9a-fA-F]+)\.\.([0-9a-fA-F]+)",
+        dump)]
+
+source, emitted = map(fdes, sys.argv[1:])
+if len(source) != 1 or len(emitted) != 1:
+    raise SystemExit("CFI fixture requires exactly one source and one emitted FDE")
+start, end = emitted[0]
+if start <= 0 or end <= start or (start, end) == source[0]:
+    raise SystemExit("CFI protected FDE must genuinely relocate and have nonzero extent")
+# Prove the FDE lies wholly inside a newly materialized executable LOAD
+# rather than accepting unrelated executable addresses as test evidence.
+from pathlib import Path
+import struct
+image = Path(sys.argv[2]).read_bytes()
+if image[:4] != b"\x7fELF" or image[4] != 2 or image[5] != 1:
+    raise SystemExit("CFI transformed ELF must be little-endian ELF64")
+phoff = struct.unpack_from("<Q", image, 32)[0]
+phentsize = struct.unpack_from("<H", image, 54)[0]
+phnum = struct.unpack_from("<H", image, 56)[0]
+if phentsize != 56 or phnum == 0 or phoff + phentsize * phnum > len(image):
+    raise SystemExit("invalid CFI program-header table")
+covered = False
+for i in range(phnum):
+    off = phoff + phentsize * i
+    kind, flags = struct.unpack_from("<II", image, off)
+    vaddr, filesz, memsz = (
+        struct.unpack_from("<Q", image, off + 16)[0],
+        struct.unpack_from("<Q", image, off + 32)[0],
+        struct.unpack_from("<Q", image, off + 40)[0])
+    if kind == 1 and flags & 1 and vaddr <= start < end <= vaddr + filesz <= vaddr + memsz:
+        covered = True
+        break
+if not covered:
+    raise SystemExit("relocated FDE does not lie inside a file-backed executable LOAD")
+print(hex(start), hex(end-start))
+PY
+)
+if [[ -z "$emitted_frame_vaddr" || -z "$emitted_frame_size" ]]; then
+  echo 'CFI relocated FDE proof absent' >&2
+  exit 1
+fi
+printf 'mappedFdeVaddr=%s mappedFdeSize=%s\n' \
+  "$emitted_frame_vaddr" "$emitted_frame_size" >"$positive/transformed-fde-range.txt"
+"$harness" "$positive/native-image.bin" --expect-transformed \
+  --target-vaddr "$emitted_frame_vaddr" --target-size "$emitted_frame_size" \
+  >"$positive/transformed-unwind.txt" 2>"$positive/transformed-unwind.stderr"
 transformed_status=$?
 set -e
 [ "$baseline_status" -eq 0 ] && [ "$transformed_status" -eq 0 ] || exit 1
