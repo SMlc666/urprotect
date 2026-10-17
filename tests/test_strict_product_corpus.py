@@ -37,12 +37,24 @@ class CompatibilityOnlyGateTests(unittest.TestCase):
         self.manifest.write_text(json.dumps({
             "rows": self.rows, "fixedRowIds": [self.rows[0]["unitId"]],
         }))
-        self.summary = self.evidence / "strict-corpus-summary.json"
-        self.summary.write_text(json.dumps({
-            "schemaVersion": 1, "kind": "strict-compatibility-corpus-run",
-            "tier": "pr", "runtime": "glibc", "totalRows": 100,
-            "completedRows": 100, "failedRows": 0, "status": "passed",
-        }))
+        self.summaries = []
+        for index in range(4):
+            selected = self.rows[index::4]
+            path = self.evidence / f"strict-corpus-summary-shard-{index}-of-4.json"
+            path.write_text(json.dumps({
+                "schemaVersion": 1,
+                "kind": "strict-compatibility-corpus-run",
+                "tier": "pr",
+                "runtime": "glibc",
+                "shardIndex": index,
+                "shardCount": 4,
+                "totalRows": len(selected),
+                "completedRows": len(selected),
+                "failedRows": 0,
+                "status": "passed",
+                "unitIds": [row["unitId"] for row in selected],
+            }))
+            self.summaries.append(path)
         for row in self.rows:
             p = self.evidence / row["unitId"]
             p.mkdir()
@@ -74,10 +86,33 @@ class CompatibilityOnlyGateTests(unittest.TestCase):
 
     @patch.object(module.subprocess, "run")
     def test_summary_is_not_a_substitute_for_product_validation(self, run):
-        record = json.loads(self.summary.read_text())
+        record = json.loads(self.summaries[0].read_text())
         record["failedRows"] = 1
-        self.summary.write_text(json.dumps(record))
-        with self.assertRaisesRegex(ValueError, "summary mismatch"):
+        self.summaries[0].write_text(json.dumps(record))
+        with self.assertRaisesRegex(ValueError, "invalid/incomplete strict shard"):
+            module.check(self.manifest, self.evidence, "pr", "glibc")
+        run.assert_not_called()
+
+    @patch.object(module.subprocess, "run")
+    def test_missing_shard_summary_is_rejected(self, run):
+        self.summaries[2].unlink()
+        with self.assertRaisesRegex(ValueError, "shard summary inventory"):
+            module.check(self.manifest, self.evidence, "pr", "glibc")
+        run.assert_not_called()
+
+    @patch.object(module.subprocess, "run")
+    def test_reordered_shard_units_are_rejected(self, run):
+        record = json.loads(self.summaries[1].read_text())
+        record["unitIds"].reverse()
+        self.summaries[1].write_text(json.dumps(record))
+        with self.assertRaisesRegex(ValueError, "invalid/incomplete strict shard"):
+            module.check(self.manifest, self.evidence, "pr", "glibc")
+        run.assert_not_called()
+
+    @patch.object(module.subprocess, "run")
+    def test_unexpected_unit_directory_is_rejected(self, run):
+        (self.evidence / "unexpected-unit-101").mkdir()
+        with self.assertRaisesRegex(ValueError, "strict corpus inventory mismatch"):
             module.check(self.manifest, self.evidence, "pr", "glibc")
         run.assert_not_called()
 
