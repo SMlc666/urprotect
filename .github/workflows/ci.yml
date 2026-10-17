@@ -482,7 +482,7 @@ jobs:
           ./scripts/run-indirect-control-e2e.sh --tier "${tier}"
           python3 scripts/check-indirect-control-evidence.py \
             ".artifacts/indirect-control/${tier}" \
-            --tier "${tier}" --runtime glibc \
+            --tier "${tier}" \
             --unit runtime.indirect-control.jump-table.glibc.host-context-entry
       - name: Require full CFI and indirect-control evidence declarations
         run: |
