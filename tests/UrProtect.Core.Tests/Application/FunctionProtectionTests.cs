@@ -150,6 +150,57 @@ public sealed class FunctionProtectionTests
 
     [Fact]
     [Trait("Category", "Protect")]
+    public void FlatteningPreservesFallthroughLastInstructionAndMapsRewrittenDirectBranch()
+    {
+        // The selected relative jump table supplies case0/case1. Make case0's
+        // RET a direct B to case1's RET, splitting case1 after its ordinary
+        // MOV. A plain block-final MOV must not be silently discarded while
+        // its successor becomes a dispatcher state transition.
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + (9 * sizeof(uint)), sizeof(uint)),
+            0x14000002u); // B +8 from VA 0x1224 to 0x122C
+
+        var result = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var plan = Assert.IsType<ProtectionPlan>(result.Plan);
+        var region = Assert.Single(plan.Regions);
+        var map = Assert.IsType<SemanticPlanSnapshot>(plan.SemanticSnapshot)
+            .AddressMap;
+        Assert.NotNull(map);
+
+        var ordinary = Assert.Single(map.Entries, entry =>
+            entry.Identity.Kind == SemanticEntityKind.Instruction
+            && entry.SourceAddress.Value == 0x1228);
+        var branch = Assert.Single(map.Entries, entry =>
+            entry.Identity.Kind == SemanticEntityKind.Instruction
+            && entry.SourceAddress.Value == 0x1224);
+
+        var ordinaryOffset = checked((int)(ordinary.OutputAddress.Value - 0x1200));
+        var branchOffset = checked((int)(branch.OutputAddress.Value - 0x1200));
+        Assert.InRange(ordinaryOffset, 0, region.CodeBytes.Length - sizeof(uint));
+        Assert.InRange(branchOffset, 0, region.CodeBytes.Length - sizeof(uint));
+        // The synthetic case1 instruction must really be present in the
+        // output, not merely represented by an invented semantic binding.
+        Assert.Equal(
+            0x52800CE0u,
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                region.CodeBytes.AsSpan(ordinaryOffset, sizeof(uint))));
+        // The direct source branch is intentionally rewritten to a real
+        // dispatcher state instruction rather than copied as an old PC-relative B.
+        Assert.NotEqual(
+            0x14000002u,
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                region.CodeBytes.AsSpan(branchOffset, sizeof(uint))));
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
     public void RelativeJumpTableWithOutOfClosureEntryFailsClosed()
     {
         var source = ElfFixture.RelativeJumpTableFunctionPie(malformedTableEntry: true);
