@@ -1089,12 +1089,12 @@ attack evaluator, artificial attack-cost factors and frozen strength baselines
 are retired. No numeric reverse-engineering resistance claim can be inferred
 from any of these compatibility rows.
 
-- The producer must retain all 100 required registered units in
+- Four native ARM64 shards must collectively retain all 100 required registered units in
   `fixtures/evaluator/compatibility-corpus.json`. Missing, duplicated or
   symlinked product evidence fails the independent gate.
 - Run `scripts/check-strict-product-corpus.py --tier pr --runtime glibc
-  --evidence-root .artifacts/protected-image/pr/glibc` to independently
-  validate every registered unit using the existing hash-bound six-stage
+  --shard-count 4 --evidence-root .artifacts/strict-corpus-merge/pr/glibc` to independently
+  validate all four exact shard summaries and every registered unit using the existing hash-bound six-stage
   `check-rehydration-evidence.py` verifier. The producer summary is a
   prerequisite, never a substitute for verifying the raw product chain.
 - The independent report records each unit's actual product-manifest digest,
