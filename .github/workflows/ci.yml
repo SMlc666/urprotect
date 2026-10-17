@@ -1048,8 +1048,8 @@ jobs:
           name: bionic-native-arm64-${{ github.run_id }}
           path: |
             .artifacts/bionic/
-            !.artifacts/bionic/**/apt-archives/**
-            !.artifacts/bionic/**/apt-indexes/**
+            !.artifacts/bionic/**/apt-archives/lock
+            !.artifacts/bionic/**/apt-indexes/lock
           if-no-files-found: warn
 
   android-container-probe:
