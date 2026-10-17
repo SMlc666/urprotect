@@ -74,7 +74,7 @@ class CompatibilityOnlyGateTests(unittest.TestCase):
         (directory / "SHA256SUMS").unlink()
         directory.rmdir()
         run.return_value.returncode = 0
-        with self.assertRaisesRegex(ValueError, "missing or symlinked"):
+        with self.assertRaisesRegex(ValueError, "strict corpus inventory mismatch"):
             module.check(self.manifest, self.evidence, "pr", "glibc")
 
     @patch.object(module.subprocess, "run")
