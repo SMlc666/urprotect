@@ -190,9 +190,17 @@ public sealed class ProtectedImageProducer
         }
 
         var analysisStarted = Stopwatch.GetTimestamp();
+        var parsedSource = ElfParser.Parse(sourceSnapshot);
+        var proofContext = parsedSource.IsSuccess && parsedSource.File is not null
+            ? HostContextProofContextFactory.TryCreate(
+                parsedSource.File,
+                producerOptions.Profile,
+                HostContextContract.EntrySymbol)
+            : null;
         var workflowPlan = workflow.Plan(
             sourceSnapshot,
-            new FunctionProtectionOptions(selectors, passes));
+            new FunctionProtectionOptions(selectors, passes),
+            proofContext);
         var analysisDurationMilliseconds = (long)Stopwatch.GetElapsedTime(analysisStarted).TotalMilliseconds;
         var planResult = workflowPlan.FunctionPlan;
         functions = planResult.Functions.ToArray();
@@ -208,7 +216,6 @@ public sealed class ProtectedImageProducer
                 null);
         }
 
-        var parsedSource = ElfParser.Parse(sourceSnapshot);
         diagnostics.AddRange(parsedSource.Diagnostics);
         if (parsedSource.File is null || diagnostics.HasErrors)
         {

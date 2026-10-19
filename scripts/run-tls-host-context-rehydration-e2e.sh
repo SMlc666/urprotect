@@ -2,47 +2,103 @@
 set -euo pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release [--unit UNIT]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --model MODEL --profile host-context-entry --runtime glibc --lifecycle current-thread --unit UNIT --source ELF --function-id TABLE:INDEX --entry-status 43 --producer-id ID\n' "$0" >&2
 }
 
 tier=''
-unit='tls.initial-exec.glibc.host-context-entry'
+unit=''
+source_file=''
+function_id=''
+model=''
+profile=''
+runtime=''
+lifecycle=''
+expected_entry_status=''
+producer_id=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier) [[ $# -ge 2 ]] || { usage; exit 2; }; tier="$2"; shift 2 ;;
     --unit) [[ $# -ge 2 ]] || { usage; exit 2; }; unit="$2"; shift 2 ;;
+    --source) [[ $# -ge 2 ]] || { usage; exit 2; }; source_file="$2"; shift 2 ;;
+    --function-id) [[ $# -ge 2 ]] || { usage; exit 2; }; function_id="$2"; shift 2 ;;
+    --model) [[ $# -ge 2 ]] || { usage; exit 2; }; model="$2"; shift 2 ;;
+    --profile) [[ $# -ge 2 ]] || { usage; exit 2; }; profile="$2"; shift 2 ;;
+    --runtime) [[ $# -ge 2 ]] || { usage; exit 2; }; runtime="$2"; shift 2 ;;
+    --lifecycle) [[ $# -ge 2 ]] || { usage; exit 2; }; lifecycle="$2"; shift 2 ;;
+    --entry-status) [[ $# -ge 2 ]] || { usage; exit 2; }; expected_entry_status="$2"; shift 2 ;;
+    --producer-id) [[ $# -ge 2 ]] || { usage; exit 2; }; producer_id="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
 done
 case "$tier" in pr|nightly|release) ;; *) echo "invalid TLS evidence tier: $tier" >&2; exit 2 ;; esac
+for field in model profile runtime lifecycle unit source_file function_id expected_entry_status producer_id; do
+  [[ -n "${!field}" ]] || { echo "missing required TLS identity input: $field" >&2; usage; exit 2; }
+done
+case "$runtime" in glibc) ;; *) echo "TLS transformed HostContext evidence requires explicit runtime glibc" >&2; exit 2 ;; esac
+case "$profile" in host-context-entry) ;; *) echo "TLS transformed evidence requires explicit profile host-context-entry" >&2; exit 2 ;; esac
+case "$lifecycle" in current-thread) ;; *) echo "TLS transformed evidence requires explicit lifecycle current-thread" >&2; exit 2 ;; esac
+case "$model" in
+  initial-exec) selector_table=symtab; selector_name=urp_tls_read; expected_producer=gcc-c-tls-initial-exec ;;
+  local-dynamic) selector_table=dynsym; selector_name=urp_entry; expected_producer=gcc-aarch64-tlsld-fixture ;;
+  general-dynamic) selector_table=dynsym; selector_name=urp_entry; expected_producer=gcc-aarch64-tlsgd-fixture ;;
+  tlsdesc) selector_table=dynsym; selector_name=urp_entry; expected_producer=gcc-aarch64-tlsdesc-fixture ;;
+  *) echo "TLS transformed evidence requires one of the four promoted models" >&2; exit 2 ;;
+esac
+[[ "$producer_id" == "$expected_producer" ]] || { echo "producer ID does not belong to TLS model $model" >&2; exit 2; }
+[[ "$expected_entry_status" == 43 ]] || { echo "TLS row expected entry status must be 43" >&2; exit 2; }
+case "$unit" in
+  "tls.$model.glibc.host-context-entry"|"$model.host-context-entry.glibc.current-thread") ;;
+  *) echo "unit ID does not bind the selected TLS model/runtime/profile/lifecycle tuple" >&2; exit 2 ;;
+esac
 if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
   echo "invalid TLS evidence unit: $unit" >&2
+  exit 2
+fi
+if [[ ! "$function_id" =~ ^(dynsym|symtab):[0-9]+$ ]]; then
+  echo "invalid TLS function selector: $function_id" >&2
   exit 2
 fi
 case "$(uname -m)" in aarch64|arm64) ;; *) echo "environment-unavailable: TLS transformed handoff requires native AArch64" >&2; exit 2 ;; esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source_file="$repo_root/native/urprotect-runtime/build/host-context-tls-fixture.so"
-make -C "$repo_root/native/urprotect-runtime" tls-fixture >/dev/null
-source_file="$(realpath -e -- "$source_file")"
-symtab_index="$(readelf -Ws "$source_file" | awk '$8 == "urp_tls_read" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" && $5 == "LOCAL" { sub(":", "", $1); print $1; exit }')"
-[[ "$symtab_index" =~ ^[0-9]+$ ]] || { echo "TLS helper symbol is missing from .symtab" >&2; exit 1; }
+expected_source_rel="$(python3 - "$repo_root" "$model" <<'PYREG'
+import json,pathlib,sys
+root=pathlib.Path(sys.argv[1])
+registry=json.loads((root/"fixtures/tls-runtime-matrix.json").read_text(encoding="utf-8"))
+print(registry["sourceFixtures"][sys.argv[2]])
+PYREG
+)"
+expected_source="$(realpath -e -- "$repo_root/$expected_source_rel")" || { echo "registered TLS fixture is missing" >&2; exit 2; }
+if [[ "$source_file" != /* ]]; then source_file="$repo_root/$source_file"; fi
+source_file="$(realpath -e -- "$source_file")" || { echo "TLS source fixture is missing" >&2; exit 2; }
+[[ -f "$source_file" && ! -L "$source_file" ]] || { echo "TLS source is not a regular file" >&2; exit 2; }
+[[ "$source_file" == "$expected_source" ]] || { echo "source fixture does not belong to TLS model $model" >&2; exit 2; }
+if [[ "$selector_table" == dynsym ]]; then
+  selector_listing="$(readelf --dyn-syms -W "$source_file")" || { echo "could not inspect TLS dynsym selector" >&2; exit 2; }
+else
+  selector_listing="$(readelf --syms -W "$source_file")" || { echo "could not inspect TLS symtab selector" >&2; exit 2; }
+fi
+mapfile -t selector_indices < <(printf '%s\n' "$selector_listing" | awk -v name="$selector_name" '$1 ~ /^[0-9]+:/ && $4 == "FUNC" && $NF == name { symidx=$1; sub(/:$/, "", symidx); print symidx }')
+[[ "${#selector_indices[@]}" -eq 1 ]] || { echo "TLS model fixture has no unique owned function selector" >&2; exit 2; }
+expected_function_id="$selector_table:${selector_indices[0]}"
+[[ "$function_id" == "$expected_function_id" ]] || { echo "function selector does not belong to TLS model $model" >&2; exit 2; }
 
 artifact_parent="${TLS_EVIDENCE_ARTIFACT_ROOT:-${PROTECTED_IMAGE_ARTIFACT_ROOT:-$repo_root/.artifacts/protected-image/tls}}"
+artifact_parent="$(realpath -m -- "$artifact_parent")"
 PROTECTED_IMAGE_ARTIFACT_ROOT="$artifact_parent/$unit" \
   "$repo_root/scripts/run-host-context-rehydration-e2e.sh" \
   --tier "$tier" \
-  --runtime glibc \
+  --runtime "$runtime" \
   --unit "$unit" \
   --source "$source_file" \
-  --function-id "symtab:$symtab_index" \
-  --entry-status 43 \
-  --producer-id gcc-c-tls-initial-exec
+  --function-id "$function_id" \
+  --entry-status "$expected_entry_status" \
+  --producer-id "$producer_id"
 
 artifact_root="$artifact_parent/$unit"
 readelf -hW -lW -rW -sW "$artifact_root/source-image.bin" > "$artifact_root/tls-readelf.txt"
-python3 - "$artifact_root" <<'PY'
+python3 - "$artifact_root" "$model" "$runtime" "$profile" "$lifecycle" "$unit" "$expected_entry_status" "$repo_root" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -55,6 +111,15 @@ import sys
 import tempfile
 
 root = Path(sys.argv[1]).resolve()
+model, runtime, profile, lifecycle, unit = sys.argv[2:7]
+expected_entry_status = int(sys.argv[7])
+repo_root = Path(sys.argv[8]).resolve()
+if not all((model, runtime, profile, lifecycle, unit)):
+    raise SystemExit("TLS enrichment requires explicit model/runtime/profile/lifecycle/unit")
+if model not in {"local-exec", "initial-exec", "local-dynamic", "general-dynamic", "tlsdesc"} or runtime != "glibc" or profile != "host-context-entry" or lifecycle != "current-thread":
+    raise SystemExit("TLS enrichment arguments are outside the native glibc HostContext current-thread contract")
+identity_command = [sys.executable, str(repo_root / "scripts/tls_runtime_identity.py")]
+runtime_identity = json.loads(subprocess.check_output(identity_command, text=True, timeout=10))
 source = root / "source-image.bin"
 source_bytes = source.read_bytes()
 if source_bytes[:6] != b"\x7fELF\x02\x01" or len(source_bytes) < 64:
@@ -114,17 +179,27 @@ def digest(path: Path) -> str:
 stage_path = root / "stage.json"
 stage = json.loads(stage_path.read_text(encoding="utf-8"))
 artifact = root / "protected-image.bin"
+native_image = root / "native-image.bin"
+rehydration = json.loads((root / "rehydration.json").read_text(encoding="utf-8"))
 source_hash = digest(source)
 artifact_hash = digest(artifact)
-if stage.get("sourceSha256") != source_hash or stage.get("artifactSha256") != artifact_hash:
-    raise SystemExit("TLS evidence source/artifact hashes do not match producer stage")
+native_hash = digest(native_image)
+if (
+    stage.get("unitId") != unit
+    or stage.get("profile") != profile
+    or stage.get("sourceSha256") != source_hash
+    or stage.get("artifactSha256") != artifact_hash
+    or rehydration.get("nativeImageSha256") != native_hash
+):
+    raise SystemExit("TLS evidence unit/profile/source/protected/native hashes do not match retained artifacts")
 
 evidence = {
     "schemaVersion": 1,
-    "model": "initial-exec",
-    "profile": stage["profile"],
-    "runtime": "glibc",
-    "lifecycle": "current-thread",
+    "model": model,
+    "profile": profile,
+    "runtime": runtime,
+    "lifecycle": lifecycle,
+    "expectedEntryStatus": expected_entry_status,
     "result": "accepted-and-runs",
     "sourcePath": "source-image.bin",
     "sourceSha256": source_hash,
@@ -132,6 +207,10 @@ evidence = {
     "transformedSha256": artifact_hash,
     "artifactPath": "protected-image.bin",
     "artifactSha256": artifact_hash,
+    "nativeImagePath": "native-image.bin",
+    "nativeImageSha256": native_hash,
+    "runtimeIdentity": runtime_identity,
+    "runtimeIdentitySha256": runtime_identity["identitySha256"],
     "toolchainIdentity": toolchain,
     "loaderIdentity": "host-context.sealed-memfd.dlopen",
     "ptTls": {
@@ -144,7 +223,7 @@ evidence = {
         "owningLoad": owning_load,
     },
     "perThread": "observed",
-    "zeroFill": "observed",
+    "zeroFill": "not-run" if memory_size > file_size else "not-applicable",
     "teardown": "observed",
     "firstFailureStage": None,
     "publicationResult": "published",
@@ -167,4 +246,4 @@ python3 "$repo_root/scripts/check-protected-image-evidence.py" "$artifact_root" 
   --tier "$tier" --runtime glibc --unit "$unit"
 python3 "$repo_root/scripts/check-rehydration-evidence.py" "$artifact_root" \
   --tier "$tier" --runtime glibc --unit "$unit"
-printf 'TLS transformed HostContext evidence: PASS (entry status 43)\n'
+printf 'TLS transformed HostContext evidence: PASS (model %s, entry status %s)\n' "$model" "$expected_entry_status"

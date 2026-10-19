@@ -21,7 +21,20 @@
     "current-thread",
     "registered-worker"
   ],
+  "sourceFixtures": {
+    "local-exec": "native/urprotect-runtime/build/host-context-tlsle-fixture.so",
+    "initial-exec": "native/urprotect-runtime/build/host-context-tls-fixture.so",
+    "local-dynamic": "native/urprotect-runtime/build/host-context-tlsld-fixture.so",
+    "general-dynamic": "native/urprotect-runtime/build/host-context-tlsgd-fixture.so",
+    "tlsdesc": "native/urprotect-runtime/build/host-context-tlsdesc-fixture.so"
+  },
   "controlRow": "initial-exec.host-context-entry.glibc.current-thread",
+  "promotedRows": [
+    "general-dynamic.host-context-entry.glibc.current-thread",
+    "initial-exec.host-context-entry.glibc.current-thread",
+    "local-dynamic.host-context-entry.glibc.current-thread",
+    "tlsdesc.host-context-entry.glibc.current-thread"
+  ],
   "resultVocabulary": [
     "accepted-and-runs",
     "environment-unavailable",

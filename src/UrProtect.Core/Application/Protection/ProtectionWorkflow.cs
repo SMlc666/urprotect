@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using UrProtect.Core.Aarch64Semantics;
 using UrProtect.Core.Application.Rehydration;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Infrastructure;
@@ -127,7 +128,8 @@ public sealed class ProtectionWorkflow
     /// <summary>Runs the one selected-function planner and semantic/code emitter.</summary>
     public ProtectionWorkflowPlan Plan(
         ReadOnlyMemory<byte> source,
-        FunctionProtectionOptions options)
+        FunctionProtectionOptions options,
+        Aarch64HostContextProofContext? proofContext = null)
     {
         var diagnostics = new DiagnosticBag();
         if (!TryNormalize(options, out var normalized, out var normalizationDiagnostics))
@@ -145,7 +147,7 @@ public sealed class ProtectionWorkflow
                 ProtectionWorkflowStage.RequestNormalization);
         }
 
-        var plan = planningService.Plan(source, normalized);
+        var plan = planningService.Plan(source, normalized, proofContext);
         diagnostics.AddRange(plan.Diagnostics);
         return new ProtectionWorkflowPlan(
             normalized,

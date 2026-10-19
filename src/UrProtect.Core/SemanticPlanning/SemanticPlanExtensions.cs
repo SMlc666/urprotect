@@ -34,10 +34,11 @@ public sealed record SemanticTlsBindingExtension : ISemanticPlanExtension
 /// </summary>
 public enum SemanticJumpTableOwnership
 {
-    SelectedFunctionPrivate,
-    Shared,
-    External,
-    RuntimeOwned,
+    SelectedFunctionPrivate = 0,
+    Shared = 1,
+    External = 2,
+    RuntimeOwned = 3,
+    Ambiguous = 4,
 }
 
 public enum SemanticJumpTableRewritePolicy
@@ -73,11 +74,14 @@ public sealed record SemanticJumpTableExtension : ISemanticPlanExtension
         int lowerBound = 0,
         int upperBound = -1,
         SemanticTarget? defaultTarget = null,
-        SemanticJumpTableOwnership ownership = SemanticJumpTableOwnership.SelectedFunctionPrivate,
-        SemanticJumpTableRewritePolicy rewritePolicy = SemanticJumpTableRewritePolicy.InPlace,
+        SemanticJumpTableOwnership ownership = SemanticJumpTableOwnership.Ambiguous,
+        SemanticJumpTableRewritePolicy rewritePolicy = SemanticJumpTableRewritePolicy.CopiedAndRetargeted,
         SemanticSourceRange? outputRange = null,
         IEnumerable<SemanticJumpTableEntryBinding>? entries = null,
-        string? diagnostic = null)
+        string? diagnostic = null,
+        IEnumerable<Aarch64JumpTableReferenceProducer>? tableReferenceProducers = null,
+        IEnumerable<Aarch64JumpTableOwnerReference>? ownerReferences = null,
+        bool ownerInventoryComplete = false)
     {
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(entrySize, nameof(entrySize));
@@ -100,6 +104,16 @@ public sealed record SemanticJumpTableExtension : ISemanticPlanExtension
         RewritePolicy = rewritePolicy;
         OutputRange = outputRange;
         Entries = Array.AsReadOnly((entries ?? Array.Empty<SemanticJumpTableEntryBinding>()).ToArray());
+        TableReferenceProducers = Array.AsReadOnly((tableReferenceProducers ?? Array.Empty<Aarch64JumpTableReferenceProducer>())
+            .OrderBy(producer => producer.InstructionAddress)
+            .ThenBy(producer => producer.Kind)
+            .ToArray());
+        OwnerReferences = Array.AsReadOnly((ownerReferences ?? Array.Empty<Aarch64JumpTableOwnerReference>())
+            .OrderBy(reference => reference.InstructionAddress)
+            .ThenBy(reference => reference.OwnerFunctionStart)
+            .ThenBy(reference => reference.RelocationType)
+            .ToArray());
+        OwnerInventoryComplete = ownerInventoryComplete;
         Diagnostic = diagnostic;
     }
 
@@ -139,13 +153,23 @@ public sealed record SemanticJumpTableExtension : ISemanticPlanExtension
 
     public IReadOnlyList<SemanticJumpTableEntryBinding> Entries { get; }
 
+    public IReadOnlyList<Aarch64JumpTableReferenceProducer> TableReferenceProducers { get; }
+
+    public IReadOnlyList<Aarch64JumpTableOwnerReference> OwnerReferences { get; }
+
+    /// <summary>False for the current section-relocation evidence, which is positive but not exhaustive.</summary>
+    public bool OwnerInventoryComplete { get; }
+
     public string? Diagnostic { get; }
 
     public bool HasStructuredProof =>
         Entries.Count > 0
         && BaseAddress is not null
         && TargetBaseAddress is not null
-        && SourceInstruction is not null;
+        && SourceInstruction is not null
+        && OutputRange is not null
+        && TableReferenceProducers.Count == 2
+        && TableReferenceProducers.Select(producer => producer.Kind).Distinct().Count() == 2;
 
     public SemanticPlanExtensionKind Kind => SemanticPlanExtensionKind.JumpTable;
 }

@@ -361,6 +361,61 @@ public static partial class SemanticPlanSnapshotCodec
                 WriteTlsBinding(context, tls.Binding);
                 context.WriteOptionalString(tls.Diagnostic);
                 break;
+            case SemanticDynamicImportCallExtension dynamicImport:
+                WriteEntityId(context, dynamicImport.CallIdentity);
+                context.Writer.Write(dynamicImport.CallAddress.Value);
+                WriteRegister(context, dynamicImport.TargetRegister);
+                context.WriteCount(dynamicImport.ProducerAddresses.Count);
+                foreach (var producerAddress in dynamicImport.ProducerAddresses)
+                {
+                    context.Writer.Write(producerAddress.Value);
+                    context.EnsureWithinCanonicalLimit();
+                }
+
+                context.Writer.Write(dynamicImport.PageProducerAddress.Value);
+                context.Writer.Write(dynamicImport.LoadProducerAddress.Value);
+                context.Writer.Write(dynamicImport.PageAddress.Value);
+                WriteRange(context, dynamicImport.GotRange);
+                WriteEntityId(context, dynamicImport.RelocationSiteIdentity);
+                context.Writer.Write(dynamicImport.RelocationOffset);
+                context.Writer.Write(dynamicImport.RelocationInfo);
+                context.Writer.Write(dynamicImport.RelocationAddend);
+                context.Writer.Write(dynamicImport.RelocationIsPlt ? (byte)1 : (byte)0);
+                context.Writer.Write(dynamicImport.RelocationTableAddress.Value);
+                context.Writer.Write(dynamicImport.SymbolIndex);
+                context.Writer.Write(dynamicImport.SymbolNameOffset);
+                context.WriteString(dynamicImport.SymbolName);
+                context.Writer.Write(dynamicImport.SymbolInfo);
+                context.Writer.Write(dynamicImport.SymbolOther);
+                context.Writer.Write(dynamicImport.SymbolBinding);
+                context.Writer.Write(dynamicImport.SymbolType);
+                context.Writer.Write(dynamicImport.SymbolVisibility);
+                context.Writer.Write(dynamicImport.SymbolSectionIndex);
+                context.Writer.Write(dynamicImport.SymbolValue);
+                context.Writer.Write(dynamicImport.SymbolSize);
+                context.Writer.Write(dynamicImport.SymbolVersionIndexRaw.HasValue ? (byte)1 : (byte)0);
+                if (dynamicImport.SymbolVersionIndexRaw is { } versionIndexRaw)
+                {
+                    context.Writer.Write(versionIndexRaw);
+                }
+
+                context.Writer.Write(dynamicImport.VersionRequirement is not null ? (byte)1 : (byte)0);
+                if (dynamicImport.VersionRequirement is { } versionRequirement)
+                {
+                    context.Writer.Write(versionRequirement.RecordVersion);
+                    context.Writer.Write(versionRequirement.AuxiliaryCount);
+                    context.Writer.Write(versionRequirement.FileNameOffset);
+                    context.Writer.Write(versionRequirement.AuxiliaryOffset);
+                    context.Writer.Write(versionRequirement.NextOffset);
+                    context.WriteString(versionRequirement.FileName);
+                    context.Writer.Write(versionRequirement.Hash);
+                    context.Writer.Write(versionRequirement.Flags);
+                    context.Writer.Write(versionRequirement.Other);
+                    context.Writer.Write(versionRequirement.NameOffset);
+                    context.WriteString(versionRequirement.Name);
+                }
+
+                break;
             case SemanticJumpTableExtension jumpTable:
                 WriteEntityId(context, jumpTable.TableIdentity);
                 WriteRange(context, jumpTable.TableRange);
@@ -415,6 +470,133 @@ public static partial class SemanticPlanSnapshotCodec
                     context.EnsureWithinCanonicalLimit();
                 }
 
+                context.Writer.Write(jumpTable.OwnerInventoryComplete);
+                var referenceProducers = jumpTable.TableReferenceProducers
+                    .OrderBy(producer => producer.InstructionAddress)
+                    .ThenBy(producer => producer.Kind)
+                    .ToArray();
+                context.WriteCount(referenceProducers.Length);
+                foreach (var producer in referenceProducers)
+                {
+                    context.Writer.Write(producer.InstructionAddress);
+                    context.Writer.Write((byte)producer.Kind);
+                }
+
+                var ownerReferences = jumpTable.OwnerReferences
+                    .OrderBy(reference => reference.InstructionAddress)
+                    .ThenBy(reference => reference.OwnerFunctionStart)
+                    .ThenBy(reference => reference.RelocationType)
+                    .ToArray();
+                context.WriteCount(ownerReferences.Length);
+                foreach (var reference in ownerReferences)
+                {
+                    context.Writer.Write(reference.InstructionAddress);
+                    context.Writer.Write(reference.RelocationSectionIndex);
+                    context.Writer.Write(reference.SymbolTableSectionIndex);
+                    context.Writer.Write(reference.TargetSectionIndex);
+                    context.Writer.Write(reference.OwnerFunctionSectionIndex);
+                    context.Writer.Write(reference.OwnerFunctionSection.Name);
+                    context.Writer.Write(reference.OwnerFunctionSection.Type);
+                    context.Writer.Write(reference.OwnerFunctionSection.Flags);
+                    context.Writer.Write(reference.OwnerFunctionSection.Address);
+                    context.Writer.Write(reference.OwnerFunctionSection.Offset);
+                    context.Writer.Write(reference.OwnerFunctionSection.Size);
+                    context.Writer.Write(reference.OwnerFunctionSection.Link);
+                    context.Writer.Write(reference.OwnerFunctionSection.Info);
+                    context.Writer.Write(reference.OwnerFunctionSection.AddressAlignment);
+                    context.Writer.Write(reference.OwnerFunctionSection.EntrySize);
+                    context.Writer.Write(reference.RelocationSourceAddress);
+                    context.Writer.Write(reference.RelocationType);
+                    context.Writer.Write(reference.Addend);
+                    context.Writer.Write(reference.SymbolIndex);
+                    context.WriteString(reference.SymbolName);
+                    context.Writer.Write(reference.SymbolBinding);
+                    context.Writer.Write(reference.SymbolType);
+                    context.Writer.Write(reference.SymbolVisibility);
+                    context.Writer.Write(reference.SymbolSectionIndex);
+                    context.Writer.Write(reference.SymbolValue);
+                    context.Writer.Write(reference.SymbolSize);
+                    context.WriteString(reference.OwnerFunctionName);
+                    context.Writer.Write(reference.OwnerFunctionStart);
+                    context.Writer.Write(reference.OwnerFunctionSize);
+                    context.Writer.Write(reference.IsSelectedFunction);
+                    context.EnsureWithinCanonicalLimit();
+                }
+
+                break;
+            case SemanticStaticFunctionPointerCallExtension staticCall:
+                WriteEntityId(context, staticCall.SourceIdentity);
+                WriteRange(context, staticCall.SourceRange);
+                WriteRegister(context, staticCall.TargetRegister);
+                context.WriteCount(staticCall.ProducerAddresses.Count);
+                foreach (var producerAddress in staticCall.ProducerAddresses)
+                {
+                    context.Writer.Write(producerAddress.Value);
+                    context.EnsureWithinCanonicalLimit();
+                }
+
+                context.Writer.Write(staticCall.StackSlotOffset);
+                context.WriteString(staticCall.OwnerFunction.Name);
+                context.Writer.Write((byte)staticCall.OwnerFunction.Table);
+                context.Writer.Write(staticCall.OwnerFunction.TableIndex);
+                context.Writer.Write(staticCall.OwnerFunction.Binding);
+                context.Writer.Write(staticCall.OwnerFunction.Other);
+                context.Writer.Write(staticCall.OwnerFunction.SectionIndex);
+                context.Writer.Write(staticCall.OwnerFunction.Value);
+                context.Writer.Write(staticCall.OwnerFunction.Size);
+                context.Writer.Write(staticCall.RelocationSectionIndex);
+                WriteSectionHeader(context, staticCall.RelocationSectionHeader);
+                context.Writer.Write(staticCall.SymbolTableSectionIndex);
+                WriteSectionHeader(context, staticCall.SymbolTableSectionHeader);
+                WriteSectionHeader(context, staticCall.CallerSectionHeader);
+                WriteSectionHeader(context, staticCall.TargetSectionHeader);
+                WriteStaticFunctionPointerRelocationRow(context, staticCall.AdrpRelocation);
+                WriteStaticFunctionPointerRelocationRow(context, staticCall.AddRelocation);
+                WriteRange(context, staticCall.TargetSourceRange);
+                WriteEntityId(context, staticCall.TargetMappingIdentity);
+                WriteRange(context, staticCall.TargetOutputRange);
+                context.Writer.Write((byte)staticCall.MappingPolicy);
+                break;
+            case SemanticExternalJumpTableExtension externalTable:
+                WriteExternalProviderEntityId(context, externalTable.TableIdentity);
+                context.WriteExternalProviderString(externalTable.ProviderSoname);
+                context.WriteExternalProviderString(externalTable.ProviderBuildIdHex);
+                context.WriteExternalProviderString(externalTable.ProviderSha256);
+                context.Writer.Write(externalTable.ProviderFileSize);
+                context.Writer.Write((byte)externalTable.Encoding);
+                WriteExternalProviderSymbol(context, externalTable.TableObject);
+
+                context.AccountExternalProviderRecords(
+                    checked(1 + externalTable.TargetSymbols.Count),
+                    externalTable.Entries.Count);
+                var providerSymbols = externalTable.TargetSymbols
+                    .OrderBy(symbol => symbol.SymbolTable)
+                    .ThenBy(symbol => symbol.SymbolIndex)
+                    .ThenBy(symbol => symbol.Name, StringComparer.Ordinal)
+                    .ToArray();
+                context.WriteCount(providerSymbols.Length);
+                foreach (var symbol in providerSymbols)
+                {
+                    WriteExternalProviderSymbol(context, symbol);
+                    context.EnsureWithinCanonicalLimit();
+                }
+
+                var providerEntries = externalTable.Entries
+                    .OrderBy(entry => entry.Index)
+                    .ThenBy(entry => entry.TargetSymbolTable)
+                    .ThenBy(entry => entry.TargetSymbolIndex)
+                    .ToArray();
+                context.WriteCount(providerEntries.Length);
+                foreach (var entry in providerEntries)
+                {
+                    context.Writer.Write(entry.Index);
+                    context.Writer.Write(entry.SignedRelativeDisplacement);
+                    context.Writer.Write((byte)entry.TargetSymbolTable);
+                    context.Writer.Write(entry.TargetSymbolIndex);
+                    context.EnsureWithinCanonicalLimit();
+                }
+
+                context.WriteExternalProviderBytes(externalTable.TableBytesSpan);
                 break;
             case SemanticCfiEffectExtension cfi:
                 WriteEntityId(context, cfi.SourceIdentity);
@@ -439,6 +621,71 @@ public static partial class SemanticPlanSnapshotCodec
                     "The semantic-plan extension has no canonical encoding.",
                     DiagnosticCode.SemanticPlanSnapshotUnsupported);
         }
+    }
+
+    private static void WriteSectionHeader(CanonicalWriteContext context, SectionHeader section)
+    {
+        context.Writer.Write(section.Name);
+        context.Writer.Write(section.Type);
+        context.Writer.Write(section.Flags);
+        context.Writer.Write(section.Address);
+        context.Writer.Write(section.Offset);
+        context.Writer.Write(section.Size);
+        context.Writer.Write(section.Link);
+        context.Writer.Write(section.Info);
+        context.Writer.Write(section.AddressAlignment);
+        context.Writer.Write(section.EntrySize);
+        context.EnsureWithinCanonicalLimit();
+    }
+
+    private static void WriteExternalProviderEntityId(
+        CanonicalWriteContext context,
+        SemanticExternalProviderTableIdentity identity)
+    {
+        context.WriteExternalProviderString(identity.Value);
+    }
+
+    private static void WriteExternalProviderSymbol(
+        CanonicalWriteContext context,
+        SemanticExternalProviderSymbol symbol)
+    {
+        context.WriteExternalProviderString(symbol.Name);
+        context.Writer.Write((byte)symbol.SymbolTable);
+        context.Writer.Write(symbol.SymbolIndex);
+        context.Writer.Write(symbol.Binding);
+        context.Writer.Write(symbol.Type);
+        context.Writer.Write(symbol.Visibility);
+        context.Writer.Write(symbol.SectionIndex);
+        context.Writer.Write(symbol.Range.FileOffset.Value);
+        context.Writer.Write(symbol.Range.VirtualAddress.Value);
+        context.Writer.Write(symbol.Range.Size);
+        context.Writer.Write(symbol.LoadSegmentFlags);
+    }
+
+    private static void WriteStaticFunctionPointerRelocationRow(
+        CanonicalWriteContext context,
+        SemanticStaticFunctionPointerRelocationRow row)
+    {
+        context.Writer.Write(row.RelocationSectionIndex);
+        context.Writer.Write(row.RelocationSectionFileOffset.Value);
+        context.Writer.Write(row.RelocationSectionAddress.Value);
+        context.Writer.Write(row.SymbolTableSectionIndex);
+        context.Writer.Write(row.TargetSectionIndex);
+        context.Writer.Write(row.RelocationSourceAddress);
+        context.Writer.Write(row.SiteAddress);
+        context.Writer.Write(row.Info);
+        context.Writer.Write(row.Type);
+        context.Writer.Write(row.SymbolIndex);
+        context.Writer.Write(row.Addend);
+        context.Writer.Write(row.IsPlt ? (byte)1 : (byte)0);
+        context.Writer.Write(row.SymbolNameOffset);
+        context.WriteString(row.Name);
+        context.Writer.Write(row.SymbolInfo);
+        context.Writer.Write(row.SymbolOther);
+        context.Writer.Write(row.SymbolSectionIndex);
+        context.Writer.Write(row.SymbolValue);
+        context.Writer.Write(row.SymbolSize);
+        context.EnsureWithinCanonicalLimit();
     }
 
     private static void WriteTlsBinding(CanonicalWriteContext context, TlsBinding binding)
@@ -839,6 +1086,74 @@ public static partial class SemanticPlanSnapshotCodec
         public DiagnosticBag Diagnostics { get; }
 
         public int MetadataBytes { get; private set; }
+
+        private int ExternalProviderTables { get; set; }
+
+        private int ExternalProviderSymbols { get; set; }
+
+        private int ExternalProviderEntries { get; set; }
+
+        private int ExternalProviderStringBytes { get; set; }
+
+        private int ExternalProviderTableBytes { get; set; }
+
+        public void AccountExternalProviderRecords(int symbolCount, int entryCount)
+        {
+            if (symbolCount < 1
+                || entryCount < 0
+                || ExternalProviderTables >= SemanticPlanSnapshotLimits.MaximumExternalProviderTables
+                || symbolCount > SemanticPlanSnapshotLimits.MaximumExternalProviderSymbols - ExternalProviderSymbols
+                || entryCount > SemanticPlanSnapshotLimits.MaximumExternalProviderTableEntries - ExternalProviderEntries)
+            {
+                throw new SnapshotEncodingException(
+                    "The semantic-plan snapshot exceeds an aggregate external-provider record limit.",
+                    DiagnosticCode.SemanticPlanSnapshotLimitExceeded);
+            }
+
+            ExternalProviderTables++;
+            ExternalProviderSymbols += symbolCount;
+            ExternalProviderEntries += entryCount;
+        }
+
+        public void WriteExternalProviderString(string value)
+        {
+            int byteCount;
+            try
+            {
+                byteCount = StrictUtf8.GetByteCount(value);
+            }
+            catch (EncoderFallbackException)
+            {
+                throw new SnapshotEncodingException(
+                    "The semantic-plan snapshot contains invalid external-provider UTF-8 metadata.",
+                    DiagnosticCode.SemanticPlanSnapshotMalformed);
+            }
+
+            if (byteCount > SemanticPlanSnapshotLimits.MaximumExternalProviderStringBytes - ExternalProviderStringBytes)
+            {
+                throw new SnapshotEncodingException(
+                    "The semantic-plan snapshot exceeds its aggregate external-provider string limit.",
+                    DiagnosticCode.SemanticPlanSnapshotLimitExceeded);
+            }
+
+            WriteString(value);
+            ExternalProviderStringBytes += byteCount;
+        }
+
+        public void WriteExternalProviderBytes(ReadOnlySpan<byte> values)
+        {
+            if (values.Length > SemanticPlanSnapshotLimits.MaximumExternalProviderTableBytesPerTable
+                || values.Length > SemanticPlanSnapshotLimits.MaximumExternalProviderTableBytes - ExternalProviderTableBytes)
+            {
+                throw new SnapshotEncodingException(
+                    "The semantic-plan snapshot exceeds its aggregate external-provider table-byte limit.",
+                    DiagnosticCode.SemanticPlanSnapshotLimitExceeded);
+            }
+
+            Writer.Write(checked((uint)values.Length));
+            Writer.Write(values);
+            ExternalProviderTableBytes += values.Length;
+        }
 
         public void EnsureWithinCanonicalLimit()
         {

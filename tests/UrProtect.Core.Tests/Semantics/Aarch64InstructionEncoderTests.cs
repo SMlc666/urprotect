@@ -91,6 +91,30 @@ public sealed class Aarch64InstructionEncoderTests
             .Immediate);
     }
 
+    [Theory]
+    [InlineData(0xB4000040u, Aarch64InstructionEncodingFamily.ConditionalBranch19)]
+    [InlineData(0x36000040u, Aarch64InstructionEncodingFamily.TestBranch14)]
+    public void ReencodesRegisterConditionalBranchToMappedLabel(
+        uint sourceEncoding,
+        Aarch64InstructionEncodingFamily family)
+    {
+        var encoder = new Aarch64InstructionEncoder();
+
+        var result = encoder.TryEncode(new Aarch64InstructionEncodeRequest(
+            sourceEncoding,
+            SourceAddress: 0x1000,
+            OutputAddress: 0x2000,
+            Family: family,
+            TargetOrImmediate: 0x2010));
+
+        Assert.True(result.IsSuccess, result.Diagnostic);
+        Assert.Equal(0x2010UL, result.Instruction!.DirectTarget);
+        Assert.Equal(Aarch64ControlFlowKind.ConditionalBranch, result.Instruction.ControlFlow);
+        Assert.True(
+            result.Instruction.Mnemonic.StartsWith("cbz", StringComparison.OrdinalIgnoreCase)
+            || result.Instruction.Mnemonic.StartsWith("tbz", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public void RejectsConditionalBranchConditionOutsideArchitecturalDomain()
     {

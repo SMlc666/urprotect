@@ -1,4 +1,8 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
 using UrProtect.Core.Aarch64Semantics;
+using UrProtect.Core.Application.Protection;
 using UrProtect.Core.SemanticPlanning;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
@@ -7,6 +11,28 @@ namespace UrProtect.Core.Tests.Semantics;
 
 public sealed class SemanticPlanSnapshotTests
 {
+    [Fact]
+    public void JumpTableOwnershipWireOrdinalsPreserveLegacyValuesAndAppendAmbiguous()
+    {
+        Assert.Equal((byte)0, (byte)SemanticJumpTableOwnership.SelectedFunctionPrivate);
+        Assert.Equal((byte)1, (byte)SemanticJumpTableOwnership.Shared);
+        Assert.Equal((byte)2, (byte)SemanticJumpTableOwnership.External);
+        Assert.Equal((byte)3, (byte)SemanticJumpTableOwnership.RuntimeOwned);
+        Assert.Equal((byte)4, (byte)SemanticJumpTableOwnership.Ambiguous);
+    }
+
+    [Fact]
+    public void OmittedJumpTableOwnershipDefaultsToAmbiguous()
+    {
+        var table = new SemanticJumpTableExtension(
+            SemanticEntityId.Table("implicit-ownership"),
+            new SemanticSourceRange(new FileOffset(0x400), new VirtualAddress(0x400), sizeof(uint)),
+            sizeof(uint),
+            Array.Empty<SemanticTarget>());
+
+        Assert.Equal(SemanticJumpTableOwnership.Ambiguous, table.Ownership);
+    }
+
     [Fact]
     public void EquivalentPlansUseDeterministicEntityFixupAndExtensionOrdering()
     {
@@ -158,6 +184,489 @@ public sealed class SemanticPlanSnapshotTests
         Assert.Equal(first.CanonicalBytes, second.CanonicalBytes);
     }
 
+    [Theory]
+    [InlineData((ushort)1)]
+    [InlineData((ushort)2)]
+    [InlineData((ushort)3)]
+    [InlineData((ushort)4)]
+    [InlineData((ushort)5)]
+    public void CurrentCodecRejectsOlderSnapshotVersionAfterDigestRefresh(ushort version)
+    {
+        var snapshot = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { CreateExternalProviderTable() }));
+        Assert.True(snapshot.IsSuccess, Describe(snapshot.Diagnostics));
+        var bytes = snapshot.CanonicalBytes!;
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(8, sizeof(ushort)), version);
+        RefreshSnapshotDigest(bytes);
+
+        var decoded = SemanticPlanSnapshotCodec.Decode(bytes);
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Null(decoded.Snapshot);
+        Assert.Contains(decoded.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotUnsupported);
+    }
+
+    [Fact]
+    public void CurrentSps6SnapshotRoundTripsAppendedAmbiguousOwnership()
+    {
+        var table = new SemanticJumpTableExtension(
+            SemanticEntityId.Table("sps6-ambiguous-table"),
+            Range(0x4000, 0x700, sizeof(uint)),
+            sizeof(uint),
+            Array.Empty<SemanticTarget>(),
+            ownership: SemanticJumpTableOwnership.Ambiguous);
+
+        var encoded = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { table }));
+        Assert.True(encoded.IsSuccess, Describe(encoded.Diagnostics));
+        Assert.Equal((ushort)6, SemanticPlanSnapshotCodec.Version);
+        Assert.Equal("URP-SPS6", SemanticPlanSnapshotCodec.MagicText);
+        Assert.Equal((ushort)1, ProtectedImageDocument.AbiVersion);
+
+        var decoded = SemanticPlanSnapshotCodec.Decode(encoded.CanonicalBytes!);
+
+        Assert.True(decoded.IsSuccess, Describe(decoded.Diagnostics));
+        Assert.Equal(encoded.PlanSha256, decoded.PlanSha256);
+        Assert.Equal(encoded.CanonicalBytes, decoded.CanonicalBytes);
+        Assert.Equal(
+            SemanticJumpTableOwnership.Ambiguous,
+            Assert.Single(decoded.Snapshot!.Extensions.OfType<SemanticJumpTableExtension>()).Ownership);
+    }
+
+    [Fact]
+    public void ExternalJumpTableProviderFactsRoundTripWithoutConsumerAddressMapRowsOrPath()
+    {
+        const string operatorPath = "/operator/private/provider/libexternal-table.so";
+        var external = CreateExternalProviderTable(targetBinding: 0, targetVisibility: 2);
+        var encoded = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { external }));
+
+        Assert.True(encoded.IsSuccess, Describe(encoded.Diagnostics));
+        Assert.Equal((ushort)6, SemanticPlanSnapshotCodec.Version);
+        Assert.Equal("URP-SPS6", SemanticPlanSnapshotCodec.MagicText);
+        Assert.Equal((ushort)1, ProtectedImageDocument.AbiVersion);
+        var decoded = SemanticPlanSnapshotCodec.Decode(encoded.CanonicalBytes!);
+        Assert.True(decoded.IsSuccess, Describe(decoded.Diagnostics));
+        var actual = Assert.Single(decoded.Snapshot!.Extensions.OfType<SemanticExternalJumpTableExtension>());
+
+        Assert.Equal(external.ProviderSoname, actual.ProviderSoname);
+        Assert.Equal(external.ProviderBuildIdHex, actual.ProviderBuildIdHex);
+        Assert.Equal(external.ProviderSha256, actual.ProviderSha256);
+        Assert.Equal(external.ProviderFileSize, actual.ProviderFileSize);
+        Assert.Equal(external.TableObject, actual.TableObject);
+        Assert.Equal((byte)1, actual.TableObject.Binding); // STB_GLOBAL is required for the provider GLOB_DAT object.
+        Assert.Equal((byte)0, actual.TableObject.Visibility); // STV_DEFAULT is the only admitted provider-object visibility.
+        Assert.All(actual.TargetSymbols, target =>
+        {
+            Assert.Equal((byte)0, target.Binding); // Provider-local function rules remain distinct from the object allowlist.
+            Assert.Equal((byte)2, target.Visibility);
+        });
+        Assert.Equal(external.TargetSymbols, actual.TargetSymbols);
+        Assert.Equal(external.Entries, actual.Entries);
+        Assert.Equal(external.TableBytes, actual.TableBytes);
+        Assert.Equal(new SemanticExternalProviderAddress(0x14000), actual.TargetSymbols[0].Range.VirtualAddress);
+        Assert.DoesNotContain(decoded.Snapshot.AddressMapEntries, entry =>
+            string.Equals(entry.Identity.Value, actual.TableIdentity.Value, StringComparison.Ordinal));
+        Assert.Equal(-1, encoded.CanonicalBytes!.AsSpan().IndexOf(Encoding.UTF8.GetBytes(operatorPath)));
+    }
+
+    [Theory]
+    [InlineData((byte)0, (byte)0)]
+    [InlineData((byte)2, (byte)0)]
+    [InlineData((byte)1, (byte)1)]
+    [InlineData((byte)1, (byte)2)]
+    [InlineData((byte)1, (byte)3)]
+    public void SnapshotCreationRejectsNonGlobalOrNonDefaultProviderTableObject(
+        byte binding,
+        byte visibility)
+    {
+        var valid = CreateExternalProviderTable();
+        var external = CopyExternalProviderTable(
+            valid,
+            tableObject: valid.TableObject with { Binding = binding, Visibility = visibility });
+
+        var result = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { external }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Snapshot);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotMalformed
+            && diagnostic.Message.Contains("STB_GLOBAL and STV_DEFAULT", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("binding", (byte)0)]
+    [InlineData("binding", (byte)2)]
+    [InlineData("visibility", (byte)1)]
+    [InlineData("visibility", (byte)2)]
+    [InlineData("visibility", (byte)3)]
+    public void ChecksumRefreshedDecodeRejectsForbiddenProviderTableObjectBindingOrVisibility(
+        string field,
+        byte value)
+    {
+        var encoded = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { CreateExternalProviderTable() }));
+        Assert.True(encoded.IsSuccess, Describe(encoded.Diagnostics));
+        var bytes = encoded.CanonicalBytes!;
+        var fieldOffset = FindProviderTableObjectField(bytes, field);
+        bytes[fieldOffset] = value;
+        RefreshSnapshotDigest(bytes);
+
+        var decoded = SemanticPlanSnapshotCodec.Decode(bytes);
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Null(decoded.Snapshot);
+        Assert.Contains(decoded.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotMalformed
+            && diagnostic.Message.Contains("STB_GLOBAL and STV_DEFAULT", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("file")]
+    [InlineData("virtual")]
+    public void ProviderTargetOverlapIsRejectedInFileAndVirtualAddressDomains(string domain)
+    {
+        var valid = CreateExternalProviderTable();
+        var targets = valid.TargetSymbols.ToArray();
+        var entries = valid.Entries.ToArray();
+        var tableBytes = valid.TableBytes.ToArray();
+        if (domain == "file")
+        {
+            targets[1] = targets[1] with
+            {
+                Range = targets[1].Range with { FileOffset = targets[0].Range.FileOffset },
+            };
+        }
+        else
+        {
+            var overlappingAddress = targets[0].Range.VirtualAddress.Value + sizeof(uint);
+            targets[1] = targets[1] with
+            {
+                Range = targets[1].Range with
+                {
+                    VirtualAddress = new SemanticExternalProviderAddress(overlappingAddress),
+                },
+            };
+            var displacement = checked((int)(overlappingAddress - valid.TableObject.Range.VirtualAddress.Value));
+            entries[1] = entries[1] with { SignedRelativeDisplacement = displacement };
+            BinaryPrimitives.WriteInt32LittleEndian(tableBytes.AsSpan(sizeof(int)), displacement);
+        }
+
+        var external = CopyExternalProviderTable(
+            valid,
+            targetSymbols: targets,
+            entries: entries,
+            tableBytes: tableBytes);
+        var result = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { external }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Snapshot);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotMalformed
+            && diagnostic.Message.Contains("ranges must not alias or overlap", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExternalProviderCollectionsAtEachPerTableLimitRemainValid()
+    {
+        var extension = CreateExternalProviderTable(
+            targetCount: SemanticPlanSnapshotLimits.MaximumExternalProviderSymbolsPerTable,
+            entryCount: SemanticPlanSnapshotLimits.MaximumExternalProviderTableEntriesPerTable);
+
+        var result = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { extension }));
+
+        Assert.True(result.IsSuccess, Describe(result.Diagnostics));
+    }
+
+    [Theory]
+    [InlineData("target-symbols", SemanticPlanSnapshotLimits.MaximumExternalProviderSymbolsPerTable)]
+    [InlineData("entries", SemanticPlanSnapshotLimits.MaximumExternalProviderTableEntriesPerTable)]
+    [InlineData("table-bytes", SemanticPlanSnapshotLimits.MaximumExternalProviderTableBytesPerTable)]
+    public void ExternalProviderConstructionStopsAtLimitPlusOneItems(string collection, int maximum)
+    {
+        var valid = CreateExternalProviderTable(targetCount: 1);
+        var consumed = 0;
+        var targetSymbols = (IEnumerable<SemanticExternalProviderSymbol>)valid.TargetSymbols;
+        var entries = (IEnumerable<SemanticExternalJumpTableEntryFact>)valid.Entries;
+        IEnumerable<byte> tableBytes = valid.TableBytes;
+        string parameterName;
+        switch (collection)
+        {
+            case "target-symbols":
+                targetSymbols = CountYielded(valid.TargetSymbols[0], maximum + 100, () => consumed++);
+                parameterName = "targetSymbols";
+                break;
+            case "entries":
+                entries = CountYielded(valid.Entries[0], maximum + 100, () => consumed++);
+                parameterName = "entries";
+                break;
+            case "table-bytes":
+                tableBytes = CountYielded((byte)0, maximum + 100, () => consumed++);
+                parameterName = "tableBytes";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(collection));
+        }
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => new SemanticExternalJumpTableExtension(
+            valid.TableIdentity,
+            valid.ProviderSoname,
+            valid.ProviderBuildIdHex,
+            valid.ProviderSha256,
+            valid.ProviderFileSize,
+            valid.TableObject,
+            targetSymbols,
+            entries,
+            tableBytes,
+            valid.Encoding));
+
+        Assert.Equal(parameterName, exception.ParamName);
+        Assert.Equal(maximum + 1, consumed);
+    }
+
+    [Fact]
+    public void ExternalProviderFactsCanonicalizeTableExtensionSymbolAndEntryOrdering()
+    {
+        var first = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[]
+            {
+                CreateExternalProviderTable("provider-b", contentTag: 'b', reverseOrder: false),
+                CreateExternalProviderTable("provider-a", contentTag: 'a', reverseOrder: false),
+            }));
+        var second = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[]
+            {
+                CreateExternalProviderTable("provider-a", contentTag: 'a', reverseOrder: true),
+                CreateExternalProviderTable("provider-b", contentTag: 'b', reverseOrder: true),
+            }));
+
+        Assert.True(first.IsSuccess, Describe(first.Diagnostics));
+        Assert.True(second.IsSuccess, Describe(second.Diagnostics));
+        Assert.Equal(first.CanonicalBytes, second.CanonicalBytes);
+        Assert.Equal(first.PlanSha256, second.PlanSha256);
+        var canonicalIdentities = SemanticPlanSnapshotCodec.Decode(first.CanonicalBytes!).Snapshot!.Extensions
+            .OfType<SemanticExternalJumpTableExtension>()
+            .Select(extension => extension.TableIdentity.Value)
+            .ToArray();
+        Assert.Equal(2, canonicalIdentities.Length);
+        Assert.Equal("provider-a", canonicalIdentities[0]);
+        Assert.Equal("provider-b", canonicalIdentities[1]);
+    }
+
+    [Fact]
+    public void RefreshedDigestDoesNotMakeMalformedProviderTableBytesCanonical()
+    {
+        var external = CreateExternalProviderTable();
+        var emptyMap = AddressMap.Create(Array.Empty<AddressMapEntry>());
+        Assert.True(emptyMap.IsSuccess, Describe(emptyMap.Diagnostics));
+        var plan = new SemanticRewritePlan(
+            emptyMap.Map!,
+            Array.Empty<SemanticInstruction>(),
+            Array.Empty<SemanticFixup>(),
+            new ISemanticPlanExtension[] { external });
+        var encoded = SemanticPlanSnapshotCodec.Create(plan);
+        Assert.True(encoded.IsSuccess, Describe(encoded.Diagnostics));
+        var bytes = encoded.CanonicalBytes!;
+        var tableBytesOffset = bytes.Length - 32 - external.TableBytes.Count;
+        bytes[tableBytesOffset] ^= 1;
+        RefreshSnapshotDigest(bytes);
+
+        var decoded = SemanticPlanSnapshotCodec.Decode(bytes);
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Null(decoded.Snapshot);
+        Assert.Contains(decoded.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotMalformed);
+    }
+
+    [Fact]
+    public void DuplicateExternalProviderTableIdentityIsRejected()
+    {
+        var external = CreateExternalProviderTable();
+        var template = CreatePlan();
+        var duplicatePlan = new SemanticRewritePlan(
+            template.AddressMap,
+            template.Instructions,
+            template.Fixups,
+            new ISemanticPlanExtension[] { external, external },
+            template.Diagnostics);
+
+        var result = SemanticPlanSnapshotCodec.Create(duplicatePlan);
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Snapshot);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotMalformed
+            && diagnostic.Message.Contains("duplicate extension identities", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void DuplicateProviderContentIdentityAndSymbolRowsAreRejected()
+    {
+        var first = CreateExternalProviderTable("provider-a", contentTag: 'a');
+        var otherTableWithSameContent = CreateExternalProviderTable("provider-b", contentTag: 'a');
+        var template = CreatePlan();
+        var duplicateContentPlan = new SemanticRewritePlan(
+            template.AddressMap,
+            template.Instructions,
+            template.Fixups,
+            new ISemanticPlanExtension[] { first, otherTableWithSameContent },
+            template.Diagnostics);
+        var duplicateContent = SemanticPlanSnapshotCodec.Create(duplicateContentPlan);
+        Assert.False(duplicateContent.IsSuccess);
+        Assert.Contains(duplicateContent.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotMalformed
+            && diagnostic.Message.Contains("content identity", StringComparison.OrdinalIgnoreCase));
+
+        var duplicateSymbols = first.TargetSymbols.ToArray();
+        duplicateSymbols[1] = duplicateSymbols[1] with { SymbolIndex = duplicateSymbols[0].SymbolIndex };
+        var duplicateSymbolTable = new SemanticExternalJumpTableExtension(
+            first.TableIdentity,
+            first.ProviderSoname,
+            first.ProviderBuildIdHex,
+            first.ProviderSha256,
+            first.ProviderFileSize,
+            first.TableObject,
+            duplicateSymbols,
+            first.Entries,
+            first.TableBytes,
+            first.Encoding);
+        var duplicateSymbolPlan = new SemanticRewritePlan(
+            template.AddressMap,
+            template.Instructions,
+            template.Fixups,
+            new ISemanticPlanExtension[] { duplicateSymbolTable },
+            template.Diagnostics);
+
+        var duplicateSymbolResult = SemanticPlanSnapshotCodec.Create(duplicateSymbolPlan);
+
+        Assert.False(duplicateSymbolResult.IsSuccess);
+        Assert.Null(duplicateSymbolResult.Snapshot);
+        Assert.Contains(duplicateSymbolResult.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotMalformed
+            && diagnostic.Message.Contains("unique", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("provider-path")]
+    [InlineData("provider-table-identity-path")]
+    [InlineData("uppercase-digest")]
+    [InlineData("malformed-build-id")]
+    [InlineData("file-range-overflow")]
+    [InlineData("virtual-range-overflow")]
+    [InlineData("target-file-range-overflow")]
+    [InlineData("target-virtual-range-overflow")]
+    [InlineData("range-outside-provider")]
+    [InlineData("table-bytes-target-mismatch")]
+    [InlineData("writable-table")]
+    [InlineData("non-executable-target")]
+    public void MalformedExternalProviderFactsAreRejected(string mutation)
+    {
+        var external = mutation switch
+        {
+            "provider-path" => CreateExternalProviderTable(providerSoname: "/tmp/provider.so"),
+            "provider-table-identity-path" => CreateExternalProviderTable(tableIdentity: "/tmp/provider.so"),
+            "uppercase-digest" => CreateExternalProviderTable(providerSha256: new string('A', 64)),
+            "malformed-build-id" => CreateExternalProviderTable(providerBuildId: "aBcde"),
+            "file-range-overflow" => CreateExternalProviderTable(
+                tableFileOffset: ulong.MaxValue - 7,
+                providerFileSize: ulong.MaxValue),
+            "virtual-range-overflow" => CreateExternalProviderTable(
+                tableVirtualAddress: ulong.MaxValue - 7),
+            "target-file-range-overflow" => MutateProviderTargetRange(
+                fileOffset: ulong.MaxValue - 3),
+            "target-virtual-range-overflow" => MutateProviderTargetRange(
+                virtualAddress: ulong.MaxValue - 3),
+            "range-outside-provider" => CreateExternalProviderTable(providerFileSize: 0x1005),
+            "table-bytes-target-mismatch" => CreateExternalProviderTable(displacementDelta: 4),
+            "writable-table" => CreateExternalProviderTable(tableFlags: ElfConstants.PfR | ElfConstants.PfW),
+            "non-executable-target" => CreateExternalProviderTable(targetFlags: ElfConstants.PfR),
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+        };
+        var result = SemanticPlanSnapshotCodec.Create(CreatePlan(
+            extensions: new ISemanticPlanExtension[] { external }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Snapshot);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code is DiagnosticCode.SemanticPlanSnapshotMalformed
+                or DiagnosticCode.SemanticPlanSnapshotLimitExceeded);
+    }
+
+    [Theory]
+    [InlineData("aggregate-symbols")]
+    [InlineData("aggregate-entries")]
+    [InlineData("aggregate-strings")]
+    [InlineData("aggregate-table-bytes")]
+    public void ExternalProviderAggregateAndCollectionBoundsAreEnforced(string limit)
+    {
+        ISemanticPlanExtension[] extensions = limit switch
+        {
+            "aggregate-symbols" => new ISemanticPlanExtension[]
+            {
+                CreateExternalProviderTable("provider-a", contentTag: 'a', targetCount: 1024, entryCount: 1),
+                CreateExternalProviderTable("provider-b", contentTag: 'b', targetCount: 1024, entryCount: 1),
+            },
+            "aggregate-entries" => new ISemanticPlanExtension[]
+            {
+                CreateExternalProviderTable("provider-a", contentTag: 'a', targetCount: 1, entryCount: 4096),
+                CreateExternalProviderTable("provider-b", contentTag: 'b', targetCount: 1, entryCount: 4096),
+                CreateExternalProviderTable("provider-c", contentTag: 'c', targetCount: 1, entryCount: 4096),
+            },
+            "aggregate-strings" => new ISemanticPlanExtension[]
+            {
+                CreateExternalProviderTable(targetCount: 1024, entryCount: 1024, targetNamePadding: 256),
+            },
+            "aggregate-table-bytes" => new ISemanticPlanExtension[]
+            {
+                CreateExternalProviderTable("provider-a", contentTag: 'a', targetCount: 1, entryCount: 4096),
+                CreateExternalProviderTable("provider-b", contentTag: 'b', targetCount: 1, entryCount: 4096),
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(limit)),
+        };
+
+        var result = SemanticPlanSnapshotCodec.Create(CreatePlan(extensions: extensions));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Snapshot);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotLimitExceeded);
+    }
+
+    [Fact]
+    public void CurrentCodecRejectsUnknownExtensionKindAfterDigestRefresh()
+    {
+        var cfi = new SemanticCfiEffectExtension(
+            SemanticEntityId.Instruction(new VirtualAddress(0x1000)),
+            Range(0x1000, 0x200, sizeof(uint)),
+            "cfi-effect");
+        var emptyMap = AddressMap.Create(Array.Empty<AddressMapEntry>());
+        Assert.True(emptyMap.IsSuccess, Describe(emptyMap.Diagnostics));
+        var plan = new SemanticRewritePlan(
+            emptyMap.Map!,
+            Array.Empty<SemanticInstruction>(),
+            Array.Empty<SemanticFixup>(),
+            new ISemanticPlanExtension[] { cfi });
+        var snapshot = SemanticPlanSnapshotCodec.Create(plan);
+        Assert.True(snapshot.IsSuccess, Describe(snapshot.Diagnostics));
+        var bytes = snapshot.CanonicalBytes!;
+        var extensionKindOffset = 8 + (sizeof(ushort) * 2) + (sizeof(uint) * 6);
+        Assert.Equal((byte)cfi.Kind, bytes[extensionKindOffset]);
+        bytes[extensionKindOffset] = byte.MaxValue;
+        RefreshSnapshotDigest(bytes);
+
+        var decoded = SemanticPlanSnapshotCodec.Decode(bytes);
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Null(decoded.Snapshot);
+        Assert.Contains(decoded.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.SemanticPlanSnapshotUnsupported);
+    }
+
     [Fact]
     public void EmptyEntityIdentityIsRejectedBySnapshotValidation()
     {
@@ -252,6 +761,7 @@ public sealed class SemanticPlanSnapshotTests
                     SemanticTarget.Exact(new VirtualAddress(0x1000)),
                 },
                 "relative-u32"),
+            CreateExternalProviderTable(),
             new SemanticCfiEffectExtension(
                 SemanticEntityId.Instruction(new VirtualAddress(0x1004)),
                 Range(0x1004, 0x204, sizeof(uint)),
@@ -284,12 +794,17 @@ public sealed class SemanticPlanSnapshotTests
                 SemanticPlanExtensionKind.CfiEffect,
                 SemanticPlanExtensionKind.RelocationBinding,
                 SemanticPlanExtensionKind.UnresolvedReference,
+                SemanticPlanExtensionKind.ExternalJumpTable,
             },
             decoded.Snapshot!.Extensions.Select(extension => extension.Kind));
         Assert.Equal(TlsAccessModel.InitialExec, Assert.IsType<SemanticTlsBindingExtension>(
             decoded.Snapshot.Extensions.Single(extension => extension.Kind == SemanticPlanExtensionKind.TlsBinding)).Model);
         Assert.Equal("cfa=sp+16", Assert.IsType<SemanticCfiEffectExtension>(
             decoded.Snapshot.Extensions.Single(extension => extension.Kind == SemanticPlanExtensionKind.CfiEffect)).Effect);
+        Assert.Equal(SemanticJumpTableOwnership.Ambiguous, Assert.IsType<SemanticJumpTableExtension>(
+            decoded.Snapshot.Extensions.Single(extension => extension.Kind == SemanticPlanExtensionKind.JumpTable)).Ownership);
+        Assert.Equal((ushort)6, SemanticPlanSnapshotCodec.Version);
+        Assert.Equal("URP-SPS6", SemanticPlanSnapshotCodec.MagicText);
     }
 
     [Theory]
@@ -959,8 +1474,183 @@ public sealed class SemanticPlanSnapshotTests
         return planResult.Plan!;
     }
 
+    private static SemanticExternalJumpTableExtension CopyExternalProviderTable(
+        SemanticExternalJumpTableExtension source,
+        SemanticExternalProviderSymbol? tableObject = null,
+        IEnumerable<SemanticExternalProviderSymbol>? targetSymbols = null,
+        IEnumerable<SemanticExternalJumpTableEntryFact>? entries = null,
+        IEnumerable<byte>? tableBytes = null) =>
+        new(
+            source.TableIdentity,
+            source.ProviderSoname,
+            source.ProviderBuildIdHex,
+            source.ProviderSha256,
+            source.ProviderFileSize,
+            tableObject ?? source.TableObject,
+            targetSymbols ?? source.TargetSymbols,
+            entries ?? source.Entries,
+            tableBytes ?? source.TableBytes,
+            source.Encoding);
+
+    private static SemanticExternalJumpTableExtension MutateProviderTargetRange(
+        ulong? fileOffset = null,
+        ulong? virtualAddress = null)
+    {
+        var source = CreateExternalProviderTable();
+        var targets = source.TargetSymbols.ToArray();
+        var range = targets[0].Range;
+        targets[0] = targets[0] with
+        {
+            Range = new SemanticExternalProviderRange(
+                new SemanticExternalProviderFileOffset(fileOffset ?? range.FileOffset.Value),
+                new SemanticExternalProviderAddress(virtualAddress ?? range.VirtualAddress.Value),
+                range.Size),
+        };
+        return CopyExternalProviderTable(source, targetSymbols: targets);
+    }
+
+    private static IEnumerable<T> CountYielded<T>(T value, int count, Action onYield)
+    {
+        for (var index = 0; index < count; index++)
+        {
+            onYield();
+            yield return value;
+        }
+    }
+
+    private static int FindProviderTableObjectField(byte[] snapshotBytes, string field)
+    {
+        var symbolName = Encoding.UTF8.GetBytes("urp_external_jump_table");
+        var nameOffset = snapshotBytes.AsSpan().IndexOf(symbolName);
+        Assert.True(nameOffset >= sizeof(uint));
+        Assert.Equal((uint)symbolName.Length, BinaryPrimitives.ReadUInt32LittleEndian(
+            snapshotBytes.AsSpan(nameOffset - sizeof(uint), sizeof(uint))));
+        Assert.Equal(-1, snapshotBytes.AsSpan(nameOffset + symbolName.Length).IndexOf(symbolName));
+        var bindingOffset = nameOffset + symbolName.Length + sizeof(byte) + sizeof(uint);
+        return field switch
+        {
+            "binding" => bindingOffset,
+            "visibility" => bindingOffset + sizeof(byte) + sizeof(byte),
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+    }
+
+    private static SemanticExternalJumpTableExtension CreateExternalProviderTable(
+        string tableIdentity = "external-provider-table",
+        char contentTag = 'a',
+        int targetCount = 4,
+        int? entryCount = null,
+        int targetNamePadding = 0,
+        bool reverseOrder = false,
+        string providerSoname = "liburprotect-external-table.so.1",
+        string? providerBuildId = null,
+        string? providerSha256 = null,
+        ulong providerFileSize = 0x20000,
+        ulong tableVirtualAddress = 0x4000,
+        ulong tableFileOffset = 0x1000,
+        uint tableFlags = ElfConstants.PfR,
+        uint targetFlags = ElfConstants.PfR | ElfConstants.PfX,
+        int displacementDelta = 0,
+        byte targetBinding = 1,
+        byte targetVisibility = 0)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(targetCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(targetNamePadding);
+        var actualEntryCount = entryCount ?? targetCount;
+        ArgumentOutOfRangeException.ThrowIfNegative(actualEntryCount);
+
+        var targetSymbols = new List<SemanticExternalProviderSymbol>(targetCount);
+        var targetDisplacements = new int[targetCount];
+        for (var index = 0; index < targetCount; index++)
+        {
+            const ulong targetStride = 0x10;
+            const ulong targetOffset = 0x10000;
+            ulong targetAddress;
+            if (tableVirtualAddress > ulong.MaxValue - targetOffset - checked((ulong)index * targetStride))
+            {
+                targetAddress = tableVirtualAddress - targetOffset + checked((ulong)index * targetStride);
+            }
+            else
+            {
+                targetAddress = tableVirtualAddress + targetOffset + checked((ulong)index * targetStride);
+            }
+
+            var displacement = targetAddress >= tableVirtualAddress
+                ? checked((int)(targetAddress - tableVirtualAddress))
+                : -checked((int)(tableVirtualAddress - targetAddress));
+            targetDisplacements[index] = displacement;
+            targetSymbols.Add(new SemanticExternalProviderSymbol(
+                $"target-{index:D4}{new string('t', targetNamePadding)}",
+                ElfSymbolTableKind.Dynamic,
+                checked((uint)(20 + index)),
+                Binding: targetBinding,
+                Type: ElfConstants.SttFunc,
+                Visibility: targetVisibility,
+                SectionIndex: 2,
+                new SemanticExternalProviderRange(
+                    new SemanticExternalProviderFileOffset(0x8000 + checked((ulong)index * targetStride)),
+                    new SemanticExternalProviderAddress(targetAddress),
+                    Size: 8),
+                targetFlags));
+        }
+
+        var tableBytes = new byte[checked(actualEntryCount * sizeof(int))];
+        var entries = new List<SemanticExternalJumpTableEntryFact>(actualEntryCount);
+        for (var index = 0; index < actualEntryCount; index++)
+        {
+            var targetIndex = index % targetCount;
+            var displacement = checked(targetDisplacements[targetIndex] + displacementDelta);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                tableBytes.AsSpan(checked(index * sizeof(int)), sizeof(int)),
+                displacement);
+            entries.Add(new SemanticExternalJumpTableEntryFact(
+                index,
+                displacement,
+                ElfSymbolTableKind.Dynamic,
+                checked((uint)(20 + targetIndex))));
+        }
+
+        if (reverseOrder)
+        {
+            targetSymbols.Reverse();
+            entries.Reverse();
+        }
+
+        var tableObject = new SemanticExternalProviderSymbol(
+            "urp_external_jump_table",
+            ElfSymbolTableKind.Dynamic,
+            SymbolIndex: 2,
+            Binding: 1,
+            Type: ElfConstants.SttObject,
+            Visibility: 0,
+            SectionIndex: 1,
+            new SemanticExternalProviderRange(
+                new SemanticExternalProviderFileOffset(tableFileOffset),
+                new SemanticExternalProviderAddress(tableVirtualAddress),
+                checked((ulong)tableBytes.Length)),
+            tableFlags);
+
+        return new SemanticExternalJumpTableExtension(
+            new SemanticExternalProviderTableIdentity(tableIdentity),
+            providerSoname,
+            providerBuildId ?? "1122334455667788",
+            providerSha256 ?? new string(contentTag, 64),
+            providerFileSize,
+            tableObject,
+            targetSymbols,
+            entries,
+            tableBytes,
+            SemanticExternalJumpTableEncoding.SignedRelative32FromTableStart);
+    }
+
     private static SemanticSourceRange Range(ulong virtualAddress, ulong fileOffset, ulong size) =>
         new(new FileOffset(fileOffset), new VirtualAddress(virtualAddress), size);
+
+    private static void RefreshSnapshotDigest(byte[] bytes)
+    {
+        var digestOffset = bytes.Length - 32;
+        SHA256.HashData(bytes.AsSpan(0, digestOffset)).CopyTo(bytes.AsSpan(digestOffset));
+    }
 
     private static string Describe(IEnumerable<Diagnostic> diagnostics) =>
         string.Join(Environment.NewLine, diagnostics);

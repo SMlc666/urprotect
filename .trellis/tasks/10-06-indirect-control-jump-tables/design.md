@@ -128,6 +128,46 @@ The resolver is demand-driven from selected roots. It does not scan every functi
 
 This policy maximizes compatibility without pretending that an opaque runtime pointer follows relocated code automatically.
 
+## Static local function-pointer calls (bounded first mode)
+
+The first function-pointer positive is an exact static local call, not an
+arbitrary indirect-call allowance. A selected caller may contain a compiler-
+shaped BLR Xn whose bounded, same-basic-block reaching definition resolves
+through an ADRP/ADD address producer and an exact stack spill/reload to one
+defined, non-preemptible STT_FUNC in the same executable file-backed source
+image. The linked SHT_RELA rows, their sh_link/sh_info, the symbol-table
+identity, relocation pair/sites/addends, and decoded expression must agree.
+Missing sections/relocations, a preemptible or ambiguous symbol, clobber,
+conflicting control-flow path, or arbitrary runtime pointer remains unresolved.
+
+For the initial mapping policy, transform only the selected urp_entry.
+Preserve the callback target at its original source VA and bind that
+identity/preserve-original decision explicitly in the canonical plan and
+address map. Re-encode the moved caller's page-relative producer to that
+preserved VA through Aarch64InstructionEncoder; do not leave stale source
+PC-relative bits. An unselected urp_observer continues to call the same
+preserved target. This first mode does not support a selected/moved callee,
+runtime translation, veneer synthesis, or a general pointer table.
+
+Represent the exact static target separately from RuntimeResolved imports.
+Use a typed static-call ownership contract that binds the call/register,
+ordered producer chain, section-linked relocation identities, exact symbol
+row and source range, and target mapping policy. Rehydration independently
+rederives those facts from source ELF and instruction bytes before publication.
+Do not reuse the dynamic-import owner with fabricated GOT data or a free-form
+runtime binding. The current nested snapshot is strict URP-SPS5/version 5 and
+rejects versions 1-4 rather than dual-decoding; the original jump-table
+ownership byte ordinals 0-3 remain stable, with `Ambiguous=4` appended. The
+outer Protected Image ABI remains v1. Publication revalidates the final caller sequence and callback
+symbol/range/bytes at the original VA.
+
+The native oracle must execute source and transformed selected callers through
+HostContext and compare the unselected observer as a control. Retain measured
+process/entry statuses, byte streams, source/protected/native hashes, and exact
+runtime identity. This is one compiler/toolchain-shaped native-glibc row only;
+it does not promote other compilers, runtimes, moved callees, or arbitrary
+function pointers.
+
 ## Stable veneers and runtime translation
 
 Stable-address veneers are preferred when the old target address can be retained and the semantic encoder supplies a valid veneer sequence. The layout child places the veneer; this child owns the target identity and required register/flag/ABI effects.

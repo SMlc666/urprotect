@@ -14,7 +14,9 @@ no database-backed application layer.
 | [Error Handling](./error-handling.md) | Diagnostics, failure propagation, and CLI exit codes | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | .NET, binary-safety, testing, and CI contracts | Filled |
 | [Runtime Compatibility](./runtime-compatibility.md) | HostContext, no-path handoff, and matrix evidence contracts | Filled |
+| [External Consumer Proof](./external-consumer-proof.md) | Selected external-table proof-only API, exact instruction semantics, and admission boundary | Filled |
 | [TLS Rewrite](./tls-rewrite.md) | Typed AArch64 TLS semantic rewrite and TLSDESC ownership contracts | Filled |
+| [TLS Evidence Oracle](./tls-evidence-oracle.md) | Explicit row identities, measured baselines, portable runtime facts, and closed child inventories | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Diagnostics and stdout/stderr behavior | Filled; no logging framework |
 
 ## Package Boundaries

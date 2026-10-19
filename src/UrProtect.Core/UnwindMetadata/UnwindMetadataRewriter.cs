@@ -58,7 +58,7 @@ public static class UnwindMetadataRewriter
         {
             if (!TryGetCodeRange(sourceFile, fde, out var sourceRange))
             {
-                if (addressMap.TryMapSourceAddress(new VirtualAddress(fde.InitialLocation), out _))
+                if (FdeOverlapsSelectedFunction(addressMap, fde.InitialLocation, fde.AddressRange))
                 {
                     diagnostics.Error(
                         DiagnosticCode.UnwindAddressMapMissing,
@@ -74,7 +74,7 @@ public static class UnwindMetadataRewriter
                     SemanticEntityKind.Function,
                     out var outputRange))
             {
-                if (addressMap.TryMapSourceAddress(new VirtualAddress(fde.InitialLocation), out _))
+                if (FdeOverlapsSelectedFunction(addressMap, fde.InitialLocation, fde.AddressRange))
                 {
                     diagnostics.Error(
                         DiagnosticCode.UnwindAddressMapMissing,
@@ -684,6 +684,16 @@ public static class UnwindMetadataRewriter
         WriteUleb(destination, offset);
         return true;
     }
+
+    private static bool FdeOverlapsSelectedFunction(
+        AddressMap addressMap,
+        ulong fdeStart,
+        ulong fdeSize) =>
+        addressMap.Entries.Any(entry =>
+            entry.Identity.Kind == SemanticEntityKind.Function
+            && (fdeStart <= entry.SourceRange.VirtualAddress.Value
+                ? entry.SourceRange.VirtualAddress.Value - fdeStart < fdeSize
+                : fdeStart - entry.SourceRange.VirtualAddress.Value < entry.SourceRange.Size));
 
     private static bool TryGetCodeRange(
         ElfFile sourceFile,

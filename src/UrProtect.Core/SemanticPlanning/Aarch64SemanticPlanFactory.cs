@@ -200,6 +200,8 @@ public static class Aarch64SemanticPlanFactory
             .ToDictionary(resolution => resolution.SourceAddress);
         var runtimeIndirectCalls = analysis.RuntimeIndirectCallResolutions
             .ToDictionary(resolution => resolution.SourceAddress);
+        var staticFunctionPointerCalls = analysis.StaticFunctionPointerCallResolutions
+            .ToDictionary(resolution => resolution.SourceAddress);
         var projections = new List<ProjectedInstruction>(layout.Instructions.Count);
         var projectedInstructions = new List<SemanticInstruction>(layout.Instructions.Count);
         var fixups = new List<SemanticFixup>();
@@ -215,6 +217,8 @@ public static class Aarch64SemanticPlanFactory
                 || analysis.JumpTableResolutions.Any(
                     resolution => resolution.SourceAddress == sourceInstruction.Address)
                 || analysis.RuntimeIndirectCallResolutions.Any(
+                    resolution => resolution.SourceAddress == sourceInstruction.Address)
+                || analysis.StaticFunctionPointerCallResolutions.Any(
                     resolution => resolution.SourceAddress == sourceInstruction.Address);
             diagnostics.AddRange(projection.Diagnostics.Where(diagnostic =>
                 !(resolvedIndirect
@@ -238,6 +242,10 @@ public static class Aarch64SemanticPlanFactory
             else if (runtimeIndirectCalls.TryGetValue(sourceInstruction.Address, out var runtimeIndirectCall))
             {
                 instruction = ApplyRuntimeIndirectCallTarget(instruction, runtimeIndirectCall);
+            }
+            else if (staticFunctionPointerCalls.TryGetValue(sourceInstruction.Address, out var staticFunctionPointerCall))
+            {
+                instruction = ApplyStaticFunctionPointerCallTarget(instruction, staticFunctionPointerCall);
             }
 
             if (TryNormalizeUndiscoverableLiteral(
@@ -288,10 +296,17 @@ public static class Aarch64SemanticPlanFactory
             extensions,
             diagnostics);
 
+        AddStaticFunctionPointerCallExtensions(
+            analysis,
+            extensions,
+            mapEntries,
+            diagnostics);
+
         AddJumpTableExtensions(
             analysis,
             extensions,
             mapEntries,
+            options.PlannedAddressMap,
             diagnostics);
 
         AddUnmappedRelocationFixups(
@@ -1195,6 +1210,36 @@ public static class Aarch64SemanticPlanFactory
             instruction.OpaquePreservation);
     }
 
+    private static SemanticInstruction ApplyStaticFunctionPointerCallTarget(
+        SemanticInstruction instruction,
+        Aarch64StaticFunctionPointerCallResolution resolution)
+    {
+        var identity = GetStaticFunctionPointerTargetIdentity(resolution);
+        var target = SemanticTarget.Exact(identity, new VirtualAddress(resolution.TargetAddress));
+        var references = instruction.References
+            .Select(reference => reference.Kind == SemanticReferenceKind.ControlFlowTarget
+                ? reference with { Target = target }
+                : reference)
+            .ToArray();
+
+        return new SemanticInstruction(
+            instruction.SourceVirtualAddress,
+            instruction.SourceFileOffset,
+            instruction.Encoding,
+            instruction.Mnemonic,
+            instruction.SourceRange,
+            instruction.Operands,
+            instruction.RegisterEffects,
+            instruction.FlagEffects,
+            instruction.ControlFlow,
+            target,
+            instruction.PcRelativeExpression,
+            instruction.LiteralReference,
+            instruction.Relocations,
+            references,
+            instruction.OpaquePreservation);
+    }
+
     private static SemanticInstruction ApplyResolvedJumpTableTarget(
         SemanticInstruction instruction,
         Aarch64JumpTableResolution resolution)
@@ -1293,10 +1338,120 @@ public static class Aarch64SemanticPlanFactory
         }
     }
 
+    private static void AddStaticFunctionPointerCallExtensions(
+        Aarch64FunctionAnalysis analysis,
+        List<ISemanticPlanExtension> extensions,
+        List<AddressMapEntry> mapEntries,
+        DiagnosticBag diagnostics)
+    {
+        var callSources = analysis.Instructions
+            .ToDictionary(instruction => instruction.Address);
+        foreach (var resolution in analysis.StaticFunctionPointerCallResolutions)
+        {
+            if (!callSources.TryGetValue(resolution.SourceAddress, out var callSource)
+                || resolution.AdrpRelocation.Symbol is not { } symbol
+                || resolution.AdrpRelocation.RelocationSectionIndex != resolution.AddRelocation.RelocationSectionIndex
+                || resolution.AdrpRelocation.SymbolTableSectionIndex != resolution.AddRelocation.SymbolTableSectionIndex)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.IndirectTargetUnresolved,
+                    "A static function-pointer call lost its selected source instruction or exact section-linked owner rows before plan publication.",
+                    resolution.SourceAddress);
+                continue;
+            }
+
+            var targetIdentity = GetStaticFunctionPointerTargetIdentity(resolution);
+            var targetRange = new SemanticSourceRange(
+                resolution.TargetFileOffset,
+                new VirtualAddress(resolution.TargetAddress),
+                resolution.TargetSize);
+            mapEntries.Add(new AddressMapEntry(targetIdentity, targetRange, targetRange));
+
+            var sourceIdentity = SemanticEntityId.Instruction(new VirtualAddress(resolution.SourceAddress));
+            extensions.RemoveAll(extension =>
+                extension is SemanticIndirectTargetExtension indirect
+                && indirect.SourceInstruction == sourceIdentity
+                && indirect.SourceAddress.Value == resolution.SourceAddress);
+            extensions.Add(new SemanticIndirectTargetExtension(
+                sourceIdentity,
+                new VirtualAddress(resolution.SourceAddress),
+                SemanticTarget.Exact(targetIdentity, new VirtualAddress(resolution.TargetAddress)),
+                SemanticStaticFunctionPointerCallContract.ProofKind));
+
+            extensions.Add(new SemanticStaticFunctionPointerCallExtension(
+                sourceIdentity,
+                new SemanticSourceRange(
+                    new FileOffset(callSource.FileOffset),
+                    new VirtualAddress(callSource.Address),
+                    sizeof(uint)),
+                resolution.TargetRegister,
+                resolution.ProducerAddresses.Select(address => new VirtualAddress(address)),
+                resolution.StackSlotOffset,
+                resolution.OwnerFunction,
+                resolution.AdrpRelocation.RelocationSectionIndex,
+                resolution.RelocationSectionHeader,
+                resolution.AdrpRelocation.SymbolTableSectionIndex,
+                resolution.SymbolTableSectionHeader,
+                resolution.CallerSectionHeader,
+                resolution.TargetSectionHeader,
+                ToSemanticRelocationRow(resolution.AdrpRelocation),
+                ToSemanticRelocationRow(resolution.AddRelocation),
+                targetRange,
+                targetIdentity,
+                targetRange,
+                SemanticStaticFunctionPointerMappingPolicy.PreserveOriginalAddress));
+        }
+
+        if (analysis.StaticFunctionPointerCallResolutions
+            .GroupBy(resolution => resolution.SourceAddress)
+            .Any(group => group.Count() != 1))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanMalformed,
+                "The selected-function analysis contains duplicate static function-pointer call owners.",
+                analysis.Function.Value);
+        }
+    }
+
+    private static SemanticEntityId GetStaticFunctionPointerTargetIdentity(
+        Aarch64StaticFunctionPointerCallResolution resolution)
+    {
+        var symbol = resolution.AdrpRelocation.Symbol!;
+        return SemanticEntityId.RelocationTarget(
+            $"static-function:{symbol.SymbolTableSectionIndex}:{symbol.SymbolIndex}:{symbol.Name}");
+    }
+
+    private static SemanticStaticFunctionPointerRelocationRow ToSemanticRelocationRow(
+        ElfSectionRelocation relocation)
+    {
+        var symbol = relocation.Symbol!;
+        return new SemanticStaticFunctionPointerRelocationRow(
+            relocation.RelocationSectionIndex,
+            relocation.RelocationSectionFileOffset,
+            relocation.RelocationSectionAddress,
+            relocation.SymbolTableSectionIndex,
+            relocation.TargetSectionIndex,
+            relocation.Relocation.SourceAddress,
+            relocation.Relocation.Offset,
+            relocation.Relocation.Info,
+            relocation.Relocation.Type,
+            relocation.Relocation.SymbolIndex,
+            relocation.Relocation.Addend,
+            relocation.Relocation.IsPlt,
+            symbol.NameOffset,
+            symbol.Name,
+            symbol.Info,
+            symbol.Other,
+            symbol.SectionIndex,
+            symbol.Value,
+            symbol.Size);
+    }
+
     private static void AddJumpTableExtensions(
         Aarch64FunctionAnalysis analysis,
         List<ISemanticPlanExtension> extensions,
         List<AddressMapEntry> mapEntries,
+        AddressMap? plannedAddressMap,
         DiagnosticBag diagnostics)
     {
         foreach (var table in analysis.JumpTableResolutions)
@@ -1310,7 +1465,11 @@ public static class Aarch64SemanticPlanFactory
                 table.TableFileOffset,
                 table.TableBase,
                 table.TableSize);
-            mapEntries.Add(new AddressMapEntry(tableIdentity, tableRange, tableRange));
+            var outputRange = plannedAddressMap is not null
+                && plannedAddressMap.TryGet(tableIdentity, out var plannedTable)
+                    ? plannedTable.OutputRange
+                    : tableRange;
+            mapEntries.Add(new AddressMapEntry(tableIdentity, tableRange, outputRange));
 
             var entryBindings = new List<SemanticJumpTableEntryBinding>(table.Entries.Count);
             var targets = new List<SemanticTarget>(table.Entries.Count);
@@ -1322,7 +1481,11 @@ public static class Aarch64SemanticPlanFactory
                     entry.SourceFileOffset,
                     entry.SourceAddress,
                     (ulong)table.EntryWidth);
-                mapEntries.Add(new AddressMapEntry(entryIdentity, entryRange, entryRange));
+                var outputEntryRange = plannedAddressMap is not null
+                    && plannedAddressMap.TryGet(entryIdentity, out var plannedEntry)
+                        ? plannedEntry.OutputRange
+                        : entryRange;
+                mapEntries.Add(new AddressMapEntry(entryIdentity, entryRange, outputEntryRange));
 
                 var targetIdentity = SemanticEntityId.BasicBlock(
                     FormatAddress(entry.TargetAddress.Value));
@@ -1355,11 +1518,16 @@ public static class Aarch64SemanticPlanFactory
                 lowerBound: table.LowerBound,
                 upperBound: table.UpperBound,
                 defaultTarget: defaultTarget,
-                ownership: SemanticJumpTableOwnership.SelectedFunctionPrivate,
-                rewritePolicy: SemanticJumpTableRewritePolicy.InPlace,
-                outputRange: tableRange,
+                ownership: table.HasObservedAdditionalOwner
+                    ? SemanticJumpTableOwnership.Shared
+                    : SemanticJumpTableOwnership.Ambiguous,
+                rewritePolicy: SemanticJumpTableRewritePolicy.CopiedAndRetargeted,
+                outputRange: outputRange,
                 entries: entryBindings,
-                diagnostic: table.Proof));
+                diagnostic: table.Proof,
+                tableReferenceProducers: table.TableReferenceProducers,
+                ownerReferences: table.OwnerReferences,
+                ownerInventoryComplete: false));
         }
 
         if (analysis.JumpTableResolutions

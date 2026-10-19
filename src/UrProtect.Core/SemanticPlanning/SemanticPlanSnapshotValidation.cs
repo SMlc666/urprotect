@@ -605,6 +605,15 @@ public static partial class SemanticPlanSnapshotCodec
                 ValidateTlsBinding(tls.Binding, diagnostics);
                 ValidateOptionalString(tls.Diagnostic, "TLS diagnostic", diagnostics);
                 break;
+            case SemanticDynamicImportCallExtension dynamicImport:
+                SemanticDynamicImportCallContract.ValidateExtensionFields(dynamicImport, diagnostics);
+                break;
+            case SemanticStaticFunctionPointerCallExtension staticCall:
+                SemanticStaticFunctionPointerCallContract.ValidateExtensionFields(staticCall, diagnostics);
+                break;
+            case SemanticExternalJumpTableExtension externalTable:
+                SemanticExternalJumpTableContract.ValidateExtensionFields(externalTable, diagnostics);
+                break;
             case SemanticJumpTableExtension jumpTable:
                 ValidateEntityId(jumpTable.TableIdentity, "jump-table identity", diagnostics);
                 ValidateRange(jumpTable.TableRange, "jump-table range", diagnostics);
@@ -673,6 +682,120 @@ public static partial class SemanticPlanSnapshotCodec
                                 entry.SourceRange.FileOffset.Value);
                         }
                     }
+                }
+
+                ValidateCount(
+                    jumpTable.TableReferenceProducers.Count,
+                    SemanticPlanSnapshotLimits.MaximumJumpTableReferenceProducers,
+                    "jump-table reference producer",
+                    diagnostics);
+                ValidateCount(
+                    jumpTable.OwnerReferences.Count,
+                    SemanticPlanSnapshotLimits.MaximumJumpTableOwnerReferences,
+                    "jump-table owner reference",
+                    diagnostics);
+                var producerAddresses = new HashSet<ulong>();
+                var producerKinds = new HashSet<Aarch64JumpTableReferenceKind>();
+                foreach (var producer in jumpTable.TableReferenceProducers)
+                {
+                    if (!Enum.IsDefined(producer.Kind)
+                        || producer.InstructionAddress % sizeof(uint) != 0
+                        || !producerAddresses.Add(producer.InstructionAddress)
+                        || !producerKinds.Add(producer.Kind))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.SemanticPlanSnapshotMalformed,
+                            "A jump-table base-reference producer has an unsupported kind, duplicate site, or unaligned instruction address.",
+                            producer.InstructionAddress);
+                    }
+                }
+
+                var hasSharedOwnerProof = false;
+                foreach (var reference in jumpTable.OwnerReferences)
+                {
+                    ValidateString(reference.SymbolName, "jump-table owner symbol name", false, diagnostics, reference.InstructionAddress);
+                    ValidateString(reference.OwnerFunctionName, "jump-table owner function name", false, diagnostics, reference.InstructionAddress);
+                    var relocationKindMatches = reference.RelocationType switch
+                    {
+                        ElfConstants.RArm64AdrPrelPgHi21 or ElfConstants.RArm64AdrPrelPgHi21Nc => true,
+                        ElfConstants.RArm64AddAbsLo12Nc => true,
+                        _ => false,
+                    };
+                    if (reference.RelocationSectionIndex < 0
+                        || reference.SymbolTableSectionIndex == 0
+                        || reference.SymbolIndex == 0
+                        || reference.SymbolSectionIndex == 0
+                        || reference.SymbolType != ElfConstants.SttObject
+                        || reference.SymbolSize == 0
+                        || !TryAdd(reference.SymbolValue, reference.SymbolSize, out _)
+                        || jumpTable.TableRange.VirtualAddress.Value < reference.SymbolValue
+                        || jumpTable.TableRange.VirtualAddress.Value - reference.SymbolValue > reference.SymbolSize
+                        || jumpTable.TableRange.Size > reference.SymbolSize - (jumpTable.TableRange.VirtualAddress.Value - reference.SymbolValue)
+                        || reference.OwnerFunctionSize == 0
+                        || !TryAdd(reference.OwnerFunctionStart, reference.OwnerFunctionSize, out var ownerEnd)
+                        || reference.TargetSectionIndex != reference.OwnerFunctionSectionIndex
+                        || reference.OwnerFunctionSectionIndex == 0
+                        || reference.InstructionAddress % sizeof(uint) != 0
+                        || reference.OwnerFunctionSection.Type == ElfConstants.ShtNobits
+                        || (reference.OwnerFunctionSection.Flags & ElfConstants.ShfExecInstr) == 0
+                        || !TryValidateOwnerSectionContainment(reference, ownerEnd)
+                        || !relocationKindMatches
+                        || !TryAddSignedAddress(reference.SymbolValue, reference.Addend, out var relocationTarget)
+                        || relocationTarget != jumpTable.TableRange.VirtualAddress.Value)
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.SemanticPlanSnapshotMalformed,
+                            "A jump-table ownership row does not identify a bounded object relocation, matching target section and owner function section, and contained owner/site range.",
+                            reference.InstructionAddress);
+                    }
+
+                    if (reference.IsSelectedFunction
+                        && !producerAddresses.Contains(reference.InstructionAddress))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.SemanticPlanSnapshotMalformed,
+                            "A selected jump-table owner relocation is not bound to one retained selected producer site.",
+                            reference.InstructionAddress);
+                    }
+                }
+
+                hasSharedOwnerProof = jumpTable.OwnerReferences
+                    .Where(reference => !reference.IsSelectedFunction)
+                    .GroupBy(reference => (reference.SymbolTableSectionIndex, reference.SymbolIndex, reference.OwnerFunctionStart, reference.OwnerFunctionSize))
+                    .Any(group => group.Any(reference => reference.RelocationType is
+                            ElfConstants.RArm64AdrPrelPgHi21 or ElfConstants.RArm64AdrPrelPgHi21Nc)
+                        && group.Any(reference => reference.RelocationType == ElfConstants.RArm64AddAbsLo12Nc));
+                if (jumpTable.HasStructuredProof
+                    && (jumpTable.RewritePolicy != SemanticJumpTableRewritePolicy.CopiedAndRetargeted
+                        || jumpTable.EntrySize != sizeof(int)
+                        || !jumpTable.IsSigned
+                        || jumpTable.Scale != 1
+                        || jumpTable.OwnerInventoryComplete
+                        || jumpTable.OutputRange is not { } copiedRange
+                        || copiedRange.Size != jumpTable.TableRange.Size
+                        || copiedRange.VirtualAddress == jumpTable.TableRange.VirtualAddress
+                        || producerKinds.Count != 2
+                        || jumpTable.Ownership == SemanticJumpTableOwnership.SelectedFunctionPrivate))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                        "The current jump-table contract requires a bounded signed-32 copy, two selected base producers, ambiguous/shared ownership evidence, and a distinct requested output range.",
+                        jumpTable.TableRange.FileOffset.Value);
+                }
+
+                if (jumpTable.Ownership == SemanticJumpTableOwnership.Shared && !hasSharedOwnerProof)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticPlanSnapshotMalformed,
+                        "A table cannot be classified shared without one retained additional owner's ADRP/ADD relocation pair.",
+                        jumpTable.TableRange.FileOffset.Value);
+                }
+                if (jumpTable.Ownership == SemanticJumpTableOwnership.Ambiguous && hasSharedOwnerProof)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticPlanSnapshotMalformed,
+                        "Positive additional-owner relocation evidence cannot be downgraded to ambiguous ownership.",
+                        jumpTable.TableRange.FileOffset.Value);
                 }
 
                 break;
@@ -1696,6 +1819,65 @@ public static partial class SemanticPlanSnapshotCodec
             : leftStart - rightStart < rightSize;
 
 
+    private static bool TryValidateOwnerSectionContainment(
+        Aarch64JumpTableOwnerReference reference,
+        ulong ownerFunctionEnd)
+    {
+        var section = reference.OwnerFunctionSection;
+        if (section.Size == 0
+            || section.Address > reference.OwnerFunctionStart
+            || !TryAdd(section.Address, section.Size, out var sectionVirtualEnd)
+            || !TryAdd(section.Offset, section.Size, out var sectionFileEnd)
+            || reference.OwnerFunctionStart > sectionVirtualEnd
+            || reference.OwnerFunctionSize > sectionVirtualEnd - reference.OwnerFunctionStart
+            || reference.InstructionAddress < reference.OwnerFunctionStart
+            || reference.InstructionAddress > ownerFunctionEnd
+            || sizeof(uint) > ownerFunctionEnd - reference.InstructionAddress
+            || reference.InstructionAddress < section.Address
+            || reference.InstructionAddress > sectionVirtualEnd
+            || sizeof(uint) > sectionVirtualEnd - reference.InstructionAddress)
+        {
+            return false;
+        }
+
+        var functionDelta = reference.OwnerFunctionStart - section.Address;
+        var siteDelta = reference.InstructionAddress - section.Address;
+        return functionDelta <= section.Size
+            && reference.OwnerFunctionSize <= section.Size - functionDelta
+            && TryAdd(section.Offset, functionDelta, out var functionFileOffset)
+            && functionFileOffset <= sectionFileEnd
+            && reference.OwnerFunctionSize <= sectionFileEnd - functionFileOffset
+            && siteDelta <= section.Size
+            && TryAdd(section.Offset, siteDelta, out var siteFileOffset)
+            && siteFileOffset <= sectionFileEnd
+            && sizeof(uint) <= sectionFileEnd - siteFileOffset;
+    }
+
+    private static bool TryAddSignedAddress(ulong value, long addend, out ulong result)
+    {
+        if (addend >= 0)
+        {
+            var positive = checked((ulong)addend);
+            if (positive <= ulong.MaxValue - value)
+            {
+                result = value + positive;
+                return true;
+            }
+        }
+        else
+        {
+            var magnitude = unchecked((ulong)(-(addend + 1))) + 1;
+            if (magnitude <= value)
+            {
+                result = value - magnitude;
+                return true;
+            }
+        }
+
+        result = 0;
+        return false;
+    }
+
     private static bool TryAdd(ulong value, ulong amount, out ulong result)
     {
         if (amount > ulong.MaxValue - value)
@@ -1843,9 +2025,20 @@ public static partial class SemanticPlanSnapshotCodec
             SemanticTlsBindingExtension tls =>
                 GetIntSortKey((int)extension.Kind)
                 + GetEntitySortKey(tls.SourceIdentity),
+            SemanticDynamicImportCallExtension dynamicImport =>
+                GetIntSortKey((int)extension.Kind)
+                + GetEntitySortKey(dynamicImport.CallIdentity)
+                + GetUlongSortKey(dynamicImport.CallAddress.Value),
+            SemanticStaticFunctionPointerCallExtension staticCall =>
+                GetIntSortKey((int)extension.Kind)
+                + GetEntitySortKey(staticCall.SourceIdentity)
+                + GetUlongSortKey(staticCall.CallAddress.Value),
             SemanticJumpTableExtension jumpTable =>
                 GetIntSortKey((int)extension.Kind)
                 + GetEntitySortKey(jumpTable.TableIdentity),
+            SemanticExternalJumpTableExtension externalTable =>
+                GetIntSortKey((int)extension.Kind)
+                + GetOptionalStringSortKey(externalTable.TableIdentity.Value),
             SemanticCfiEffectExtension cfi =>
                 GetIntSortKey((int)extension.Kind)
                 + GetEntitySortKey(cfi.SourceIdentity),

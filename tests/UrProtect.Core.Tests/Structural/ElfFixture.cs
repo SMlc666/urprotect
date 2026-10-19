@@ -269,7 +269,665 @@ internal static partial class ElfFixture
         return bytes;
     }
 
-    public static byte[] RelativeJumpTableFunctionPie(bool malformedTableEntry = false)
+    public static byte[] ConditionalRegisterBranchFunctionPie(uint branchEncoding)
+    {
+        var bytes = ExactIndirectBranchFunctionPie();
+        const int codeOffset = 0x200;
+        WriteUInt32(bytes.AsSpan(), codeOffset, branchEncoding);
+        WriteUInt32(bytes.AsSpan(), codeOffset + sizeof(uint), 0xD65F03C0u);
+        WriteUInt32(bytes.AsSpan(), codeOffset + (2 * sizeof(uint)), 0xD65F03C0u);
+        return bytes;
+    }
+
+    public static byte[] HostContextJoinClearedByReleaseStorePie()
+    {
+        var bytes = ExactIndirectBranchFunctionPie();
+        const int codeOffset = 0x200;
+        const int functionAddress = 0x1200;
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int codeSize = 18 * sizeof(uint);
+        const int successIndex = 7;
+        const int failureIndex = 16;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            functionAddress,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+
+        var words = new uint[18];
+        words[0] = 0xAA0003E6u; // MOV X6, X0 (HostContext root for this selected test entry)
+        words[1] = 0xF94004C1u; // LDR X1, [X6, #8]
+        words[2] = EncodeTestBranch(functionAddress + (2 * sizeof(uint)), functionAddress + (failureIndex * sizeof(uint)), 1, 4, false);
+        words[3] = 0xB94004C2u; // LDR W2, [X6, #4]
+        var compare = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate,
+            functionAddress + (4 * sizeof(uint)),
+            72,
+            BaseRegister: 2,
+            DestinationWidth: 32));
+        if (!compare.IsSuccess)
+        {
+            throw new InvalidOperationException(compare.Diagnostic);
+        }
+
+        words[4] = compare.Encoding;
+        words[5] = EncodeConditionalBranch(
+            functionAddress + (5 * sizeof(uint)),
+            functionAddress + (successIndex * sizeof(uint)),
+            conditionCode: 2);
+        words[6] = 0xD65F03C0u; // RET (short-table failure)
+        words[7] = 0xF9401CC3u; // LDR X3, [X6, #56]
+        words[8] = EncodeCompareAndBranch(functionAddress + (8 * sizeof(uint)), functionAddress + (failureIndex * sizeof(uint)), 3, 64, false);
+        words[9] = 0xF94020C4u; // LDR X4, [X6, #64]
+        words[10] = EncodeCompareAndBranch(functionAddress + (10 * sizeof(uint)), functionAddress + (failureIndex * sizeof(uint)), 4, 64, false);
+        words[11] = 0x910100C9u; // ADD X9, X6, #64 (the review counterexample's host-field alias)
+        words[12] = 0xC89FFD3Fu; // STLR XZR, [X9]
+        words[13] = 0xF94020C4u; // LDR X4, [X6, #64] (reload after the nulling write)
+        words[14] = 0xD63F0080u; // BLR X4
+        words[15] = 0xD65F03C0u; // RET
+        words[16] = 0x52800020u; // MOV W0, #1
+        words[17] = 0xD65F03C0u; // RET
+
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return AddHostContextDynamicEntry(bytes, codeSize);
+    }
+
+    public static byte[] HostContextJoinCallbackIntactPie()
+    {
+        var bytes = HostContextJoinClearedByReleaseStorePie();
+        WriteUInt32(bytes.AsSpan(), 0x200 + (11 * sizeof(uint)), 0xD503201Fu);
+        WriteUInt32(bytes.AsSpan(), 0x200 + (12 * sizeof(uint)), 0xD503201Fu);
+        return bytes;
+    }
+
+    public static byte[] HostContextJoinCallbackAddressBearingMutationPie(uint memoryInstructionEncoding)
+    {
+        var bytes = HostContextJoinCallbackIntactPie();
+        const int codeOffset = 0x200;
+        const ulong functionAddress = 0x1200;
+        const int addressIndex = 11;
+        const int atomicIndex = 12;
+        var addAddress = functionAddress + (addressIndex * sizeof(uint));
+        var add = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.AddImmediate,
+            addAddress,
+            64,
+            DestinationRegister: 9,
+            BaseRegister: 6,
+            DestinationWidth: 64));
+        if (!add.IsSuccess)
+        {
+            throw new InvalidOperationException(add.Diagnostic);
+        }
+
+        WriteUInt32(bytes.AsSpan(), codeOffset + (addressIndex * sizeof(uint)), add.Encoding);
+        // The instruction word is a named AArch64 oracle asserted by adapter tests.
+        WriteUInt32(bytes.AsSpan(), codeOffset + (atomicIndex * sizeof(uint)), memoryInstructionEncoding);
+        return bytes;
+    }
+
+    public static byte[] HostContextSizeStoreAfterComparisonPie()
+    {
+        var bytes = HostContextJoinClearedByReleaseStorePie();
+        const int codeOffset = 0x200;
+        const int functionAddress = 0x1200;
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int codeSize = 20 * sizeof(uint);
+        const int failureIndex = 18;
+        var words = new uint[20];
+        words[0] = 0xAA0003E6u;
+        words[1] = 0xF94004C1u;
+        words[2] = EncodeTestBranch(functionAddress + (2 * sizeof(uint)), functionAddress + (failureIndex * sizeof(uint)), 1, 4, false);
+        words[3] = 0xB94004C2u;
+        var compare = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate,
+            functionAddress + (4 * sizeof(uint)),
+            72,
+            BaseRegister: 2,
+            DestinationWidth: 32));
+        if (!compare.IsSuccess)
+        {
+            throw new InvalidOperationException(compare.Diagnostic);
+        }
+
+        words[4] = compare.Encoding;
+        words[5] = 0x910010C9u; // ADD X9, X6, #4 (HostContext size field)
+        words[6] = 0x889FFD3Fu; // STLR WZR, [X9]
+        words[7] = EncodeConditionalBranch(
+            functionAddress + (7 * sizeof(uint)),
+            functionAddress + (9 * sizeof(uint)),
+            conditionCode: 2);
+        words[8] = 0xD65F03C0u;
+        words[9] = 0xF9401CC3u;
+        words[10] = EncodeCompareAndBranch(functionAddress + (10 * sizeof(uint)), functionAddress + (failureIndex * sizeof(uint)), 3, 64, false);
+        words[11] = 0xF94020C4u;
+        words[12] = EncodeCompareAndBranch(functionAddress + (12 * sizeof(uint)), functionAddress + (failureIndex * sizeof(uint)), 4, 64, false);
+        words[13] = 0xD503201Fu;
+        words[14] = 0xD503201Fu;
+        words[15] = 0xF94020C4u;
+        words[16] = 0xD63F0080u;
+        words[17] = 0xD65F03C0u;
+        words[18] = 0x52800020u;
+        words[19] = 0xD65F03C0u;
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        WriteProgramHeader(bytes.AsSpan(), SecondProgramHeaderOffset, ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX, codeOffset, functionAddress, codeSize, codeSize, 0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+        UpdateHostContextDynamicEntrySize(bytes, codeSize);
+        return bytes;
+    }
+
+    public static byte[] HostContextCallbackWithUnrelatedTlsStorePie()
+    {
+        var bytes = HostContextJoinClearedByReleaseStorePie();
+        WriteUInt32(bytes.AsSpan(), 0x200 + (11 * sizeof(uint)), 0xD53BD049u); // MRS X9, TPIDR_EL0
+        return bytes;
+    }
+
+    public static byte[] HostContextCallbackProducerChainPie(int moveAliasCount)
+    {
+        if (moveAliasCount < 0 || moveAliasCount > 256)
+        {
+            throw new ArgumentOutOfRangeException(nameof(moveAliasCount));
+        }
+
+        var bytes = ExactIndirectBranchFunctionPie();
+        const int codeOffset = 0x200;
+        const int functionAddress = 0x1200;
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int moveStartIndex = 11;
+        var callIndex = checked(moveStartIndex + moveAliasCount);
+        var failureIndex = checked(callIndex + 2);
+        var instructionCount = checked(failureIndex + 2);
+        var codeSize = checked(instructionCount * sizeof(uint));
+
+        var words = new uint[instructionCount];
+        words[0] = 0xAA0003F3u; // MOV X19, X0 (HostContext root)
+        words[1] = 0xF9400661u; // LDR X1, [X19, #8]
+        words[2] = EncodeTestBranch(functionAddress + (2 * sizeof(uint)), checked((ulong)(functionAddress + (failureIndex * sizeof(uint)))), 1, 4, false);
+        words[3] = 0xB9400662u; // LDR W2, [X19, #4]
+        var compare = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate,
+            functionAddress + (4 * sizeof(uint)),
+            72,
+            BaseRegister: 2,
+            DestinationWidth: 32));
+        if (!compare.IsSuccess)
+        {
+            throw new InvalidOperationException(compare.Diagnostic);
+        }
+
+        words[4] = compare.Encoding;
+        words[5] = EncodeConditionalBranch(
+            functionAddress + (5 * sizeof(uint)),
+            functionAddress + (7 * sizeof(uint)),
+            conditionCode: 2);
+        words[6] = 0xD65F03C0u; // RET (short-table failure)
+        words[7] = 0xF9401E63u; // LDR X3, [X19, #56]
+        words[8] = EncodeCompareAndBranch(functionAddress + (8 * sizeof(uint)), checked((ulong)(functionAddress + (failureIndex * sizeof(uint)))), 3, 64, false);
+        words[9] = 0xF9402264u; // LDR X4, [X19, #64]
+        words[10] = EncodeCompareAndBranch(functionAddress + (10 * sizeof(uint)), checked((ulong)(functionAddress + (failureIndex * sizeof(uint)))), 4, 64, false);
+        for (var index = 0; index < moveAliasCount; index++)
+        {
+            words[moveStartIndex + index] = index == 0 ? 0xAA0403E9u : 0xAA0903E9u;
+        }
+
+        words[callIndex] = 0xD63F0120u; // BLR X9
+        words[callIndex + 1] = 0xD65F03C0u; // RET
+        words[failureIndex] = 0x52800020u; // MOV W0, #1
+        words[failureIndex + 1] = 0xD65F03C0u; // RET
+
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            functionAddress,
+            checked((ulong)codeSize),
+            checked((ulong)codeSize),
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, checked((ulong)codeSize));
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, checked((ulong)codeSize));
+        return AddHostContextDynamicEntry(bytes, checked((ulong)codeSize));
+    }
+
+
+    public static byte[] HostContextCallbackProducerMergePie()
+    {
+        var bytes = HostContextCallbackProducerChainPie(62);
+        const int codeOffset = 0x200;
+        const int functionAddress = 0x1200;
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int pathAStart = 12;
+        const int aliasesPerPath = 31;
+        const int pathABranch = 44;
+        const int pathBStart = 45;
+        const int pathBBranch = 77;
+        const int joinIndex = 78;
+        const int failureIndex = 80;
+        const int instructionCount = 82;
+        const ulong codeSize = instructionCount * sizeof(uint);
+        ulong AddressAt(int index) => checked((ulong)(functionAddress + (index * sizeof(uint))));
+
+        var words = new uint[instructionCount];
+        words[0] = 0xAA0003F3u;
+        words[1] = 0xF9400661u;
+        words[2] = EncodeTestBranch(AddressAt(2), AddressAt(failureIndex), 1, 4, false);
+        words[3] = 0xB9400662u;
+        var compare = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate, AddressAt(4), 72, BaseRegister: 2, DestinationWidth: 32));
+        if (!compare.IsSuccess)
+        {
+            throw new InvalidOperationException(compare.Diagnostic);
+        }
+
+        words[4] = compare.Encoding;
+        words[5] = EncodeConditionalBranch(AddressAt(5), AddressAt(7), 2);
+        words[6] = 0xD65F03C0u;
+        words[7] = 0xF9401E63u;
+        words[8] = EncodeCompareAndBranch(AddressAt(8), AddressAt(failureIndex), 3, 64, false);
+        words[9] = 0xF9402264u;
+        words[10] = EncodeCompareAndBranch(AddressAt(10), AddressAt(failureIndex), 4, 64, false);
+        words[11] = EncodeCompareAndBranch(AddressAt(11), AddressAt(pathBStart), 0, 32, false);
+        words[pathAStart] = 0xF9402269u;
+        for (var index = 0; index < aliasesPerPath; index++)
+        {
+            words[pathAStart + index + 1] = 0xAA0903E9u;
+        }
+
+        var branchA = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.Branch26, AddressAt(pathABranch), AddressAt(joinIndex)));
+        var branchB = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.Branch26, AddressAt(pathBBranch), AddressAt(joinIndex)));
+        if (!branchA.IsSuccess || !branchB.IsSuccess)
+        {
+            throw new InvalidOperationException(!branchA.IsSuccess ? branchA.Diagnostic : branchB.Diagnostic);
+        }
+
+        words[pathABranch] = branchA.Encoding;
+        words[pathBStart] = 0xF9402269u;
+        for (var index = 0; index < aliasesPerPath; index++)
+        {
+            words[pathBStart + index + 1] = 0xAA0903E9u;
+        }
+
+        words[pathBBranch] = branchB.Encoding;
+        words[joinIndex] = 0xD63F0120u;
+        words[joinIndex + 1] = 0xD65F03C0u;
+        words[failureIndex] = 0x52800020u;
+        words[failureIndex + 1] = 0xD65F03C0u;
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        WriteProgramHeader(bytes.AsSpan(), SecondProgramHeaderOffset, ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX, codeOffset, functionAddress, codeSize, codeSize, 0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+        UpdateHostContextDynamicEntrySize(bytes, codeSize);
+        return bytes;
+    }
+
+    public static byte[] HostContextCallbackAfterUnknownCallPie()
+    {
+        var bytes = ExactIndirectBranchFunctionPie();
+        const int codeOffset = 0x200;
+        const int functionAddress = 0x1200;
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int codeSize = 19 * sizeof(uint);
+        const int successIndex = 9;
+        const int failureIndex = 17;
+        const int capabilityBranchIndex = 3;
+        const int sizeBranchIndex = 6;
+        const int createNullBranchIndex = 10;
+        const int joinNullBranchIndex = 12;
+        const int callbackCallIndex = 15;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            functionAddress,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+
+        var words = new uint[19];
+        words[0] = 0xD10083FFu; // SUB SP, SP, #0x20
+        words[1] = 0xAA0003F3u; // MOV X19, X0 (HostContext; callee-saved)
+        words[2] = 0xF9400661u; // LDR X1, [X19, #8]
+        words[capabilityBranchIndex] = EncodeTestBranch(
+            functionAddress + (capabilityBranchIndex * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 1,
+            bit: 4,
+            nonZero: false);
+        words[4] = 0xB9400662u; // LDR W2, [X19, #4]
+        var compare = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate,
+            functionAddress + (5 * sizeof(uint)),
+            72,
+            BaseRegister: 2,
+            DestinationWidth: 32));
+        if (!compare.IsSuccess)
+        {
+            throw new InvalidOperationException(compare.Diagnostic);
+        }
+
+        words[5] = compare.Encoding;
+        words[sizeBranchIndex] = EncodeConditionalBranch(
+            functionAddress + (sizeBranchIndex * sizeof(uint)),
+            functionAddress + (successIndex * sizeof(uint)),
+            conditionCode: 2); // B.HS: struct_size >= 72
+        words[7] = 0x52800020u; // MOV W0, #1
+        words[8] = 0xD65F03C0u; // RET (short-table failure)
+        words[9] = 0xF9401E63u; // LDR X3, [X19, #56]
+        words[createNullBranchIndex] = EncodeCompareAndBranch(
+            functionAddress + (createNullBranchIndex * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 3,
+            width: 64,
+            nonZero: false);
+        words[11] = 0xF9402264u; // LDR X4, [X19, #64]
+        words[joinNullBranchIndex] = EncodeCompareAndBranch(
+            functionAddress + (joinNullBranchIndex * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 4,
+            width: 64,
+            nonZero: false);
+        var call = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.Call26,
+            functionAddress + (13 * sizeof(uint)),
+            0x1100));
+        if (!call.IsSuccess)
+        {
+            throw new InvalidOperationException(call.Diagnostic);
+        }
+
+        words[13] = call.Encoding;
+        words[14] = 0xF9401E69u; // LDR X9, [X19, #56] (reload without a fresh null check)
+        words[callbackCallIndex] = 0xD63F0120u; // BLR X9
+        words[16] = 0xD65F03C0u; // RET
+        words[failureIndex] = 0x52800020u; // MOV W0, #1
+        words[18] = 0xD65F03C0u; // RET
+
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return AddHostContextDynamicEntry(bytes, codeSize);
+    }
+
+    public static byte[] HostContextCallbackWithEscapedStackArgumentPie()
+    {
+        var bytes = ExactIndirectBranchFunctionPie();
+        const int codeOffset = 0x200;
+        const int functionAddress = 0x1200;
+        const int sectionHeaderStart = 0x300;
+        const int symbolTableOffset = 0x500;
+        const int codeSize = 34 * sizeof(uint);
+        const int failureIndex = 32;
+
+        WriteProgramHeader(
+            bytes.AsSpan(),
+            SecondProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR | ElfConstants.PfX,
+            codeOffset,
+            functionAddress,
+            codeSize,
+            codeSize,
+            0x1000);
+        WriteUInt64(bytes.AsSpan(), sectionHeaderStart + (4 * ElfConstants.SectionHeaderSize64) + 32, codeSize);
+        WriteUInt64(bytes.AsSpan(), symbolTableOffset + (2 * ElfConstants.SymbolEntrySize64) + 16, codeSize);
+
+        var words = new uint[34];
+        words[0] = 0xD10103FFu; // SUB SP, SP, #0x40
+        words[1] = 0xF90003E0u; // STR X0, [SP] (retain the HostContext pointer in a stack slot)
+        words[2] = 0xAA0003F3u; // MOV X19, X0
+        words[3] = 0xF9400661u; // LDR X1, [X19, #8]
+        words[4] = EncodeTestBranch(
+            functionAddress + (4 * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 1,
+            bit: 4,
+            nonZero: false);
+        words[5] = 0xB9400662u; // LDR W2, [X19, #4]
+        words[6] = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate,
+            functionAddress + (6 * sizeof(uint)),
+            72,
+            BaseRegister: 2,
+            DestinationWidth: 32)).Encoding;
+        words[7] = EncodeConditionalBranch(
+            functionAddress + (7 * sizeof(uint)),
+            functionAddress + (10 * sizeof(uint)),
+            conditionCode: 2);
+        words[8] = 0x52800020u; // MOV W0, #1
+        words[9] = 0xD65F03C0u; // RET
+        words[10] = 0xF9401E63u; // LDR X3, [X19, #56]
+        words[11] = EncodeCompareAndBranch(
+            functionAddress + (11 * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 3,
+            width: 64,
+            nonZero: false);
+        words[12] = 0xF9402264u; // LDR X4, [X19, #64]
+        words[13] = EncodeCompareAndBranch(
+            functionAddress + (13 * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 4,
+            width: 64,
+            nonZero: false);
+        words[14] = 0x910083E4u; // ADD X4, SP, #0x20 (callback output pointer)
+        words[15] = 0xD2800013u; // MOVZ X19, #0 (force subsequent recovery through the stack slot)
+        words[16] = 0xD63F0060u; // BLR X3
+        words[17] = 0xF94003F3u; // LDR X19, [SP]
+        words[18] = 0xF9400661u; // LDR X1, [X19, #8]
+        words[19] = EncodeTestBranch(
+            functionAddress + (19 * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 1,
+            bit: 4,
+            nonZero: false);
+        words[20] = 0xB9400662u; // LDR W2, [X19, #4]
+        words[21] = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate,
+            functionAddress + (21 * sizeof(uint)),
+            72,
+            BaseRegister: 2,
+            DestinationWidth: 32)).Encoding;
+        words[22] = EncodeConditionalBranch(
+            functionAddress + (22 * sizeof(uint)),
+            functionAddress + (25 * sizeof(uint)),
+            conditionCode: 2);
+        words[23] = 0x52800020u; // MOV W0, #1
+        words[24] = 0xD65F03C0u; // RET
+        words[25] = 0xF9401E63u; // LDR X3, [X19, #56]
+        words[26] = EncodeCompareAndBranch(
+            functionAddress + (26 * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 3,
+            width: 64,
+            nonZero: false);
+        words[27] = 0xF9402264u; // LDR X4, [X19, #64]
+        words[28] = EncodeCompareAndBranch(
+            functionAddress + (28 * sizeof(uint)),
+            functionAddress + (failureIndex * sizeof(uint)),
+            register: 4,
+            width: 64,
+            nonZero: false);
+        words[29] = 0xF9402270u; // LDR X16, [X19, #64]
+        words[30] = 0xD63F0200u; // BLR X16
+        words[31] = 0xD65F03C0u; // RET
+        words[failureIndex] = 0x52800020u; // MOV W0, #1
+        words[33] = 0xD65F03C0u; // RET
+
+        for (var index = 0; index < words.Length; index++)
+        {
+            WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
+        }
+
+        return AddHostContextDynamicEntry(bytes, codeSize);
+    }
+
+    private static byte[] AddHostContextDynamicEntry(byte[] bytes, ulong functionSize)
+    {
+        Array.Resize(ref bytes, 0x780);
+        var span = bytes.AsSpan();
+        WriteUInt64(span, ElfHeaderOffsets.Entry, 0);
+        const int dynamicEntryCount = 7;
+        const int hashFileOffset = 0x700;
+        const int symbolFileOffset = 0x720;
+        const int stringFileOffset = 0x750;
+        const ulong hashVirtualAddress = 0x1700;
+        const ulong symbolVirtualAddress = 0x1720;
+        const ulong stringVirtualAddress = 0x1750;
+        const ulong functionAddress = 0x1200;
+        var entryName = "\0urp_entry\0"u8;
+
+        WriteProgramHeader(
+            span,
+            InterpreterProgramHeaderOffset,
+            ElfConstants.PtLoad,
+            ElfConstants.PfR,
+            hashFileOffset,
+            hashVirtualAddress,
+            0x80,
+            0x80,
+            1);
+        WriteUInt64(span, DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.FileSize,
+            checked((ulong)dynamicEntryCount * ElfConstants.DynamicEntrySize64));
+        WriteUInt64(span, DynamicProgramHeaderOffset + ElfProgramHeaderOffsets.MemorySize,
+            checked((ulong)dynamicEntryCount * ElfConstants.DynamicEntrySize64));
+
+        var dynamicEntries = new (ulong Tag, ulong Value)[]
+        {
+            (ElfConstants.DtHash, hashVirtualAddress),
+            (ElfConstants.DtStrTab, stringVirtualAddress),
+            (ElfConstants.DtStrSz, checked((ulong)entryName.Length)),
+            (ElfConstants.DtSymTab, symbolVirtualAddress),
+            (ElfConstants.DtSymEnt, ElfConstants.SymbolEntrySize64),
+            (ElfConstants.DtFlags1, ElfConstants.Df1Pie),
+            (ElfConstants.DtNull, 0),
+        };
+        for (var index = 0; index < dynamicEntries.Length; index++)
+        {
+            WriteDynamicEntry(
+                span,
+                DynamicTableOffset + (index * ElfConstants.DynamicEntrySize64),
+                dynamicEntries[index].Tag,
+                dynamicEntries[index].Value);
+        }
+
+        WriteUInt32(span, hashFileOffset, 1);
+        WriteUInt32(span, hashFileOffset + sizeof(uint), 2);
+        WriteUInt32(span, hashFileOffset + (2 * sizeof(uint)), 1);
+        WriteUInt32(span, hashFileOffset + (3 * sizeof(uint)), 0);
+        WriteUInt32(span, hashFileOffset + (4 * sizeof(uint)), 0);
+
+        var symbolOffset = symbolFileOffset + ElfConstants.SymbolEntrySize64;
+        WriteUInt32(span, symbolOffset, 1);
+        span[symbolOffset + 4] = (byte)((1 << 4) | ElfConstants.SttFunc);
+        WriteUInt16(span, symbolOffset + 6, 4);
+        WriteUInt64(span, symbolOffset + 8, functionAddress);
+        WriteUInt64(span, symbolOffset + 16, functionSize);
+        entryName.CopyTo(span[stringFileOffset..]);
+        return bytes;
+    }
+
+    private static void UpdateHostContextDynamicEntrySize(byte[] bytes, ulong functionSize) =>
+        WriteUInt64(
+            bytes.AsSpan(),
+            0x720 + ElfConstants.SymbolEntrySize64 + 16,
+            functionSize);
+
+    private static uint EncodeTestBranch(ulong address, ulong target, byte register, int bit, bool nonZero)
+    {
+        var displacement = checked((long)target - (long)address);
+        if (displacement % sizeof(uint) != 0 || displacement / sizeof(uint) is < -8192 or > 8191)
+        {
+            throw new ArgumentOutOfRangeException(nameof(target));
+        }
+
+        var immediate = unchecked((uint)(displacement / sizeof(uint))) & 0x3FFFu;
+        return (nonZero ? 0x37000000u : 0x36000000u)
+            | (checked((uint)bit) << 19)
+            | (immediate << 5)
+            | register;
+    }
+
+    private static uint EncodeCompareAndBranch(
+        ulong address,
+        ulong target,
+        byte register,
+        int width,
+        bool nonZero)
+    {
+        var displacement = checked((long)target - (long)address);
+        if (displacement % sizeof(uint) != 0 || displacement / sizeof(uint) is < -262144 or > 262143)
+        {
+            throw new ArgumentOutOfRangeException(nameof(target));
+        }
+
+        var immediate = unchecked((uint)(displacement / sizeof(uint))) & 0x7FFFFu;
+        var widthBit = width == 64 ? 0x80000000u : 0u;
+        return widthBit
+            | (nonZero ? 0x35000000u : 0x34000000u)
+            | (immediate << 5)
+            | register;
+    }
+
+    private static uint EncodeConditionalBranch(ulong address, ulong target, int conditionCode)
+    {
+        var displacement = checked((long)target - (long)address);
+        if (displacement % sizeof(uint) != 0 || displacement / sizeof(uint) is < -262144 or > 262143)
+        {
+            throw new ArgumentOutOfRangeException(nameof(target));
+        }
+
+        var immediate = unchecked((uint)(displacement / sizeof(uint))) & 0x7FFFFu;
+        return 0x54000000u | (immediate << 5) | checked((uint)conditionCode);
+    }
+
+    public static byte[] RelativeJumpTableFunctionPie(
+        bool malformedTableEntry = false,
+        bool clobberCheckedIndexWithTableBase = false,
+        bool outOfExecutableLoadRangeTableEntry = false)
     {
         var bytes = ExactIndirectBranchFunctionPie();
         const int codeOffset = 0x200;
@@ -318,14 +976,31 @@ internal static partial class ElfFixture
             0x12800000, // default: MOV W0, #-1
             0xD65F03C0, // RET
         };
+        if (clobberCheckedIndexWithTableBase)
+        {
+            // GNU-as equivalents: ADRP X0, table page; ADD X0, X0, #0x248;
+            // LDRSW X2, [X0, W0, UXTW #2]. This keeps the decoded table
+            // pattern intact while the X0 table-base setup overwrites checked W0.
+            words[2] = 0x90000000;
+            words[3] = 0x91092000;
+            words[4] = 0xB8A05802;
+        }
+
         for (var index = 0; index < words.Length; index++)
         {
             WriteUInt32(bytes.AsSpan(), codeOffset + (index * sizeof(uint)), words[index]);
         }
 
+        if (malformedTableEntry && outOfExecutableLoadRangeTableEntry)
+        {
+            throw new ArgumentException("Select only one malformed relative jump-table mutation.");
+        }
+
         var entries = malformedTableEntry
-            ? new[] { unchecked((uint)-0x1000), 8u, 16u, 24u }
-            : new[] { 0u, 8u, 16u, 24u };
+            ? new[] { 40u, 8u, 16u, 24u }
+            : outOfExecutableLoadRangeTableEntry
+                ? new[] { 0x7FFFFFE0u, 8u, 16u, 24u }
+                : new[] { 0u, 8u, 16u, 24u };
         for (var index = 0; index < entries.Length; index++)
         {
             WriteUInt32(bytes.AsSpan(), tableOffset + (index * sizeof(uint)), entries[index]);
@@ -649,7 +1324,7 @@ internal static partial class ElfFixture
     /// Exact TLSLD ADRP/ADD, __tls_get_addr CALL26, and DTPREL ADD/ADD shape
     /// with a loader-owned DTPMOD64 GOT slot and PLT resolver owner.
     /// </summary>
-    public static byte[] TlsLocalDynamicFunctionPie(long dtprelAddend = 4)
+    public static byte[] TlsLocalDynamicFunctionPie(long dtprelAddend = 4, bool useNonNcDtprelLow = false)
     {
         var bytes = MinimalPie();
         Array.Resize(ref bytes, 0xB00);
@@ -781,7 +1456,9 @@ internal static partial class ElfFixture
             (0x1600, ElfConstants.RArm64TlsLdAdrPage21, 0),
             (0x1604, ElfConstants.RArm64TlsLdAddLo12Nc, 0),
             (0x160C, ElfConstants.RArm64TlsLdAddDtprelHi12, dtprelAddend),
-            (0x1610, ElfConstants.RArm64TlsLdAddDtprelLo12Nc, dtprelAddend),
+            (0x1610, useNonNcDtprelLow
+                ? ElfConstants.RArm64TlsLdAddDtprelLo12
+                : ElfConstants.RArm64TlsLdAddDtprelLo12Nc, dtprelAddend),
         };
         for (var index = 0; index < staticRelocations.Length; index++)
         {

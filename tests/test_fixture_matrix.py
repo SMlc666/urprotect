@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +23,100 @@ RENDERER = REPO_ROOT / "scripts" / "render-compatibility-matrix.py"
 class FixtureMatrixTests(unittest.TestCase):
     def setUp(self) -> None:
         self.data = json.loads(MANIFEST.read_text())
+
+    def test_runtime_evidence_declarations_bind_exact_current_ci_roots(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+
+        def step(name: str) -> str:
+            marker = f"      - name: {name}\n"
+            start = workflow.index(marker)
+            end = workflow.find("\n      - name:", start + len(marker))
+            return workflow[start:] if end < 0 else workflow[start:end]
+
+        def feature(feature_id: str) -> dict[str, object]:
+            return next(item for item in self.data["features"] if item["id"] == feature_id)
+
+        def producer_root(block: str, script: str) -> str:
+            start = block.index(script)
+            option = block.index("--artifact-root", start)
+            return block[option:].splitlines()[0].split()[1]
+
+        def generated_paths(record: dict[str, object]) -> list[str]:
+            paths = [path for path in record["evidence"] if path.startswith(".artifacts/")]
+            self.assertTrue(paths, f"{record['id']} has no generated evidence paths")
+            self.assertTrue(
+                all(not any(character in path for character in "*?[]") for path in paths),
+                f"{record['id']} must declare exact paths, not globs",
+            )
+            return paths
+
+        rows = (
+            (
+                "runtime.cfi.transformed-backtrace.glibc.host-context-entry",
+                "Run transformed CFI unwind evidence",
+                "./scripts/run-cfi-host-context-e2e.sh",
+                "scripts/check-cfi-evidence.py",
+            ),
+            (
+                "runtime.indirect-control.shared-jump-table-copy.glibc.host-context-entry",
+                "Run and check transformed shared jump-table evidence",
+                "./scripts/run-shared-jump-table-copy-e2e.sh",
+                "scripts/check-shared-jump-table-evidence.py",
+            ),
+        )
+        roots: set[str] = set()
+        for feature_id, step_name, runner, checker in rows:
+            record = feature(feature_id)
+            block = step(step_name)
+            root = producer_root(block, runner)
+            self.assertTrue(root.startswith(".artifacts/"), root)
+            self.assertEqual(Path(root).name, "current", root)
+            self.assertNotIn("${tier}", root)
+            self.assertNotIn(root, roots, f"distinct producer rows must not share an artifact root: {root}")
+            roots.add(root)
+            self.assertIn('--tier "${tier}"', block)
+            producer = (REPO_ROOT / runner.removeprefix("./")).read_text()
+            self.assertIn("--artifact-root", producer)
+            if runner == "./scripts/run-cfi-host-context-e2e.sh":
+                self.assertIn('requested_artifact_root="$2"', producer)
+                self.assertIn('artifact_root="$requested_artifact_root"', producer)
+                self.assertIn('if [[ -e "$artifact_root" || -L "$artifact_root" ]]; then', producer)
+            else:
+                self.assertIn('root_arg="$2"', producer)
+                self.assertIn('root="$(realpath -m -- "$root_arg")"', producer)
+                self.assertIn('[[ ! -e "$root" && ! -L "$root" ]]', producer)
+
+            declared = generated_paths(record)
+            self.assertTrue(
+                all(path == root or path.startswith(root + "/") for path in declared),
+                f"{feature_id} declarations do not belong to CI producer root {root}: {declared}",
+            )
+            if checker == "scripts/check-shared-jump-table-evidence.py":
+                unit = "runtime.indirect-control.shared-table.glibc.host-context-entry"
+                self.assertIn(f"shared_positive={root}/{unit}", block)
+                self.assertIn("scripts/check-rehydration-evidence.py", block)
+                self.assertIn(f'{checker} "${{shared_positive}}"', block)
+            else:
+                match = re.search(
+                    re.escape(checker) + r"\s+\\?\s*([^\s]+)",
+                    block,
+                )
+                self.assertIsNotNone(match, f"CI does not invoke {checker} in {step_name}")
+                self.assertEqual(match.group(1), root)
+
+        declaration_gate = step("Check transformed CFI and indirect-control feature declarations")
+        for feature_id, _, _, _ in rows:
+            self.assertIn(f"--feature {feature_id}", declaration_gate)
+        self.assertIn(
+            "--feature runtime.indirect-control.jump-table.glibc.host-context-entry",
+            declaration_gate,
+        )
+        self.assertNotIn("proof-binding-fix-20261014T202700Z", workflow)
+        self.assertNotIn('cp -a ".artifacts/cfi/', workflow)
+        self.assertIn(
+            'cp -a ".artifacts/indirect-control/${tier}" .artifacts/indirect-control/pr',
+            workflow,
+        )
 
     def run_validator(
         self,

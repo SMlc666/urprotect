@@ -23,5 +23,8 @@
   <ItemGroup>
     <None Include="GoldenReports/*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/SymbolVersions/*.so" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/DynamicImports/*.so" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/SharedJumpTable/*.so" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/StaticFunctionPointers/*.so" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

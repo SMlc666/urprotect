@@ -1,8 +1,11 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
 using UrProtect.Core.SemanticPlanning;
+using UrProtect.Core.Aarch64Semantics;
 
 namespace UrProtect.Core.ElfLayout;
 
@@ -315,6 +318,31 @@ public sealed record ElfLayoutAddressMapEntry(
     ElfLayoutRange? SourceRange,
     ElfLayoutRange OutputRange);
 
+/// <summary>
+/// Planner-derived proof for one rewritten relative jump-table entry. Both the
+/// source and output address domains remain explicit so evidence consumers can
+/// independently recompute the entry encoding against the retained address map.
+/// </summary>
+public sealed record ElfLayoutJumpTableTargetBinding(
+    SemanticEntityId TableIdentity,
+    SemanticSourceRange SourceTableRange,
+    SemanticEntityId EntryIdentity,
+    SemanticEntityId TargetIdentity,
+    SemanticEntityId TargetBaseIdentity,
+    int EntryIndex,
+    SemanticSourceRange SourceEntryRange,
+    VirtualAddress SourceTargetAddress,
+    VirtualAddress OutputTargetAddress,
+    VirtualAddress SourceTargetBaseAddress,
+    VirtualAddress OutputTargetBaseAddress,
+    SemanticSourceRange OutputEntryRange,
+    int EntryWidth,
+    bool IsSigned,
+    int Scale,
+    long Addend,
+    long SourceEncodedValue,
+    long OutputEncodedValue);
+
 public sealed record ElfBranchPlacementDecision(
     string Identity,
     string SourceIdentity,
@@ -328,6 +356,11 @@ public sealed record ElfBranchPlacementDecision(
     long MinimumDisplacement,
     long MaximumDisplacementExclusive);
 
+public sealed record ElfLayoutJumpTableEntryOutputBinding(
+    SemanticEntityId EntryIdentity,
+    SemanticEntityId TargetIdentity,
+    VirtualAddress OutputTargetAddress);
+
 public sealed record ElfLayoutJumpTableEditRequest(
     SemanticEntityId TableIdentity,
     SemanticSourceRange TableRange,
@@ -337,7 +370,75 @@ public sealed record ElfLayoutJumpTableEditRequest(
     int Scale,
     long Addend,
     SemanticJumpTableRewritePolicy RewritePolicy,
-    IReadOnlyList<SemanticJumpTableEntryBinding> Entries);
+    IReadOnlyList<SemanticJumpTableEntryBinding> Entries,
+    SemanticJumpTableOwnership Ownership = SemanticJumpTableOwnership.Ambiguous,
+    SemanticSourceRange? RequestedOutputRange = null,
+    IReadOnlyList<Aarch64JumpTableReferenceProducer>? TableReferenceProducers = null,
+    IReadOnlyList<Aarch64JumpTableOwnerReference>? OwnerReferences = null,
+    bool OwnerInventoryComplete = false,
+    SemanticSourceRange? SelectedFunctionSourceRange = null,
+    SemanticSourceRange? SelectedFunctionOutputRange = null,
+    SemanticEntityId? OutputTargetBaseIdentity = null,
+    VirtualAddress? OutputTargetBaseAddress = null,
+    IReadOnlyList<ElfLayoutJumpTableEntryOutputBinding>? OutputEntryBindings = null);
+
+public sealed record ElfLayoutJumpTableClone(
+    SemanticEntityId TableIdentity,
+    SemanticSourceRange SourceTableRange,
+    SemanticSourceRange RequestedOutputRange,
+    ElfLayoutRange OutputRange,
+    [property: JsonConverter(typeof(ElfLayoutEvidenceJumpTableOwnershipJsonConverter))]
+    SemanticJumpTableOwnership Ownership,
+    SemanticJumpTableRewritePolicy RewritePolicy,
+    IReadOnlyList<Aarch64JumpTableReferenceProducer> TableReferenceProducers,
+    IReadOnlyList<Aarch64JumpTableOwnerReference> OwnerReferences,
+    bool OwnerInventoryComplete,
+    uint Permissions);
+
+/// <summary>
+/// Keeps the layout-evidence v3 JSON ownership ordinals independent from the
+/// semantic-plan snapshot's <see cref="SemanticJumpTableOwnership"/> ordinals.
+/// </summary>
+public sealed class ElfLayoutEvidenceJumpTableOwnershipJsonConverter : JsonConverter<SemanticJumpTableOwnership>
+{
+    public override SemanticJumpTableOwnership Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.Number || !reader.TryGetInt32(out var value))
+        {
+            throw new JsonException("Layout-evidence jump-table ownership must be an integer ordinal.");
+        }
+
+        return value switch
+        {
+            0 => SemanticJumpTableOwnership.Ambiguous,
+            1 => SemanticJumpTableOwnership.SelectedFunctionPrivate,
+            2 => SemanticJumpTableOwnership.Shared,
+            3 => SemanticJumpTableOwnership.External,
+            4 => SemanticJumpTableOwnership.RuntimeOwned,
+            _ => throw new JsonException("Layout-evidence jump-table ownership ordinal is unsupported."),
+        };
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer,
+        SemanticJumpTableOwnership value,
+        JsonSerializerOptions options)
+    {
+        var ordinal = value switch
+        {
+            SemanticJumpTableOwnership.Ambiguous => 0,
+            SemanticJumpTableOwnership.SelectedFunctionPrivate => 1,
+            SemanticJumpTableOwnership.Shared => 2,
+            SemanticJumpTableOwnership.External => 3,
+            SemanticJumpTableOwnership.RuntimeOwned => 4,
+            _ => throw new JsonException("Semantic jump-table ownership is not defined."),
+        };
+        writer.WriteNumberValue(ordinal);
+    }
+}
 
 public sealed record ElfLayoutTlsFixupRequest(
     string RegionIdentity,
@@ -371,6 +472,11 @@ public sealed record ElfLayoutPlan(
     public IReadOnlyList<ElfLayoutByteEdit> UnwindEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
 
     public IReadOnlyList<ElfLayoutByteEdit> JumpTableEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
+
+    public IReadOnlyList<ElfLayoutJumpTableTargetBinding> JumpTableTargetBindings { get; init; } =
+        Array.Empty<ElfLayoutJumpTableTargetBinding>();
+
+    public IReadOnlyList<ElfLayoutJumpTableClone> JumpTableClones { get; init; } = Array.Empty<ElfLayoutJumpTableClone>();
 }
 
 /// <summary>Bounded serializable projection of a selected physical layout.</summary>
@@ -393,7 +499,12 @@ public sealed record ElfLayoutEvidence(
 
     public IReadOnlyList<ElfLayoutByteEdit> JumpTableEdits { get; init; } = Array.Empty<ElfLayoutByteEdit>();
 
-    public const int CurrentSchemaVersion = 1;
+    public IReadOnlyList<ElfLayoutJumpTableTargetBinding> JumpTableTargetBindings { get; init; } =
+        Array.Empty<ElfLayoutJumpTableTargetBinding>();
+
+    public IReadOnlyList<ElfLayoutJumpTableClone> JumpTableClones { get; init; } = Array.Empty<ElfLayoutJumpTableClone>();
+
+    public const int CurrentSchemaVersion = 3;
 
     public string StrategyValue => Strategy.ToEvidenceValue();
 }

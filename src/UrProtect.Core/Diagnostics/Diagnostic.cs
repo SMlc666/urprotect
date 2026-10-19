@@ -112,6 +112,8 @@ public enum DiagnosticCode
     UnwindMetadataUnsupported,
     UnwindAddressMapMissing,
     UnwindRewriteOverlap,
+    SemanticDynamicImportOwnerMismatch,
+    ElfParserWorkLimitExceeded,
 }
 
 public readonly record struct Diagnostic(

@@ -3,9 +3,20 @@ using A64FeatureSet = global::AsmStone.Model.A64FeatureSet;
 using A64InstructionFlags = global::AsmStone.Model.A64InstructionFlags;
 using A64Operand = global::AsmStone.Model.A64Operand;
 using A64Register = global::AsmStone.Model.A64Register;
-using A64TargetOperand = global::AsmStone.Model.TargetOperand;
 
 namespace UrProtect.Core.Aarch64Semantics;
+
+public enum Aarch64MemoryEffect
+{
+    None,
+    Read,
+    PlainWrite,
+    ReadModifyWrite,
+    ConditionalWrite,
+    // Includes implicit/address-bearing accesses whose backend reports memory
+    // or side effects but provides no explicit project-owned Memory operand.
+    Unclassified,
+}
 
 [Flags]
 public enum Aarch64InstructionProperties
@@ -121,7 +132,12 @@ public sealed record Aarch64SemanticOperand(
     bool AllowsStackPointer,
     bool AllowsZeroRegister,
     bool IsPageRelative,
-    string SemanticDomain);
+    string SemanticDomain)
+{
+    public string? RegisterModifierKind { get; init; }
+
+    public int RegisterModifierAmount { get; init; }
+}
 
 public sealed record Aarch64Instruction(
     ulong Address,
@@ -132,6 +148,8 @@ public sealed record Aarch64Instruction(
     ulong? DirectTarget)
 {
     public string Mnemonic { get; init; } = SourceName;
+
+    public Aarch64MemoryEffect MemoryEffect { get; init; } = Aarch64MemoryEffect.None;
 
     public IReadOnlyList<Aarch64SemanticOperand> Operands { get; init; } =
         Array.Empty<Aarch64SemanticOperand>();
@@ -203,10 +221,18 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
                 out var instruction,
                 out var diagnostic))
         {
+            if (TryCreateInstruction(instruction, out var projectedInstruction, out var projectionDiagnostic))
+            {
+                return new Aarch64DecodeResult(
+                    Aarch64DecodeStatus.Decoded,
+                    projectedInstruction,
+                    diagnostic.Message);
+            }
+
             return new Aarch64DecodeResult(
-                Aarch64DecodeStatus.Decoded,
-                CreateInstruction(instruction),
-                diagnostic.Message);
+                Aarch64DecodeStatus.UnknownEncoding,
+                null,
+                projectionDiagnostic);
         }
 
         var status = diagnostic.Code == A64DiagnosticCode.UnsupportedFeature
@@ -275,8 +301,14 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
         && register.Role == global::AsmStone.Model.A64RegisterRole.None
         && register.Index == index;
 
-    private static Aarch64Instruction CreateInstruction(global::AsmStone.Model.A64Instruction instruction)
+    private static bool TryCreateInstruction(
+        global::AsmStone.Model.A64Instruction instruction,
+        out Aarch64Instruction projectedInstruction,
+        out string diagnostic)
     {
+        projectedInstruction = null!;
+        diagnostic = string.Empty;
+
         var properties = Aarch64InstructionProperties.None;
         var flags = instruction.Flags;
         if (flags.HasFlag(A64InstructionFlags.IsBranch))
@@ -329,32 +361,305 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
             properties |= Aarch64InstructionProperties.WritesNzcv;
         }
 
-        var target = instruction.Operands
-            .OfType<A64TargetOperand>()
-            .Select(operand => (ulong?)operand.Address)
+        var operands = new Aarch64SemanticOperand[instruction.OperandSemantics.Count];
+        for (var index = 0; index < operands.Length; index++)
+        {
+            if (!TryMapSemanticOperand(
+                    instruction.OperandSemantics[index],
+                    instruction.Address,
+                    out operands[index],
+                    out diagnostic))
+            {
+                return false;
+            }
+        }
+
+        var target = operands
+            .Where(operand => operand.Kind == Aarch64OperandKind.Target)
+            .Select(operand => operand.Target)
             .FirstOrDefault();
         var controlFlow = ClassifyControlFlow(instruction, target);
-        var projectInstruction = new Aarch64Instruction(
+        var memoryEffect = ClassifyMemoryEffect(instruction.Mnemonic, flags, operands, out var projectedAccessSize);
+        if (projectedAccessSize is { } accessSize)
+        {
+            var memoryOperandIndex = Array.FindIndex(operands, operand => operand.Memory is not null);
+            if (memoryOperandIndex >= 0)
+            {
+                var memoryOperand = operands[memoryOperandIndex];
+                operands[memoryOperandIndex] = memoryOperand with
+                {
+                    Memory = memoryOperand.Memory! with { AccessSize = accessSize },
+                };
+            }
+        }
+
+        projectedInstruction = new Aarch64Instruction(
             instruction.Address,
             instruction.Encoding,
             instruction.SourceName ?? instruction.Mnemonic,
             properties,
             controlFlow,
-            target);
-        return projectInstruction with
+            target)
         {
             Mnemonic = instruction.Mnemonic,
-            Operands = instruction.OperandSemantics
-                .Select(MapSemanticOperand)
-                .ToArray(),
+            MemoryEffect = memoryEffect,
+            Operands = operands,
         };
+        return true;
     }
 
-    private static Aarch64SemanticOperand MapSemanticOperand(
-        global::AsmStone.Model.A64InstructionOperand operand)
+    private static Aarch64MemoryEffect ClassifyMemoryEffect(
+        string mnemonic,
+        A64InstructionFlags flags,
+        IReadOnlyList<Aarch64SemanticOperand> operands,
+        out int? projectedAccessSize)
     {
-        var mapped = MapOperand(operand.Operand, out var register, out var registers, out var memory, out var immediate, out var target);
-        return new Aarch64SemanticOperand(
+        projectedAccessSize = null;
+        var memoryOperands = operands
+            .Where(operand => operand.Kind == Aarch64OperandKind.Memory && operand.Memory is not null)
+            .ToArray();
+        if (memoryOperands.Length == 0)
+        {
+            return HasUnclassifiedImplicitMemoryEffect(mnemonic, flags, operands)
+                ? Aarch64MemoryEffect.Unclassified
+                : Aarch64MemoryEffect.None;
+        }
+
+        if (memoryOperands.Length != 1)
+        {
+            return Aarch64MemoryEffect.Unclassified;
+        }
+
+        var memoryOperand = memoryOperands[0];
+        var memory = memoryOperand.Memory!;
+        if (memory.AccessSize is <= 0 or > 16)
+        {
+            return Aarch64MemoryEffect.Unclassified;
+        }
+
+        var normalizedMnemonic = mnemonic.ToUpperInvariant();
+        if (normalizedMnemonic.StartsWith("SWP", StringComparison.Ordinal))
+        {
+            if (!IsSwapMnemonic(normalizedMnemonic)
+                || !TryGetSwapAccessSize(memoryOperand, operands, normalizedMnemonic, out var swapAccessSize))
+            {
+                return Aarch64MemoryEffect.Unclassified;
+            }
+
+            projectedAccessSize = swapAccessSize;
+            return Aarch64MemoryEffect.ReadModifyWrite;
+        }
+
+        if (IsConditionalMemoryWriteMnemonic(normalizedMnemonic))
+        {
+            return HasValidConditionalMemoryWriteShape(memory, operands)
+                ? Aarch64MemoryEffect.ConditionalWrite
+                : Aarch64MemoryEffect.Unclassified;
+        }
+
+        var isLoad = flags.HasFlag(A64InstructionFlags.IsLoad);
+        var isStore = flags.HasFlag(A64InstructionFlags.IsStore);
+        if (isLoad && isStore)
+        {
+            return Aarch64MemoryEffect.ReadModifyWrite;
+        }
+
+        if (isLoad && IsProvenReadMnemonic(normalizedMnemonic))
+        {
+            return Aarch64MemoryEffect.Read;
+        }
+
+        if (isStore && IsPlainStoreMnemonic(normalizedMnemonic))
+        {
+            return Aarch64MemoryEffect.PlainWrite;
+        }
+
+        return Aarch64MemoryEffect.Unclassified;
+    }
+
+    private static bool HasUnclassifiedImplicitMemoryEffect(
+        string mnemonic,
+        A64InstructionFlags flags,
+        IReadOnlyList<Aarch64SemanticOperand> operands)
+    {
+        if (flags.HasFlag(A64InstructionFlags.IsLoad)
+            || flags.HasFlag(A64InstructionFlags.IsStore))
+        {
+            return true;
+        }
+
+        if (!flags.HasFlag(A64InstructionFlags.HasSideEffects))
+        {
+            return false;
+        }
+
+        // Barriers order memory operations but do not themselves write data.
+        // MRS is also a read-only system-register operation; validate its
+        // projected operand shape rather than treating all SYSTEM instructions
+        // as harmless. Other side-effecting no-operand forms fail closed.
+        if (flags.HasFlag(A64InstructionFlags.IsBarrier)
+            || mnemonic.Equals("dmb", StringComparison.OrdinalIgnoreCase)
+            || mnemonic.Equals("dsb", StringComparison.OrdinalIgnoreCase)
+            || mnemonic.Equals("isb", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !IsWellFormedSystemRegisterRead(mnemonic, flags, operands);
+    }
+
+    private static bool IsWellFormedSystemRegisterRead(
+        string mnemonic,
+        A64InstructionFlags flags,
+        IReadOnlyList<Aarch64SemanticOperand> operands)
+    {
+        if (!flags.HasFlag(A64InstructionFlags.IsSystem)
+            || !mnemonic.Equals("mrs", StringComparison.OrdinalIgnoreCase)
+            || operands.Count != 2)
+        {
+            return false;
+        }
+
+        var output = operands[0];
+        var systemRegister = operands[1];
+        return output.Kind == Aarch64OperandKind.Register
+            && output.Direction == Aarch64OperandDirection.Output
+            && output.Register is { Class: Aarch64RegisterClass.General }
+            && systemRegister.Kind == Aarch64OperandKind.EncodedField
+            && systemRegister.Direction == Aarch64OperandDirection.Input;
+    }
+
+    private static bool IsSwapMnemonic(string mnemonic) => mnemonic is
+        "SWP" or "SWPA" or "SWPL" or "SWPAL"
+        or "SWPB" or "SWPAB" or "SWPLB" or "SWPALB"
+        or "SWPH" or "SWPAH" or "SWPLH" or "SWPALH";
+
+    private static bool TryGetSwapAccessSize(
+        Aarch64SemanticOperand memoryOperand,
+        IReadOnlyList<Aarch64SemanticOperand> operands,
+        string mnemonic,
+        out int accessSize)
+    {
+        accessSize = 0;
+        var memory = memoryOperand.Memory!;
+        var registerOperands = operands
+            .Where(operand => operand.Kind == Aarch64OperandKind.Register
+                && !operand.IsImplicit
+                && operand.Register is { Class: Aarch64RegisterClass.General })
+            .ToArray();
+        var inputs = registerOperands.Where(operand => operand.Direction == Aarch64OperandDirection.Input).ToArray();
+        var outputs = registerOperands.Where(operand => operand.Direction == Aarch64OperandDirection.Output).ToArray();
+        if (memoryOperand.Direction != Aarch64OperandDirection.Input
+            || memory.Base.Class != Aarch64RegisterClass.General
+            || memory.Base.Width != 64
+            || memory.Index is not null
+            || memory.Offset != 0
+            || memory.WritesBack
+            || memory.IndexModifier is not null
+            || !string.Equals(memory.AddressingMode, "Offset", StringComparison.Ordinal)
+            || inputs.Length != 1
+            || outputs.Length != 1)
+        {
+            return false;
+        }
+
+        var input = inputs[0].Register!.Value;
+        var output = outputs[0].Register!.Value;
+        if (input.Width is not (32 or 64) || output.Width != input.Width)
+        {
+            return false;
+        }
+
+        var byteAccess = mnemonic.EndsWith('B');
+        var halfwordAccess = mnemonic.EndsWith('H');
+        accessSize = byteAccess ? 1 : halfwordAccess ? 2 : input.Width / 8;
+        if ((byteAccess || halfwordAccess) && input.Width != 32)
+        {
+            return false;
+        }
+
+        var backendWidth = input.Width / 8;
+        return memory.AccessSize == backendWidth || memory.AccessSize == accessSize;
+    }
+
+    private static bool IsConditionalMemoryWriteMnemonic(string mnemonic) => mnemonic is
+        "CAS" or "CASA" or "CASL" or "CASAL"
+        or "CASB" or "CASAB" or "CASLB" or "CASALB"
+        or "CASH" or "CASAH" or "CASLH" or "CASALH"
+        or "CASP" or "CASPA" or "CASPL" or "CASPAL"
+        or "STXR" or "STLXR" or "STXRB" or "STLXRB"
+        or "STXRH" or "STLXRH" or "STXP" or "STLXP";
+
+    private static bool HasValidConditionalMemoryWriteShape(
+        Aarch64MemoryReference memory,
+        IReadOnlyList<Aarch64SemanticOperand> operands)
+    {
+        var registers = operands
+            .Where(operand =>
+                (operand.Kind == Aarch64OperandKind.Register
+                    && operand.Register is { Class: Aarch64RegisterClass.General })
+                || (operand.Kind == Aarch64OperandKind.RegisterPair
+                    && operand.Registers.Count > 0
+                    && operand.Registers.All(register => register.Class == Aarch64RegisterClass.General)))
+            .ToArray();
+        return memory.Base.Class == Aarch64RegisterClass.General
+            && memory.Base.Width == 64
+            && memory.AccessSize is 1 or 2 or 4 or 8 or 16
+            && memory.Index is null
+            && memory.Offset == 0
+            && !memory.WritesBack
+            && registers.Any(operand => operand.Direction == Aarch64OperandDirection.Input)
+            && registers.Any(operand => operand.Direction == Aarch64OperandDirection.Output);
+    }
+
+    private static bool IsProvenReadMnemonic(string mnemonic) => mnemonic is
+        "LDR" or "LDRB" or "LDRH" or "LDRSB" or "LDRSH" or "LDRSW"
+        or "LDUR" or "LDURB" or "LDURH" or "LDURSB" or "LDURSH" or "LDURSW"
+        or "LDP" or "LDNP" or "LDPSW"
+        or "LDTR" or "LDTRB" or "LDTRH" or "LDTRSB" or "LDTRSH" or "LDTRSW"
+        or "LDAR" or "LDARB" or "LDARH"
+        or "LDAPR" or "LDAPRB" or "LDAPRH"
+        or "LDXR" or "LDXRB" or "LDXRH" or "LDXP"
+        or "LDAXR" or "LDAXRB" or "LDAXRH" or "LDAXP";
+
+    private static bool IsPlainStoreMnemonic(string mnemonic) => mnemonic is
+        "STR" or "STRB" or "STRH"
+        or "STUR" or "STURB" or "STURH"
+        or "STP" or "STNP"
+        or "STLR" or "STLRB" or "STLRH"
+        or "STLUR" or "STLURB" or "STLURH";
+
+    private static bool TryMapSemanticOperand(
+        global::AsmStone.Model.A64InstructionOperand operand,
+        ulong instructionAddress,
+        out Aarch64SemanticOperand mappedOperand,
+        out string diagnostic)
+    {
+        var mapped = MapOperand(
+            operand.Operand,
+            out var register,
+            out var registers,
+            out var memory,
+            out var immediate,
+            out var target,
+            out var registerModifierKind,
+            out var registerModifierAmount);
+        diagnostic = string.Empty;
+        if (operand.IsPageRelative)
+        {
+            if (mapped != Aarch64OperandKind.Target
+                || target is not { } pageRelativeTarget
+                || !TryNormalizePageRelativeTarget(instructionAddress, pageRelativeTarget, out var pageTarget))
+            {
+                mappedOperand = null!;
+                diagnostic = $"AsmStone returned an ADRP page-relative target that cannot be normalized with checked source/displacement arithmetic at 0x{instructionAddress:X}.";
+                return false;
+            }
+
+            target = pageTarget;
+        }
+
+        mappedOperand = new Aarch64SemanticOperand(
             operand.Name,
             mapped,
             operand.Direction switch
@@ -382,7 +687,74 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
             operand.AllowsStackPointer,
             operand.AllowsZeroRegister,
             operand.IsPageRelative,
-            operand.SemanticDomain);
+            operand.SemanticDomain)
+        {
+            RegisterModifierKind = registerModifierKind,
+            RegisterModifierAmount = registerModifierAmount,
+        };
+        return true;
+    }
+
+    private static bool TryNormalizePageRelativeTarget(
+        ulong instructionAddress,
+        ulong decodedTarget,
+        out ulong pageTarget)
+    {
+        pageTarget = default;
+        long displacement;
+        if (decodedTarget >= instructionAddress)
+        {
+            var positiveDisplacement = decodedTarget - instructionAddress;
+            if (positiveDisplacement > 0xFFFFF000UL)
+            {
+                return false;
+            }
+
+            displacement = checked((long)positiveDisplacement);
+        }
+        else
+        {
+            var negativeMagnitude = instructionAddress - decodedTarget;
+            if (negativeMagnitude > 0x1_0000_0000UL)
+            {
+                return false;
+            }
+
+            displacement = negativeMagnitude == 0x8000_0000_0000_0000UL
+                ? long.MinValue
+                : -checked((long)negativeMagnitude);
+        }
+
+        if ((displacement & 0xFFF) != 0)
+        {
+            return false;
+        }
+
+        var sourcePage = instructionAddress & ~0xFFFUL;
+        if (displacement >= 0)
+        {
+            var distance = checked((ulong)displacement);
+            if (sourcePage > ulong.MaxValue - distance)
+            {
+                return false;
+            }
+
+            pageTarget = sourcePage + distance;
+        }
+        else
+        {
+            var distance = displacement == long.MinValue
+                ? 0x8000_0000_0000_0000UL
+                : checked((ulong)-displacement);
+            if (sourcePage < distance)
+            {
+                return false;
+            }
+
+            pageTarget = sourcePage - distance;
+        }
+
+        return (pageTarget & 0xFFFUL) == 0;
     }
 
     private static Aarch64OperandKind MapOperand(
@@ -391,20 +763,40 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
         out IReadOnlyList<Aarch64RegisterView> registers,
         out Aarch64MemoryReference? memory,
         out long? immediate,
-        out ulong? target)
+        out ulong? target,
+        out string? registerModifierKind,
+        out int registerModifierAmount)
     {
         register = null;
         registers = Array.Empty<Aarch64RegisterView>();
         memory = null;
         immediate = null;
         target = null;
+        registerModifierKind = null;
+        registerModifierAmount = 0;
         switch (operand)
         {
             case global::AsmStone.Model.RegisterOperand value:
                 register = MapRegister(value.Register);
+                if (value.Modifier is { } registerModifier)
+                {
+                    registerModifierKind = registerModifier.Kind.ToString();
+                    registerModifierAmount = registerModifier.Amount;
+                }
+
                 return Aarch64OperandKind.Register;
             case global::AsmStone.Model.ModifiedRegisterOperand value:
                 register = MapRegister(value.Register);
+                if (value.TryGetModifier(out var modifier))
+                {
+                    registerModifierKind = modifier.Kind.ToString();
+                    registerModifierAmount = modifier.Amount;
+                }
+                else
+                {
+                    registerModifierKind = "Unknown";
+                }
+
                 return Aarch64OperandKind.Register;
             case global::AsmStone.Model.RegisterPairOperand value:
                 registers = new[] { MapRegister(value.First), MapRegister(value.Second) };
@@ -437,6 +829,26 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
             case global::AsmStone.Model.ImmediateOperand value:
                 immediate = value.Value;
                 return Aarch64OperandKind.Immediate;
+            case global::AsmStone.Model.RegisterModifierOperand value:
+                registerModifierKind = value.Modifier.Kind.ToString();
+                registerModifierAmount = value.Modifier.Amount;
+                return Aarch64OperandKind.EncodedField;
+            case global::AsmStone.Model.EncodedFieldOperand value:
+                if (!string.IsNullOrEmpty(value.Codec)
+                    && global::AsmStone.Model.A64RegisterModifier.TryDecode(
+                        value.Codec,
+                        value.Value,
+                        out var encodedModifier))
+                {
+                    registerModifierKind = encodedModifier.Kind.ToString();
+                    registerModifierAmount = encodedModifier.Amount;
+                }
+                else if (IsRegisterModifierCodec(value.Codec))
+                {
+                    registerModifierKind = "Unknown";
+                }
+
+                return Aarch64OperandKind.EncodedField;
             case global::AsmStone.Model.FloatingImmediateOperand:
                 return Aarch64OperandKind.Immediate;
             case null:
@@ -445,6 +857,12 @@ public sealed class AsmStoneAdapter : IAarch64Decoder
                 return Aarch64OperandKind.EncodedField;
         }
     }
+
+    private static bool IsRegisterModifierCodec(string codec) =>
+        codec is "logical_shifted_reg32" or "logical_shifted_reg64"
+            or "arith_shifted_reg32" or "arith_shifted_reg64"
+            or "arith_extendlsl64"
+        || codec.StartsWith("arith_extended_reg", StringComparison.Ordinal);
 
     private static Aarch64RegisterView MapRegister(global::AsmStone.Model.A64Register register) =>
         new(

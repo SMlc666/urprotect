@@ -10,7 +10,7 @@
     {
       "registryId": "fixture-matrix",
       "path": "fixtures/manifest.json",
-      "sha256": "bc25fc3129f4ce896bb4365db35c021ed6a847af45ef3c81931724716802eb53",
+      "sha256": "7640d3e7836d017dcd9cf8fadc685e1578684a1cb0a145218c3eaeacbd611ff1",
       "role": "auxiliary-not-strict-chain"
     },
     {
@@ -28,7 +28,7 @@
     {
       "registryId": "tls-transformed-runtime-matrix",
       "path": "fixtures/tls-runtime-matrix.json",
-      "sha256": "d6c3fd3fdd9bd76cfe0885a38b85c124180e40cefa3443fb7432cd28177a9973",
+      "sha256": "827072dcd5caf1d4f961e87d32427ed96d14ecc4e0569bceae8cf4b4fba76504",
       "role": "auxiliary-tls-promotion-contract"
     },
     {

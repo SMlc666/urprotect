@@ -1,12 +1,20 @@
 using System.Buffers.Binary;
+using System.Text.Json;
+using UrProtect.Core.Application.Protection;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.ElfLayout;
+using UrProtect.Core.SemanticPlanning;
 using UrProtect.Core.StructuralElf;
 
 namespace UrProtect.Core.Tests.Layout;
 
 public sealed class ElfLayoutTests
 {
+    private static readonly JsonSerializerOptions LayoutEvidenceJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
     [Fact]
     [Trait("Category", "ElfLayout")]
     public void ExistingExecutableLoadExtensionUsesTheSharedPlanner()
@@ -171,6 +179,254 @@ public sealed class ElfLayoutTests
 
     [Fact]
     [Trait("Category", "ElfLayout")]
+    public void RelativeJumpTableEvidenceCarriesPlannerDerivedPerTargetOutputMappings()
+    {
+        var (source, sourceFile, planning) = PlanRelativeJumpTableLayout();
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        Assert.Equal(3, ElfLayoutEvidence.CurrentSchemaVersion);
+        Assert.Equal(ElfLayoutEvidence.CurrentSchemaVersion, planning.Evidence!.SchemaVersion);
+        Assert.Equal(4, planning.Evidence.JumpTableTargetBindings.Count);
+        Assert.Single(planning.Evidence.JumpTableClones);
+
+        var materialized = ElfLayoutMaterializer.Materialize(source, sourceFile, planning.Plan!);
+        Assert.True(materialized.IsSuccess, string.Join(Environment.NewLine, materialized.Diagnostics));
+        Assert.Equal(ElfLayoutEvidence.CurrentSchemaVersion, materialized.Evidence!.SchemaVersion);
+
+        var bindings = materialized.Evidence.JumpTableTargetBindings.OrderBy(binding => binding.EntryIndex).ToArray();
+        Assert.Equal(4, bindings.Length);
+        Assert.Equal(4, materialized.Evidence.JumpTableEdits.Count);
+        var clone = Assert.Single(materialized.Evidence.JumpTableClones);
+        Assert.Equal(ElfConstants.PfR, clone.Permissions);
+        Assert.NotEqual(clone.SourceTableRange.VirtualAddress, clone.OutputRange.VirtualAddress);
+        Assert.Equal(
+            source.AsSpan(checked((int)clone.SourceTableRange.FileOffset.Value), checked((int)clone.SourceTableRange.Size)).ToArray(),
+            materialized.Bytes!.AsSpan(checked((int)clone.SourceTableRange.FileOffset.Value), checked((int)clone.SourceTableRange.Size)).ToArray());
+        Assert.Equal(planning.Evidence.JumpTableTargetBindings, materialized.Evidence.JumpTableTargetBindings);
+        for (var index = 0; index < bindings.Length; index++)
+        {
+            var binding = bindings[index];
+            Assert.Equal(index, binding.EntryIndex);
+            Assert.Equal(SemanticEntityKind.TableEntry, binding.EntryIdentity.Kind);
+            Assert.Equal(SemanticEntityKind.BasicBlock, binding.TargetIdentity.Kind);
+            Assert.Equal(4, binding.EntryWidth);
+            Assert.True(binding.IsSigned);
+            Assert.Equal(
+                checked((long)(binding.OutputTargetAddress.Value - binding.OutputTargetBaseAddress.Value)),
+                binding.OutputEncodedValue);
+            Assert.True(materialized.ParsedOutput!.LoadMap.TryVirtualAddressToFileOffset(
+                binding.OutputTargetAddress,
+                sizeof(uint),
+                out var mappedTargetOffset));
+            Assert.Contains(materialized.ParsedOutput.LoadMap.Segments, segment =>
+                segment.IsExecutable
+                && segment.ContainsVirtualAddress(binding.OutputTargetAddress.Value, sizeof(uint))
+                && segment.ContainsFileOffset(mappedTargetOffset.Value, sizeof(uint)));
+        }
+    }
+
+    [Theory]
+    [InlineData(SemanticJumpTableOwnership.Ambiguous, 0)]
+    [InlineData(SemanticJumpTableOwnership.SelectedFunctionPrivate, 1)]
+    [InlineData(SemanticJumpTableOwnership.Shared, 2)]
+    [InlineData(SemanticJumpTableOwnership.External, 3)]
+    [InlineData(SemanticJumpTableOwnership.RuntimeOwned, 4)]
+    [Trait("Category", "ElfLayout")]
+    public void LayoutEvidenceJsonSerializesStableV3OwnershipOrdinals(
+        SemanticJumpTableOwnership ownership,
+        int expectedWireOrdinal)
+    {
+        var (_, _, planning) = PlanRelativeJumpTableLayout();
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        Assert.Equal(3, ElfLayoutEvidence.CurrentSchemaVersion);
+        Assert.Equal(1, (int)SemanticJumpTableOwnership.Shared);
+
+        var clone = Assert.Single(planning.Evidence!.JumpTableClones);
+        var evidence = planning.Evidence with
+        {
+            JumpTableClones = new[] { clone with { Ownership = ownership } },
+        };
+        var json = JsonSerializer.Serialize(evidence, LayoutEvidenceJsonOptions);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.Equal(3, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(
+            expectedWireOrdinal,
+            root.GetProperty("jumpTableClones")[0].GetProperty("ownership").GetInt32());
+
+    }
+
+    [Fact]
+    [Trait("Category", "ElfLayout")]
+    public void RelativeJumpTablePlannerFailsClosedWhenTargetHasNoOutputAddressMapping()
+    {
+        var (source, sourceFile, _) = PlanRelativeJumpTableLayout();
+        var function = Assert.Single(sourceFile.FunctionSymbols, symbol =>
+            symbol.Table == ElfSymbolTableKind.Static && symbol.Value == 0x1200);
+        var (region, table) = BuildRelativeJumpTableRequests(source, function, narrowRegion: true);
+
+        var planning = ElfLayoutPlanner.Plan(
+            source,
+            sourceFile,
+            new[] { region },
+            Array.Empty<ElfLayoutBranchRequest>(),
+            new ElfLayoutOptions(RequestedStrategy: ElfLayoutStrategy.RelocatedProgramHeaderTable),
+            jumpTableRequests: new[] { table });
+
+        Assert.False(planning.IsSuccess);
+        Assert.Null(planning.Plan);
+        Assert.Contains(planning.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.SemanticAddressMapMissing);
+    }
+
+    [Fact]
+    [Trait("Category", "ElfLayout")]
+    public void RelativeJumpTablePlannerRejectsCloneRangeAliasingItsSourceTable()
+    {
+        var (source, sourceFile, _) = PlanRelativeJumpTableLayout();
+        var function = Assert.Single(sourceFile.FunctionSymbols, symbol =>
+            symbol.Table == ElfSymbolTableKind.Static && symbol.Value == 0x1200);
+        var (region, request) = BuildRelativeJumpTableRequests(source, function, narrowRegion: false);
+        var overlappingClone = request with
+        {
+            RequestedOutputRange = request.TableRange,
+        };
+
+        var planning = ElfLayoutPlanner.Plan(
+            source,
+            sourceFile,
+            new[] { region },
+            Array.Empty<ElfLayoutBranchRequest>(),
+            new ElfLayoutOptions(RequestedStrategy: ElfLayoutStrategy.RelocatedProgramHeaderTable),
+            jumpTableRequests: new[] { overlappingClone });
+
+        Assert.False(planning.IsSuccess);
+        Assert.Null(planning.Plan);
+        Assert.Contains(planning.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.ElfLayoutUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "ElfLayout")]
+    public void RelativeJumpTablePlannerRejectsTargetBaseBeyondSelectedOutputRange()
+    {
+        var (source, sourceFile, _) = PlanRelativeJumpTableLayout();
+        var function = Assert.Single(sourceFile.FunctionSymbols, symbol =>
+            symbol.Table == ElfSymbolTableKind.Static && symbol.Value == 0x1200);
+        var (region, request) = BuildRelativeJumpTableRequests(source, function, narrowRegion: false);
+        var selectedOutput = Assert.IsType<SemanticSourceRange>(request.SelectedFunctionOutputRange);
+        var outOfRangeTargetBase = request with
+        {
+            OutputTargetBaseAddress = new VirtualAddress(
+                checked(selectedOutput.VirtualAddress.Value + selectedOutput.Size)),
+        };
+
+        var planning = ElfLayoutPlanner.Plan(
+            source,
+            sourceFile,
+            new[] { region },
+            Array.Empty<ElfLayoutBranchRequest>(),
+            new ElfLayoutOptions(RequestedStrategy: ElfLayoutStrategy.RelocatedProgramHeaderTable),
+            jumpTableRequests: new[] { outOfRangeTargetBase });
+
+        Assert.False(planning.IsSuccess);
+        Assert.Null(planning.Plan);
+        Assert.Contains(planning.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.ElfLayoutUnsupported);
+    }
+
+    [Fact]
+    [Trait("Category", "ElfLayout")]
+    public void MaterializerRejectsTamperedOrDuplicateJumpTableTargetBindings()
+    {
+        var (source, sourceFile, planning) = PlanRelativeJumpTableLayout();
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var original = planning.Plan!;
+
+        var changed = original.JumpTableTargetBindings.ToArray();
+        changed[0] = changed[0] with
+        {
+            OutputTargetAddress = new VirtualAddress(changed[0].OutputTargetAddress.Value + sizeof(uint)),
+        };
+        var tamperedAddress = ElfLayoutMaterializer.Materialize(
+            source,
+            sourceFile,
+            original with { JumpTableTargetBindings = changed });
+        Assert.False(tamperedAddress.IsSuccess);
+        Assert.Null(tamperedAddress.Bytes);
+        Assert.Contains(tamperedAddress.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.ElfLayoutPostValidationFailed);
+
+        var changedAddressMap = original.AddressMap.ToArray();
+        changedAddressMap[0] = changedAddressMap[0] with
+        {
+            OutputRange = changedAddressMap[0].OutputRange with
+            {
+                FileOffset = new FileOffset(changedAddressMap[0].OutputRange.FileOffset.Value + sizeof(uint)),
+            },
+        };
+        var mismatchedOutputFileOffset = ElfLayoutMaterializer.Materialize(
+            source,
+            sourceFile,
+            original with { AddressMap = changedAddressMap });
+        Assert.False(mismatchedOutputFileOffset.IsSuccess);
+        Assert.Null(mismatchedOutputFileOffset.Bytes);
+        Assert.Contains(mismatchedOutputFileOffset.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.ElfLayoutPostValidationFailed);
+
+        var duplicated = original.JumpTableTargetBindings.ToArray();
+        duplicated[^1] = duplicated[^1] with { EntryIndex = duplicated[^2].EntryIndex };
+        var duplicateEntry = ElfLayoutMaterializer.Materialize(
+            source,
+            sourceFile,
+            original with { JumpTableTargetBindings = duplicated });
+        Assert.False(duplicateEntry.IsSuccess);
+        Assert.Null(duplicateEntry.Bytes);
+        Assert.Contains(duplicateEntry.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.ElfLayoutPostValidationFailed);
+
+        var nonCanonical = original.JumpTableTargetBindings.ToArray();
+        nonCanonical[0] = nonCanonical[0] with
+        {
+            EntryIdentity = SemanticEntityId.TableEntry("forged-entry-identity"),
+        };
+        var nonCanonicalEntry = ElfLayoutMaterializer.Materialize(
+            source,
+            sourceFile,
+            original with { JumpTableTargetBindings = nonCanonical });
+        Assert.False(nonCanonicalEntry.IsSuccess);
+        Assert.Null(nonCanonicalEntry.Bytes);
+        Assert.Contains(nonCanonicalEntry.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.ElfLayoutPostValidationFailed);
+    }
+
+    [Fact]
+    [Trait("Category", "ElfLayout")]
+    public void MaterializerRejectsDuplicateBindingsThatLeaveAnotherTableEditUnbound()
+    {
+        var (source, sourceFile, planning) = PlanRelativeJumpTableLayout();
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var original = planning.Plan!;
+        var first = original.JumpTableTargetBindings[0];
+        var duplicatedRanges = original.JumpTableTargetBindings
+            .Select((_, index) => first with
+            {
+                TableIdentity = SemanticEntityId.Table($"forged-table-{index}"),
+                SourceTableRange = first.SourceEntryRange,
+                EntryIdentity = SemanticEntityId.TableEntry($"forged-table-{index}:0"),
+                EntryIndex = 0,
+            })
+            .ToArray();
+
+        var result = ElfLayoutMaterializer.Materialize(
+            source,
+            sourceFile,
+            original with { JumpTableTargetBindings = duplicatedRanges });
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Bytes);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.ElfLayoutPostValidationFailed);
+    }
+
+    [Fact]
+    [Trait("Category", "ElfLayout")]
     public void BranchRangeOverflowProducesStableDiagnosticAndNoMaterializedBytes()
     {
         var source = CreateFarBranchSource();
@@ -317,6 +573,94 @@ public sealed class ElfLayoutTests
         Assert.True(second.IsSuccess, string.Join(Environment.NewLine, second.Diagnostics));
         Assert.Equal(first.Bytes, second.Bytes);
         Assert.Contains(first.Plan!.BranchDecisions, decision => decision.Decision == ElfLayoutBranchDecision.LongAddress);
+    }
+
+    private static (byte[] Source, ElfFile SourceFile, ElfLayoutPlanningResult Planning) PlanRelativeJumpTableLayout()
+    {
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        var parsed = ElfParser.Parse(source);
+        Assert.True(parsed.IsSuccess, string.Join(Environment.NewLine, parsed.Diagnostics));
+        var function = Assert.Single(parsed.File!.FunctionSymbols, symbol =>
+            symbol.Table == ElfSymbolTableKind.Static && symbol.Value == 0x1200);
+        var (region, table) = BuildRelativeJumpTableRequests(source, function, narrowRegion: false);
+        var planning = ElfLayoutPlanner.Plan(
+            source,
+            parsed.File,
+            new[] { region },
+            Array.Empty<ElfLayoutBranchRequest>(),
+            new ElfLayoutOptions(RequestedStrategy: ElfLayoutStrategy.RelocatedProgramHeaderTable),
+            jumpTableRequests: new[] { table });
+        return (source, parsed.File, planning);
+    }
+
+    private static (ElfLayoutRegionRequest Region, ElfLayoutJumpTableEditRequest Table)
+        BuildRelativeJumpTableRequests(
+            byte[] source,
+            ElfFunctionSymbol function,
+            bool narrowRegion)
+    {
+        var protection = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+        Assert.True(protection.IsSuccess, string.Join(Environment.NewLine, protection.Diagnostics));
+        var protectedRegion = Assert.Single(protection.Plan!.Regions);
+        var snapshot = protection.Plan.SemanticSnapshot!;
+        var jumpTable = Assert.Single(snapshot.Extensions.OfType<SemanticJumpTableExtension>());
+        var selectedFunctionMapping = Assert.Single(snapshot.Plan.AddressMap.Entries, entry =>
+            entry.Identity.Kind == SemanticEntityKind.Function
+            && entry.SourceRange.VirtualAddress.Value == function.Value
+            && entry.SourceRange.Size == function.Size);
+        var targetBaseMapping = Assert.Single(snapshot.Plan.AddressMap.Entries, entry =>
+            entry.Identity.Kind == SemanticEntityKind.BasicBlock
+            && jumpTable.TargetBaseAddress is { } targetBase
+            && targetBase.Value >= entry.SourceRange.VirtualAddress.Value
+            && targetBase.Value - entry.SourceRange.VirtualAddress.Value < entry.SourceRange.Size);
+        var outputEntryBindings = jumpTable.Entries.Select(entry =>
+        {
+            var targetIdentity = entry.Target.Identity!.Value;
+            var targetMapping = Assert.Single(snapshot.Plan.AddressMap.Entries, mapping => mapping.Identity == targetIdentity);
+            return new ElfLayoutJumpTableEntryOutputBinding(
+                entry.EntryIdentity,
+                targetIdentity,
+                targetMapping.OutputRange.VirtualAddress);
+        }).ToArray();
+
+        var regionAddress = narrowRegion
+            ? new VirtualAddress(function.Value + function.Size - sizeof(uint))
+            : protectedRegion.SourceAddress;
+        var regionSize = narrowRegion ? (ulong)sizeof(uint) : protectedRegion.SourceSize;
+        var codeBytes = narrowRegion
+            ? new byte[] { 0x1F, 0x20, 0x03, 0xD5 }
+            : protectedRegion.CodeBytes;
+        var region = new ElfLayoutRegionRequest(
+            "region:jump-table-targets",
+            "function:jump-table-targets",
+            regionAddress,
+            regionSize,
+            codeBytes);
+        var table = new ElfLayoutJumpTableEditRequest(
+            jumpTable.TableIdentity,
+            jumpTable.TableRange,
+            jumpTable.TargetBaseAddress!.Value,
+            jumpTable.EntrySize,
+            jumpTable.IsSigned,
+            jumpTable.Scale,
+            jumpTable.Addend,
+            jumpTable.RewritePolicy,
+            jumpTable.Entries,
+            jumpTable.Ownership,
+            jumpTable.OutputRange,
+            jumpTable.TableReferenceProducers,
+            jumpTable.OwnerReferences,
+            jumpTable.OwnerInventoryComplete,
+            selectedFunctionMapping.SourceRange,
+            selectedFunctionMapping.OutputRange,
+            targetBaseMapping.Identity,
+            targetBaseMapping.OutputRange.VirtualAddress,
+            outputEntryBindings);
+        return (region, table);
     }
 
     private static (ElfLayoutRegionRequest[] Regions, ElfLayoutBranchRequest[] Branches) Requests(

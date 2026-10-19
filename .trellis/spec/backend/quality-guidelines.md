@@ -89,12 +89,139 @@ tests plus the relevant malformed-input path:
   tests or Coverlet line/branch coverage.
 - Native `self_test.c` and `test_launcher.sh` cover SHA-256, raw deflate,
   malformed frames, handoff behavior, and signal/status preservation.
+- Native indirect-control promotion must execute every declared bounded
+  jump-table target, not infer coverage from table contents or fixture presence.
+  Retain measured source/transformed handoff records and exact baseline/target
+  stdout/stderr bytes plus hashes; the evidence checker recomputes status and
+  stream comparison from those files, binds the selected function and case
+  symbols to the source ELF dynamic symbols, binds table edit offsets to the
+  source table's mapped file range, and verifies rewritten entry bytes in the
+  Native Image. Its address-map range must cover the selected function and all
+  case targets and map to file-backed executable output. Layout evidence also
+  retains one planner-derived typed binding per table entry: table/entry/target
+  identities, entry index and source row, source target/base VAs, and the mapped
+  output target/base VAs. The checker independently recomputes each target from
+  the retained address map and each signed-32-bit entry from those VAs, then
+  compares it with source table bytes, layout edits, and Native Image bytes;
+  missing, duplicate, remapped, or checksum-refreshed forged bindings fail.
+  The shared-table copy slice first introduced canonical semantic snapshot v3
+  (`URP-SPS3`) to persist bounded owner/reference-site evidence; the current
+  single semantic schema is v6 (`URP-SPS6`) and adds a typed provider-facts-only
+  external-table extension alongside the static function-pointer call owner,
+  while strictly rejecting v1-v5. SPS6 retains the semantic snapshot byte
+  ordinals `SelectedFunctionPrivate=0`, `Shared=1`, `External=2`,
+  `RuntimeOwned=3`, and `Ambiguous=4`. These are distinct from layout-evidence
+  schema v3 JSON ownership ordinals; see
+   `runtime-compatibility.md` for that mapping and its exact-integer-token
+   validation requirement. The provider-facts reader takes one bounded private
+  input snapshot after the raw-size gate, verifies its SHA-256, and uses that
+  same snapshot for ELF parsing and all retained provider facts; do not reuse
+  caller-owned bytes after the copy. Test the maximum-plus-one refusal before
+  copy/access, wrong-hash rejection before parsing, and deterministic mutation
+  on a later caller-memory observation. Its strict single-`PT_DYNAMIC` /
+  no-`PT_INTERP` rule is provider-profile-only: retain the ordinary parser's
+  zero-`PT_DYNAMIC` behavior. Provider facts do not establish consumer
+  `GLOB_DAT`/GOT semantics, protect/rehydrate admission, or native/runtime
+  support. Layout evidence
+  remains schema 3 to retain clone ranges, permissions, ownership, rewrite
+  policy, and per-entry target/base bindings. The Protected Image ABI
+  remains v1. Its independent native glibc checker proves one selected
+  `urp_entry` consumer reads a distinct read-only file-backed clone while an
+  unselected `urp_observer` keeps its original table bytes/reference chain;
+  this is limited to the controlled signed-32-bit shared-table fixture and does
+  not promote other encodings or runtimes. For a proven bounded in-image table
+  with an exact selected ADRP/ADD reference but incomplete owner inventory, the
+  managed safe-default is `Ambiguous` ownership plus the same distinct PF_R
+  clone-and-retarget policy. Global/default-visible symbols and missing or
+  stripped metadata prove neither `Shared`, `SelectedFunctionPrivate`,
+  `External`, nor `RuntimeOwned`.
+  Leave the source table and unselected/unknown references unchanged.
+  Rehydration must re-decode the selected source reference chain and rederive
+  every carried owner fact/classification before layout/publication; a changed
+  selected chain or conflicting selected-site relocation fails before Protected
+  Image or Native Image publication. Derive each owner function's section
+  identity and executable/file-backed address/file bounds from the retained
+  source ELF; every section-linked RELA row must have bounded `sh_info` equal
+  to that function's `st_shndx`, contain the complete function and four-byte
+  relocation site, and map the site to the section's file bytes. Carry these
+  typed section facts through the current URP-SPS6 snapshot, then independently
+  cross-check them against source section headers, linked RELA rows, and
+  function symbols at rehydration publication; any mismatch or ambiguity
+  discards the ownership proof. The static local function-pointer row separately
+  carries exact caller/target symbol and section identities, the ordered
+  ADRP/ADD/stack spill/reload/BLR chain, exact static RELA sites, and an
+  identity-preserved callback range; rehydration re-derives these from source
+  ELF and validates the emitted caller and final callback VA/bytes. This is a
+  compiler/toolchain-shaped same-image local/hidden `STT_FUNC` mode only;
+  arbitrary pointers, imported function pointers, moved callees, veneers, and
+  runtime translation remain unpromoted. Python evidence consumers retain the
+  nested semantic snapshot as opaque bounded bytes plus its digest. Retain each observer helper's actual process
+  exit status and stdout/stderr bytes, bind their hashes/statuses in behavior
+  evidence, and require exact source/transformed image hashes, HostContext
+  loader identity, release order/status, no failure stage, and expected fixture
+  stream behavior. Keep the malformed-table and
+  post-CMP/B.HI checked-index-clobber negatives separate,
+  require the producer's stable
+  diagnostic and actual failed stage, and prove no Protected Image, Native
+  Image, or loader handoff was published. Refreshed-manifest tampering tests
+  cover forged equality, stream hashes, statuses, negative diagnostics, and
+  missing negative artifacts. A true out-of-range relative-entry negative must
+  be distinct from an in-image target outside the selected closure: retain the
+  exact pre-mutation input and mutated source ELF, independently parse the table
+  symbol/range and signed entry/base, recompute the target, and prove it lies
+  outside every PT_LOAD memory range and executable file-backed range. Preserve
+  the actual producer command, structured failed producer stage and exit status;
+  require its stable out-of-executable-PT_LOAD diagnostic and reject refreshed
+  checksums that forge the table value, target/range, diagnostic, or publication
+  claims. A separate external-table nearest-negative source must use an undefined
+  dynamic STT_OBJECT imported by `urp_entry`, one exact non-PLT
+  `R_AARCH64_GLOB_DAT` bound by dynsym index, and a guarded ADRP/GOT-LDR to
+  indexed signed LDRSW to relative ADD to BR dataflow chain. The evidence
+  checker reparses PT_DYNAMIC, dynsym/string facts, RELA ownership, writable
+  file-backed GOT mapping, and selected-function bytes from the retained
+  source ELF; the GOT slot is a pointer carrier, never external table storage.
+  The source-byte proof must bind the taken bounds-branch edge to the exact safe
+  default-return path, prove its bounded instructions terminate without
+  re-entering or reaching the GOT/indexed-read/relative-dispatch chain, and
+  reject an in-function destination that can enter that chain. Keep a
+  checksum-refreshed raw-ELF branch-immediate mutation targeting the indexed
+  read, and assert rejection for the unsafe bounds destination rather than a
+  stale hash. Bind the observed producer command/source digest/exit/stage and stable
+  diagnostic, reject downstream publication, and reject refreshed checksums
+  that forge owner, relocation, GOT, instruction-link, diagnostic, or stage
+  facts. This negative establishes fail-closed behavior only and does not claim
+  external-table support or widen indirect-call admission.
+- Native CFI promotion must retain genuine typed C++ throw/catch execution
+  through the transformed target FDE and register-call assembly frame. Keep the
+  C `setjmp`/`longjmp` observation separately named; require the exact BLR
+  return-PC symbol/offset and an active assembly FDE covering that PC, plus
+  throw-site target-frame/return-PC observations, token-specific catch, no
+  normal target return, one RAII cleanup, successful release, and measured
+  source/target process results. Bind each runtime target start/end and callback
+  PC through measured load bias, mapped VA/extent, and the retained rehydration
+  address map using overflow-checked arithmetic; recompute address-derived
+  booleans rather than trusting flags, and keep the checks independent of ASLR
+  absolute addresses. Retain C/C++ compiler plus libstdc++/libgcc/glibc
+  identities. The evidence checker must reject refreshed-checksum tampering;
+  these relational checks do not establish cryptographic authenticity of
+  self-reported runtime observations. Malformed-CFI rollback remains an
+  independent negative gate.
 - HostContext worker-lifetime changes require the real-linker initial-exec TLS
   fixture on native AArch64 glibc, with inherited event/gate pipes, exact
   readelf TLS/relocation facts, explicit and automatic joins, TLS teardown
   before image destructor, serial reruns, concurrent independent dispatches,
   and retained runtime identity/status/hash evidence. Musl/bionic execution is
   not a substitute for the glibc cell.
+
+Package-merge cleanup tests must inventory only resources owned by that test,
+not a before/after glob of shared `/tmp`. Keep the real merge shell, privilege
+drop, timeout, path-security checks, and exit status intact. A test-only
+`mktemp` interceptor must validate the exact production invocation and delegate
+to the real executable under a private root accessible to the dropped UID.
+Test both an unrelated concurrent stage (ignored) and a leaked owned stage
+(rejected). Capture return code and both streams on failure. A green rerun or
+fixed cleanup assertion does not explain a historical nonzero child exit;
+retain that failure separately until its cause is established.
 
 Use external `readelf`/`llvm-readelf` checks for produced ELF structure when a
 change affects a launcher, fixture, or release. Compare runtime behavior using

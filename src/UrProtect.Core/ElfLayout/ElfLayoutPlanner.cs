@@ -191,6 +191,8 @@ public static class ElfLayoutPlanner
             var tableHasVirtualAddress = oldTable.HasVirtualAddress;
             var tableOutputSize = tableSize;
             var changedHeaderIndex = -1;
+            var readOnlyHeaderIndex = -1;
+            var needsReadOnlyJumpTableSegment = jumpTables.Count > 0;
             var extensionHeader = default(ProgramHeader);
             var isExtension = strategy == ElfLayoutStrategy.ExistingExecutableLoadExtension;
             var isRelocation = strategy == ElfLayoutStrategy.RelocatedProgramHeaderTable;
@@ -226,6 +228,19 @@ public static class ElfLayoutPlanner
 
                 codeFileStart = sourceLength;
                 segmentVirtualStart = extensionHeader.VirtualAddress;
+                if (needsReadOnlyJumpTableSegment)
+                {
+                    if (!TryFindNullHeaders(sourceHeaders, 1, out var extensionNullHeaders))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.RehydrationLayoutUnavailable,
+                            "The executable-extension strategy needs a separate PT_NULL slot for the read-only jump-table clone segment.");
+                        rejected = diagnostics.ToArray();
+                        return false;
+                    }
+
+                    readOnlyHeaderIndex = extensionNullHeaders[0];
+                }
             }
             else
             {
@@ -245,8 +260,9 @@ public static class ElfLayoutPlanner
                 codeVirtualStart = segmentVirtualStart;
                 if (isRelocation)
                 {
-                    if (programHeaderCount >= options.MaximumProgramHeaderCount
-                        || programHeaderCount >= ushort.MaxValue)
+                    var addedHeaderCount = needsReadOnlyJumpTableSegment ? 2 : 1;
+                    if (programHeaderCount > options.MaximumProgramHeaderCount - addedHeaderCount
+                        || programHeaderCount > ushort.MaxValue - addedHeaderCount)
                     {
                         diagnostics.Error(
                             DiagnosticCode.RehydrationLayoutUnavailable,
@@ -255,7 +271,7 @@ public static class ElfLayoutPlanner
                         return false;
                     }
 
-                    var newCount = checked(programHeaderCount + 1);
+                    var newCount = checked(programHeaderCount + addedHeaderCount);
                     tableOutputSize = checked((ulong)newCount * sourceFile.Header.ProgramHeaderEntrySize);
                     if (!TryAdd(segmentFileStart, tableOutputSize, out var codeAfterTable)
                         || !TryAlignUp(codeAfterTable, options.CodeAlignment, out codeFileStart)
@@ -272,13 +288,25 @@ public static class ElfLayoutPlanner
                     tableHasVirtualAddress = true;
                     programHeaderCount = newCount;
                 }
-                else if (!TryFindNullHeader(sourceHeaders, out changedHeaderIndex))
+                else
                 {
-                    diagnostics.Error(
-                        DiagnosticCode.RehydrationLayoutUnavailable,
-                        "The source ELF has no PT_NULL program-header candidate for the generated executable region.");
-                    rejected = diagnostics.ToArray();
-                    return false;
+                    var requiredNullHeaders = needsReadOnlyJumpTableSegment ? 2 : 1;
+                    if (!TryFindNullHeaders(sourceHeaders, requiredNullHeaders, out var nullHeaders))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.RehydrationLayoutUnavailable,
+                            needsReadOnlyJumpTableSegment
+                                ? "The source ELF lacks distinct PT_NULL slots for the generated executable region and read-only jump-table clone segment."
+                                : "The source ELF has no PT_NULL program-header candidate for the generated executable region.");
+                        rejected = diagnostics.ToArray();
+                        return false;
+                    }
+
+                    changedHeaderIndex = nullHeaders[0];
+                    if (needsReadOnlyJumpTableSegment)
+                    {
+                        readOnlyHeaderIndex = nullHeaders[1];
+                    }
                 }
             }
 
@@ -287,6 +315,9 @@ public static class ElfLayoutPlanner
             var addressMap = new List<ElfLayoutAddressMapEntry>(regions.Count + options.MaximumVeneerCount);
             var placementByIdentity = new Dictionary<string, ElfLayoutPlacement>(StringComparer.Ordinal);
             var edits = new List<ElfLayoutByteEdit>(unwindEdits.Count + regions.Count + branches.Count + jumpTables.Count);
+            var jumpTableTargetBindings = new List<ElfLayoutJumpTableTargetBinding>();
+            var jumpTableEdits = new List<ElfLayoutByteEdit>();
+            var jumpTableClones = new List<ElfLayoutJumpTableClone>();
             edits.AddRange(unwindEdits);
             var cursorFile = codeFileStart;
             var cursorVirtual = codeVirtualStart;
@@ -340,18 +371,6 @@ public static class ElfLayoutPlanner
                 edits.Add(new ElfLayoutByteEdit(placement.FileOffset, materializedCode, ElfLayoutEditKind.GeneratedCode));
                 cursorFile = checked(cursorFile + placement.Size);
                 cursorVirtual = checked(cursorVirtual + placement.Size);
-            }
-
-            var jumpTableEdits = BuildJumpTableEdits(
-                sourceFile,
-                jumpTables,
-                addressMap,
-                diagnostics);
-            edits.AddRange(jumpTableEdits);
-            if (diagnostics.HasErrors)
-            {
-                rejected = diagnostics.ToArray();
-                return false;
             }
 
             var branchDecisions = new List<ElfBranchPlacementDecision>(branches.Count);
@@ -650,7 +669,116 @@ public static class ElfLayoutPlanner
                 return false;
             }
 
-            var generatedSpanBytes = checked(cursorFile - codeFileStart);
+            ProgramHeader? plannedReadOnlySegment = null;
+            if (jumpTables.Count > 0)
+            {
+                var previousFileCursor = cursorFile;
+                if (!TryAlignPlacementCursor(
+                        ref cursorFile,
+                        ref cursorVirtual,
+                        segmentAlignment,
+                        codeFileStart,
+                        codeVirtualStart,
+                        diagnostics))
+                {
+                    rejected = diagnostics.ToArray();
+                    return false;
+                }
+
+                AddPaddingEdits(edits, previousFileCursor, cursorFile, options, diagnostics);
+                if (diagnostics.HasErrors)
+                {
+                    rejected = diagnostics.ToArray();
+                    return false;
+                }
+
+                var cloneSegmentFileStart = cursorFile;
+                var cloneSegmentVirtualStart = cursorVirtual;
+                foreach (var request in jumpTables.OrderBy(request => request.TableRange.FileOffset.Value)
+                             .ThenBy(request => request.TableIdentity.Value, StringComparer.Ordinal))
+                {
+                    previousFileCursor = cursorFile;
+                    if (!TryAlignPlacementCursor(
+                            ref cursorFile,
+                            ref cursorVirtual,
+                            checked((ulong)request.EntryWidth),
+                            codeFileStart,
+                            codeVirtualStart,
+                            diagnostics))
+                    {
+                        rejected = diagnostics.ToArray();
+                        return false;
+                    }
+
+                    AddPaddingEdits(edits, previousFileCursor, cursorFile, options, diagnostics);
+                    if (diagnostics.HasErrors)
+                    {
+                        rejected = diagnostics.ToArray();
+                        return false;
+                    }
+
+                    var outputRange = new ElfLayoutRange(
+                        new FileOffset(cursorFile),
+                        new VirtualAddress(cursorVirtual),
+                        request.TableRange.Size);
+                    var requestedOutputRange = request.RequestedOutputRange!.Value;
+                    var sourceRange = new ElfLayoutRange(
+                        request.TableRange.FileOffset,
+                        request.TableRange.VirtualAddress,
+                        request.TableRange.Size);
+                    var clone = new ElfLayoutJumpTableClone(
+                        request.TableIdentity,
+                        request.TableRange,
+                        requestedOutputRange,
+                        outputRange,
+                        request.Ownership,
+                        request.RewritePolicy,
+                        Array.AsReadOnly(request.TableReferenceProducers!.ToArray()),
+                        Array.AsReadOnly(request.OwnerReferences!.ToArray()),
+                        request.OwnerInventoryComplete,
+                        ElfConstants.PfR);
+                    jumpTableClones.Add(clone);
+                    addressMap.Add(new ElfLayoutAddressMapEntry(
+                        request.TableIdentity.Value,
+                        request.TableIdentity.Value,
+                        sourceRange,
+                        outputRange));
+                    cursorFile = checked(cursorFile + request.TableRange.Size);
+                    cursorVirtual = checked(cursorVirtual + request.TableRange.Size);
+                }
+
+                var cloneFileSize = checked(cursorFile - cloneSegmentFileStart);
+                plannedReadOnlySegment = new ProgramHeader(
+                    ElfConstants.PtLoad,
+                    ElfConstants.PfR,
+                    cloneSegmentFileStart,
+                    cloneSegmentVirtualStart,
+                    cloneSegmentVirtualStart,
+                    cloneFileSize,
+                    cloneFileSize,
+                    segmentAlignment);
+                jumpTableEdits = BuildJumpTableEdits(
+                    sourceFile,
+                    jumpTables,
+                    jumpTableClones,
+                    addressMap,
+                    jumpTableTargetBindings,
+                    diagnostics);
+                edits.AddRange(jumpTableEdits);
+                if (diagnostics.HasErrors)
+                {
+                    rejected = diagnostics.ToArray();
+                    return false;
+                }
+            }
+
+            var generatedSpanBytes = checked((jumpTables.Count > 0
+                ? jumpTableClones[0].OutputRange.FileOffset.Value
+                : cursorFile) - codeFileStart);
+            if (jumpTables.Count > 0)
+            {
+                generatedSpanBytes = checked(jumpTableClones[0].OutputRange.FileOffset.Value - codeFileStart);
+            }
             var generatedCodeBytes = 0UL;
             foreach (var placement in placements)
             {
@@ -723,6 +851,26 @@ public static class ElfLayoutPlanner
                 plannedHeaders.Add(plannedSegment);
             }
 
+            if (plannedReadOnlySegment is { } readOnlySegment)
+            {
+                if (isRelocation)
+                {
+                    plannedHeaders.Add(readOnlySegment);
+                }
+                else if (readOnlyHeaderIndex >= 0)
+                {
+                    plannedHeaders[readOnlyHeaderIndex] = readOnlySegment;
+                }
+                else
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutMalformed,
+                        "A read-only jump-table clone segment has no distinct program-header owner.");
+                    rejected = diagnostics.ToArray();
+                    return false;
+                }
+            }
+
             var programHeaderPlans = new List<ElfProgramHeaderPlan>(plannedHeaders.Count);
             for (var index = 0; index < plannedHeaders.Count; index++)
             {
@@ -736,9 +884,11 @@ public static class ElfLayoutPlanner
                 {
                     editKind = plannedHeaders[index].Type == ElfConstants.PtPhdr
                         ? ElfProgramHeaderEditKind.UpdatedProgramHeaderTableMapping
-                        : strategy == ElfLayoutStrategy.ExistingExecutableLoadExtension
-                            ? ElfProgramHeaderEditKind.ExtendedExecutableLoad
-                            : ElfProgramHeaderEditKind.ReplaceAvailableSlot;
+                        : original.Value.Type == ElfConstants.PtNull
+                            ? ElfProgramHeaderEditKind.ReplaceAvailableSlot
+                            : strategy == ElfLayoutStrategy.ExistingExecutableLoadExtension
+                                ? ElfProgramHeaderEditKind.ExtendedExecutableLoad
+                                : ElfProgramHeaderEditKind.ReplaceAvailableSlot;
                 }
 
                 programHeaderPlans.Add(new ElfProgramHeaderPlan(index < sourceHeaders.Length ? index : null, original, plannedHeaders[index], editKind));
@@ -829,6 +979,8 @@ public static class ElfLayoutPlanner
                     .ToArray()),
                 UnwindEdits = Array.AsReadOnly(unwindEdits.ToArray()),
                 JumpTableEdits = Array.AsReadOnly(jumpTableEdits.ToArray()),
+                JumpTableTargetBindings = Array.AsReadOnly(jumpTableTargetBindings.ToArray()),
+                JumpTableClones = Array.AsReadOnly(jumpTableClones.ToArray()),
             };
 
             if (!ValidateCandidate(
@@ -840,6 +992,7 @@ public static class ElfLayoutPlanner
                     segmentFileStart,
                     segmentVirtualStart,
                     plannedSegment,
+                    plannedReadOnlySegment,
                     diagnostics))
             {
                 rejected = diagnostics.ToArray();
@@ -883,6 +1036,7 @@ public static class ElfLayoutPlanner
         ulong segmentFileStart,
         ulong segmentVirtualStart,
         ProgramHeader plannedSegment,
+        ProgramHeader? plannedReadOnlySegment,
         DiagnosticBag diagnostics)
     {
         if (plan.NewProgramHeaderCount != plannedHeaders.Count
@@ -1013,6 +1167,58 @@ public static class ElfLayoutPlanner
             }
         }
 
+        if (plan.JumpTableClones.Count > 0)
+        {
+            if (plannedReadOnlySegment is not { } readOnlySegment
+                || readOnlySegment.Type != ElfConstants.PtLoad
+                || readOnlySegment.Flags != ElfConstants.PfR
+                || !IsValidAlignment(readOnlySegment.Alignment, options.MaximumAlignment)
+                || (readOnlySegment.Alignment > 1
+                    && readOnlySegment.Offset % readOnlySegment.Alignment != readOnlySegment.VirtualAddress % readOnlySegment.Alignment)
+                || readOnlySegment.FileSize != readOnlySegment.MemorySize
+                || readOnlySegment.FileSize == 0)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutMalformed,
+                    "The copied jump-table segment is not a distinct, file-backed PF_R-only PT_LOAD.");
+                return false;
+            }
+
+            var cloneIdentities = new HashSet<SemanticEntityId>();
+            foreach (var clone in plan.JumpTableClones)
+            {
+                if (!cloneIdentities.Add(clone.TableIdentity)
+                    || clone.Permissions != ElfConstants.PfR
+                    || clone.RewritePolicy != SemanticJumpTableRewritePolicy.CopiedAndRetargeted
+                    || clone.Ownership is not (SemanticJumpTableOwnership.Ambiguous or SemanticJumpTableOwnership.Shared)
+                    || clone.SourceTableRange.Size == 0
+                    || clone.SourceTableRange.Size != clone.RequestedOutputRange.Size
+                    || clone.SourceTableRange.Size != clone.OutputRange.Size
+                    || clone.SourceTableRange.VirtualAddress == clone.OutputRange.VirtualAddress
+                    || clone.SourceTableRange.FileOffset == clone.OutputRange.FileOffset
+                    || clone.OutputRange.FileOffset.Value < readOnlySegment.Offset
+                    || clone.OutputRange.FileOffset.Value - readOnlySegment.Offset > readOnlySegment.FileSize
+                    || clone.OutputRange.Size > readOnlySegment.FileSize - (clone.OutputRange.FileOffset.Value - readOnlySegment.Offset)
+                    || clone.OutputRange.VirtualAddress.Value < readOnlySegment.VirtualAddress
+                    || clone.OutputRange.VirtualAddress.Value - readOnlySegment.VirtualAddress > readOnlySegment.MemorySize
+                    || clone.OutputRange.Size > readOnlySegment.MemorySize - (clone.OutputRange.VirtualAddress.Value - readOnlySegment.VirtualAddress)
+                    || clone.TableReferenceProducers.Count != 2
+                    || clone.OwnerInventoryComplete)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutMalformed,
+                        "A copied jump-table clone has an invalid identity, ownership policy, source/output range, or read-only segment binding.",
+                        clone.SourceTableRange.FileOffset.Value);
+                    return false;
+                }
+            }
+        }
+        else if (plannedReadOnlySegment is not null)
+        {
+            diagnostics.Error(DiagnosticCode.ElfLayoutMalformed, "A read-only jump-table segment was planned without clone requests.");
+            return false;
+        }
+
         foreach (var metadata in plannedHeaders.Where(header => header.Type is not (ElfConstants.PtNull or ElfConstants.PtLoad)))
         {
             if (plan.Strategy == ElfLayoutStrategy.RelocatedProgramHeaderTable
@@ -1043,8 +1249,11 @@ public static class ElfLayoutPlanner
             var allowedChange = plan.Strategy switch
             {
                 ElfLayoutStrategy.ExistingExecutableLoadExtension => index == plan.ProgramHeaders[index].SourceIndex
-                    && original.Type == ElfConstants.PtLoad
-                    && original.IsExecutable,
+                    && ((original.Type == ElfConstants.PtLoad && original.IsExecutable)
+                        || (original.Type == ElfConstants.PtNull
+                            && plan.JumpTableClones.Count > 0
+                            && planned.Type == ElfConstants.PtLoad
+                            && planned.Flags == ElfConstants.PfR)),
                 ElfLayoutStrategy.AvailableProgramHeaderSlot => index == plan.ProgramHeaders[index].SourceIndex
                     && original.Type == ElfConstants.PtNull,
                 ElfLayoutStrategy.RelocatedProgramHeaderTable => original.Type == ElfConstants.PtPhdr,
@@ -1358,14 +1567,17 @@ public static class ElfLayoutPlanner
                                 ? type is not (ElfConstants.RArm64TlsLdAdrPage21
                                     or ElfConstants.RArm64TlsLdAddLo12Nc
                                     or ElfConstants.RArm64TlsLdAddDtprelHi12
+                                    or ElfConstants.RArm64TlsLdAddDtprelLo12
                                     or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
                                 : type is not (ElfConstants.RArm64TlsGdAdrPage21
                                     or ElfConstants.RArm64TlsGdAddLo12Nc))))
                 || request.OutputOffset > (ulong)region.CodeBytes.Length
                 || sizeof(uint) > (ulong)region.CodeBytes.Length - request.OutputOffset
                 || (request.OutputOffset & 3) != 0
-                || !region.SourceAddress.Value.Equals(fixup.SequenceSourceRange.VirtualAddress.Value)
+                || fixup.SequenceSourceRange.VirtualAddress.Value < region.SourceAddress.Value
+                || fixup.SequenceSourceRange.VirtualAddress.Value - region.SourceAddress.Value > region.SourceSize
                 || fixup.SequenceSourceRange.Size > region.SourceSize
+                    - (fixup.SequenceSourceRange.VirtualAddress.Value - region.SourceAddress.Value)
                 || (model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
                     ? fixup.PairOrdinal is < -1 or > 3
                     : model == TlsAccessModel.TlsDesc
@@ -1389,7 +1601,14 @@ public static class ElfLayoutPlanner
             var virtualDelta = fixup.RelocationOutputRange.VirtualAddress.Value >= fixup.SequenceOutputRange.VirtualAddress.Value
                 ? fixup.RelocationOutputRange.VirtualAddress.Value - fixup.SequenceOutputRange.VirtualAddress.Value
                 : ulong.MaxValue;
-            if (fileDelta != virtualDelta || fileDelta != request.OutputOffset)
+            var sequenceRegionOffset = fixup.SequenceOutputRange.VirtualAddress.Value >= region.SourceAddress.Value
+                ? fixup.SequenceOutputRange.VirtualAddress.Value - region.SourceAddress.Value
+                : ulong.MaxValue;
+            var expectedOutputOffset = sequenceRegionOffset != ulong.MaxValue
+                && virtualDelta <= ulong.MaxValue - sequenceRegionOffset
+                ? sequenceRegionOffset + virtualDelta
+                : ulong.MaxValue;
+            if (fileDelta != virtualDelta || expectedOutputOffset != request.OutputOffset)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsLayoutMismatch,
@@ -1454,14 +1673,18 @@ public static class ElfLayoutPlanner
             if (valid && region is not null)
             {
                 var first = ordered[0].Fixup;
-                var sourceOffset = first.RelocationSourceRange.FileOffset.Value;
+                var sourceOffset = first.SequenceSourceRange.FileOffset.Value;
                 var outputOffset = ordered[0].OutputOffset;
+                var sourceSize = first.SequenceSourceRange.Size;
+                var outputSize = first.SequenceOutputRange.Size;
                 valid = sourceOffset <= (ulong)sourceFile.Bytes.Length
-                    && 8 * sizeof(uint) <= (ulong)sourceFile.Bytes.Length - sourceOffset
+                    && sourceSize >= 8 * sizeof(uint)
+                    && sourceSize <= (ulong)sourceFile.Bytes.Length - sourceOffset
                     && outputOffset <= (ulong)region.CodeBytes.Length
-                    && 8 * sizeof(uint) <= (ulong)region.CodeBytes.Length - outputOffset
-                    && TryReadWords(sourceFile.Bytes.Span, sourceOffset, 8 * sizeof(uint), out var sourceWords)
-                    && TryReadWords(region.CodeBytes, outputOffset, 8 * sizeof(uint), out var outputWords)
+                    && outputSize >= 8 * sizeof(uint)
+                    && outputSize <= (ulong)region.CodeBytes.Length - outputOffset
+                    && TryReadWords(sourceFile.Bytes.Span, sourceOffset, sourceSize, out var sourceWords)
+                    && TryReadWords(region.CodeBytes, outputOffset, outputSize, out var outputWords)
                     && Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
                         sourceWords,
                         first.DescriptorOwner!,
@@ -2348,7 +2571,9 @@ public static class ElfLayoutPlanner
             fixedEncoding = isAdr ? encodedAdr : encodedAdd;
         }
         else if (fixup.AccessModel == TlsAccessModel.LocalDynamic
-            && relocationType is ElfConstants.RArm64TlsLdAddDtprelHi12 or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
+            && relocationType is ElfConstants.RArm64TlsLdAddDtprelHi12
+                or ElfConstants.RArm64TlsLdAddDtprelLo12
+                or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
         {
             if (!TryAdd(placement.VirtualAddress.Value, (ulong)outputIndex, out var dtpRelOutputAddress)
                 || !Aarch64TlsInstructionSemantics.TryEncodeLocalDynamicDtprel(
@@ -2653,20 +2878,29 @@ public static class ElfLayoutPlanner
     private static List<ElfLayoutByteEdit> BuildJumpTableEdits(
         ElfFile sourceFile,
         IReadOnlyList<ElfLayoutJumpTableEditRequest> requests,
-        IReadOnlyList<ElfLayoutAddressMapEntry> addressMap,
+        IReadOnlyList<ElfLayoutJumpTableClone> clones,
+        List<ElfLayoutAddressMapEntry> addressMap,
+        List<ElfLayoutJumpTableTargetBinding> targetBindings,
         DiagnosticBag diagnostics)
     {
         var edits = new List<ElfLayoutByteEdit>();
         foreach (var request in requests)
         {
-            if (request.RewritePolicy != SemanticJumpTableRewritePolicy.InPlace)
+            var matchingClones = clones
+                .Where(clone => clone.TableIdentity == request.TableIdentity)
+                .ToArray();
+            if (request.RewritePolicy != SemanticJumpTableRewritePolicy.CopiedAndRetargeted
+                || matchingClones.Length != 1
+                || matchingClones[0].OutputRange.Size != request.TableRange.Size)
             {
                 diagnostics.Error(
-                    DiagnosticCode.ElfLayoutUnsupported,
-                    "Only in-place selected-function-private jump-table rewrites are currently materialized.",
+                    DiagnosticCode.ElfLayoutMalformed,
+                    "A copied jump-table request has no unique physical read-only clone range.",
                     request.TableRange.FileOffset.Value);
                 continue;
             }
+
+            var clone = matchingClones[0];
 
             if (!sourceFile.LoadMap.TryVirtualAddressToFileOffset(
                     request.TableRange.VirtualAddress,
@@ -2689,26 +2923,125 @@ public static class ElfLayoutPlanner
                 continue;
             }
 
-            if (!TryMapPhysicalAddress(
+            if (request.SelectedFunctionSourceRange is not { } selectedFunctionSourceRange
+                || request.SelectedFunctionOutputRange is not { } selectedFunctionOutputRange
+                || request.OutputTargetBaseIdentity is not { } targetBaseIdentity
+                || request.OutputTargetBaseAddress is not { } logicalOutputTargetBase
+                || !TryMapSelectedLogicalOutputAddress(
                     addressMap,
-                    request.TargetBaseAddress,
-                    out var outputTargetBase))
+                    selectedFunctionSourceRange,
+                    selectedFunctionOutputRange,
+                    logicalOutputTargetBase,
+                    out var outputTargetBase,
+                    out var outputTargetBaseFileOffset))
             {
                 diagnostics.Error(
                     DiagnosticCode.SemanticAddressMapMissing,
-                    "The jump-table target-base address has no physical output mapping.",
+                    "The jump-table target-base address has no unique physical output mapping.",
                     request.TableRange.FileOffset.Value);
                 continue;
             }
 
-            foreach (var entry in request.Entries.OrderBy(entry => entry.Index))
+            if (!TryAddJumpTableTargetAddressMapEntry(
+                    sourceFile,
+                    addressMap,
+                    targetBaseIdentity,
+                    request.TargetBaseAddress,
+                    outputTargetBase,
+                    outputTargetBaseFileOffset))
             {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMalformed,
+                    "The jump-table target-base physical map conflicts with its selected-function mapping.",
+                    request.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            var orderedEntries = request.Entries.OrderBy(entry => entry.Index).ToArray();
+            var firstIndex = orderedEntries[0].Index;
+            var seenEntryIdentities = new HashSet<SemanticEntityId>();
+            for (var ordinal = 0; ordinal < orderedEntries.Length; ordinal++)
+            {
+                var entry = orderedEntries[ordinal];
+                var delta = checked((ulong)ordinal * (ulong)request.EntryWidth);
+                if (delta > ulong.MaxValue - tableFileOffset.Value
+                    || delta > ulong.MaxValue - request.TableRange.VirtualAddress.Value
+                    || entry.Index < firstIndex
+                    || entry.Index - firstIndex != ordinal
+                    || entry.SourceRange.FileOffset.Value != tableFileOffset.Value + delta
+                    || entry.SourceRange.VirtualAddress.Value != request.TableRange.VirtualAddress.Value + delta
+                    || entry.SourceRange.Size != (ulong)request.EntryWidth
+                    || entry.EntryIdentity.Kind != SemanticEntityKind.TableEntry
+                    || !seenEntryIdentities.Add(entry.EntryIdentity))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutMalformed,
+                        "A jump-table entry identity, index, or source range is not a unique ordered row of its declared table.",
+                        entry.SourceRange.FileOffset.Value);
+                    continue;
+                }
+
+                var outputEntryBindings = request.OutputEntryBindings ?? Array.Empty<ElfLayoutJumpTableEntryOutputBinding>();
+                var outputEntryMatches = outputEntryBindings
+                    .Where(binding => binding.EntryIdentity == entry.EntryIdentity)
+                    .ToArray();
                 if (entry.Target.SourceAddress is not { } sourceTarget
-                    || !TryMapPhysicalAddress(addressMap, sourceTarget, out var outputTarget))
+                    || entry.Target.Identity is not { } targetIdentity
+                    || outputEntryMatches.Length != 1
+                    || outputEntryMatches[0].TargetIdentity != targetIdentity
+                    || request.SelectedFunctionSourceRange is not { } entrySelectedFunctionSourceRange
+                    || request.SelectedFunctionOutputRange is not { } entrySelectedFunctionOutputRange
+                    || !TryMapSelectedLogicalOutputAddress(
+                        addressMap,
+                        entrySelectedFunctionSourceRange,
+                        entrySelectedFunctionOutputRange,
+                        outputEntryMatches[0].OutputTargetAddress,
+                        out var outputTarget,
+                        out var outputTargetFileOffset))
                 {
                     diagnostics.Error(
                         DiagnosticCode.SemanticAddressMapMissing,
-                        "A jump-table entry target has no physical output mapping.",
+                        "A jump-table entry target identity or unique physical output mapping is missing.",
+                        entry.SourceRange.FileOffset.Value);
+                    continue;
+                }
+
+                if (!TryAddJumpTableTargetAddressMapEntry(
+                        sourceFile,
+                        addressMap,
+                        targetIdentity,
+                        sourceTarget,
+                        outputTarget,
+                        outputTargetFileOffset))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticAddressMapMalformed,
+                        "A jump-table target output address conflicts with its selected-function mapping.",
+                        entry.SourceRange.FileOffset.Value);
+                    continue;
+                }
+
+                if (entry.SourceRange.FileOffset.Value > int.MaxValue
+                    || !TryReadJumpTableEntry(
+                        sourceFile.Bytes.Span.Slice(
+                            checked((int)entry.SourceRange.FileOffset.Value),
+                            request.EntryWidth),
+                        request.IsSigned,
+                        out var sourceEncoded)
+                    || sourceEncoded != entry.EncodedValue
+                    || !TryGetRelativeEntryValue(
+                        sourceTarget.Value,
+                        request.TargetBaseAddress.Value,
+                        request.Addend,
+                        request.Scale,
+                        request.IsSigned,
+                        request.EntryWidth,
+                        out var sourceValueFromAddresses)
+                    || sourceValueFromAddresses != sourceEncoded)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutMalformed,
+                        "A jump-table source entry does not encode its declared source target and base.",
                         entry.SourceRange.FileOffset.Value);
                     continue;
                 }
@@ -2729,7 +3062,11 @@ public static class ElfLayoutPlanner
                     continue;
                 }
 
-                var entryOffset = entry.SourceRange.FileOffset;
+                var outputEntryRange = new SemanticSourceRange(
+                    new FileOffset(checked(clone.OutputRange.FileOffset.Value + delta)),
+                    new VirtualAddress(checked(clone.OutputRange.VirtualAddress.Value + delta)),
+                    checked((ulong)request.EntryWidth));
+                var entryOffset = outputEntryRange.FileOffset;
                 var bytes = new byte[request.EntryWidth];
                 switch (request.EntryWidth)
                 {
@@ -2757,10 +3094,70 @@ public static class ElfLayoutPlanner
                     entryOffset,
                     bytes,
                     ElfLayoutEditKind.JumpTableEntry));
+                targetBindings.Add(new ElfLayoutJumpTableTargetBinding(
+                    request.TableIdentity,
+                    request.TableRange,
+                    entry.EntryIdentity,
+                    targetIdentity,
+                    targetBaseIdentity,
+                    entry.Index,
+                    entry.SourceRange,
+                    sourceTarget,
+                    outputTarget,
+                    request.TargetBaseAddress,
+                    outputTargetBase,
+                    outputEntryRange,
+                    request.EntryWidth,
+                    request.IsSigned,
+                    request.Scale,
+                    request.Addend,
+                    sourceEncoded,
+                    encoded));
             }
         }
 
         return edits;
+    }
+
+    private static bool TryReadJumpTableEntry(
+        ReadOnlySpan<byte> bytes,
+        bool isSigned,
+        out long value)
+    {
+        value = default;
+        switch (bytes.Length)
+        {
+            case 1:
+                value = isSigned ? unchecked((sbyte)bytes[0]) : bytes[0];
+                return true;
+            case 2:
+                value = isSigned
+                    ? BinaryPrimitives.ReadInt16LittleEndian(bytes)
+                    : BinaryPrimitives.ReadUInt16LittleEndian(bytes);
+                return true;
+            case 4:
+                value = isSigned
+                    ? BinaryPrimitives.ReadInt32LittleEndian(bytes)
+                    : BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+                return true;
+            case 8:
+                if (isSigned)
+                {
+                    value = BinaryPrimitives.ReadInt64LittleEndian(bytes);
+                    return true;
+                }
+
+                var unsigned = BinaryPrimitives.ReadUInt64LittleEndian(bytes);
+                if (unsigned > long.MaxValue)
+                {
+                    return false;
+                }
+
+                value = checked((long)unsigned);
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static void ValidateJumpTableRequests(
@@ -2786,11 +3183,48 @@ public static class ElfLayoutPlanner
                 continue;
             }
 
-            if (request.RewritePolicy != SemanticJumpTableRewritePolicy.InPlace)
+            if (request.RewritePolicy != SemanticJumpTableRewritePolicy.CopiedAndRetargeted
+                || request.EntryWidth != sizeof(int)
+                || !request.IsSigned
+                || request.Scale != 1
+                || request.RequestedOutputRange is not { } requestedOutput
+                || requestedOutput.Size != request.TableRange.Size
+                || requestedOutput.VirtualAddress == request.TableRange.VirtualAddress
+                || request.Ownership is not (SemanticJumpTableOwnership.Ambiguous or SemanticJumpTableOwnership.Shared)
+                || request.OwnerInventoryComplete
+                || request.TableReferenceProducers is not { Count: 2 }
+                || request.TableReferenceProducers.Select(producer => producer.Kind).Distinct().Count() != 2
+                || request.OwnerReferences is null
+                || request.OwnerReferences.Count > SemanticPlanSnapshotLimits.MaximumJumpTableOwnerReferences
+                || request.SelectedFunctionSourceRange is not { } selectedSource
+                || request.SelectedFunctionOutputRange is not { } selectedOutput
+                || selectedSource.Size == 0
+                || selectedOutput.Size == 0
+                || request.OutputTargetBaseIdentity is not { } outputBaseIdentity
+                || outputBaseIdentity.Kind != SemanticEntityKind.BasicBlock
+                || request.OutputTargetBaseAddress is not { } outputBase
+                || request.OutputEntryBindings is null
+                || request.OutputEntryBindings.Count != request.Entries.Count
+                || outputBase.Value < selectedOutput.VirtualAddress.Value
+                || outputBase.Value - selectedOutput.VirtualAddress.Value >= selectedOutput.Size)
             {
                 diagnostics.Error(
                     DiagnosticCode.ElfLayoutUnsupported,
-                    "Only in-place jump-table rewrite policy is supported by this layout slice.",
+                    "The shared-copy layout slice requires a signed-32 copied table, distinct requested range, two selected base producers, and ambiguous/shared bounded owner evidence.",
+                    request.TableRange.FileOffset.Value);
+            }
+
+            if (request.Ownership == SemanticJumpTableOwnership.Shared
+                && !(request.OwnerReferences ?? Array.Empty<Aarch64JumpTableOwnerReference>())
+                    .Where(reference => !reference.IsSelectedFunction)
+                    .GroupBy(reference => (reference.SymbolTableSectionIndex, reference.SymbolIndex, reference.OwnerFunctionStart, reference.OwnerFunctionSize))
+                    .Any(group => group.Any(reference => reference.RelocationType is
+                            ElfConstants.RArm64AdrPrelPgHi21 or ElfConstants.RArm64AdrPrelPgHi21Nc)
+                        && group.Any(reference => reference.RelocationType == ElfConstants.RArm64AddAbsLo12Nc)))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutMalformed,
+                    "A copied table marked shared lacks retained external ADRP/ADD static-relocation evidence.",
                     request.TableRange.FileOffset.Value);
             }
 
@@ -2810,7 +3244,100 @@ public static class ElfLayoutPlanner
                         entry.SourceRange.FileOffset.Value);
                 }
             }
+
+            var outputBindings = request.OutputEntryBindings ?? Array.Empty<ElfLayoutJumpTableEntryOutputBinding>();
+            var expectedEntries = request.Entries.OrderBy(entry => entry.Index).ToArray();
+            var orderedOutputBindings = outputBindings.OrderBy(binding =>
+                expectedEntries.SingleOrDefault(entry => entry.EntryIdentity == binding.EntryIdentity)?.Index ?? int.MaxValue).ToArray();
+            if (orderedOutputBindings.Length != expectedEntries.Length
+                || expectedEntries.Where((entry, index) =>
+                    orderedOutputBindings[index].EntryIdentity != entry.EntryIdentity
+                    || orderedOutputBindings[index].TargetIdentity != entry.Target.Identity
+                    || orderedOutputBindings[index].OutputTargetAddress.Value < request.SelectedFunctionOutputRange!.Value.VirtualAddress.Value
+                    || orderedOutputBindings[index].OutputTargetAddress.Value - request.SelectedFunctionOutputRange.Value.VirtualAddress.Value
+                        >= request.SelectedFunctionOutputRange.Value.Size).Any())
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMalformed,
+                    "A copied jump table's output target bindings do not exactly match its ordered semantic entries and selected-function map.",
+                    request.TableRange.FileOffset.Value);
+            }
         }
+    }
+
+    private static bool TryAddJumpTableTargetAddressMapEntry(
+        ElfFile sourceFile,
+        List<ElfLayoutAddressMapEntry> addressMap,
+        SemanticEntityId identity,
+        VirtualAddress sourceAddress,
+        VirtualAddress outputAddress,
+        FileOffset outputFileOffset)
+    {
+        var sourceRange = GetSourceRange(sourceFile, sourceAddress, sizeof(uint));
+        if (sourceRange is null)
+        {
+            return false;
+        }
+
+        var outputRange = new ElfLayoutRange(outputFileOffset, outputAddress, sizeof(uint));
+        var existing = addressMap
+            .Where(entry => string.Equals(entry.Identity, identity.Value, StringComparison.Ordinal))
+            .ToArray();
+        if (existing.Length == 1)
+        {
+            return existing[0].SourceRange == sourceRange
+                && existing[0].OutputRange == outputRange;
+        }
+
+        if (existing.Length > 1)
+        {
+            return false;
+        }
+
+        addressMap.Add(new ElfLayoutAddressMapEntry(
+            identity.Value,
+            identity.Value,
+            sourceRange,
+            outputRange));
+        return true;
+    }
+
+    private static bool TryMapSelectedLogicalOutputAddress(
+        IReadOnlyList<ElfLayoutAddressMapEntry> addressMap,
+        SemanticSourceRange selectedFunctionSourceRange,
+        SemanticSourceRange selectedFunctionOutputRange,
+        VirtualAddress logicalOutputAddress,
+        out VirtualAddress physicalOutputAddress,
+        out FileOffset physicalOutputFileOffset)
+    {
+        var mappings = addressMap
+            .Where(entry => entry.SourceRange is { } sourceRange
+                && sourceRange.FileOffset == selectedFunctionSourceRange.FileOffset
+                && sourceRange.VirtualAddress == selectedFunctionSourceRange.VirtualAddress
+                && sourceRange.Size == selectedFunctionSourceRange.Size)
+            .ToArray();
+        if (mappings.Length != 1
+            || logicalOutputAddress.Value < selectedFunctionOutputRange.VirtualAddress.Value)
+        {
+            physicalOutputAddress = default;
+            physicalOutputFileOffset = default;
+            return false;
+        }
+
+        var delta = logicalOutputAddress.Value - selectedFunctionOutputRange.VirtualAddress.Value;
+        if (delta >= selectedFunctionOutputRange.Size
+            || delta >= mappings[0].OutputRange.Size
+            || mappings[0].OutputRange.VirtualAddress.Value > ulong.MaxValue - delta
+            || mappings[0].OutputRange.FileOffset.Value > ulong.MaxValue - delta)
+        {
+            physicalOutputAddress = default;
+            physicalOutputFileOffset = default;
+            return false;
+        }
+
+        physicalOutputAddress = new VirtualAddress(mappings[0].OutputRange.VirtualAddress.Value + delta);
+        physicalOutputFileOffset = new FileOffset(mappings[0].OutputRange.FileOffset.Value + delta);
+        return true;
     }
 
     private static bool TryMapPhysicalAddress(
@@ -2818,6 +3345,7 @@ public static class ElfLayoutPlanner
         VirtualAddress sourceAddress,
         out VirtualAddress outputAddress)
     {
+        VirtualAddress? mapped = null;
         foreach (var entry in addressMap)
         {
             if (entry.SourceRange is not { } sourceRange
@@ -2829,17 +3357,18 @@ public static class ElfLayoutPlanner
 
             var delta = sourceAddress.Value - sourceRange.VirtualAddress.Value;
             if (delta >= entry.OutputRange.Size
-                || entry.OutputRange.VirtualAddress.Value > ulong.MaxValue - delta)
+                || entry.OutputRange.VirtualAddress.Value > ulong.MaxValue - delta
+                || mapped is not null)
             {
-                continue;
+                outputAddress = default;
+                return false;
             }
 
-            outputAddress = new VirtualAddress(entry.OutputRange.VirtualAddress.Value + delta);
-            return true;
+            mapped = new VirtualAddress(entry.OutputRange.VirtualAddress.Value + delta);
         }
 
-        outputAddress = default;
-        return false;
+        outputAddress = mapped.GetValueOrDefault();
+        return mapped is not null;
     }
 
     private static bool TryGetRelativeEntryValue(
@@ -3130,19 +3659,18 @@ public static class ElfLayoutPlanner
         return true;
     }
 
-    private static bool TryFindNullHeader(IReadOnlyList<ProgramHeader> headers, out int index)
+    private static bool TryFindNullHeaders(
+        IReadOnlyList<ProgramHeader> headers,
+        int requiredCount,
+        out int[] indices)
     {
-        index = -1;
-        for (var position = 0; position < headers.Count; position++)
-        {
-            if (headers[position].Type == ElfConstants.PtNull)
-            {
-                index = position;
-                return true;
-            }
-        }
-
-        return false;
+        indices = headers
+            .Select((header, position) => (header, position))
+            .Where(item => item.header.Type == ElfConstants.PtNull)
+            .Select(item => item.position)
+            .Take(requiredCount)
+            .ToArray();
+        return requiredCount >= 0 && indices.Length == requiredCount;
     }
 
     private static ElfLayoutRange? GetSourceRange(ElfFile sourceFile, VirtualAddress address, ulong size)
@@ -3323,6 +3851,9 @@ public static class ElfLayoutPlanner
         {
             TlsFixups = plan.TlsFixups,
             UnwindEdits = plan.UnwindEdits,
+            JumpTableEdits = plan.JumpTableEdits,
+            JumpTableTargetBindings = plan.JumpTableTargetBindings,
+            JumpTableClones = plan.JumpTableClones,
         };
 
     private static string ComputePreservedMetadataFingerprint(IReadOnlyList<ProgramHeader> headers)

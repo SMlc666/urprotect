@@ -224,9 +224,21 @@ public sealed class AddressMap
             out outputAddress);
     }
 
-    public bool TryMapSourceFileOffset(FileOffset sourceFileOffset, out FileOffset outputFileOffset)
+    public bool TryMapSourceFileOffset(FileOffset sourceFileOffset, out FileOffset outputFileOffset) =>
+        TryMapSourceFileOffset(sourceFileOffset, preferredKind: null, out outputFileOffset);
+
+    public bool TryMapSourceFileOffset(
+        FileOffset sourceFileOffset,
+        SemanticEntityKind preferredKind,
+        out FileOffset outputFileOffset) =>
+        TryMapSourceFileOffset(sourceFileOffset, (SemanticEntityKind?)preferredKind, out outputFileOffset);
+
+    private bool TryMapSourceFileOffset(
+        FileOffset sourceFileOffset,
+        SemanticEntityKind? preferredKind,
+        out FileOffset outputFileOffset)
     {
-        var candidates = FindContainingFileOffset(sourceFileOffset.Value, preferredKind: null);
+        var candidates = FindContainingFileOffset(sourceFileOffset.Value, preferredKind);
         if (candidates.Length != 1)
         {
             outputFileOffset = default;

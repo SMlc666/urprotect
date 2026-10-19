@@ -163,6 +163,37 @@ public sealed class TlsLocalExecWorkflowTests
 
 
     [Fact]
+    [Trait("Category", "TlsLocalDynamic")]
+    public void SelectedLocalDynamicNonNcDtprelLowFlowsThroughSnapshotAndSharedLayout()
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsLocalDynamicFunctionPie(useNonNcDtprelLow: true),
+            "tls.local-dynamic.non-nc.fixture",
+            "tls.local-dynamic.non-nc.producer");
+
+        var planning = new FunctionProtectionService().Plan(setup.Source, setup.Request);
+
+        Assert.True(planning.IsSuccess, string.Join(Environment.NewLine, planning.Diagnostics));
+        var snapshot = Assert.IsType<SemanticPlanSnapshot>(planning.Plan!.SemanticSnapshot);
+        var binding = Assert.IsType<SemanticTlsBindingExtension>(
+            Assert.Single(snapshot.Extensions.OfType<SemanticTlsBindingExtension>())).Binding;
+        Assert.Equal(TlsAccessModel.LocalDynamic, binding.AccessModel);
+        Assert.Equal(
+            ElfConstants.RArm64TlsLdAddDtprelLo12,
+            binding.RelocationSites[3].Binding.RelocationType);
+
+        var rehydration = GenericRehydrationEngine.Rehydrate(
+            setup.Source,
+            setup.Emission.ArtifactBytes!,
+            setup.RehydrationOptions);
+
+        Assert.True(rehydration.IsSuccess, string.Join(Environment.NewLine, rehydration.Diagnostics));
+        Assert.Equal(
+            Assert.IsType<ElfFile>(ElfParser.Parse(setup.Source).File).TlsMetadata.StaticRelocations,
+            rehydration.NativeImage!.ParsedImage.TlsMetadata.StaticRelocations);
+    }
+
+    [Fact]
     [Trait("Category", "TlsDesc")]
     public void SelectedTlsDescFunctionFlowsThroughSnapshotAndProducer()
     {

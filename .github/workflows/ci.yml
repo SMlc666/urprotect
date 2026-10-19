@@ -145,9 +145,20 @@ jobs:
             release) tier=release ;;
             *) tier=pr ;;
           esac
+          make -C native/urprotect-runtime tls-fixture
+          source_file=native/urprotect-runtime/build/host-context-tls-fixture.so
+          function_id="$(readelf --syms -W "$source_file" | awk '$1 ~ /^[0-9]+:/ && $4 == "FUNC" && $NF == "urp_tls_read" { symidx=$1; sub(/:$/, "", symidx); print "symtab:" symidx }')"
           ./scripts/run-tls-host-context-rehydration-e2e.sh \
             --tier "${tier}" \
-            --unit tls.initial-exec.glibc.host-context-entry
+            --unit tls.initial-exec.glibc.host-context-entry \
+            --model initial-exec \
+            --profile host-context-entry \
+            --runtime glibc \
+            --lifecycle current-thread \
+            --source "$source_file" \
+            --function-id "$function_id" \
+            --entry-status 43 \
+            --producer-id gcc-c-tls-initial-exec
       - name: Check managed TLS initial-exec transformed-image evidence
         if: always()
         run: |
@@ -227,9 +238,11 @@ jobs:
             release) tier=release ;;
             *) tier=pr ;;
           esac
-          ./scripts/run-cfi-host-context-e2e.sh --tier "${tier}"
+          ./scripts/run-cfi-host-context-e2e.sh --tier "${tier}" \
+            --unit runtime.cfi.transformed-backtrace.glibc.host-context-entry \
+            --artifact-root .artifacts/cfi/current
           python3 scripts/check-cfi-evidence.py \
-            ".artifacts/cfi/${tier}" \
+            .artifacts/cfi/current \
             --tier "${tier}" \
             --runtime glibc \
             --unit runtime.cfi.transformed-backtrace.glibc.host-context-entry
@@ -247,6 +260,23 @@ jobs:
             --tier "${tier}" \
             --unit runtime.indirect-control.jump-table.glibc.host-context-entry
 
+      - name: Run and check transformed shared jump-table evidence
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-shared-jump-table-copy-e2e.sh --tier "${tier}" \
+            --unit runtime.indirect-control.shared-table.glibc.host-context-entry \
+            --artifact-root .artifacts/indirect-control/shared-copy/current
+          shared_positive=.artifacts/indirect-control/shared-copy/current/runtime.indirect-control.shared-table.glibc.host-context-entry
+          python3 scripts/check-rehydration-evidence.py "${shared_positive}" \
+            --tier "${tier}" --runtime glibc \
+            --unit runtime.indirect-control.shared-table.glibc.host-context-entry
+          python3 scripts/check-shared-jump-table-evidence.py "${shared_positive}" \
+            --unit runtime.indirect-control.shared-table.glibc.host-context-entry
+
       - name: Check transformed CFI and indirect-control feature declarations
         if: always()
         run: |
@@ -256,15 +286,16 @@ jobs:
             *) tier=pr ;;
           esac
           if [[ "${tier}" != pr ]]; then
-            rm -rf .artifacts/cfi/pr .artifacts/indirect-control/pr
-            mkdir -p .artifacts/cfi .artifacts/indirect-control
-            cp -a ".artifacts/cfi/${tier}" .artifacts/cfi/pr
+            rm -rf .artifacts/indirect-control/pr
+            mkdir -p .artifacts/indirect-control
             cp -a ".artifacts/indirect-control/${tier}" .artifacts/indirect-control/pr
           fi
           python3 scripts/check-evidence.py fixtures/manifest.json \
             --feature runtime.cfi.transformed-backtrace.glibc.host-context-entry
           python3 scripts/check-evidence.py fixtures/manifest.json \
             --feature runtime.indirect-control.jump-table.glibc.host-context-entry
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --feature runtime.indirect-control.shared-jump-table-copy.glibc.host-context-entry
 
       - name: Run strict compatibility corpus growth evidence
         if: always()

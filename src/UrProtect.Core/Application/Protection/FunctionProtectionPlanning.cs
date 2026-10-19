@@ -13,7 +13,8 @@ public sealed partial class FunctionProtectionService
 {
     public FunctionProtectionPlanResult Plan(
         ReadOnlyMemory<byte> input,
-        FunctionProtectionOptions options)
+        FunctionProtectionOptions options,
+        Aarch64HostContextProofContext? proofContext = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         var diagnostics = new DiagnosticBag();
@@ -31,7 +32,8 @@ public sealed partial class FunctionProtectionService
         var selectedPlan = new SelectedFunctionProtectionPlanner(decoder).Analyze(
             sourceSnapshot,
             selectorSnapshot,
-            passSnapshot);
+            passSnapshot,
+            proofContext);
         diagnostics.AddRange(selectedPlan.Diagnostics);
         functionResults.AddRange(selectedPlan.FunctionResults);
         if (!selectedPlan.IsSuccess)
@@ -133,7 +135,8 @@ public sealed partial class FunctionProtectionService
         var hasIndirectTargets = analyses.Any(analysis =>
             analysis.IndirectTargetResolutions.Count > 0
             || analysis.JumpTableResolutions.Count > 0
-            || analysis.RuntimeIndirectCallResolutions.Count > 0);
+            || analysis.RuntimeIndirectCallResolutions.Count > 0
+            || analysis.StaticFunctionPointerCallResolutions.Count > 0);
         var hasTls = analyses.Any(analysis =>
             file.TlsMetadata.StaticRelocations
                 .Concat(file.TlsMetadata.Dynamic.Relocations)
@@ -149,7 +152,8 @@ public sealed partial class FunctionProtectionService
                 analyses.First(analysis =>
                     analysis.IndirectTargetResolutions.Count > 0
                     || analysis.JumpTableResolutions.Count > 0
-                    || analysis.RuntimeIndirectCallResolutions.Count > 0).Function.Value);
+                    || analysis.RuntimeIndirectCallResolutions.Count > 0
+                    || analysis.StaticFunctionPointerCallResolutions.Count > 0).Function.Value);
             return null;
         }
 
@@ -178,7 +182,11 @@ public sealed partial class FunctionProtectionService
             // projected by Aarch64SemanticPlanFactory. CFI must win this
             // selection because callback-shaped BLR instructions can coexist
             // with unwind-covered transformed code.
-            return BuildCfiSemanticSnapshot(file, analyses, patches, diagnostics);
+            var cfiSnapshot = BuildCfiSemanticSnapshot(file, analyses, patches, diagnostics);
+            if (cfiSnapshot is not null || diagnostics.HasErrors)
+            {
+                return cfiSnapshot;
+            }
         }
 
         if (hasIndirectTargets)
@@ -186,8 +194,562 @@ public sealed partial class FunctionProtectionService
             return BuildIndirectSemanticSnapshot(file, analyses, patches, diagnostics);
         }
 
-        return BuildTlsSemanticSnapshot(file, analyses, patches, diagnostics);
+        if (hasTls)
+        {
+            return BuildTlsSemanticSnapshot(file, analyses, patches, diagnostics);
+        }
+
+        return BuildBasicSemanticSnapshot(file, analyses, patches, diagnostics);
     }
+
+    private static SemanticPlanSnapshot? BuildBasicSemanticSnapshot(
+        ElfFile file,
+        IReadOnlyList<Aarch64FunctionAnalysis> analyses,
+        IReadOnlyList<FunctionPatch> patches,
+        DiagnosticBag diagnostics)
+    {
+        var plannedEntries = new List<AddressMapEntry>();
+        var instructions = new List<SemanticInstruction>();
+        var fixups = new List<SemanticFixup>();
+        var extensions = new List<ISemanticPlanExtension>();
+        var planDiagnostics = new List<Diagnostic>();
+
+        foreach (var analysis in analyses)
+        {
+            var patch = patches.SingleOrDefault(candidate =>
+                candidate.SourceAddress == analysis.Function.Value
+                && candidate.SourceSize == analysis.Function.Size);
+            if (patch.SourceSize == 0
+                || !file.LoadMap.TryVirtualAddressToFileOffset(
+                    new VirtualAddress(analysis.Function.Value),
+                    analysis.Function.Size,
+                    out var functionFileOffset))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "A selected function has no emitted logical output map for the canonical semantic snapshot.",
+                    analysis.Function.Value);
+                return null;
+            }
+
+            var ownerExtensions = BuildAddressReferenceOwnerExtensions(file, analysis, diagnostics);
+            var projected = Aarch64SemanticPlanFactory.Create(
+                analysis,
+                Array.Empty<RelaRelocation>(),
+                new Aarch64SemanticPlanFactoryOptions(
+                    loadMap: file.LoadMap,
+                    extensions: ownerExtensions));
+            diagnostics.AddRange(projected.Diagnostics);
+            if (!projected.IsSuccess || projected.Plan is null)
+            {
+                return null;
+            }
+
+            var referenceMapEntries = BuildAddressReferenceMapEntries(
+                file,
+                analysis,
+                projected.Plan.AddressMap,
+                diagnostics);
+            plannedEntries.AddRange(projected.Plan.AddressMap.Entries.Select(entry =>
+                MapIndirectEntry(entry, analysis, patch, functionFileOffset, diagnostics)));
+            plannedEntries.AddRange(referenceMapEntries);
+            instructions.AddRange(projected.Plan.Instructions);
+            fixups.AddRange(projected.Plan.Fixups);
+            extensions.AddRange(projected.Plan.Extensions);
+            planDiagnostics.AddRange(projected.Plan.Diagnostics);
+        }
+
+        if (diagnostics.HasErrors)
+        {
+            return null;
+        }
+
+        var map = AddressMap.Create(plannedEntries);
+        diagnostics.AddRange(map.Diagnostics);
+        if (!map.IsSuccess || map.Map is null)
+        {
+            return null;
+        }
+
+        var plan = new SemanticRewritePlan(map.Map, instructions, fixups, extensions, planDiagnostics);
+        var snapshot = SemanticPlanSnapshotCodec.Create(plan);
+        diagnostics.AddRange(snapshot.Diagnostics);
+        return snapshot.Snapshot;
+    }
+
+    private static System.Collections.ObjectModel.ReadOnlyCollection<ISemanticPlanExtension> BuildAddressReferenceOwnerExtensions(
+        ElfFile file,
+        Aarch64FunctionAnalysis analysis,
+        DiagnosticBag diagnostics)
+    {
+        var extensions = new List<ISemanticPlanExtension>();
+        var emittedRelocations = new HashSet<ulong>();
+        var tlsModule = default(TlsModuleIdentity);
+        var tlsModuleAttempted = false;
+        var tlsFacts = file.TlsMetadata.StaticRelocations
+            .Concat(file.TlsMetadata.Dynamic.Relocations)
+            .ToArray();
+
+        foreach (var reference in analysis.AddressReferences)
+        {
+            if (reference.RelocationOwner is not { } relocation
+                || !emittedRelocations.Add(relocation.Offset))
+            {
+                continue;
+            }
+
+            if (relocation.Type == ElfConstants.RArm64TlsTprel64)
+            {
+                var matchingFacts = tlsFacts
+                    .Where(fact => fact.Relocation == relocation)
+                    .ToArray();
+                if (matchingFacts.Length != 1
+                    || TlsStructuralAdapter.ProjectSymbol(matchingFacts[0].Symbol) is not { } symbol)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TlsBindingUnresolved,
+                        "An ADRP-derived R_AARCH64_TLS_TPREL64 data reference has no unique typed dynamic TLS symbol owner.",
+                        relocation.Offset);
+                    continue;
+                }
+
+                if (!tlsModuleAttempted)
+                {
+                    var moduleResult = TlsStructuralAdapter.CreateImageModule(file);
+                    diagnostics.AddRange(moduleResult.Diagnostics);
+                    tlsModule = moduleResult.Value;
+                    tlsModuleAttempted = true;
+                }
+
+                if (tlsModule is null)
+                {
+                    continue;
+                }
+
+                var projected = TlsStructuralAdapter.ProjectGotEntry(
+                    file,
+                    tlsModule,
+                    symbol,
+                    relocation.Addend);
+                diagnostics.AddRange(projected.Diagnostics);
+                if (projected.Value is not { } gotEntry)
+                {
+                    continue;
+                }
+
+                extensions.Add(new SemanticRelocationBindingExtension(
+                    gotEntry.SourceIdentity,
+                    gotEntry.Relocation,
+                    "The selected-function ADRP/LDR range resolves to a unique writable, file-backed TLSIE GOT entry projected by TlsStructuralAdapter.ProjectGotEntry."));
+                continue;
+            }
+
+            if (relocation.Type == ElfConstants.RArm64GlobDat)
+            {
+                if (reference.ImportOwner is not { } import
+                    || import.Relocation != relocation)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.IndirectTargetUnresolved,
+                        "The selected-function GLOB_DAT data reference lacks a matching validated dynamic-symbol import owner.",
+                        relocation.Offset);
+                    continue;
+                }
+
+                var target = SemanticTarget.RuntimeResolved(
+                    $"aarch64:elf-import:{import.SymbolName}:glob-dat@0x{import.GotAddress:X}");
+                var binding = RelocationBinding.FromRelocation(relocation, target, import.SymbolName);
+                extensions.Add(new SemanticRelocationBindingExtension(
+                    SemanticEntityId.RelocationSite($"0x{relocation.Offset:X}"),
+                    binding,
+                    "The dynamic import owner is one undefined global/weak default-visible function-or-NOTYPE symbol in a writable, file-backed, aligned GLOB_DAT slot."));
+                continue;
+            }
+
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanMalformed,
+                $"The selected-function ADRP/LDR chain reaches unsupported relocation owner type {relocation.Type}.",
+                relocation.Offset);
+        }
+
+        foreach (var resolution in analysis.RuntimeIndirectCallResolutions
+                     .Where(candidate => candidate.OwnerKind == Aarch64RuntimeIndirectCallOwnerKind.DynamicImport))
+        {
+            if (resolution.ImportBinding is not { } import
+                || import.SymbolIndex >= (uint)file.DynamicSymbols.Count
+                || !TryGetMappedSourceRange(file, import.GotAddress, sizeof(ulong), out var gotFileOffset))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.IndirectTargetUnresolved,
+                    "A selected dynamic-import call does not retain one parsed dynamic-symbol/GOT source owner.",
+                    resolution.SourceAddress);
+                continue;
+            }
+
+            var symbol = file.DynamicSymbols[checked((int)import.SymbolIndex)];
+            if (!ElfParserUtilities.TryReadString(file.DynamicMetadata.StringTable, symbol.Name, out var symbolName)
+                || !string.Equals(symbolName, import.SymbolName, StringComparison.Ordinal)
+                || symbol.SectionIndex != 0
+                || symbol.Value != 0
+                || (byte)(symbol.Info >> 4) != import.SymbolBinding
+                || (byte)(symbol.Info & 0x0F) != import.SymbolType
+                || (byte)(symbol.Other & 0x03) != import.SymbolVisibility
+                || import.Relocation.Offset != import.GotAddress
+                || import.Relocation.Type != ElfConstants.RArm64GlobDat
+                || import.Relocation.IsPlt)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.IndirectTargetUnresolved,
+                    "A selected dynamic-import call's parsed dynsym/GLOB_DAT owner changed before semantic-plan construction.",
+                    import.GotAddress);
+                continue;
+            }
+
+            if (!SemanticDynamicImportCallContract.TryProjectVersionFacts(
+                    file,
+                    import.SymbolIndex,
+                    out var symbolVersionIndexRaw,
+                    out var versionRequirement,
+                    out var versionFailure))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.IndirectTargetUnresolved,
+                    versionFailure ?? "A selected dynamic import has no exact bounded source symbol-version owner.",
+                    import.GotAddress);
+                continue;
+            }
+
+            var gotRange = new SemanticSourceRange(
+                gotFileOffset,
+                new VirtualAddress(import.GotAddress),
+                sizeof(ulong));
+            var relocationSiteIdentity = SemanticEntityId.RelocationSite($"0x{import.Relocation.Offset:X}");
+            extensions.Add(new SemanticDynamicImportCallExtension(
+                SemanticEntityId.Instruction(new VirtualAddress(resolution.SourceAddress)),
+                new VirtualAddress(resolution.SourceAddress),
+                resolution.TargetRegister,
+                resolution.ProducerAddresses.Select(address => new VirtualAddress(address)),
+                new VirtualAddress(import.AddressPageProducerAddress),
+                new VirtualAddress(import.PointerLoadProducerAddress),
+                new VirtualAddress(import.PageAddress),
+                gotRange,
+                relocationSiteIdentity,
+                import.Relocation.Offset,
+                import.Relocation.Info,
+                import.Relocation.Addend,
+                import.Relocation.IsPlt,
+                new VirtualAddress(import.Relocation.SourceAddress),
+                import.SymbolIndex,
+                symbol.Name,
+                symbolName,
+                symbol.Info,
+                symbol.Other,
+                (byte)(symbol.Info >> 4),
+                (byte)(symbol.Info & 0x0F),
+                (byte)(symbol.Other & 0x03),
+                symbol.SectionIndex,
+                symbol.Value,
+                symbol.Size,
+                symbolVersionIndexRaw,
+                versionRequirement));
+        }
+
+        return Array.AsReadOnly(extensions.ToArray());
+    }
+
+    private static System.Collections.ObjectModel.ReadOnlyCollection<AddressMapEntry> BuildAddressReferenceMapEntries(
+        ElfFile file,
+        Aarch64FunctionAnalysis analysis,
+        AddressMap existingMap,
+        DiagnosticBag diagnostics)
+    {
+        var requiredRanges = new SortedDictionary<ulong, ulong>();
+        foreach (var reference in analysis.AddressReferences)
+        {
+            AddRequiredRange(reference.PageAddress.Value, 1, reference.PageProducerAddress);
+            AddRequiredRange(reference.TargetAddress.Value, reference.AccessSize, reference.LoadProducerAddress);
+        }
+
+        foreach (var table in analysis.JumpTableResolutions)
+        {
+            AddRequiredRange(table.TableBase.Value & ~0xFFFUL, 1, table.SourceAddress);
+            AddRequiredRange(table.TableBase.Value, table.TableSize, table.SourceAddress);
+        }
+
+        foreach (var instruction in analysis.Instructions)
+        {
+            if (instruction.Decode.Instruction is not
+                {
+                    ControlFlow: Aarch64ControlFlowKind.DirectCall,
+                    DirectTarget: { } target
+                })
+            {
+                continue;
+            }
+
+            if (analysis.Function.TryGetEnd(out var functionEnd)
+                && target >= analysis.Function.Value
+                && target < functionEnd)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "A direct call target inside the selected function is not represented by the supported external-call closure.",
+                    instruction.Address);
+                continue;
+            }
+
+            var executableOwners = file.LoadMap.Segments.Count(segment =>
+                segment.IsExecutable
+                && segment.ContainsVirtualAddress(target, sizeof(uint)));
+            if (target % sizeof(uint) != 0
+                || executableOwners != 1
+                || !TryGetMappedSourceRange(file, target, sizeof(uint), out _))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "A selected direct call target is not one aligned, file-backed executable source range.",
+                    instruction.Address);
+                continue;
+            }
+
+            AddRequiredRange(target, sizeof(uint), instruction.Address);
+        }
+
+        var candidates = new List<(ulong Start, ulong Size)>();
+        foreach (var pair in requiredRanges)
+        {
+            var start = pair.Key;
+            var size = pair.Value;
+            if (TryGetMappedAddressReferenceRange(file, analysis, start, size, out _))
+            {
+                candidates.Add((start, size));
+            }
+            else
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "A selected-function ADRP/LDR address reference is not one file-backed source range.",
+                    start);
+            }
+        }
+
+        var merged = new List<(ulong Start, ulong Size)>();
+        foreach (var candidate in candidates.OrderBy(range => range.Start))
+        {
+            if (merged.Count == 0)
+            {
+                merged.Add(candidate);
+                continue;
+            }
+
+            var prior = merged[^1];
+            var priorEnd = checked(prior.Start + prior.Size);
+            if (candidate.Start < priorEnd)
+            {
+                var candidateEnd = checked(candidate.Start + candidate.Size);
+                var combinedSize = Math.Max(priorEnd, candidateEnd) - prior.Start;
+                if (!TryGetMappedAddressReferenceRange(file, analysis, prior.Start, combinedSize, out _))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticAddressMapMalformed,
+                        "Overlapping selected-function address references do not share one file-backed load range.",
+                        prior.Start);
+                    continue;
+                }
+
+                merged[^1] = (prior.Start, combinedSize);
+            }
+            else
+            {
+                merged.Add(candidate);
+            }
+        }
+
+        var entries = new List<AddressMapEntry>(merged.Count);
+        foreach (var range in merged)
+        {
+            if (existingMap.Entries.Any(entry => entry.Identity.Kind == SemanticEntityKind.RelocationTarget
+                    && RangesOverlap(entry.SourceRange.VirtualAddress.Value, entry.SourceRange.Size, range.Start, range.Size)))
+            {
+                var alreadyMapped = existingMap.TryMapSourceAddress(
+                    new VirtualAddress(range.Start),
+                    SemanticEntityKind.RelocationTarget,
+                    out var mappedStart)
+                    && existingMap.TryMapSourceAddress(
+                        new VirtualAddress(checked(range.Start + range.Size - 1)),
+                        SemanticEntityKind.RelocationTarget,
+                        out var mappedEnd)
+                    && mappedStart.Value == range.Start
+                    && mappedEnd.Value == checked(range.Start + range.Size - 1);
+                if (alreadyMapped)
+                {
+                    continue;
+                }
+
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMalformed,
+                    "A selected-function address-reference range partially overlaps a different relocation-target owner.",
+                    range.Start);
+                continue;
+            }
+
+            if (!TryGetMappedAddressReferenceRange(file, analysis, range.Start, range.Size, out var fileOffset))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "A selected-function address-reference mapping has no unique file-backed source range.",
+                    range.Start);
+                continue;
+            }
+
+            var sourceRange = new SemanticSourceRange(
+                fileOffset,
+                new VirtualAddress(range.Start),
+                range.Size);
+            entries.Add(new AddressMapEntry(
+                SemanticEntityId.RelocationTarget($"aarch64-data:{range.Start:X}:{range.Size:X}"),
+                sourceRange,
+                sourceRange));
+        }
+
+        foreach (var import in analysis.RuntimeIndirectCallResolutions
+                     .Where(resolution => resolution.ImportBinding is not null)
+                     .Select(resolution => resolution.ImportBinding!)
+                     .GroupBy(binding => binding.Relocation.Offset)
+                     .Select(group => group.First()))
+        {
+            if (!TryGetMappedSourceRange(file, import.GotAddress, sizeof(ulong), out var gotFileOffset))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapMissing,
+                    "A dynamic-import relocation site has no exact file-backed GOT address-map range.",
+                    import.GotAddress);
+                continue;
+            }
+
+            var siteRange = new SemanticSourceRange(
+                gotFileOffset,
+                new VirtualAddress(import.GotAddress),
+                sizeof(ulong));
+            entries.Add(new AddressMapEntry(
+                SemanticEntityId.RelocationSite($"0x{import.Relocation.Offset:X}"),
+                siteRange,
+                siteRange));
+        }
+
+        return Array.AsReadOnly(entries.ToArray());
+
+        void AddRequiredRange(ulong address, ulong size, ulong diagnosticOffset)
+        {
+            if (size == 0 || address > ulong.MaxValue - size)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticAddressMapOverflow,
+                    "A selected-function address-reference range overflows its virtual address domain.",
+                    diagnosticOffset);
+                return;
+            }
+
+            if (!requiredRanges.TryGetValue(address, out var existingSize) || existingSize < size)
+            {
+                requiredRanges[address] = size;
+            }
+        }
+    }
+
+    private static bool TryGetMappedSourceRange(
+        ElfFile file,
+        ulong address,
+        ulong size,
+        out FileOffset fileOffset)
+    {
+        fileOffset = default;
+        if (size == 0
+            || !file.LoadMap.TryVirtualAddressToFileOffset(new VirtualAddress(address), size, out fileOffset)
+            || fileOffset.Value > (ulong)file.Bytes.Length
+            || size > (ulong)file.Bytes.Length - fileOffset.Value)
+        {
+            return false;
+        }
+
+        var owners = file.LoadMap.Segments.Count(segment =>
+            segment.ContainsVirtualAddress(address, size)
+            && segment.FileOffset <= ulong.MaxValue - (address - segment.VirtualAddress)
+            && segment.ContainsFileOffset(segment.FileOffset + (address - segment.VirtualAddress), size));
+        return owners == 1;
+    }
+
+    private static bool TryGetMappedAddressReferenceRange(
+        ElfFile file,
+        Aarch64FunctionAnalysis analysis,
+        ulong address,
+        ulong size,
+        out FileOffset fileOffset)
+    {
+        if (TryGetMappedSourceRange(file, address, size, out fileOffset))
+        {
+            return true;
+        }
+
+        fileOffset = default;
+        var targetRanges = analysis.AddressReferences
+            .Where(reference => reference.PageAddress.Value == address
+                && reference.TargetAddress.Value >= address
+                && reference.TargetAddress.Value - address < 0x1000
+                && reference.AccessSize > 0
+                && TryGetMappedSourceRange(
+                    file,
+                    reference.TargetAddress.Value,
+                    reference.AccessSize,
+                    out _))
+            .Select(reference => (Target: reference.TargetAddress.Value, Size: (ulong)reference.AccessSize))
+            .Concat(analysis.JumpTableResolutions
+                .Where(table => (table.TableBase.Value & ~0xFFFUL) == address
+                    && table.TableBase.Value - address < 0x1000
+                    && TryGetMappedSourceRange(file, table.TableBase.Value, table.TableSize, out _))
+                .Select(table => (Target: table.TableBase.Value, Size: table.TableSize)))
+            .Distinct()
+            .ToArray();
+        if (size != 1
+            || (address & 0xFFFUL) != 0
+            || targetRanges.Length == 0)
+        {
+            return false;
+        }
+
+        var owners = file.LoadMap.Segments
+            .Where(segment => targetRanges.All(range =>
+                segment.ContainsVirtualAddress(range.Target, range.Size)))
+            .Select(segment =>
+            {
+                var pageStart = segment.VirtualAddress & ~0xFFFUL;
+                var pageDelta = segment.VirtualAddress - pageStart;
+                return (Segment: segment, PageStart: pageStart, PageDelta: pageDelta);
+            })
+            .Where(owner => owner.PageStart == address
+                && owner.PageDelta <= owner.Segment.FileOffset
+                && owner.Segment.Alignment >= 0x1000
+                && (owner.Segment.FileOffset - owner.PageDelta) % 0x1000 == 0)
+            .ToArray();
+        if (owners.Length != 1)
+        {
+            return false;
+        }
+
+        var filePage = owners[0].Segment.FileOffset - owners[0].PageDelta;
+        if (filePage >= (ulong)file.Bytes.Length)
+        {
+            return false;
+        }
+
+        fileOffset = new FileOffset(filePage);
+        return true;
+    }
+
+    private static bool RangesOverlap(ulong leftStart, ulong leftSize, ulong rightStart, ulong rightSize) =>
+        leftStart <= rightStart
+            ? rightStart - leftStart < leftSize
+            : leftStart - rightStart < rightSize;
 
     private static SemanticPlanSnapshot? BuildIndirectSemanticSnapshot(
         ElfFile file,
@@ -199,7 +761,8 @@ public sealed partial class FunctionProtectionService
             .Where(analysis =>
                 analysis.IndirectTargetResolutions.Count > 0
                 || analysis.JumpTableResolutions.Count > 0
-                || analysis.RuntimeIndirectCallResolutions.Count > 0)
+                || analysis.RuntimeIndirectCallResolutions.Count > 0
+                || analysis.StaticFunctionPointerCallResolutions.Count > 0)
             .ToArray();
         if (indirectAnalyses.Length != 1 || analyses.Count != 1)
         {
@@ -210,10 +773,13 @@ public sealed partial class FunctionProtectionService
             return null;
         }
 
+        var ownerExtensions = BuildAddressReferenceOwnerExtensions(file, indirectAnalyses[0], diagnostics);
         var result = Aarch64SemanticPlanFactory.Create(
             indirectAnalyses[0],
             Array.Empty<RelaRelocation>(),
-            new Aarch64SemanticPlanFactoryOptions(loadMap: file.LoadMap));
+            new Aarch64SemanticPlanFactoryOptions(
+                loadMap: file.LoadMap,
+                extensions: ownerExtensions));
         diagnostics.AddRange(result.Diagnostics);
         if (!result.IsSuccess || result.Plan is null)
         {
@@ -236,6 +802,11 @@ public sealed partial class FunctionProtectionService
             return null;
         }
 
+        var referenceMapEntries = BuildAddressReferenceMapEntries(
+            file,
+            indirectAnalyses[0],
+            result.Plan.AddressMap,
+            diagnostics);
         var plannedEntries = result.Plan.AddressMap.Entries
             .Select(entry => MapIndirectEntry(
                 entry,
@@ -243,6 +814,7 @@ public sealed partial class FunctionProtectionService
                 patch,
                 sourceFunctionFileOffset,
                 diagnostics))
+            .Concat(referenceMapEntries)
             .ToArray();
         if (diagnostics.HasErrors)
         {
@@ -260,7 +832,8 @@ public sealed partial class FunctionProtectionService
             indirectAnalyses[0],
             plannedMap.Map,
             Array.Empty<RelaRelocation>(),
-            file.LoadMap);
+            file.LoadMap,
+            ownerExtensions);
         diagnostics.AddRange(placed.Diagnostics);
         if (!placed.IsSuccess || placed.Plan is null)
         {
@@ -304,16 +877,24 @@ public sealed partial class FunctionProtectionService
             return null;
         }
 
+        var ownerExtensions = BuildAddressReferenceOwnerExtensions(file, analysis, diagnostics);
         var projected = Aarch64SemanticPlanFactory.Create(
             analysis,
             Array.Empty<RelaRelocation>(),
-            new Aarch64SemanticPlanFactoryOptions(loadMap: file.LoadMap));
+            new Aarch64SemanticPlanFactoryOptions(
+                loadMap: file.LoadMap,
+                extensions: ownerExtensions));
         diagnostics.AddRange(projected.Diagnostics);
         if (!projected.IsSuccess || projected.Plan is null)
         {
             return null;
         }
 
+        var referenceMapEntries = BuildAddressReferenceMapEntries(
+            file,
+            analysis,
+            projected.Plan.AddressMap,
+            diagnostics);
         var plannedEntries = projected.Plan.AddressMap.Entries
             .Select(entry =>
             {
@@ -346,6 +927,7 @@ public sealed partial class FunctionProtectionService
 
                 return entry with { OutputRange = outputRange };
             })
+            .Concat(referenceMapEntries)
             .ToArray();
 
         if (diagnostics.HasErrors)
@@ -379,12 +961,49 @@ public sealed partial class FunctionProtectionService
         DiagnosticBag diagnostics)
     {
         var outputRange = entry.SourceRange;
-        if (entry.Identity.Kind == SemanticEntityKind.Function)
+        var staticTargetIdentity = analysis.StaticFunctionPointerCallResolutions
+            .Select(resolution => resolution.AdrpRelocation.Symbol is { } symbol
+                ? SemanticEntityId.RelocationTarget(
+                    $"static-function:{symbol.SymbolTableSectionIndex}:{symbol.SymbolIndex}:{symbol.Name}")
+                : (SemanticEntityId?)null)
+            .FirstOrDefault(identity => identity == entry.Identity);
+        if (entry.Identity.Kind == SemanticEntityKind.Function && staticTargetIdentity is null)
         {
             outputRange = new SemanticSourceRange(
                 new FileOffset(checked(sourceFunctionFileOffset.Value + patch.TargetAddress)),
                 new VirtualAddress(checked(analysis.Function.Value + patch.TargetAddress)),
                 patch.OutputSize);
+        }
+        else if (entry.Identity.Kind is SemanticEntityKind.Table or SemanticEntityKind.TableEntry)
+        {
+            var logicalCloneFileOffset = checked(sourceFunctionFileOffset.Value + patch.TargetAddress + patch.OutputSize);
+            var logicalCloneVirtualAddress = checked(analysis.Function.Value + patch.TargetAddress + patch.OutputSize);
+            foreach (var table in analysis.JumpTableResolutions
+                         .OrderBy(table => table.TableBase.Value)
+                         .ThenBy(table => table.SourceAddress))
+            {
+                var sourceEnd = checked(table.TableBase.Value + table.TableSize);
+                if (entry.SourceRange.VirtualAddress.Value >= table.TableBase.Value
+                    && entry.SourceRange.VirtualAddress.Value < sourceEnd
+                    && entry.SourceRange.Size <= sourceEnd - entry.SourceRange.VirtualAddress.Value)
+                {
+                    var delta = entry.SourceRange.VirtualAddress.Value - table.TableBase.Value;
+                    outputRange = new SemanticSourceRange(
+                        new FileOffset(checked(logicalCloneFileOffset + delta)),
+                        new VirtualAddress(checked(logicalCloneVirtualAddress + delta)),
+                        entry.SourceRange.Size);
+                    return entry with { OutputRange = outputRange };
+                }
+
+                logicalCloneFileOffset = checked(logicalCloneFileOffset + table.TableSize);
+                logicalCloneVirtualAddress = checked(logicalCloneVirtualAddress + table.TableSize);
+            }
+
+            diagnostics.Error(
+                DiagnosticCode.SemanticAddressMapMissing,
+                $"The jump-table entity '{entry.Identity.Value}' has no unique requested clone range after the selected function output.",
+                entry.SourceRange.FileOffset.Value);
+            return entry;
         }
         else if (entry.Identity.Kind is SemanticEntityKind.Instruction or SemanticEntityKind.BasicBlock)
         {
@@ -401,9 +1020,7 @@ public sealed partial class FunctionProtectionService
                 return entry;
             }
 
-            var outputSize = entry.Identity.Kind == SemanticEntityKind.Instruction
-                ? (ulong)sizeof(uint)
-                : (ulong)sizeof(uint);
+            var outputSize = (ulong)sizeof(uint);
             outputRange = new SemanticSourceRange(
                 new FileOffset(checked(sourceFunctionFileOffset.Value + patch.TargetAddress + instructionOffset)),
                 new VirtualAddress(checked(analysis.Function.Value + patch.TargetAddress + instructionOffset)),
@@ -475,13 +1092,12 @@ public sealed partial class FunctionProtectionService
                         || (facts[0].Relocation.Type == ElfConstants.RArm64TlsIeAdrGottprelPage21
                             && facts[1].Relocation.Type == ElfConstants.RArm64TlsIeLd64GottprelLo12Nc)),
                 TlsAccessModel.LocalDynamic => facts.Length == 4
-                    && facts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
-                    {
-                        ElfConstants.RArm64TlsLdAdrPage21,
-                        ElfConstants.RArm64TlsLdAddLo12Nc,
-                        ElfConstants.RArm64TlsLdAddDtprelHi12,
-                        ElfConstants.RArm64TlsLdAddDtprelLo12Nc,
-                    }),
+                    && facts[0].Relocation.Type == ElfConstants.RArm64TlsLdAdrPage21
+                    && facts[1].Relocation.Type == ElfConstants.RArm64TlsLdAddLo12Nc
+                    && facts[2].Relocation.Type == ElfConstants.RArm64TlsLdAddDtprelHi12
+                    && facts[3].Relocation.Type is
+                        ElfConstants.RArm64TlsLdAddDtprelLo12
+                        or ElfConstants.RArm64TlsLdAddDtprelLo12Nc,
                 TlsAccessModel.GeneralDynamic => facts.Length == 2
                     && facts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
                     {

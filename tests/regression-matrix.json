@@ -450,8 +450,12 @@
       "expected": "pass",
       "artifacts": [
         ".artifacts/cfi/*/SHA256SUMS",
+        ".artifacts/cfi/*/cpp-runtime-identity.json",
+        ".artifacts/cfi/*/glibc-runtime-identity.json",
+        ".artifacts/cfi/*/cpp-harness-unwind-readelf.txt",
         ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/cfi-behavior.json",
         ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/rehydration.json",
+        ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/transformed-unwind.txt",
         ".artifacts/cfi/*/negative-malformed-eh-frame/negative-result.json"
       ]
     },
@@ -468,7 +472,36 @@
       "artifacts": [
         ".artifacts/indirect-control/*/SHA256SUMS",
         ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/jump-table-behavior.json",
-        ".artifacts/indirect-control/*/negative-malformed-table/negative-result.json"
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/source-handoff.json",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/handoff.json",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/baseline.stdout",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/target.stdout",
+        ".artifacts/indirect-control/*/negative-malformed-table/negative-result.json",
+        ".artifacts/indirect-control/*/negative-index-clobber/negative-result.json",
+        ".artifacts/indirect-control/*/negative-out-of-range-target/negative-result.json",
+        ".artifacts/indirect-control/*/negative-external-table/negative-result.json",
+        ".artifacts/indirect-control/*/negative-external-table/external-table-facts.json"
+      ]
+    },
+    {
+      "id": "fixture.indirect-control-shared-jump-table-copy",
+      "class": "host-context",
+      "command": "scripts/run-shared-jump-table-copy-e2e.sh --tier pr",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/shared-copy-*/SHA256SUMS",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/shared-table-behavior.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/source-handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/observer-source-handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/observer-transformed-handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/rehydration.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/native-image.bin"
       ]
     },
     {
@@ -484,8 +517,22 @@
       "artifacts": [
         ".artifacts/tls-runtime/*/matrix.json",
         ".artifacts/tls-runtime/*/environment.json",
+        ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/source-image.bin",
         ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/protected-image.bin",
         ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/behavior-comparison.json",
         ".artifacts/tls-runtime/*/SHA256SUMS"
       ]
     }

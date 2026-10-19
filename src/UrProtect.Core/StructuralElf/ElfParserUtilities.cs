@@ -1,5 +1,6 @@
 using System.Text;
 using UrProtect.Core.Binary;
+using UrProtect.Core.Diagnostics;
 
 namespace UrProtect.Core.StructuralElf;
 
@@ -48,7 +49,15 @@ internal static class ElfParserUtilities
     internal static bool TryReadString(
         ReadOnlyMemory<byte> table,
         ulong offset,
-        out string value)
+        out string value) =>
+        TryReadString(table, offset, out value, workBudget: null, diagnostics: null);
+
+    internal static bool TryReadString(
+        ReadOnlyMemory<byte> table,
+        ulong offset,
+        out string value,
+        ElfParserWorkBudget? workBudget,
+        DiagnosticBag? diagnostics)
     {
         value = string.Empty;
         if (offset >= (ulong)table.Length)
@@ -56,10 +65,26 @@ internal static class ElfParserUtilities
             return false;
         }
 
-        var bytes = table.Span[(int)offset..];
+        var remaining = (ulong)table.Length - offset;
+        var scanLength = remaining;
+        if (workBudget is not null
+            && !workBudget.TryGetStringScanLength(remaining, offset, diagnostics!, out scanLength))
+        {
+            return false;
+        }
+
+        var bytes = table.Span.Slice(checked((int)offset), checked((int)scanLength));
         var terminator = bytes.IndexOf((byte)0);
         if (terminator < 0)
         {
+            if (workBudget is not null && remaining > scanLength)
+            {
+                workBudget.Fail(
+                    $"a dynamic/static symbol string exceeds the {workBudget.Limits.MaximumStringScanBytes - 1}-byte name limit before UTF-8 decoding",
+                    diagnostics!,
+                    offset);
+            }
+
             return false;
         }
 

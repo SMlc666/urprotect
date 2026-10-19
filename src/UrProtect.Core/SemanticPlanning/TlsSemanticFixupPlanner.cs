@@ -49,10 +49,22 @@ public static class TlsSemanticFixupPlanner
         foreach (var extension in plan.Extensions.OfType<SemanticTlsBindingExtension>())
         {
             var binding = extension.Binding;
+            var sequenceSourceRange = GetSequenceSourceRange(binding);
+            SemanticSourceRange outputSequenceRange = default;
+            if (binding.AccessModel == TlsAccessModel.TlsDesc
+                && !TryMapInstructionRange(
+                    plan.AddressMap,
+                    sequenceSourceRange,
+                    out outputSequenceRange))
+        {
+            // Snapshot-only plans may intentionally carry a function-level map
+            // without per-instruction entries. Real transformed plans use the
+            // instruction map above; retain the bounded fixture contract when
+            // that finer-grained evidence is absent.
             if (!plan.AddressMap.TryMapSourceRange(
-                    binding.SourceRange,
+                    sequenceSourceRange,
                     SemanticEntityKind.Function,
-                    out var outputSequenceRange))
+                    out outputSequenceRange))
             {
                 diagnostics.Error(
                     DiagnosticCode.SemanticAddressMapMissing,
@@ -60,6 +72,19 @@ public static class TlsSemanticFixupPlanner
                     binding.SourceRange.FileOffset.Value);
                 continue;
             }
+        }
+        else if (binding.AccessModel != TlsAccessModel.TlsDesc
+            && !plan.AddressMap.TryMapSourceRange(
+                sequenceSourceRange,
+                SemanticEntityKind.Function,
+                out outputSequenceRange))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticAddressMapMissing,
+                "The TLS instruction sequence has no unique source-to-output mapping.",
+                binding.SourceRange.FileOffset.Value);
+            continue;
+        }
 
             SemanticSourceRange? resolverCallOutputRange = null;
             if (binding.ResolverCall is { } resolverCall)
@@ -120,7 +145,7 @@ public static class TlsSemanticFixupPlanner
                 fixups.Add(new TlsSemanticFixup(
                     binding.AccessModel,
                     site.Family,
-                    binding.SourceRange,
+                    sequenceSourceRange,
                     outputSequenceRange,
                     site.SourceRange,
                     outputRelocationRange,
@@ -146,7 +171,7 @@ public static class TlsSemanticFixupPlanner
                 fixups.Add(new TlsSemanticFixup(
                     binding.AccessModel,
                     TlsRelocationFamily.Dtpmod,
-                    binding.SourceRange,
+                    sequenceSourceRange,
                     outputSequenceRange,
                     callBinding.SourceRange,
                     resolverOutputRange,
@@ -176,6 +201,86 @@ public static class TlsSemanticFixupPlanner
                 .ThenBy(fixup => (int)fixup.RelocationFamily)
                 .ToArray()),
             diagnostics.ToArray());
+    }
+
+    private static SemanticSourceRange GetSequenceSourceRange(TlsBinding binding)
+    {
+        if (binding.AccessModel != TlsAccessModel.TlsDesc)
+        {
+            return binding.SourceRange;
+        }
+
+        var firstSite = binding.RelocationSites
+            .OrderBy(site => site.PairOrdinal)
+            .First();
+        var instructions = binding.InstructionSequence.Instructions;
+        var firstIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.SourceRange.VirtualAddress == firstSite.SourceRange.VirtualAddress)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        var returnIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.Mnemonic.Equals("ret", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .Last();
+        if (firstIndex < 0 || returnIndex < firstIndex)
+        {
+            return binding.SourceRange;
+        }
+
+        var size = checked((ulong)(returnIndex - firstIndex + 1) * sizeof(uint));
+        return new SemanticSourceRange(
+            instructions[firstIndex].SourceRange.FileOffset,
+            instructions[firstIndex].SourceRange.VirtualAddress,
+            size);
+    }
+
+    private static bool TryMapInstructionRange(
+        AddressMap addressMap,
+        SemanticSourceRange sourceRange,
+        out SemanticSourceRange outputRange)
+    {
+        outputRange = default;
+        if (sourceRange.Size == 0
+            || sourceRange.Size % sizeof(uint) != 0
+            || !sourceRange.TryGetVirtualEnd(out _)
+            || !sourceRange.TryGetFileEnd(out _)
+            || !addressMap.TryMapSourceAddress(
+                sourceRange.VirtualAddress,
+                SemanticEntityKind.Instruction,
+                out var firstOutputAddress)
+            || !addressMap.TryMapSourceFileOffset(
+                sourceRange.FileOffset,
+                SemanticEntityKind.Instruction,
+                out var firstOutputFileOffset))
+        {
+            return false;
+        }
+
+        var lastSourceAddress = sourceRange.VirtualAddress.Value + sourceRange.Size - sizeof(uint);
+        var lastSourceFileOffset = sourceRange.FileOffset.Value + sourceRange.Size - sizeof(uint);
+        if (!addressMap.TryMapSourceAddress(
+                new VirtualAddress(lastSourceAddress),
+                SemanticEntityKind.Instruction,
+                out var lastOutputAddress)
+            || !addressMap.TryMapSourceFileOffset(
+                new FileOffset(lastSourceFileOffset),
+                SemanticEntityKind.Instruction,
+                out var lastOutputFileOffset)
+            || lastOutputAddress.Value - firstOutputAddress.Value != sourceRange.Size - sizeof(uint)
+            || lastOutputFileOffset.Value - firstOutputFileOffset.Value != sourceRange.Size - sizeof(uint))
+        {
+            return false;
+        }
+
+        outputRange = new SemanticSourceRange(
+            firstOutputFileOffset,
+            firstOutputAddress,
+            sourceRange.Size);
+        return true;
     }
 
     private static void ValidateOutputSites(

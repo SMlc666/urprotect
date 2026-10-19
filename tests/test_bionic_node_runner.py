@@ -8,12 +8,15 @@ import io
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -144,28 +147,127 @@ class BionicNodeRunnerTests(unittest.TestCase):
             "outer": outer,
         }
 
-    def _run_package_merge(self, root: Path, archive: Path, rootfs: Path) -> subprocess.CompletedProcess[str]:
+    @staticmethod
+    def _owned_package_stage_snapshot(stage_root: Path) -> set[Path]:
+        return set(stage_root.iterdir())
+
+    def _assert_no_new_owned_package_stages(self, stage_root: Path, before: set[Path]) -> None:
+        leaked = self._owned_package_stage_snapshot(stage_root) - before
+        self.assertEqual(leaked, set(), f"owned package stage paths were left behind: {sorted(map(str, leaked))}")
+
+    def _run_package_merge(
+        self,
+        root: Path,
+        archive: Path,
+        rootfs: Path,
+        *,
+        inject_unrelated_global_stage: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         fake_bin = root / "fake-bin"
         fake_bin.mkdir()
+        stage_root = root / "owned-package-stage-root"
+        stage_root.mkdir()
+        stage_root.chmod(0o733)
+        control_root = root / "package-merge-control"
+        control_root.mkdir()
+        control_root.chmod(0o733)
+
         dpkg_deb = fake_bin / "dpkg-deb"
-        dpkg_deb.write_text("#!/bin/sh\ncat \"$FAKE_PAYLOAD\"\n", encoding="utf-8")
+        if inject_unrelated_global_stage:
+            started = control_root / "dpkg-started"
+            unrelated_ready = control_root / "unrelated-stage-ready"
+            dpkg_deb.write_text(
+                "#!/bin/sh\n"
+                "set -eu\n"
+                ": > \"$URPROTECT_TEST_DPKG_STARTED\"\n"
+                "attempt=0\n"
+                "while [ ! -f \"$URPROTECT_TEST_UNRELATED_READY\" ]; do\n"
+                "  attempt=$((attempt + 1))\n"
+                "  [ \"$attempt\" -lt 500 ] || exit 92\n"
+                "  sleep 0.01\n"
+                "done\n"
+                "cat \"$FAKE_PAYLOAD\"\n",
+                encoding="utf-8",
+            )
+        else:
+            dpkg_deb.write_text("#!/bin/sh\ncat \"$FAKE_PAYLOAD\"\n", encoding="utf-8")
         dpkg_deb.chmod(0o755)
+
+        real_mktemp = shutil.which("mktemp")
+        self.assertIsNotNone(real_mktemp, "mktemp is required for the package merge fixture")
+        fake_mktemp = fake_bin / "mktemp"
+        fake_mktemp.write_text(
+            "#!/bin/sh\n"
+            "set -eu\n"
+            "[ \"$#\" -eq 2 ] && [ \"$1\" = -d ] && [ \"$2\" = /tmp/urprotect-package.XXXXXX ] || { echo 'unexpected mktemp request' >&2; exit 91; }\n"
+            "exec \"$URPROTECT_REAL_MKTEMP\" -d \"$URPROTECT_TEST_STAGE_ROOT/urprotect-package.XXXXXX\"\n",
+            encoding="utf-8",
+        )
+        fake_mktemp.chmod(0o755)
+
         environment = os.environ.copy()
         environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
         environment["FAKE_PAYLOAD"] = str(archive)
+        environment["URPROTECT_TEST_STAGE_ROOT"] = str(stage_root)
+        environment["URPROTECT_REAL_MKTEMP"] = real_mktemp or ""
         command = ["bash", "-o", "pipefail", "-c", RUNNER.BIONIC_PACKAGE_MERGE_SCRIPT, "--", str(archive), str(rootfs)]
         setpriv = shutil.which("setpriv")
         if setpriv is not None and os.geteuid() == 0:
             command = [setpriv, "--reuid=65534", "--regid=65534", "--clear-groups", *command]
-        temporary_paths_before = set(Path("/tmp").glob("urprotect-package.*"))
-        result = subprocess.run(command, check=False, capture_output=True, text=True, env=environment, timeout=5)
-        temporary_paths_after = set(Path("/tmp").glob("urprotect-package.*"))
-        self.assertEqual(
-            temporary_paths_after - temporary_paths_before,
-            set(),
-            "package stage or temporary merge lists were left behind",
-        )
-        return result
+
+        before = self._owned_package_stage_snapshot(stage_root)
+        unrelated_path = Path("/tmp") / f"urprotect-package.concurrent-{os.getpid()}-{secrets.token_hex(8)}"
+        unrelated_created = threading.Event()
+        release_unrelated = threading.Event()
+        worker_errors: list[str] = []
+        worker: threading.Thread | None = None
+        owned_identity: tuple[int, int] | None = None
+        if inject_unrelated_global_stage:
+            environment["URPROTECT_TEST_DPKG_STARTED"] = str(started)
+            environment["URPROTECT_TEST_UNRELATED_READY"] = str(unrelated_ready)
+
+            def create_unrelated_stage() -> None:
+                nonlocal owned_identity
+                deadline = time.monotonic() + 4
+                try:
+                    while not started.exists() and time.monotonic() < deadline:
+                        time.sleep(0.005)
+                    if not started.exists():
+                        worker_errors.append("merge process did not reach dpkg-deb")
+                        return
+                    unrelated_path.mkdir(mode=0o700)
+                    info = unrelated_path.stat()
+                    owned_identity = (info.st_dev, info.st_ino)
+                    unrelated_created.set()
+                    unrelated_ready.touch()
+                    if not release_unrelated.wait(timeout=8):
+                        worker_errors.append("test did not release unrelated global temp stage")
+                except OSError as error:
+                    worker_errors.append(f"could not create unrelated test stage: {error}")
+                finally:
+                    try:
+                        info = unrelated_path.stat()
+                        if owned_identity == (info.st_dev, info.st_ino) and info.st_uid == os.geteuid():
+                            unrelated_path.rmdir()
+                    except FileNotFoundError:
+                        pass
+
+            worker = threading.Thread(target=create_unrelated_stage, name="unrelated-package-temp")
+            worker.start()
+
+        try:
+            result = subprocess.run(command, check=False, capture_output=True, text=True, env=environment, timeout=5)
+            self._assert_no_new_owned_package_stages(stage_root, before)
+            if inject_unrelated_global_stage:
+                self.assertTrue(unrelated_created.is_set(), "unrelated global temp stage was not created during merge")
+                self.assertTrue(unrelated_path.is_dir(), "unrelated global temp stage disappeared before scoped check")
+            return result
+        finally:
+            release_unrelated.set()
+            if worker is not None:
+                worker.join(timeout=2)
+                self.assertFalse(worker.is_alive(), "unrelated temp-stage helper did not terminate")
+                self.assertEqual(worker_errors, [], "; ".join(worker_errors))
 
     def test_named_container_identity_is_written_to_worker_cleanup_registry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -562,7 +664,11 @@ class BionicNodeRunnerTests(unittest.TestCase):
                             tar.addfile(info, io.BytesIO(data))
 
                 result = self._run_package_merge(root, archive, rootfs)
-                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    f"returncode={result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}",
+                )
                 if kind == "absolute":
                     self.assertIn("unsafe absolute or traversal package path", result.stderr)
                     self.assertFalse((safe / "evil").exists())
@@ -617,7 +723,11 @@ class BionicNodeRunnerTests(unittest.TestCase):
 
                 result = self._run_package_merge(root, archive, rootfs)
 
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    f"returncode={result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}",
+                )
                 self.assertEqual(old_target.read_text(encoding="utf-8"), "old-target\\n")
                 self.assertEqual(new_target.read_text(encoding="utf-8"), "new-target\\n")
                 if staged_type == "regular":
@@ -628,6 +738,46 @@ class BionicNodeRunnerTests(unittest.TestCase):
                 else:
                     self.assertTrue(destination.is_symlink())
                     self.assertEqual(os.readlink(destination), "new-target")
+
+    def test_unrelated_global_temp_stage_does_not_trigger_owned_leak_check(self) -> None:
+        if shutil.which("setpriv") is None:
+            self.skipTest("setpriv is unavailable")
+
+        with tempfile.TemporaryDirectory(prefix="package-merge-global-temp-isolation-") as directory:
+            root = Path(directory)
+            root.chmod(0o755)
+            rootfs = root / "rootfs"
+            rootfs.mkdir()
+            rootfs.chmod(0o777)
+            payload = root / "payload"
+            payload.mkdir()
+            entry = payload / "entry"
+            entry.write_text("new content\\n", encoding="utf-8")
+            archive = root / "package-data.tar"
+            with tarfile.open(archive, "w") as tar:
+                tar.add(entry, arcname="entry")
+
+            result = self._run_package_merge(root, archive, rootfs, inject_unrelated_global_stage=True)
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"returncode={result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}",
+            )
+            self.assertEqual((rootfs / "entry").read_text(encoding="utf-8"), "new content\\n")
+
+    def test_owned_package_stage_leak_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="package-merge-owned-leak-") as directory:
+            stage_root = Path(directory) / "stage-root"
+            stage_root.mkdir()
+            stage_root.chmod(0o733)
+            before = self._owned_package_stage_snapshot(stage_root)
+            leaked = stage_root / "urprotect-package.test-leak"
+            leaked.mkdir(mode=0o700)
+            try:
+                with self.assertRaisesRegex(AssertionError, "owned package stage paths were left behind"):
+                    self._assert_no_new_owned_package_stages(stage_root, before)
+            finally:
+                leaked.rmdir()
 
     def test_staged_merge_rejects_directory_symlink_type_conflicts(self) -> None:
         if shutil.which("setpriv") is None:

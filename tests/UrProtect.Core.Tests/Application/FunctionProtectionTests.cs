@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text.Json;
 using UrProtect.Core.Aarch64Semantics;
+using UrProtect.Core.ArtifactProtocol;
 using UrProtect.Core.SemanticPlanning;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.ElfLayout;
@@ -12,6 +13,19 @@ namespace UrProtect.Core.Tests.Application;
 public sealed class FunctionProtectionTests
 {
     private const string VersionedFixturePath = "Fixtures/SymbolVersions/liburp-versioned.so";
+
+    private static ElfFunctionSymbol HostContextEntryFunction(ElfFile file, ulong? size = null) =>
+        Assert.Single(file.FunctionSymbols, function =>
+            function.IsDynamic
+            && function.Name == HostContextContract.EntrySymbol
+            && (!size.HasValue || function.Size == size.Value));
+
+    private static Aarch64HostContextProofContext CreateHostContextProofContext(ElfFile file) =>
+        HostContextProofContextFactory.TryCreate(
+            file,
+            ProtectedImageProfile.HostContextEntry,
+            HostContextContract.EntrySymbol)
+        ?? throw new InvalidOperationException("The fixture does not establish a HostContext entry proof context.");
 
     [Fact]
     [Trait("Category", "Protect")]
@@ -117,6 +131,24 @@ public sealed class FunctionProtectionTests
             function => function.Transformed && function.Function.Value == 0x1200);
     }
 
+    [Theory]
+    [InlineData(0xB4000040u)]
+    [InlineData(0x36000040u)]
+    [Trait("Category", "Protect")]
+    public void FlattensRegisterConditionalBranchesWithTypedSourceEncoding(uint branchEncoding)
+    {
+        var source = ElfFixture.ConditionalRegisterBranchFunctionPie(branchEncoding);
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.OutputBytes);
+        Assert.Contains(result.Functions, function => function.Transformed && function.Function.Value == 0x1200);
+    }
+
     [Fact]
     [Trait("Category", "Protect")]
     public void RelativeJumpTableFlowsThroughBoundedResolutionAndSnapshot()
@@ -143,9 +175,51 @@ public sealed class FunctionProtectionTests
         Assert.True(table.IsSigned);
         Assert.Equal(0, table.LowerBound);
         Assert.Equal(3, table.UpperBound);
-        Assert.Equal(SemanticJumpTableOwnership.SelectedFunctionPrivate, table.Ownership);
-        Assert.Equal(SemanticJumpTableRewritePolicy.InPlace, table.RewritePolicy);
+        Assert.Equal(SemanticJumpTableOwnership.Ambiguous, table.Ownership);
+        Assert.Equal(SemanticJumpTableRewritePolicy.CopiedAndRetargeted, table.RewritePolicy);
+        Assert.Equal(2, table.TableReferenceProducers.Count);
+        Assert.False(table.OwnerInventoryComplete);
+        Assert.NotEqual(table.TableRange.VirtualAddress, table.OutputRange!.Value.VirtualAddress);
         Assert.Equal(4, result.Plan.SemanticSnapshot.AddressMap.TableEntries.Count);
+        Assert.Equal((ushort)6, SemanticPlanSnapshotCodec.Version);
+        Assert.Equal("URP-SPS6", SemanticPlanSnapshotCodec.MagicText);
+
+        var decoded = SemanticPlanSnapshotCodec.Decode(result.Plan.SemanticSnapshot.CanonicalBytes!);
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        var roundTripped = Assert.Single(decoded.Snapshot!.Extensions.OfType<SemanticJumpTableExtension>());
+        Assert.Equal(table.TableReferenceProducers, roundTripped.TableReferenceProducers);
+        Assert.Equal(table.OwnerReferences, roundTripped.OwnerReferences);
+        Assert.Equal(table.OwnerInventoryComplete, roundTripped.OwnerInventoryComplete);
+        Assert.Equal(table.Ownership, roundTripped.Ownership);
+        Assert.Equal(table.RewritePolicy, roundTripped.RewritePolicy);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void RelativeJumpTableWithCheckedIndexClobberedByTableBaseFailsClosedBeforePublication()
+    {
+        using var temporary = new TemporaryDirectory();
+        var inputPath = temporary.Path("input.elf");
+        var outputPath = temporary.Path("protected.elf");
+        var source = ElfFixture.RelativeJumpTableFunctionPie(clobberCheckedIndexWithTableBase: true);
+        File.WriteAllBytes(inputPath, source);
+
+        var result = new FunctionProtectionWorkflow().Execute(
+            new FunctionProtectionCommandRequest(
+                inputPath,
+                outputPath,
+                null,
+                new FunctionProtectionOptions(
+                    new[] { FunctionSelector.ByAddress(0x1200) },
+                    new[] { ProtectionPass.ControlFlowFlattening })));
+
+        Assert.False(result.Protection.IsSuccess);
+        Assert.False(result.OutputPublished);
+        Assert.Null(result.Protection.OutputBytes);
+        Assert.False(File.Exists(outputPath));
+        var diagnostic = Assert.Single(result.Diagnostics, candidate =>
+            candidate.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.Contains("overwritten between B.HI and the indexed LDRSW", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -163,7 +237,38 @@ public sealed class FunctionProtectionTests
         Assert.Null(result.Plan);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+            diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+                && diagnostic.Message == "A signed relative jump-table entry resolves outside the selected function closure.");
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void RelativeJumpTableWithTargetOutsideExecutableLoadRangeFailsBeforePublication()
+    {
+        using var temporary = new TemporaryDirectory();
+        var inputPath = temporary.Path("input.elf");
+        var outputPath = temporary.Path("protected.elf");
+        var source = ElfFixture.RelativeJumpTableFunctionPie(outOfExecutableLoadRangeTableEntry: true);
+        File.WriteAllBytes(inputPath, source);
+
+        var result = new FunctionProtectionWorkflow().Execute(
+            new FunctionProtectionCommandRequest(
+                inputPath,
+                outputPath,
+                null,
+                new FunctionProtectionOptions(
+                    new[] { FunctionSelector.ByAddress(0x1200) },
+                    new[] { ProtectionPass.ControlFlowFlattening })));
+
+        Assert.False(result.Protection.IsSuccess);
+        Assert.False(result.OutputPublished);
+        Assert.Null(result.Protection.OutputBytes);
+        Assert.False(File.Exists(outputPath));
+        var diagnostic = Assert.Single(result.Diagnostics, candidate =>
+            candidate.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.Equal(
+            "A signed relative jump-table entry resolves outside an executable PT_LOAD range.",
+            diagnostic.Message);
     }
 
     [Fact]
@@ -181,7 +286,423 @@ public sealed class FunctionProtectionTests
         Assert.Null(result.OutputBytes);
         Assert.Contains(
             result.Diagnostics,
-            diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnsupported);
+            diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void SelectedFunctionAnalysisDoesNotAssumeHostContextRootByDefault()
+    {
+        var source = ElfFixture.HostContextJoinCallbackIntactPie();
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var entry = HostContextEntryFunction(parse.File!, 18 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(parse.File!, entry);
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Empty(analysis.RuntimeIndirectCallResolutions);
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void IntactHostContextEntryCallbackUsesApplicationMappedProofContext()
+    {
+        using var temporary = new TemporaryDirectory();
+        var sourcePath = temporary.Path("input.elf");
+        var artifactPath = temporary.Path("protected-image.bin");
+        var rolePath = temporary.Path("protected-image.json");
+        var manifestPath = temporary.Path("SHA256SUMS");
+        var stagePath = temporary.Path("stage.json");
+        var source = ElfFixture.HostContextJoinCallbackIntactPie();
+        File.WriteAllBytes(sourcePath, source);
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var entry = HostContextEntryFunction(parse.File!, 18 * sizeof(uint));
+        var proofContext = CreateHostContextProofContext(parse.File!);
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(parse.File!, entry, proofContext);
+
+        var command = ProtectedImageCommandWorkflow.Execute(new ProtectedImageCommandRequest(
+            sourcePath,
+            artifactPath,
+            rolePath,
+            manifestPath,
+            stagePath,
+            null,
+            "host-context-entry-proof",
+            ProtectedImageProfile.HostContextEntry,
+            "host-context-proof-test",
+            null,
+            "urprotect.rehydrator.v1",
+            null,
+            null,
+            new[] { FunctionSelector.ByIdentity(entry.Table, entry.TableIndex) },
+            new[] { ProtectionPass.ControlFlowFlattening },
+            Array.Empty<string>(),
+            "test"));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.Complete, analysis.Status);
+        var callback = Assert.Single(analysis.RuntimeIndirectCallResolutions);
+        Assert.Equal(Aarch64RuntimeIndirectCallOwnerKind.HostContextCallback, callback.OwnerKind);
+        Assert.Equal(HostContextContract.JoinImageThreadCallbackOffset, callback.HostContextFieldOffset);
+        Assert.True(command.IsSuccess, string.Join(Environment.NewLine, command.Diagnostics));
+        Assert.True(command.Published);
+        Assert.True(File.Exists(artifactPath));
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void HostContextProfileDoesNotApplyEntryProofToNonEntrySymbolIdentity()
+    {
+        using var temporary = new TemporaryDirectory();
+        var sourcePath = temporary.Path("input.elf");
+        var artifactPath = temporary.Path("protected-image.bin");
+        var rolePath = temporary.Path("protected-image.json");
+        var manifestPath = temporary.Path("SHA256SUMS");
+        var stagePath = temporary.Path("stage.json");
+        var source = ElfFixture.HostContextJoinCallbackIntactPie();
+        File.WriteAllBytes(sourcePath, source);
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var entry = HostContextEntryFunction(parse.File!);
+        var nonEntry = Assert.Single(parse.File.FunctionSymbols, function =>
+            !function.IsDynamic
+            && function.Value == entry.Value
+            && function.Size == entry.Size);
+        var proofContext = CreateHostContextProofContext(parse.File!);
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(parse.File!, nonEntry, proofContext);
+        var command = ProtectedImageCommandWorkflow.Execute(new ProtectedImageCommandRequest(
+            sourcePath,
+            artifactPath,
+            rolePath,
+            manifestPath,
+            stagePath,
+            null,
+            "host-context-non-entry-proof",
+            ProtectedImageProfile.HostContextEntry,
+            "host-context-proof-test",
+            null,
+            "urprotect.rehydrator.v1",
+            null,
+            null,
+            new[] { FunctionSelector.ByIdentity(nonEntry.Table, nonEntry.TableIndex) },
+            new[] { ProtectionPass.ControlFlowFlattening },
+            Array.Empty<string>(),
+            "test"));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Empty(analysis.RuntimeIndirectCallResolutions);
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.False(command.IsSuccess);
+        Assert.False(command.Published);
+        Assert.Null(command.Role);
+        Assert.False(File.Exists(artifactPath));
+        Assert.False(File.Exists(rolePath));
+        Assert.Contains(command.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void HostContextProofContextCannotBeReusedForDifferentSourceBytes()
+    {
+        var original = ElfFixture.HostContextJoinCallbackIntactPie();
+        var originalParse = ElfParser.Parse(original);
+        Assert.NotNull(originalParse.File);
+        var proofContext = CreateHostContextProofContext(originalParse.File!);
+        var changedSource = original.ToArray();
+        changedSource[^1] ^= 1;
+        var changedParse = ElfParser.Parse(changedSource);
+        Assert.NotNull(changedParse.File);
+        var entry = HostContextEntryFunction(changedParse.File!);
+        Assert.Equal(proofContext.EntryFunction, entry);
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(changedParse.File!, entry, proofContext);
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Empty(analysis.RuntimeIndirectCallResolutions);
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void StoreInvalidatesHostContextComparisonUsedForLaterSizeGuard()
+    {
+        var source = ElfFixture.HostContextSizeStoreAfterComparisonPie();
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!, 20 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File,
+            function,
+            CreateHostContextProofContext(parse.File));
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+            && diagnostic.Message.Contains("lacks dominating table-size", StringComparison.Ordinal));
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+    }
+
+    [Theory]
+    [InlineData(0xF83F813Fu)] // GNU as: SWP XZR, XZR, [X9] stores zero and discards the old value.
+    [InlineData(0xF8EA813Fu)] // GNU as: SWPAL X10, XZR, [X9] stores X10 and discards the old value.
+    [InlineData(0xF8FF812Au)] // GNU as: SWPAL XZR, X10, [X9] stores zero and returns the old value in X10.
+    [Trait("Category", "Protect")]
+    public void AtomicSwapOperandsAfterJoinGuardFailClosedBeforePublication(uint swapEncoding)
+    {
+        var source = ElfFixture.HostContextJoinCallbackAddressBearingMutationPie(swapEncoding);
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!, 18 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File,
+            function,
+            CreateHostContextProofContext(parse.File));
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        var diagnostic = Assert.Single(analysis.Diagnostics, candidate =>
+            candidate.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.Equal((ulong?)0x1238, diagnostic.Offset);
+        Assert.Contains("lacks dominating", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Empty(analysis.RuntimeIndirectCallResolutions);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void ImplicitAddressBearingMemoryWriteFailsClosedBeforePublication()
+    {
+        const uint dcZvaX9 = 0xD50B7429u; // GNU as: DC ZVA, X9; backend provides no explicit Memory operand.
+        var source = ElfFixture.HostContextJoinCallbackAddressBearingMutationPie(dcZvaX9);
+        var parsed = ElfParser.Parse(source);
+        Assert.NotNull(parsed.File);
+        var function = HostContextEntryFunction(parsed.File!, 18 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parsed.File,
+            function,
+            CreateHostContextProofContext(parsed.File));
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        var diagnostic = Assert.Single(analysis.Diagnostics, candidate =>
+            candidate.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.Equal((ulong?)0x1238, diagnostic.Offset);
+        Assert.Contains("lacks dominating", diagnostic.Message, StringComparison.Ordinal);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void UnclassifiedMemoryEffectFailsClosedBeforePublication()
+    {
+        var source = ElfFixture.HostContextJoinCallbackAddressBearingMutationPie(0xC89FFD3Fu);
+        var backend = new AsmStoneAdapter();
+        var decoder = new AsmStoneAdapter((encoding, address) =>
+        {
+            var decoded = backend.Decode(encoding, address);
+            return address == 0x1230 && decoded.Instruction is { } instruction
+                ? new Aarch64DecodeResult(
+                    decoded.Status,
+                    instruction with { MemoryEffect = Aarch64MemoryEffect.Unclassified },
+                    decoded.Diagnostic)
+                : decoded;
+        });
+        var parsed = ElfParser.Parse(source);
+        Assert.NotNull(parsed.File);
+        var function = HostContextEntryFunction(parsed.File!, 18 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer(decoder).Analyze(
+            parsed.File,
+            function,
+            CreateHostContextProofContext(parsed.File));
+        var result = new ProtectionWorkflow(new FunctionProtectionService(decoder)).ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+            && diagnostic.Offset == 0x1238);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void ReleaseStoreAfterJoinGuardFailsClosedBeforePublication()
+    {
+        var source = ElfFixture.HostContextJoinClearedByReleaseStorePie();
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!, 18 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File,
+            function,
+            CreateHostContextProofContext(parse.File));
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Contains(analysis.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+            && diagnostic.Offset == 0x1238);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void ProducerOverflowPropagatesAcrossControlFlowMerge()
+    {
+        var parse = ElfParser.Parse(ElfFixture.HostContextCallbackProducerMergePie());
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!);
+        var proofContext = CreateHostContextProofContext(parse.File!);
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(parse.File!, function, proofContext);
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Contains(analysis.Diagnostics, candidate =>
+            candidate.Code == DiagnosticCode.IndirectTargetUnresolved
+            && candidate.Message.Contains("64-producer", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void UnprovenThreadPointerStoreInvalidatesHostContextGuards()
+    {
+        var source = ElfFixture.HostContextCallbackWithUnrelatedTlsStorePie();
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!);
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File,
+            function,
+            CreateHostContextProofContext(parse.File));
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.Contains(analysis.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+    }
+
+    [Theory]
+    [InlineData(62, true)]
+    [InlineData(63, false)]
+    [Trait("Category", "Protect")]
+    public void ProducerChainLimitIsExactAndOverflowFailsClosed(int moveAliasCount, bool expectedSuccess)
+    {
+        var parse = ElfParser.Parse(ElfFixture.HostContextCallbackProducerChainPie(moveAliasCount));
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!);
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File,
+            function,
+            CreateHostContextProofContext(parse.File));
+
+        Assert.Equal(expectedSuccess, analysis.Status == Aarch64FunctionAnalysisStatus.Complete);
+        if (expectedSuccess)
+        {
+            var call = Assert.Single(analysis.RuntimeIndirectCallResolutions);
+            Assert.Equal(64, call.ProducerAddresses.Count);
+        }
+        else
+        {
+            var diagnostic = Assert.Single(analysis.Diagnostics, candidate =>
+                candidate.Code == DiagnosticCode.IndirectTargetUnresolved);
+            Assert.Contains("64-producer", diagnostic.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void UnknownCallInvalidatesEarlierHostContextGuardsForReloadedCallback()
+    {
+        var source = ElfFixture.HostContextCallbackAfterUnknownCallPie();
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!, 19 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File,
+            function,
+            CreateHostContextProofContext(parse.File));
+        var result = new ProtectionWorkflow().ExecuteFinal(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByIdentity(function.Table, function.TableIndex) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.OutputBytes);
+        var diagnostic = Assert.Single(
+            analysis.Diagnostics,
+            candidate => candidate.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.Equal((ulong?)0x123C, diagnostic.Offset);
+        Assert.Contains("lacks dominating table-size", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void HostCallbackInvalidatesEscapedStackFactsBeyondItsOutputSlot()
+    {
+        const ulong functionSize = 34 * sizeof(uint);
+        var parse = ElfParser.Parse(ElfFixture.HostContextCallbackWithEscapedStackArgumentPie());
+        Assert.NotNull(parse.File);
+        var function = HostContextEntryFunction(parse.File!, functionSize);
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File,
+            function,
+            CreateHostContextProofContext(parse.File));
+
+        Assert.Equal(Aarch64FunctionAnalysisStatus.IncompleteControlFlow, analysis.Status);
+        var diagnostic = Assert.Single(
+            analysis.Diagnostics,
+            candidate => candidate.Code == DiagnosticCode.IndirectTargetUnresolved);
+        Assert.Equal((ulong?)0x1278, diagnostic.Offset);
+        Assert.Contains("target provenance is missing", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]

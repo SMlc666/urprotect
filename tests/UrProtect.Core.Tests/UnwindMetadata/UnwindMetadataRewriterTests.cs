@@ -105,6 +105,37 @@ public sealed class UnwindMetadataRewriterTests
     }
 
     [Fact]
+    public void ExternalCallTargetMappingDoesNotSelectAnUnrelatedFde()
+    {
+        var parsed = ElfParser.Parse(UnwindMetadataParserTests.UnwindFixture.GccShapedElf());
+        var file = Assert.IsType<ElfFile>(parsed.File);
+        var model = Assert.IsType<CoreUnwind.UnwindMetadataModel>(
+            CoreUnwind.UnwindMetadataParser.Parse(file).Model);
+        var fde = Assert.Single(model.Fdes);
+        Assert.True(file.LoadMap.TryVirtualAddressToFileOffset(
+            new VirtualAddress(fde.InitialLocation),
+            sizeof(uint),
+            out var targetOffset));
+        var targetRange = new SemanticSourceRange(
+            targetOffset,
+            new VirtualAddress(fde.InitialLocation),
+            sizeof(uint));
+        var map = Assert.IsType<AddressMap>(AddressMap.Create(new[]
+        {
+            new AddressMapEntry(
+                SemanticEntityId.RelocationTarget("external-call-target"),
+                targetRange,
+                targetRange),
+        }).Map);
+
+        var result = CoreUnwind.UnwindMetadataRewriter.Rewrite(file, map);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.Empty(result.FdeRewrites);
+        Assert.Empty(result.Edits);
+    }
+
+    [Fact]
     public void MissingMappingForSelectedFdeFailsClosed()
     {
         var parsed = ElfParser.Parse(UnwindMetadataParserTests.UnwindFixture.GccShapedElf());

@@ -182,6 +182,9 @@ public enum SemanticPlanExtensionKind
     CfiEffect,
     RelocationBinding,
     UnresolvedReference,
+    DynamicImportCall,
+    StaticFunctionPointerCall,
+    ExternalJumpTable,
 }
 
 public interface ISemanticPlanExtension

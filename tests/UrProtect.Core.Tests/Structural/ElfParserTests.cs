@@ -444,6 +444,11 @@ public sealed class ElfParserTests
         Assert.Equal(5, table.SectionHeaderIndex);
         Assert.Equal(new FileOffset(0x240), table.FileOffset);
         Assert.Equal(2U, table.SymbolTableSectionIndex);
+        var structuralRelocation = Assert.Single(file.SectionRelocations);
+        Assert.Equal(ElfConstants.RArm64TlsIeAdrGottprelPage21, structuralRelocation.Relocation.Type);
+        Assert.Equal("tls_value", structuralRelocation.Symbol!.Name);
+        Assert.Equal(2U, structuralRelocation.Symbol.SymbolTableSectionIndex);
+        Assert.Equal(3, structuralRelocation.Symbol.SectionIndex);
         Assert.Equal(4U, table.TargetSectionIndex);
         Assert.Empty(file.TlsMetadata.Dynamic.Relocations);
     }

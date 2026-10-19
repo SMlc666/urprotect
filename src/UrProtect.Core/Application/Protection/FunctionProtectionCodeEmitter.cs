@@ -38,6 +38,7 @@ public sealed partial class FunctionProtectionService
             if (!TryBuildFunction(
                     sourceFile,
                     analysis,
+                    analyses,
                     hasFlattening,
                     hasPermutation,
                     resourcePlan,
@@ -157,6 +158,7 @@ public sealed partial class FunctionProtectionService
     private bool TryBuildFunction(
         ElfFile sourceFile,
         Aarch64FunctionAnalysis analysis,
+        IReadOnlyList<Aarch64FunctionAnalysis> selectedAnalyses,
         bool flatten,
         bool permutation,
         Aarch64RegisterResourcePlan resourcePlan,
@@ -229,13 +231,12 @@ public sealed partial class FunctionProtectionService
                 .FirstOrDefault()
             : null;
         var hasTlsLdShape = tlsFacts.Length == 4
-            && tlsFacts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
-            {
-                ElfConstants.RArm64TlsLdAdrPage21,
-                ElfConstants.RArm64TlsLdAddLo12Nc,
-                ElfConstants.RArm64TlsLdAddDtprelHi12,
-                ElfConstants.RArm64TlsLdAddDtprelLo12Nc,
-            });
+            && tlsFacts[0].Relocation.Type == ElfConstants.RArm64TlsLdAdrPage21
+            && tlsFacts[1].Relocation.Type == ElfConstants.RArm64TlsLdAddLo12Nc
+            && tlsFacts[2].Relocation.Type == ElfConstants.RArm64TlsLdAddDtprelHi12
+            && tlsFacts[3].Relocation.Type is
+                ElfConstants.RArm64TlsLdAddDtprelLo12
+                or ElfConstants.RArm64TlsLdAddDtprelLo12Nc;
         var hasTlsGdShape = tlsFacts.Length == 2
             && tlsFacts.Select(fact => fact.Relocation.Type).SequenceEqual(new[]
             {
@@ -268,12 +269,27 @@ public sealed partial class FunctionProtectionService
                 tlsDescOwner = descriptorProjection.Value;
             }
         }
+        var tlsDescCoreInstructions = hasTlsDescShape
+            ? analysis.Instructions
+                .Where(instruction => instruction.Address >= orderedTlsDescFacts[0].Relocation.Offset)
+                .TakeWhile((instruction, index) =>
+                    index == 0
+                    || analysis.Instructions
+                        .Where(candidate => candidate.Address >= orderedTlsDescFacts[0].Relocation.Offset)
+                        .Take(index)
+                        .Last()
+                        .Decode.Instruction?.ControlFlow != Aarch64ControlFlowKind.Return)
+                .ToArray()
+            : Array.Empty<Aarch64FunctionInstruction>();
         var supportsTlsDesc = hasTlsDescShape
+            && tlsDescCoreInstructions.Length >= 8
             && tlsDescOwner is { } descriptorOwner
             && Aarch64TlsInstructionSemantics.IsSupportedTlsDescWordSequence(
-                analysis.Instructions.Select(instruction => instruction.Encoding).ToArray(),
+                tlsDescCoreInstructions
+                    .Select(instruction => instruction.Encoding)
+                    .ToArray(),
                 descriptorOwner,
-                analysis.Function.Value);
+                tlsDescCoreInstructions[0].Address);
         var tlsDescModuleAddress = supportsTlsDesc
             ? orderedTlsDescFacts[0].Relocation.Offset
             : (ulong?)null;
@@ -297,6 +313,7 @@ public sealed partial class FunctionProtectionService
         var tlsLdResolverCallAddress = exactResolverCallAddresses.Length == 1
             ? exactResolverCallAddresses[0]
             : (ulong?)null;
+        var stableDirectCallAddresses = new HashSet<ulong>();
         var tlsLdModuleAddressCandidates = tlsLdResolverCallAddress is not null
             ? tlsFacts
                 .Where(fact => fact.Relocation.Type is ElfConstants.RArm64TlsLdAdrPage21 or ElfConstants.RArm64TlsGdAdrPage21)
@@ -344,11 +361,22 @@ public sealed partial class FunctionProtectionService
                     resolution => resolution.SourceAddress == instruction.Address);
             var isRuntimeIndirectCall = analysis.RuntimeIndirectCallResolutions.Any(
                 resolution => resolution.SourceAddress == instruction.Address);
+            var isStaticFunctionPointerCall = analysis.StaticFunctionPointerCallResolutions.Any(
+                resolution => resolution.SourceAddress == instruction.Address);
             var isJumpTableProducer = analysis.JumpTableResolutions.Any(
                 resolution => resolution.ProducerAddresses.Contains(instruction.Address));
+            var isAddressReferenceProducer = analysis.AddressReferences.Any(
+                reference => reference.PageProducerAddress == instruction.Address);
             var isTlsDescModuleAddress = tlsDescModuleAddress is { } descriptorModuleAddress
                 && instruction.Address == descriptorModuleAddress
                 && instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true;
+            var isStableDirectCall = controlFlow == Aarch64ControlFlowKind.DirectCall
+                && IsStableExternalDirectCall(sourceFile, instruction, selectedAnalyses);
+            if (isStableDirectCall)
+            {
+                stableDirectCallAddresses.Add(instruction.Address);
+            }
+
             if ((instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true
                     && !isTerminalBranch
                     && !(supportsTlsIePcRelativeLoad
@@ -359,12 +387,17 @@ public sealed partial class FunctionProtectionService
                     && !isTlsLdResolverCall
                     && !isTlsLdModuleAddress
                     && !isTlsDescModuleAddress
-                    && !isJumpTableProducer)
-                || (controlFlow is Aarch64ControlFlowKind.DirectCall && !isTlsLdResolverCall)
+                    && !isJumpTableProducer
+                    && !isAddressReferenceProducer
+                    && !isStableDirectCall)
+                || (controlFlow is Aarch64ControlFlowKind.DirectCall
+                    && !isTlsLdResolverCall
+                    && !isStableDirectCall)
                 || (controlFlow == Aarch64ControlFlowKind.IndirectBranch
                     && !isTlsDescCall
                     && !isResolvedIndirectTarget
-                    && !isRuntimeIndirectCall))
+                    && !isRuntimeIndirectCall
+                    && !isStaticFunctionPointerCall))
             {
                 diagnostic = new Diagnostic(
                     DiagnosticSeverity.Error,
@@ -416,18 +449,23 @@ public sealed partial class FunctionProtectionService
         foreach (var block in analysis.Blocks)
         {
             var last = block.Instructions[^1];
-            if (last.Decode.Instruction?.ControlFlow == Aarch64ControlFlowKind.ConditionalBranch
-                && !last.Decode.Instruction.Properties.HasFlag(Aarch64InstructionProperties.ReadsNzcv))
+            var isConditionalBranch = last.Decode.Instruction?.ControlFlow == Aarch64ControlFlowKind.ConditionalBranch;
+            var isRegisterConditionalBranch = last.Decode.Instruction is { } conditionalInstruction
+                && IsRegisterConditionalBranch(conditionalInstruction.Mnemonic);
+            if (isConditionalBranch
+                && !last.Decode.Instruction!.Properties.HasFlag(Aarch64InstructionProperties.ReadsNzcv)
+                && !isRegisterConditionalBranch)
             {
                 diagnostic = new Diagnostic(
                     DiagnosticSeverity.Error,
                     DiagnosticCode.ProtectionUnsupportedInstruction,
-                    "Only NZCV-based b.cond branches are supported by the initial flattening pass.",
+                    "The conditional branch is neither an NZCV-based b.cond nor a supported CBZ/CBNZ/TBZ/TBNZ form.",
                     last.FileOffset);
                 return false;
             }
 
-            if (last.Decode.Instruction?.ControlFlow == Aarch64ControlFlowKind.ConditionalBranch
+            if (isConditionalBranch
+                && last.Decode.Instruction!.Properties.HasFlag(Aarch64InstructionProperties.ReadsNzcv)
                 && !block.Instructions
                     .Take(block.Instructions.Count - 1)
                     .Any(instruction => instruction.Decode.Instruction?.Properties
@@ -474,8 +512,44 @@ public sealed partial class FunctionProtectionService
             tlsLdResolverCallAddress,
             tlsLdModuleAddress,
             tlsDescCallAddress,
-            tlsDescModuleAddress);
+            tlsDescModuleAddress,
+            stableDirectCallAddresses);
         return true;
+    }
+
+    private static bool IsRegisterConditionalBranch(string mnemonic) =>
+        mnemonic.StartsWith("cbz", StringComparison.OrdinalIgnoreCase)
+        || mnemonic.StartsWith("cbnz", StringComparison.OrdinalIgnoreCase)
+        || mnemonic.StartsWith("tbz", StringComparison.OrdinalIgnoreCase)
+        || mnemonic.StartsWith("tbnz", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsStableExternalDirectCall(
+        ElfFile sourceFile,
+        Aarch64FunctionInstruction instruction,
+        IReadOnlyList<Aarch64FunctionAnalysis> selectedAnalyses)
+    {
+        if (instruction.Decode.Instruction is not
+            {
+                ControlFlow: Aarch64ControlFlowKind.DirectCall,
+                DirectTarget: { } target
+            }
+            || target % sizeof(uint) != 0
+            || selectedAnalyses.Any(analysis =>
+                analysis.Function.TryGetEnd(out var end)
+                && target >= analysis.Function.Value
+                && target < end))
+        {
+            return false;
+        }
+
+        var executableOwners = sourceFile.LoadMap.Segments.Count(segment =>
+            segment.IsExecutable
+            && segment.ContainsVirtualAddress(target, sizeof(uint)));
+        return executableOwners == 1
+            && sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+                new VirtualAddress(target),
+                sizeof(uint),
+                out _);
     }
 
     private sealed class ProtectedFunctionBuilder
@@ -489,7 +563,8 @@ public sealed partial class FunctionProtectionService
             ulong? tlsLdResolverCallAddress,
             ulong? tlsLdModuleAddress,
             ulong? tlsDescCallAddress,
-            ulong? tlsDescModuleAddress)
+            ulong? tlsDescModuleAddress,
+            IReadOnlySet<ulong> stableDirectCallAddresses)
         {
             Source = source;
             Flatten = flatten;
@@ -500,6 +575,7 @@ public sealed partial class FunctionProtectionService
             TlsLdModuleAddress = tlsLdModuleAddress;
             TlsDescCallAddress = tlsDescCallAddress;
             TlsDescModuleAddress = tlsDescModuleAddress;
+            StableDirectCallAddresses = new HashSet<ulong>(stableDirectCallAddresses);
         }
 
         public Aarch64FunctionAnalysis Source { get; }
@@ -515,6 +591,8 @@ public sealed partial class FunctionProtectionService
         public ulong? TlsLdModuleAddress { get; }
         public ulong? TlsDescCallAddress { get; }
         public ulong? TlsDescModuleAddress { get; }
+
+        public HashSet<ulong> StableDirectCallAddresses { get; }
 
         public ulong OutputAddress { get; set; }
 
@@ -594,8 +672,12 @@ public sealed partial class FunctionProtectionService
                             resolution => resolution.SourceAddress == instruction.Address);
                     var isRuntimeIndirectCall = Source.RuntimeIndirectCallResolutions.Any(
                         resolution => resolution.SourceAddress == instruction.Address);
+                    var isStaticFunctionPointerCall = Source.StaticFunctionPointerCallResolutions.Any(
+                        resolution => resolution.SourceAddress == instruction.Address);
                     var isJumpTableProducer = Source.JumpTableResolutions.Any(
                         resolution => resolution.ProducerAddresses.Contains(instruction.Address));
+                    var isAddressReferenceProducer = Source.AddressReferences.Any(
+                        reference => reference.PageProducerAddress == instruction.Address);
                     var isTlsDescModuleAddress = TlsDescModuleAddress is { } descriptorModuleAddress
                         && instruction.Address == descriptorModuleAddress
                         && instruction.Decode.Instruction?.Properties.HasFlag(Aarch64InstructionProperties.PcRelative) == true;
@@ -603,7 +685,9 @@ public sealed partial class FunctionProtectionService
                             && !isTlsLdResolverCall
                             && !isTlsDescCall
                             && !isResolvedIndirectTarget
-                            && !isRuntimeIndirectCall)
+                            && !isRuntimeIndirectCall
+                            && !isStaticFunctionPointerCall
+                            && !StableDirectCallAddresses.Contains(instruction.Address))
                         || (instruction.Decode.Instruction.Properties.HasFlag(Aarch64InstructionProperties.PcRelative)
                             && !(SupportsTlsIePcRelativeLoad
                                 && TlsIePcRelativeLoadAddress is { } pcRelativeLoadAddress
@@ -611,7 +695,8 @@ public sealed partial class FunctionProtectionService
                             && !isTlsLdResolverCall
                             && !isTlsLdModuleAddress
                             && !isTlsDescModuleAddress
-                            && !isJumpTableProducer))
+                            && !isJumpTableProducer
+                            && !isAddressReferenceProducer))
                     {
                         diagnostics.Error(
                             DiagnosticCode.ProtectionUnsupportedInstruction,
@@ -626,24 +711,31 @@ public sealed partial class FunctionProtectionService
                     }
                 }
 
+                var isTlsLdResolverCallTerminator = TlsLdResolverCallAddress is { } tlsLdResolverAddress
+                    && last.Address == tlsLdResolverAddress
+                    && last.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.DirectCall;
                 var isTlsDescCallTerminator = TlsDescCallAddress is { } terminatorAddress
                     && last.Address == terminatorAddress
                     && last.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.IndirectBranch;
                 var isRuntimeIndirectCallTerminator = Source.RuntimeIndirectCallResolutions.Any(
                     resolution => resolution.SourceAddress == last.Address);
+                var isStaticFunctionPointerCallTerminator = Source.StaticFunctionPointerCallResolutions.Any(
+                    resolution => resolution.SourceAddress == last.Address);
+                var isStableDirectCallTerminator = StableDirectCallAddresses.Contains(last.Address);
                 if (last.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
                     && !isTlsDescCallTerminator
-                    && !isRuntimeIndirectCallTerminator)
+                    && !isRuntimeIndirectCallTerminator
+                    && !isStaticFunctionPointerCallTerminator)
                 {
                     InstructionOutputOffsets[last.Address] = emitter.PositionAddress - OutputAddress;
-                    if (Source.JumpTableResolutions.FirstOrDefault(
-                            resolution => resolution.SourceAddress == last.Address) is { } jumpTable)
+                    if (Source.JumpTableResolutions.Any(
+                            resolution => resolution.SourceAddress == last.Address))
                     {
-                        if (!EmitJumpTableDispatch(
-                                emitter,
-                                jumpTable,
-                                blockIds,
-                                diagnostics))
+                        // The source instructions already load and compute the selected
+                        // table target. Keep the terminal BR so execution consumes the
+                        // cloned, retargeted table rather than replacing its semantics
+                        // with an immediate-comparison dispatcher.
+                        if (!EmitSourceInstruction(emitter, encoder, last, diagnostics))
                         {
                             return false;
                         }
@@ -669,7 +761,11 @@ public sealed partial class FunctionProtectionService
                     }
                 }
 
-                if (isTlsDescCallTerminator || isRuntimeIndirectCallTerminator)
+                if (isTlsLdResolverCallTerminator
+                    || isTlsDescCallTerminator
+                    || isRuntimeIndirectCallTerminator
+                    || isStaticFunctionPointerCallTerminator
+                    || isStableDirectCallTerminator)
                 {
                     var fallthrough = block.Successors.SingleOrDefault(edge =>
                         edge.Kind == Aarch64ControlFlowEdgeKind.Fallthrough);
@@ -678,9 +774,13 @@ public sealed partial class FunctionProtectionService
                     {
                         diagnostics.Error(
                             DiagnosticCode.ProtectionUnsupportedInstruction,
-                            isTlsDescCallTerminator
-                                ? "The TLSDESC resolver call does not have one in-function fallthrough successor."
-                                : "The runtime indirect call does not have one in-function fallthrough successor.",
+                            isTlsLdResolverCallTerminator
+                                ? "The TLSLD resolver call does not have one in-function fallthrough successor."
+                                : isTlsDescCallTerminator
+                                    ? "The TLSDESC resolver call does not have one in-function fallthrough successor."
+                                    : isRuntimeIndirectCallTerminator || isStaticFunctionPointerCallTerminator
+                                    ? "The validated indirect call does not have one in-function fallthrough successor."
+                                    : "The direct call does not have one in-function fallthrough successor.",
                             last.FileOffset);
                         return false;
                     }
@@ -690,8 +790,8 @@ public sealed partial class FunctionProtectionService
                         return false;
                     }
 
-                    // Runtime-owned calls return to the next emitted word. Keep
-                    // their proven fallthrough block adjacent.
+                    // Validated indirect calls return to the next emitted word.
+                    // Keep their proven fallthrough block adjacent.
                     continue;
                 }
 
@@ -730,7 +830,50 @@ public sealed partial class FunctionProtectionService
                     var falseEdge = edges.First(edge => edge.Kind == Aarch64ControlFlowEdgeKind.Fallthrough);
                     InstructionOutputOffsets[last.Address] = emitter.PositionAddress - OutputAddress;
                     var trueLabel = $"set-{Source.Function.Value:X}-{blockIds[trueEdge.TargetAddress!.Value]}";
-                    emitter.EmitConditionalBranch((int)(last.Encoding & 0xF), trueLabel);
+                    if (last.Decode.Instruction.Properties.HasFlag(Aarch64InstructionProperties.ReadsNzcv))
+                    {
+                        emitter.EmitConditionalBranch((int)(last.Encoding & 0xF), trueLabel);
+                    }
+                    else if (last.Decode.Instruction is { } conditionalInstruction
+                        && IsRegisterConditionalBranch(conditionalInstruction.Mnemonic))
+                    {
+                        var branchEncoding = last.Encoding;
+                        if (Permutation)
+                        {
+                            var permuted = encoder.TryPermuteGeneralRegisters(
+                                branchEncoding,
+                                last.Address,
+                                RegisterPermutation);
+                            if (!permuted.IsSuccess)
+                            {
+                                diagnostics.Error(
+                                    DiagnosticCode.ProtectionUnsupportedInstruction,
+                                    permuted.Diagnostic,
+                                    last.FileOffset);
+                                return false;
+                            }
+
+                            branchEncoding = permuted.Encoding;
+                        }
+
+                        var family = conditionalInstruction.Mnemonic.StartsWith("tb", StringComparison.OrdinalIgnoreCase)
+                            ? Aarch64InstructionEncodingFamily.TestBranch14
+                            : Aarch64InstructionEncodingFamily.ConditionalBranch19;
+                        emitter.EmitSourceConditionalBranch(
+                            branchEncoding,
+                            last.Address,
+                            family,
+                            trueLabel);
+                    }
+                    else
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.ProtectionUnsupportedInstruction,
+                            "A flattened conditional branch does not match its proved branch semantic domain.",
+                            last.FileOffset);
+                        return false;
+                    }
+
                     if (!EmitState(emitter, checked((uint)blockIds[falseEdge.TargetAddress!.Value]), diagnostics))
                     {
                         return false;
@@ -757,6 +900,7 @@ public sealed partial class FunctionProtectionService
                     return false;
                 }
 
+                InstructionOutputOffsets[last.Address] = emitter.PositionAddress - OutputAddress;
                 if (!EmitState(emitter, checked((uint)blockIds[nextTarget]), diagnostics))
                 {
                     return false;
@@ -812,6 +956,172 @@ public sealed partial class FunctionProtectionService
             DiagnosticBag diagnostics)
         {
             InstructionOutputOffsets[instruction.Address] = emitter.PositionAddress - OutputAddress;
+            if (StableDirectCallAddresses.Contains(instruction.Address))
+            {
+                if (instruction.Decode.Instruction?.DirectTarget is not { } callTarget)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticTargetUnresolved,
+                        "A selected direct call lost its decoded source target.",
+                        instruction.FileOffset);
+                    return false;
+                }
+
+                var sourceEncoding = instruction.Encoding;
+                if (Permutation)
+                {
+                    var permuted = encoder.TryPermuteGeneralRegisters(
+                        sourceEncoding,
+                        instruction.Address,
+                        RegisterPermutation);
+                    if (!permuted.IsSuccess)
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.ProtectionUnsupportedInstruction,
+                            permuted.Diagnostic,
+                            instruction.FileOffset);
+                        return false;
+                    }
+
+                    sourceEncoding = permuted.Encoding;
+                }
+
+                var encodedCall = encoder.TryEncode(new Aarch64InstructionEncodeRequest(
+                    sourceEncoding,
+                    instruction.Address,
+                    emitter.PositionAddress,
+                    Aarch64InstructionEncodingFamily.Call26,
+                    callTarget));
+                if (!encodedCall.IsSuccess)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ProtectionUnsupportedInstruction,
+                        encodedCall.Diagnostic,
+                        instruction.FileOffset);
+                    return false;
+                }
+
+                emitter.EmitWord(encodedCall.Encoding);
+                return true;
+            }
+
+            var addressReferencePages = Source.AddressReferences
+                .Where(reference => reference.PageProducerAddress == instruction.Address)
+                .Select(reference => reference.PageAddress.Value)
+                .Distinct()
+                .ToArray();
+            var staticFunctionPointerTargets = Source.StaticFunctionPointerCallResolutions
+                .Where(resolution => resolution.ProducerAddresses.Count > 0
+                    && resolution.ProducerAddresses[0] == instruction.Address)
+                .Select(resolution => resolution.TargetAddress)
+                .Distinct()
+                .ToArray();
+            if (addressReferencePages.Length > 0 || staticFunctionPointerTargets.Length > 0)
+            {
+                if (addressReferencePages.Length != 1
+                    || staticFunctionPointerTargets.Length > 1
+                    || instruction.Decode.Instruction?.Mnemonic.Equals("adrp", StringComparison.OrdinalIgnoreCase) != true
+                    || staticFunctionPointerTargets.Length == 1
+                        && (staticFunctionPointerTargets[0] & ~0xFFFUL) != addressReferencePages[0])
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticAddressMapMalformed,
+                        "One selected-function ADRP producer maps to conflicting decoded page targets.",
+                        instruction.FileOffset);
+                    return false;
+                }
+
+                var sourceEncoding = instruction.Encoding;
+                if (Permutation)
+                {
+                    var permuted = encoder.TryPermuteGeneralRegisters(
+                        sourceEncoding,
+                        instruction.Address,
+                        RegisterPermutation);
+                    if (!permuted.IsSuccess)
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.ProtectionUnsupportedInstruction,
+                            permuted.Diagnostic,
+                            instruction.FileOffset);
+                        return false;
+                    }
+
+                    sourceEncoding = permuted.Encoding;
+                }
+
+                var encodedPage = encoder.TryEncode(new Aarch64InstructionEncodeRequest(
+                    sourceEncoding,
+                    instruction.Address,
+                    emitter.PositionAddress,
+                    Aarch64InstructionEncodingFamily.AdrPrelPgHi21,
+                    staticFunctionPointerTargets.Length == 1
+                        ? staticFunctionPointerTargets[0]
+                        : addressReferencePages[0]));
+                if (!encodedPage.IsSuccess)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.IndirectTargetUnresolved,
+                        encodedPage.Diagnostic,
+                        instruction.FileOffset);
+                    return false;
+                }
+
+                emitter.EmitWord(encodedPage.Encoding);
+                return true;
+            }
+
+            var jumpTableTargetBaseProducer = Source.JumpTableResolutions
+                .FirstOrDefault(resolution => resolution.ProducerAddresses.Contains(instruction.Address));
+            if (jumpTableTargetBaseProducer is not null
+                && string.Equals(
+                    instruction.Decode.Instruction?.Mnemonic,
+                    "adr",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                if (Flatten)
+                {
+                    if (!Source.Blocks.Any(block =>
+                            block.StartAddress == jumpTableTargetBaseProducer.TargetBaseAddress.Value
+                            && !IsTrailingAlignmentPadding(block)))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.IndirectTargetUnresolved,
+                            "The jump-table target base has no emitted dispatcher block.",
+                            instruction.FileOffset);
+                        return false;
+                    }
+
+                    emitter.EmitSourceAdr(
+                        instruction.Encoding,
+                        instruction.Address,
+                        BlockLabel(jumpTableTargetBaseProducer.TargetBaseAddress.Value),
+                        null);
+                }
+                else
+                {
+                    var targetBase = jumpTableTargetBaseProducer.TargetBaseAddress.Value;
+                    if (targetBase < Source.Function.Value
+                        || targetBase - Source.Function.Value >= Source.Function.Size
+                        || OutputAddress > ulong.MaxValue - (targetBase - Source.Function.Value))
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.IndirectTargetUnresolved,
+                            "The jump-table target base is outside the selected function output range.",
+                            instruction.FileOffset);
+                        return false;
+                    }
+
+                    emitter.EmitSourceAdr(
+                        instruction.Encoding,
+                        instruction.Address,
+                        null,
+                        OutputAddress + (targetBase - Source.Function.Value));
+                }
+
+                return true;
+            }
+
             if (!Permutation)
             {
                 var table = Source.JumpTableResolutions
@@ -823,9 +1133,51 @@ public sealed partial class FunctionProtectionService
                     var family = tableInstruction.Mnemonic.Equals("adrp", StringComparison.OrdinalIgnoreCase)
                         ? Aarch64InstructionEncodingFamily.AdrPrelPgHi21
                         : Aarch64InstructionEncodingFamily.AdrPrelLo21;
-                    var target = family == Aarch64InstructionEncodingFamily.AdrPrelPgHi21
-                        ? table.TableBase.Value
-                        : table.TargetBaseAddress.Value;
+                    if (family == Aarch64InstructionEncodingFamily.AdrPrelLo21)
+                    {
+                        if (Flatten)
+                        {
+                            if (!Source.Blocks.Any(block =>
+                                    block.StartAddress == table.TargetBaseAddress.Value
+                                    && !IsTrailingAlignmentPadding(block)))
+                            {
+                                diagnostics.Error(
+                                    DiagnosticCode.IndirectTargetUnresolved,
+                                    "The jump-table target base has no emitted dispatcher block.",
+                                    instruction.FileOffset);
+                                return false;
+                            }
+
+                            emitter.EmitSourceAdr(
+                                instruction.Encoding,
+                                instruction.Address,
+                                BlockLabel(table.TargetBaseAddress.Value),
+                                null);
+                        }
+                        else
+                        {
+                            if (table.TargetBaseAddress.Value < Source.Function.Value
+                                || table.TargetBaseAddress.Value - Source.Function.Value >= Source.Function.Size
+                                || OutputAddress > ulong.MaxValue - (table.TargetBaseAddress.Value - Source.Function.Value))
+                            {
+                                diagnostics.Error(
+                                    DiagnosticCode.IndirectTargetUnresolved,
+                                    "The jump-table target base is outside the selected function output range.",
+                                    instruction.FileOffset);
+                                return false;
+                            }
+
+                            emitter.EmitSourceAdr(
+                                instruction.Encoding,
+                                instruction.Address,
+                                null,
+                                OutputAddress + (table.TargetBaseAddress.Value - Source.Function.Value));
+                        }
+
+                        return true;
+                    }
+
+                    var target = table.TableBase.Value;
                     var encoded = encoder.TryEncode(new Aarch64InstructionEncodeRequest(
                         instruction.Encoding,
                         instruction.Address,
@@ -900,66 +1252,6 @@ public sealed partial class FunctionProtectionService
             return true;
         }
 
-        private bool EmitJumpTableDispatch(
-            CodeEmitter emitter,
-            Aarch64JumpTableResolution table,
-            Dictionary<ulong, int> blockIds,
-            DiagnosticBag diagnostics)
-        {
-            var labels = new List<(int Index, string Label, int BlockId)>(table.Entries.Count);
-            foreach (var entry in table.Entries.OrderBy(entry => entry.Index))
-            {
-                if (entry.Index is < 0 or > 4095
-                    || !blockIds.TryGetValue(entry.TargetAddress.Value, out var blockId))
-                {
-                    diagnostics.Error(
-                        DiagnosticCode.IndirectTargetUnresolved,
-                        "A bounded jump-table entry has no encodable dispatcher state or selected block binding.",
-                        entry.SourceFileOffset.Value);
-                    return false;
-                }
-
-                var label = $"table-{Source.Function.Value:X}-{table.SourceAddress:X}-{entry.Index}";
-                if (!emitter.TryEmitCreate(new Aarch64InstructionBuildRequest(
-                        Aarch64InstructionEncodingFamily.CompareImmediate,
-                        emitter.PositionAddress,
-                        checked((uint)entry.Index),
-                        BaseRegister: table.IndexRegister.Index,
-                        DestinationWidth: table.IndexRegister.Width),
-                    diagnostics))
-                {
-                    return false;
-                }
-
-                emitter.EmitConditionalBranch(0, label);
-                labels.Add((entry.Index, label, blockId));
-            }
-
-            if (!blockIds.TryGetValue(table.DefaultTargetAddress.Value, out var defaultBlockId)
-                || !EmitState(emitter, checked((uint)defaultBlockId), diagnostics))
-            {
-                diagnostics.Error(
-                    DiagnosticCode.IndirectTargetUnresolved,
-                    "The bounded jump-table default target has no selected dispatcher state.",
-                    table.SourceAddress);
-                return false;
-            }
-
-            emitter.EmitBranch($"dispatcher-{Source.Function.Value:X}");
-            foreach (var (_, label, blockId) in labels)
-            {
-                emitter.MarkLabel(label);
-                if (!EmitState(emitter, checked((uint)blockId), diagnostics))
-                {
-                    return false;
-                }
-
-                emitter.EmitBranch($"dispatcher-{Source.Function.Value:X}");
-            }
-
-            return true;
-        }
-
         private static bool IsTrailingAlignmentPadding(Aarch64BasicBlock block) =>
             block.Successors.Count == 0
             && block.Instructions.Count > 0
@@ -1031,7 +1323,9 @@ public sealed partial class FunctionProtectionService
         private readonly List<uint> words = new();
         private readonly Dictionary<string, int> labels = new(StringComparer.Ordinal);
         private readonly List<BranchPatch> branches = new();
+        private readonly List<SourceConditionalPatch> sourceConditionalPatches = new();
         private readonly List<MoveWidePatch> moveWidePatches = new();
+        private readonly List<SourceAdrPatch> sourceAdrPatches = new();
 
         public CodeEmitter(ulong baseAddress, IAarch64InstructionEncoder encoder)
         {
@@ -1076,6 +1370,47 @@ public sealed partial class FunctionProtectionService
             }
 
             branches.Add(new BranchPatch(words.Count, label, true, condition));
+            words.Add(0);
+        }
+
+        public void EmitSourceAdr(
+            uint sourceEncoding,
+            ulong sourceAddress,
+            string? targetLabel,
+            ulong? fixedTargetAddress)
+        {
+            if ((targetLabel is null) == (fixedTargetAddress is null))
+            {
+                throw new ArgumentException("An ADR patch requires exactly one output target binding.");
+            }
+
+            sourceAdrPatches.Add(new SourceAdrPatch(
+                words.Count,
+                sourceEncoding,
+                sourceAddress,
+                targetLabel,
+                fixedTargetAddress));
+            words.Add(sourceEncoding);
+        }
+
+        public void EmitSourceConditionalBranch(
+            uint sourceEncoding,
+            ulong sourceAddress,
+            Aarch64InstructionEncodingFamily family,
+            string label)
+        {
+            if (family is not (Aarch64InstructionEncodingFamily.ConditionalBranch19
+                or Aarch64InstructionEncodingFamily.TestBranch14))
+            {
+                throw new ArgumentOutOfRangeException(nameof(family));
+            }
+
+            sourceConditionalPatches.Add(new SourceConditionalPatch(
+                words.Count,
+                label,
+                sourceEncoding,
+                sourceAddress,
+                family));
             words.Add(0);
         }
 
@@ -1143,6 +1478,87 @@ public sealed partial class FunctionProtectionService
                             DiagnosticCode.ProtectionBranchOutOfRange,
                             $"The AArch64 encoder rejected protected-code {family}: {result.Diagnostic}",
                             source);
+                        return false;
+                    }
+
+                    words[patch.Index] = result.Encoding;
+                }
+
+                foreach (var patch in sourceConditionalPatches)
+                {
+                    if (!labels.TryGetValue(patch.Label, out var targetIndex))
+                    {
+                        diagnostic = new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.ProtectionUnsupportedInstruction,
+                            $"Missing protected-code label '{patch.Label}'.");
+                        return false;
+                    }
+
+                    var outputAddress = baseAddress + checked((ulong)patch.Index * sizeof(uint));
+                    var targetAddress = baseAddress + checked((ulong)targetIndex * sizeof(uint));
+                    var result = encoder.TryEncode(new Aarch64InstructionEncodeRequest(
+                        patch.SourceEncoding,
+                        patch.SourceAddress,
+                        outputAddress,
+                        patch.Family,
+                        targetAddress));
+                    if (!result.IsSuccess)
+                    {
+                        diagnostic = new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.ProtectionBranchOutOfRange,
+                            $"The AArch64 encoder rejected protected-code {patch.Family}: {result.Diagnostic}",
+                            outputAddress);
+                        return false;
+                    }
+
+                    words[patch.Index] = result.Encoding;
+                }
+
+                foreach (var patch in sourceAdrPatches)
+                {
+                    ulong target;
+                    if (patch.TargetLabel is { } targetLabel)
+                    {
+                        if (!labels.TryGetValue(targetLabel, out var targetIndex))
+                        {
+                            diagnostic = new Diagnostic(
+                                DiagnosticSeverity.Error,
+                                DiagnosticCode.IndirectTargetUnresolved,
+                                $"Missing ADR target label '{targetLabel}'.");
+                            return false;
+                        }
+
+                        target = baseAddress + checked((ulong)targetIndex * sizeof(uint));
+                    }
+                    else if (patch.FixedTargetAddress is { } fixedTarget)
+                    {
+                        target = fixedTarget;
+                    }
+                    else
+                    {
+                        diagnostic = new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.IndirectTargetUnresolved,
+                            "An ADR patch has no output target binding.");
+                        return false;
+                    }
+
+                    var outputAddress = baseAddress + checked((ulong)patch.Index * sizeof(uint));
+                    var result = encoder.TryEncode(new Aarch64InstructionEncodeRequest(
+                        patch.SourceEncoding,
+                        patch.SourceAddress,
+                        outputAddress,
+                        Aarch64InstructionEncodingFamily.AdrPrelLo21,
+                        target));
+                    if (!result.IsSuccess)
+                    {
+                        diagnostic = new Diagnostic(
+                            DiagnosticSeverity.Error,
+                            DiagnosticCode.IndirectTargetUnsupported,
+                            result.Diagnostic,
+                            outputAddress);
                         return false;
                     }
 
@@ -1229,6 +1645,20 @@ public sealed partial class FunctionProtectionService
             string Label,
             bool Conditional,
             int Condition);
+
+        private readonly record struct SourceAdrPatch(
+            int Index,
+            uint SourceEncoding,
+            ulong SourceAddress,
+            string? TargetLabel,
+            ulong? FixedTargetAddress);
+
+        private readonly record struct SourceConditionalPatch(
+            int Index,
+            string Label,
+            uint SourceEncoding,
+            ulong SourceAddress,
+            Aarch64InstructionEncodingFamily Family);
 
         private readonly record struct MoveWidePatch(
             int Index,

@@ -369,42 +369,92 @@
     {
       "id": "runtime.cfi.transformed-backtrace.glibc.host-context-entry",
       "status": "validated",
-      "obligation": "A transformed HostContext image preserves native backtrace frame coverage through regenerated .eh_frame/.eh_frame_hdr metadata, with baseline/transformed register-frame behavior and malformed-CFI publication rollback.",
+      "obligation": "A transformed HostContext image preserves native CFI behavior, including genuine typed C++ exception unwinding through the transformed target FDE and register-call assembly frame, baseline/transformed register-frame behavior, and malformed-CFI publication rollback.",
       "witness": "scripts/run-cfi-host-context-e2e.sh",
       "oracle": "scripts/check-cfi-evidence.py",
       "evidence": [
         "scripts/run-cfi-host-context-e2e.sh",
         "scripts/check-cfi-evidence.py",
+        "tests/test_cfi_evidence.py",
+        "native/urprotect-runtime/Makefile",
         "native/urprotect-runtime/host_context_cfi_fixture.c",
         "native/urprotect-runtime/host_context_cfi_runtime_test.c",
+        "native/urprotect-runtime/host_context_cfi_exception_bridge.h",
+        "native/urprotect-runtime/host_context_cfi_exception_bridge.cpp",
+        "native/urprotect-runtime/host_context_cfi_register_call.S",
         "src/UrProtect.Core/UnwindMetadata/UnwindMetadataRewriter.cs",
-        ".artifacts/cfi/pr/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry",
-        ".artifacts/cfi/pr/negative-malformed-eh-frame"
+        ".artifacts/cfi/current/cpp-runtime-identity.json",
+        ".artifacts/cfi/current/glibc-runtime-identity.json",
+        ".artifacts/cfi/current/cpp-harness-unwind-readelf.txt",
+        ".artifacts/cfi/current/SHA256SUMS",
+        ".artifacts/cfi/current/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/cfi-behavior.json",
+        ".artifacts/cfi/current/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/baseline-unwind.txt",
+        ".artifacts/cfi/current/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/transformed-unwind.txt",
+        ".artifacts/cfi/current/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/rehydration.json",
+        ".artifacts/cfi/current/negative-malformed-eh-frame"
       ],
       "constraints": [
         "The promoted row is an independent native AArch64 glibc HostContext entry row; musl and bionic CFI rows require their own loader/unwinder evidence.",
-        "The positive artifact binds source/protected/native hashes, transformed FDE/header readelf output, baseline/transformed backtrace records, and a closed SHA256SUMS.",
+        "The positive artifact binds source/protected/native hashes, the rehydration address-map target range, transformed FDE/header readelf output, measured source/transformed outcomes, and a closed SHA256SUMS.",
+        "A typed C++ exception carries the required token through the target and register-call assembly frames to a specific catch with one RAII cleanup; C longjmp and cancellation remain separate observations.",
+        "The exact post-BLR return-PC symbol and static offset must lie in the assembly function and in an active FDE; function-entry overlap alone is insufficient.",
+        "Measured load bias, mapped target VA/extent, entry address, callback return PC, and frame PCs must satisfy overflow-checked relations to the source/rehydration map, with booleans recomputed from numeric observations and no fixed ASLR addresses.",
+        "Exact C/C++ compiler, libstdc++, libgcc unwinder, and glibc runtime identities are retained and hashed; the C fixture itself acquires no C++ runtime dependency.",
         "The nearest malformed .eh_frame mutation fails during protect-image with UnwindMetadataMalformed and publishes no Protected Image."
       ]
     },
     {
       "id": "runtime.indirect-control.jump-table.glibc.host-context-entry",
       "status": "validated",
-      "obligation": "A compiler-shaped AArch64 relative jump table is resolved, rewritten through the shared layout plan, and executed through native glibc HostContext with the transformed entry returning the same case result.",
+      "obligation": "A compiler-shaped AArch64 signed-relative jump table is resolved, rewritten through the shared layout plan, and executed through native glibc HostContext with every target selected and its exact result retained by an in-function trace oracle.",
       "witness": "native/urprotect-runtime/host_context_jump_table_fixture.S",
-      "oracle": "tests/UrProtect.Core.Tests/Integration/GenericRehydrationWorkflowTests.cs",
+      "oracle": "scripts/check-indirect-control-evidence.py",
       "evidence": [
         "native/urprotect-runtime/host_context_jump_table_fixture.S",
+        "native/urprotect-runtime/host_context_external_jump_table_fixture.S",
         "native/urprotect-runtime/Makefile",
+        "scripts/run-indirect-control-e2e.sh",
+        "scripts/check-indirect-control-evidence.py",
+        "tests/test_rehydration_evidence.py",
         "src/UrProtect.Core/Aarch64Semantics/Aarch64JumpTableResolver.cs",
         "src/UrProtect.Core/ElfLayout/ElfLayoutPlanner.cs",
         "src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs",
-        ".artifacts/indirect-control/pr/runtime.indirect-control.jump-table.glibc.host-context-entry"
+        ".artifacts/indirect-control/pr/runtime.indirect-control.jump-table.glibc.host-context-entry",
+        ".artifacts/indirect-control/pr/negative-external-table/negative-result.json",
+        ".artifacts/indirect-control/pr/negative-external-table/external-table-facts.json"
       ],
       "constraints": [
-        "The fixture contains ADRP/ADD/LDRSW/ADD/BR over a private signed relative table; the native handoff invokes the transformed table-bearing entry itself.",
-        "Layout evidence must retain JumpTableEdits and the source/native hashes; malformed or out-of-closure table entries remain fail-closed in managed negative tests.",
-        "This row promotes the native glibc lane only; musl and bionic require independent jump-table loader/behavior rows."
+        "The fixture walks table indices 0,1,2,3 in one invocation, accumulates the exact signed case results 17,103,-7,91, and returns 91 only after the full ordered trace matches; fixture presence alone is not case-execution evidence.",
+        "Retain and independently compare source/transformed handoff status records and the actual baseline/target stdout/stderr bytes and hashes. Bind target-selection facts to exported source target symbols and four rewritten signed 32-bit table entries.",
+        "Both malformed out-of-closure table and checked-index-clobber negatives must retain the producer JSON, exact stable IndirectTargetUnresolved diagnostic, failed producer stage, and no Protected Image, Native Image, or loader handoff.",
+        "This row promotes the native glibc lane only; musl and bionic require independent jump-table loader/behavior rows.",
+        "A separate source-built external-table nearest-negative binds an undefined default-visible global dynamic STT_OBJECT to exactly one non-PLT R_AARCH64_GLOB_DAT slot and the selected function's guarded ADRP/GOT-LDR/LDRSW/relative-ADD/BR chain. Its checker reparses the retained Source Image, treats the writable GOT slot only as an external-object pointer carrier (not table storage), binds the real producer failure/stage/diagnostic, and rejects all downstream publication. This is fail-closed evidence only; external-table support and indirect-call admission remain unclaimed."
+      ]
+    },
+    {
+      "id": "runtime.indirect-control.shared-jump-table-copy.glibc.host-context-entry",
+      "status": "validated",
+      "obligation": "A bounded shared AArch64 signed-32-bit relative table is copied to a distinct read-only PT_LOAD, only the selected function is retargeted to the clone, and an unselected observer continues to use the unchanged source table through native glibc HostContext.",
+      "witness": "native/urprotect-runtime/host_context_shared_jump_table_fixture.S",
+      "oracle": "scripts/check-shared-jump-table-evidence.py",
+      "evidence": [
+        "native/urprotect-runtime/host_context_shared_jump_table_fixture.S",
+        "native/urprotect-runtime/Makefile",
+        "scripts/run-shared-jump-table-copy-e2e.sh",
+        "scripts/check-shared-jump-table-evidence.py",
+        "tests/UrProtect.Core.Tests/Layout/ElfLayoutTests.cs",
+        "tests/UrProtect.Core.Tests/Application/FunctionProtectionTests.cs",
+        ".artifacts/indirect-control/shared-copy/current/runtime.indirect-control.shared-table.glibc.host-context-entry/shared-table-behavior.json",
+        ".artifacts/indirect-control/shared-copy/current/runtime.indirect-control.shared-table.glibc.host-context-entry/observer-source-handoff.json",
+        ".artifacts/indirect-control/shared-copy/current/runtime.indirect-control.shared-table.glibc.host-context-entry/observer-transformed-handoff.json",
+        ".artifacts/indirect-control/shared-copy/current/runtime.indirect-control.shared-table.glibc.host-context-entry/rehydration.json",
+        ".artifacts/indirect-control/shared-copy/current/runtime.indirect-control.shared-table.glibc.host-context-entry/SHA256SUMS"
+      ],
+      "constraints": [
+        "The positive row proves only the hidden source-built signed-32-bit shared table with selected urp_entry and unselected urp_observer on native AArch64 glibc; external/imported tables, other encodings, function pointers, and musl/bionic remain outside the claim.",
+        "The independent checker reparses the source and output ELF, verifies two relocation-backed owners, the read-only file-backed clone, preserved original bytes, clone entry bindings, selected ADRP/ADD/LDRSW/ADR/ADD/BR semantics, and unchanged observer code.",
+        "Source and transformed handoff results for both consumers are retained; a fixture or address-map claim alone is not runtime evidence.",
+        "Clone aliasing and output-target-base range failures are exercised as pre-publication layout negatives."
       ]
     },
     {
@@ -459,13 +509,28 @@
         "scripts/check-tls-runtime-matrix-evidence.py",
         ".artifacts/tls-runtime/pr/matrix.json",
         ".artifacts/tls-runtime/pr/environment.json",
+        ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/source-image.bin",
         ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/protected-image.bin",
         ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/pr/initial-exec.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/pr/local-dynamic.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/pr/local-dynamic.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/pr/local-dynamic.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/pr/local-dynamic.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/pr/general-dynamic.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/pr/general-dynamic.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/pr/general-dynamic.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/pr/general-dynamic.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/pr/tlsdesc.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/pr/tlsdesc.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/pr/tlsdesc.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/pr/tlsdesc.host-context-entry.glibc.current-thread/behavior-comparison.json",
         ".artifacts/tls-runtime/pr/SHA256SUMS"
       ],
       "constraints": [
         "The matrix contains exactly 60 rows across five models, two profiles, three runtimes, and two lifecycle boundaries.",
-        "Only initial-exec x host-context-entry x glibc x current-thread is promoted from the retained transformed control row; all other rows remain independently not-applicable or environment-unavailable until their own oracle passes.",
+        "Exactly initial-exec, local-dynamic, general-dynamic, and tlsdesc x host-context-entry x glibc x current-thread are promoted, each from its own model-specific source fixture and transformed/native behavior oracle.",
+        "All other model/profile/runtime/lifecycle tuples remain row-local not-applicable or environment-unavailable; the four glibc current-thread rows do not promote workers, outer-execveat, musl, or bionic.",
         "The existing six-cell fixtures/runtime-matrix.json covering set remains environment evidence and is not this TLS promotion matrix."
       ]
     },

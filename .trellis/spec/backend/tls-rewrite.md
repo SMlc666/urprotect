@@ -124,3 +124,75 @@ Correct: require the four ordered markers and exact descriptor/DT tag/stub
          the AsmStone-backed adapter, and reparse every preserved fact before
          publication.
 ```
+
+## Scenario: TLSDESC fixture dynamic-tag reservation
+
+### 1. Scope / Trigger
+
+Applies to `native/urprotect-runtime/patch_tlsdesc_dynamic_tags.py` and its
+Makefile-integrated fixture construction. GNU BIND_NOW links may omit the
+optional TLSDESC tag pair; this fixture-only step fills declared reserved
+space. It is not a general ELF rewriter or evidence of tagless managed support.
+
+### 2. Signatures
+
+```sh
+python3 native/urprotect-runtime/patch_tlsdesc_dynamic_tags.py FIXTURE
+make -B -C native/urprotect-runtime tlsdesc-fixture
+python3 -B -m unittest tests.test_tlsdesc_dynamic_tags -v
+```
+
+### 3. Contracts
+
+- Require the bounded ELF64 little-endian AArch64 ET_DYN fixture, exactly one
+  bounded `PT_DYNAMIC`, BIND_NOW, the supported PLT RELA TLSDESC owner and
+  writable resolver-GOT mapping before publication.
+- Locate the first `DT_NULL` semantically, but inspect the physical bytes of
+  that entry and the two following entries separately. All three entries must
+  fit within declared `PT_DYNAMIC.p_filesz` and equal `(DT_NULL, 0)`.
+  Bytes elsewhere in the file are not dynamic-table reservation capacity.
+- Reject an existing TLSDESC tag, insufficient capacity, nonzero tag or value
+  in any reservation entry, malformed bounds, or missing terminator. Never
+  substitute zero tuples for entries omitted from the parsed prefix.
+- Replace exactly those three entries with `DT_TLSDESC_PLT`,
+  `DT_TLSDESC_GOT`, and `(DT_NULL, 0)`; preserve file length and every other
+  byte. Publish via a flushed/fsynced same-directory temporary file and atomic
+  replacement. Rejection/publication failure preserves input bytes and cleans
+  up temporary output.
+
+### 4. Validation & Error Matrix
+
+| Input / event | Required result |
+| --- | --- |
+| valid physical three-entry zero reservation | exact three-entry update |
+| nonzero tag/value in either following slot | reject before publication |
+| first null has nonzero value | reject fixture reservation |
+| fewer than three declared entries or truncated range | reject despite later file bytes |
+| missing terminator or existing TLSDESC tags | reject; input unchanged |
+| atomic replacement fails | input unchanged; no leaked temporary file |
+
+### 5. Good / Base / Bad Cases
+
+- Good: clean native fixture build inserts the exact pair and matches the
+  retained transformed-row source hash.
+- Base: malformed reservation fails without changing the fixture.
+- Bad: stop reading at `DT_NULL`, invent zero values for unread slots, then
+  overwrite real bytes after the terminator.
+
+### 6. Tests Required
+
+`tests/test_tlsdesc_dynamic_tags.py` checks exact success footprint, both
+fields in both following slots, first-null value, declared capacity,
+truncation, missing/already-tagged input, rejection byte preservation, and
+injected replacement failure cleanup. A clean Makefile build must be checked
+with independent readelf dynamic/relocation output and a fresh row-specific
+managed rehydration/native status-43 oracle. Byte-identical fixture rebuilds
+may reuse prior matrix content bindings, not claim a new runtime cell.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: read entries only to DT_NULL; missing slot => (0, 0).
+Correct: bound three physical entries within PT_DYNAMIC, read their actual
+         bytes, require all zero, then construct and atomically publish output.
+```

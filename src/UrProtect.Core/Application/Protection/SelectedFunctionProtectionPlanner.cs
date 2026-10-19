@@ -31,7 +31,8 @@ internal sealed class SelectedFunctionProtectionPlanner
     public SelectedFunctionProtectionPlan Analyze(
         ReadOnlyMemory<byte> input,
         IReadOnlyList<FunctionSelector> selectors,
-        IReadOnlyList<ProtectionPass> passes)
+        IReadOnlyList<ProtectionPass> passes,
+        Aarch64HostContextProofContext? proofContext = null)
     {
         ArgumentNullException.ThrowIfNull(selectors);
         ArgumentNullException.ThrowIfNull(passes);
@@ -79,7 +80,13 @@ internal sealed class SelectedFunctionProtectionPlanner
         var hasPermutation = orderedPasses.Contains(ProtectionPass.RegisterPermutation);
         foreach (var function in selection.Functions)
         {
-            var analysis = new Aarch64FunctionAnalyzer(decoder).Analyze(parsed.File, function);
+            var functionProofContext = proofContext is not null && proofContext.MatchesEntry(function)
+                ? proofContext
+                : null;
+            var analysis = new Aarch64FunctionAnalyzer(decoder).Analyze(
+                parsed.File,
+                function,
+                functionProofContext);
             analyses.Add(analysis);
             if (!analysis.IsComplete)
             {
