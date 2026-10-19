@@ -17,7 +17,10 @@ EXPECTED_CASE_SYMBOLS = [f"urp_jump_table_case{index}" for index in EXPECTED_CAS
 EXPECTED_TRACE = "0x1167f95b"
 EXPECTED_ENTRY_STATUS = 91
 EXPECTED_FAILURE_STAGE = "protected-image-producer"
-ELF_LAYOUT_EVIDENCE_SCHEMA_VERSION = 2
+ELF_LAYOUT_EVIDENCE_SCHEMA_VERSION = 3
+LAYOUT_PERMISSION_READ = 4
+LAYOUT_OWNERSHIP_AMBIGUOUS = 0
+LAYOUT_REWRITE_COPIED_AND_RETARGETED = 1
 SEMANTIC_ENTITY_KIND_BASIC_BLOCK = 1
 SEMANTIC_ENTITY_KIND_TABLE = 5
 SEMANTIC_ENTITY_KIND_TABLE_ENTRY = 6
@@ -77,6 +80,12 @@ def read_json(root: Path, relative: str) -> dict[str, Any]:
 
 def is_int(value: object) -> bool:
     return type(value) is int
+
+
+def require_int(value: object, label: str) -> int:
+    if not is_int(value):
+        fail(f"{label} is not an integer")
+    return value
 
 
 def require_digest(value: object, label: str) -> str:
@@ -844,7 +853,12 @@ def parse_fixture_symbols(
         if name in symbols_by_name and symbols_by_name[name][2] == "NOTYPE"
     }
     table = symbols_by_name.get("urp_jump_table")
-    if set(cases) != set(EXPECTED_CASE_SYMBOLS) or table is None:
+    if (
+        set(cases) != set(EXPECTED_CASE_SYMBOLS)
+        or table is None
+        or table[1] != 0
+        or table[2] != "NOTYPE"
+    ):
         fail("retained source dynamic symbols do not identify the bounded table and all four targets")
     return cases, table[0], selected_raw[1], selected_raw[2]
 
@@ -974,11 +988,11 @@ def validate_source_output_map(
     source_entry: int,
     source_entry_size: int,
     source_targets: list[int],
-) -> int:
+) -> tuple[int, int, int]:
     address_map = layout.get("addressMap")
     if not isinstance(address_map, list) or not address_map:
         fail("jump-table layout has no address-map bindings")
-    matching_output_offsets: list[int] = []
+    matching_output_ranges: list[tuple[int, int, int]] = []
     for binding in address_map:
         if not isinstance(binding, dict):
             continue
@@ -1019,10 +1033,251 @@ def validate_source_output_map(
         ]
         if len(matching_placements) != 1:
             fail("address-map output range does not match one unique layout placement")
-        matching_output_offsets.append(output_file_offset)
-    if len(matching_output_offsets) != 1:
+        matching_output_ranges.append((output_file_offset, output_va, output_size))
+    if len(matching_output_ranges) != 1:
         fail("source function and all target symbols are not bound by one unique address-map range")
-    return matching_output_offsets[0]
+    return matching_output_ranges[0]
+
+
+def validate_mapping_placement(
+    layout: dict[str, Any],
+    binding: dict[str, Any],
+    source_range: tuple[int, int, int],
+    output_range: tuple[int, int, int],
+    label: str,
+) -> None:
+    placements = layout.get("placements")
+    address_map = layout.get("addressMap")
+    identity = binding.get("identity")
+    source_identity = binding.get("sourceIdentity")
+    if (
+        not isinstance(placements, list)
+        or not isinstance(address_map, list)
+        or not isinstance(identity, str)
+        or not isinstance(source_identity, str)
+    ):
+        fail(f"{label} address-map record has no typed placement identity")
+
+    exact_placements = [
+        placement
+        for placement in placements
+        if isinstance(placement, dict)
+        and placement.get("identity") == identity
+        and placement.get("sourceIdentity") == source_identity
+        and placement.get("range") == binding.get("outputRange")
+    ]
+    if len(exact_placements) == 1:
+        return
+    if exact_placements:
+        fail(f"{label} address-map record matches multiple exact layout placements")
+
+    covering_placements: list[dict[str, Any]] = []
+    for placement in placements:
+        if not isinstance(placement, dict):
+            continue
+        parent_output = placement.get("range")
+        parent_identity = placement.get("identity")
+        parent_source_identity = placement.get("sourceIdentity")
+        if not isinstance(parent_identity, str) or not isinstance(parent_source_identity, str):
+            continue
+        parent_rows = [
+            row
+            for row in address_map
+            if isinstance(row, dict)
+            and row.get("identity") == parent_identity
+            and row.get("sourceIdentity") == parent_source_identity
+            and row.get("outputRange") == parent_output
+        ]
+        if len(parent_rows) != 1:
+            continue
+        parent = parent_rows[0]
+        parent_source = map_range_values(parent.get("sourceRange"), f"{label} parent source range")
+        parent_output_values = map_range_values(parent_output, f"{label} parent output range")
+        if (
+            source_range[1] < parent_source[1]
+            or source_range[1] + source_range[2] > parent_source[1] + parent_source[2]
+            or output_range[1] < parent_output_values[1]
+            or output_range[1] + output_range[2] > parent_output_values[1] + parent_output_values[2]
+        ):
+            continue
+        covering_placements.append(placement)
+    if len(covering_placements) != 1:
+        fail(f"{label} address-map record does not bind one unique layout placement")
+
+
+def validate_jump_table_clone(
+    layout: dict[str, Any],
+    source_bytes: bytes,
+    native_bytes: bytes,
+    source_segments: list[dict[str, int]],
+    native_segments: list[dict[str, int]],
+    source_table_address: int,
+    source_table_file_offset: int,
+) -> tuple[int, int, str]:
+    clones = layout.get("jumpTableClones")
+    if not isinstance(clones, list) or len(clones) != 1 or not isinstance(clones[0], dict):
+        fail("layout evidence does not retain one unique copied-and-retargeted jump-table clone")
+    clone = clones[0]
+    table_size = 4 * len(EXPECTED_CASE_INDICES)
+    expected_identity = f"0x{source_table_address:X}:4:0:3"
+    identity = clone.get("tableIdentity")
+    if (
+        not isinstance(identity, dict)
+        or not is_int(identity.get("kind"))
+        or identity.get("kind") != SEMANTIC_ENTITY_KIND_TABLE
+        or identity.get("value") != expected_identity
+    ):
+        fail("jump-table clone identity does not bind the source table symbol and bounded entry shape")
+
+    source_range = semantic_range_values(clone.get("sourceTableRange"), "jump-table clone source range")
+    requested_range = semantic_range_values(
+        clone.get("requestedOutputRange"), "jump-table clone requested output range"
+    )
+    output_range = map_range_values(clone.get("outputRange"), "jump-table clone physical output range")
+    if (
+        source_range != (source_table_file_offset, source_table_address, table_size)
+        or requested_range[2] != table_size
+        or output_range[2] != table_size
+        or min(*source_range[:2], *requested_range[:2], *output_range[:2]) < 0
+        or any(value >= (1 << 64) for value in (*source_range, *requested_range, *output_range))
+    ):
+        fail("jump-table clone ranges do not bind the bounded source table and complete output clone")
+
+    permissions = require_int(clone.get("permissions"), "jump-table clone permissions")
+    ownership = require_int(clone.get("ownership"), "jump-table layout ownership ordinal")
+    rewrite_policy = require_int(clone.get("rewritePolicy"), "jump-table rewrite-policy ordinal")
+    if (
+        permissions != LAYOUT_PERMISSION_READ
+        or ownership != LAYOUT_OWNERSHIP_AMBIGUOUS
+        or rewrite_policy != LAYOUT_REWRITE_COPIED_AND_RETARGETED
+        or clone.get("ownerInventoryComplete") is not False
+        or clone.get("ownerReferences") != []
+    ):
+        fail("jump-table clone does not retain the current ambiguous-owner PF_R copy-and-retarget policy")
+
+    parsed_source_offset, _ = mapped_file_offset(
+        source_segments, source_table_address, table_size, "source jump-table symbol range"
+    )
+    if parsed_source_offset != source_table_file_offset:
+        fail("source table symbol range differs from its independent PT_LOAD file mapping")
+    source_table = source_bytes[source_table_file_offset:source_table_file_offset + table_size]
+    if len(source_table) != table_size:
+        fail("source jump-table bytes are truncated")
+
+    clone_file_offset, clone_segment = mapped_file_offset(
+        native_segments, output_range[1], table_size, "Native Image jump-table clone"
+    )
+    if clone_file_offset != output_range[0] or clone_segment["flags"] != LAYOUT_PERMISSION_READ:
+        fail("jump-table clone is not uniquely file-backed by a PF_R-only PT_LOAD range")
+    if output_range[1] < source_table_address + table_size and source_table_address < output_range[1] + table_size:
+        fail("jump-table output clone overlaps the preserved source-table virtual range")
+
+    original_file_offset, _ = mapped_file_offset(
+        native_segments, source_table_address, table_size, "Native Image original jump table"
+    )
+    if (
+        original_file_offset < clone_file_offset + table_size
+        and clone_file_offset < original_file_offset + table_size
+    ):
+        fail("jump-table output clone overlaps the original table's Native Image bytes")
+    if native_bytes[original_file_offset:original_file_offset + table_size] != source_table:
+        fail("copy-and-retarget changed the original source jump-table bytes")
+
+    address_map = layout.get("addressMap")
+    if not isinstance(address_map, list):
+        fail("jump-table clone has no typed layout address-map evidence")
+    table_maps = [row for row in address_map if isinstance(row, dict) and row.get("identity") == expected_identity]
+    if len(table_maps) != 1:
+        fail("jump-table source identity does not have one unique clone address-map row")
+    table_map = table_maps[0]
+    if (
+        table_map.get("sourceIdentity") != expected_identity
+        or map_range_values(table_map.get("sourceRange"), "jump-table address-map source range") != source_range
+        or map_range_values(table_map.get("outputRange"), "jump-table address-map output range") != output_range
+    ):
+        fail("jump-table address-map row does not bind the parsed source range to its PF_R clone")
+    return clone_file_offset, output_range[1], expected_identity
+
+
+def sign_extend(value: int, bits: int) -> int:
+    sign_bit = 1 << (bits - 1)
+    return (value ^ sign_bit) - sign_bit
+
+
+def decode_adrp(word: int, address: int) -> tuple[int, int] | None:
+    if word & 0x9F000000 != 0x90000000:
+        return None
+    immediate = (((word >> 5) & 0x7FFFF) << 2) | ((word >> 29) & 0x3)
+    target = (address & ~0xFFF) + (sign_extend(immediate, 21) << 12)
+    if target < 0 or target >= (1 << 64):
+        return None
+    return target, word & 0x1F
+
+
+def decode_add_immediate(word: int) -> tuple[int, int, int] | None:
+    # Bit 23 distinguishes ordinary ADD-immediate from tagged ADDG encodings.
+    if word & 0xFF800000 != 0x91000000:
+        return None
+    immediate = (word >> 10) & 0xFFF
+    if (word >> 22) & 1:
+        immediate <<= 12
+    return word & 0x1F, (word >> 5) & 0x1F, immediate
+
+
+def decode_adr(word: int, address: int) -> tuple[int, int] | None:
+    if word & 0x9F000000 != 0x10000000:
+        return None
+    immediate = (((word >> 5) & 0x7FFFF) << 2) | ((word >> 29) & 0x3)
+    target = address + sign_extend(immediate, 21)
+    if target < 0 or target >= (1 << 64):
+        return None
+    return target, word & 0x1F
+
+
+def validate_relative_table_reference_chain(
+    image: bytes,
+    segments: list[dict[str, int]],
+    code_address: int,
+    code_size: int,
+    table_address: int,
+    target_base_address: int,
+    label: str,
+) -> tuple[int, int]:
+    code_file_offset, code_segment = mapped_file_offset(segments, code_address, code_size, label)
+    if code_segment["flags"] & 1 == 0 or code_size % 4 != 0:
+        fail(f"{label} is not an aligned executable instruction range")
+    if code_file_offset > len(image) or code_size > len(image) - code_file_offset:
+        fail(f"{label} exceeds its retained image bytes")
+    words = struct.unpack_from(f"<{code_size // 4}I", image, code_file_offset)
+    matches: list[tuple[int, int]] = []
+    for index in range(max(0, len(words) - 5)):
+        instruction_address = code_address + index * 4
+        page = decode_adrp(words[index], instruction_address)
+        low = decode_add_immediate(words[index + 1])
+        if page is None or low is None:
+            continue
+        page_address, page_register = page
+        low_destination, low_base, low_immediate = low
+        if (
+            page_register != 1
+            or low_destination != page_register
+            or low_base != page_register
+            or page_address + low_immediate != table_address
+        ):
+            continue
+        adr = decode_adr(words[index + 3], instruction_address + 12)
+        if (
+            words[index + 2] != 0xB8A05822
+            or adr is None
+            or adr != (target_base_address, 3)
+            or words[index + 4] != 0x8B020061
+            or words[index + 5] != 0xD61F0020
+        ):
+            continue
+        matches.append((instruction_address, instruction_address + 4))
+    if len(matches) != 1:
+        fail(f"{label} does not contain one exact ADRP/ADD/LDRSW/ADR/ADD/BR dispatch chain")
+    return matches[0]
 
 
 def map_layout_source_address(
@@ -1038,6 +1293,23 @@ def map_layout_source_address(
     if not isinstance(address_map, list) or not isinstance(placements, list):
         fail("jump-table layout address map or placements are malformed")
 
+    covering_sizes: list[int] = []
+    for candidate in address_map:
+        if not isinstance(candidate, dict):
+            continue
+        _candidate_file, candidate_va, candidate_size = map_range_values(
+            candidate.get("sourceRange"), f"{label} address-map source range"
+        )
+        if (
+            source_address >= candidate_va
+            and source_address + size <= candidate_va + candidate_size
+            and source_address + size <= (1 << 64)
+        ):
+            covering_sizes.append(candidate_size)
+    if not covering_sizes:
+        fail(f"{label} has no unique retained source-to-output address-map decision")
+    most_specific_size = min(covering_sizes)
+
     matches: list[int] = []
     for binding in address_map:
         if not isinstance(binding, dict):
@@ -1052,6 +1324,7 @@ def map_layout_source_address(
             source_address < source_va
             or source_address + size > source_va + source_size
             or source_address + size > (1 << 64)
+            or source_size != most_specific_size
         ):
             continue
 
@@ -1064,20 +1337,13 @@ def map_layout_source_address(
         if mapped_output_file != output_file_offset or output_segment["flags"] & 1 == 0:
             fail(f"{label} address-map range is not file-backed executable output")
 
-        identity = binding.get("identity")
-        source_identity = binding.get("sourceIdentity")
-        if not isinstance(identity, str) or not isinstance(source_identity, str):
-            fail(f"{label} address-map record has no placement identity")
-        placement_matches = [
-            placement
-            for placement in placements
-            if isinstance(placement, dict)
-            and placement.get("identity") == identity
-            and placement.get("sourceIdentity") == source_identity
-            and placement.get("range") == binding.get("outputRange")
-        ]
-        if len(placement_matches) != 1:
-            fail(f"{label} address-map record does not bind one unique layout placement")
+        validate_mapping_placement(
+            layout,
+            binding,
+            (source_file_offset, source_va, source_size),
+            (output_file_offset, output_va, output_size),
+            label,
+        )
 
         delta = source_address - source_va
         if delta >= output_size or output_va + delta + size > (1 << 64):
@@ -1106,16 +1372,19 @@ def validate_jump_table_target_bindings(
     native_segments: list[dict[str, int]],
     source_table_address: int,
     source_table_file_offset: int,
+    clone_file_offset: int,
+    clone_virtual_address: int,
     source_target_addresses: list[int],
     source_table_values: list[int],
-) -> None:
+) -> int:
     bindings = layout.get("jumpTableTargetBindings")
     if not isinstance(bindings, list) or len(bindings) != len(EXPECTED_CASE_INDICES):
         fail("layout evidence is missing one unique output target binding per jump-table entry")
 
     expected_table_identity = f"0x{source_table_address:X}:4:0:3"
-    expected_source_table_range = (source_table_file_offset, source_table_address, 4 * len(EXPECTED_CASE_INDICES))
-    if source_table_file_offset > len(source_bytes) or 4 * len(EXPECTED_CASE_INDICES) > len(source_bytes) - source_table_file_offset:
+    table_size = 4 * len(EXPECTED_CASE_INDICES)
+    expected_source_table_range = (source_table_file_offset, source_table_address, table_size)
+    if source_table_file_offset > len(source_bytes) or table_size > len(source_bytes) - source_table_file_offset:
         fail("source jump-table bytes are truncated for per-entry target binding")
     source_values_from_bytes = [
         struct.unpack_from("<i", source_bytes, source_table_file_offset + index * 4)[0]
@@ -1123,27 +1392,18 @@ def validate_jump_table_target_bindings(
     ]
     if source_values_from_bytes != source_table_values:
         fail("per-entry source table values differ from retained source ELF table bytes")
-    ordered = sorted(
-        bindings,
-        key=lambda binding: binding.get("entryIndex", -1) if isinstance(binding, dict) else -1,
-    )
-    if len({
-        (
-            binding.get("tableIdentity", {}).get("value"),
-            binding.get("entryIndex"),
-        )
-        for binding in ordered
-        if isinstance(binding, dict) and isinstance(binding.get("tableIdentity"), dict)
-    }) != len(EXPECTED_CASE_INDICES):
-        fail("layout evidence has duplicate jump-table target bindings")
+    if not all(isinstance(binding, dict) and is_int(binding.get("entryIndex")) for binding in bindings):
+        fail("jump-table target binding has a non-integer entry index")
+    ordered = sorted(bindings, key=lambda binding: binding["entryIndex"])
+    if [binding["entryIndex"] for binding in ordered] != EXPECTED_CASE_INDICES:
+        fail("layout evidence has missing, duplicate, or unknown jump-table entry bindings")
 
     output_base_addresses: list[int] = []
     for index, binding in enumerate(ordered):
-        if not isinstance(binding, dict):
-            fail("jump-table target binding is malformed")
         table_identity = binding.get("tableIdentity")
         entry_identity = binding.get("entryIdentity")
         target_identity = binding.get("targetIdentity")
+        target_base_identity = binding.get("targetBaseIdentity")
         if (
             not isinstance(table_identity, dict)
             or not is_int(table_identity.get("kind"))
@@ -1157,37 +1417,48 @@ def validate_jump_table_target_bindings(
             or not is_int(target_identity.get("kind"))
             or target_identity.get("kind") != SEMANTIC_ENTITY_KIND_BASIC_BLOCK
             or target_identity.get("value") != f"0x{source_target_addresses[index]:X}"
-            or not is_int(binding.get("entryIndex"))
-            or binding.get("entryIndex") != index
+            or not isinstance(target_base_identity, dict)
+            or not is_int(target_base_identity.get("kind"))
+            or target_base_identity.get("kind") != SEMANTIC_ENTITY_KIND_BASIC_BLOCK
+            or target_base_identity.get("value") != f"0x{source_target_addresses[0]:X}"
         ):
-            fail("jump-table target binding identity/index differs from the source table entry and target")
+            fail("jump-table target/entry/base identity differs from the source table and target symbols")
 
         if semantic_range_values(binding.get("sourceTableRange"), "jump-table source table range") != expected_source_table_range:
             fail("jump-table target binding source table range differs from the source ELF table symbol")
-        expected_entry_range = (
+        expected_source_entry_range = (
             source_table_file_offset + index * 4,
             source_table_address + index * 4,
             4,
         )
-        if semantic_range_values(binding.get("sourceEntryRange"), "jump-table source entry range") != expected_entry_range:
+        if semantic_range_values(binding.get("sourceEntryRange"), "jump-table source entry range") != expected_source_entry_range:
             fail("jump-table target binding entry index/offset does not identify its source ELF table row")
+        expected_output_entry_range = (
+            clone_file_offset + index * 4,
+            clone_virtual_address + index * 4,
+            4,
+        )
+        if semantic_range_values(binding.get("outputEntryRange"), "jump-table output entry range") != expected_output_entry_range:
+            fail("jump-table target binding output entry does not identify its unique cloned table row")
 
         source_target = semantic_address(binding.get("sourceTargetAddress"), "jump-table source target VA")
         source_base = semantic_address(binding.get("sourceTargetBaseAddress"), "jump-table source target base VA")
         output_target = semantic_address(binding.get("outputTargetAddress"), "jump-table output target VA")
         output_base = semantic_address(binding.get("outputTargetBaseAddress"), "jump-table output target base VA")
+        entry_width = require_int(binding.get("entryWidth"), "jump-table entry width")
+        scale = require_int(binding.get("scale"), "jump-table entry scale")
+        addend = require_int(binding.get("addend"), "jump-table entry addend")
+        source_encoded = require_int(binding.get("sourceEncodedValue"), "jump-table source entry value")
+        output_encoded = require_int(binding.get("outputEncodedValue"), "jump-table output entry value")
         if (
             source_target != source_target_addresses[index]
             or source_base != source_target_addresses[0]
-            or not is_int(binding.get("entryWidth"))
-            or binding.get("entryWidth") != 4
+            or entry_width != 4
             or binding.get("isSigned") is not True
-            or not is_int(binding.get("scale"))
-            or binding.get("scale") != 1
-            or not is_int(binding.get("addend"))
-            or binding.get("addend") != 0
-            or not is_int(binding.get("sourceEncodedValue"))
-            or binding.get("sourceEncodedValue") != source_table_values[index]
+            or scale != 1
+            or addend != 0
+            or source_encoded != source_table_values[index]
+            or source_base + source_encoded != source_target
         ):
             fail("jump-table target binding does not reproduce the signed source table target/base facts")
 
@@ -1202,26 +1473,31 @@ def validate_jump_table_target_bindings(
         output_base_addresses.append(output_base)
 
         encoded_delta = output_target - output_base
-        encoded_adjusted = encoded_delta - binding["addend"]
-        if encoded_adjusted % binding["scale"] != 0:
+        encoded_adjusted = encoded_delta - addend
+        if encoded_adjusted % scale != 0:
             fail("jump-table output target/base cannot be represented by the retained relative scale")
-        output_encoded = encoded_adjusted // binding["scale"]
-        if not (-(1 << 31) <= output_encoded < (1 << 31)):
+        expected_output_encoded = encoded_adjusted // scale
+        if not (-(1 << 31) <= expected_output_encoded < (1 << 31)):
             fail("jump-table output target/base is outside the signed-32-bit entry range")
-        if not is_int(binding.get("outputEncodedValue")) or binding.get("outputEncodedValue") != output_encoded:
+        if output_encoded != expected_output_encoded:
             fail("jump-table target binding output VA does not reproduce its encoded value")
 
-        edit_offset, edits_encoded = table_entry_offsets_for_binding(layout, expected_entry_range[0])
-        if edit_offset != expected_entry_range[0] or edits_encoded != output_encoded:
-            fail("jump-table target binding differs from the corresponding rewritten table edit")
+        output_entry_offset = clone_file_offset + index * 4
+        edit_offset, edit_encoded = table_entry_offsets_for_binding(layout, output_entry_offset)
+        if edit_offset != output_entry_offset or edit_encoded != expected_output_encoded:
+            fail("jump-table target binding differs from the corresponding cloned-table edit")
         native_entry_file_offset, _ = mapped_file_offset(
-            native_segments, source_table_address + index * 4, 4, "Native Image jump-table entry"
+            native_segments, clone_virtual_address + index * 4, 4, "Native Image cloned jump-table entry"
         )
-        if struct.unpack_from("<i", native_bytes, native_entry_file_offset)[0] != output_encoded:
-            fail("jump-table output target binding differs from the rewritten Native Image table bytes")
+        if (
+            native_entry_file_offset != output_entry_offset
+            or struct.unpack_from("<i", native_bytes, native_entry_file_offset)[0] != expected_output_encoded
+        ):
+            fail("jump-table output target binding differs from the rewritten clone bytes in the Native Image")
 
     if len(set(output_base_addresses)) != 1:
         fail("jump-table entries do not retain one common mapped output target base")
+    return output_base_addresses[0]
 
 
 def table_entry_offsets_for_binding(layout: dict[str, Any], expected_offset: int) -> tuple[int, int]:
@@ -1230,7 +1506,7 @@ def table_entry_offsets_for_binding(layout: dict[str, Any], expected_offset: int
         fail("layout evidence has no jump-table byte edits")
     matches: list[tuple[int, int]] = []
     for edit in edits:
-        if not isinstance(edit, dict) or edit.get("kind") != 8:
+        if not isinstance(edit, dict) or not is_int(edit.get("kind")) or edit.get("kind") != 8:
             continue
         offset = edit.get("offset")
         if not isinstance(offset, dict) or not is_int(offset.get("value")):
@@ -1245,7 +1521,7 @@ def table_entry_offsets_for_binding(layout: dict[str, Any], expected_offset: int
             fail("jump-table edit is not one signed 32-bit entry")
         matches.append((offset["value"], int.from_bytes(encoded, "little", signed=True)))
     if len(matches) != 1:
-        fail("jump-table source entry has no unique corresponding rewrite edit")
+        fail("jump-table cloned entry has no unique corresponding rewrite edit")
     return matches[0]
 
 
@@ -1256,7 +1532,7 @@ def table_entry_offsets(layout: dict[str, Any]) -> tuple[list[int], list[int]]:
     source_offsets: list[int] = []
     target_offsets: list[int] = []
     for edit in edits:
-        if not isinstance(edit, dict) or edit.get("kind") != 8:
+        if not isinstance(edit, dict) or not is_int(edit.get("kind")) or edit.get("kind") != 8:
             fail("layout evidence contains a non-table edit in the jump-table edit set")
         offset = edit.get("offset")
         if not isinstance(offset, dict) or not is_int(offset.get("value")):
@@ -1339,16 +1615,25 @@ def check_positive(root: Path, unit: str) -> None:
         or not isinstance(layout, dict)
     ):
         fail("jump-table rehydration record does not bind the retained images")
-    if layout.get("schemaVersion") != ELF_LAYOUT_EVIDENCE_SCHEMA_VERSION:
-        fail("jump-table layout evidence lacks schema v2 per-target output address bindings")
+    if (
+        not is_int(layout.get("schemaVersion"))
+        or layout.get("schemaVersion") != ELF_LAYOUT_EVIDENCE_SCHEMA_VERSION
+    ):
+        fail("jump-table layout evidence lacks the current schema v3 clone-preserving contract")
     if layout.get("sourceSha256") != source_hash or layout.get("outputSha256") != native_hash:
         fail("jump-table layout evidence does not bind the retained source and Native Image")
-    source_entry_offsets, output_target_offsets = table_entry_offsets(layout)
-    if behavior.get("jumpTableEditCount") != len(EXPECTED_CASE_INDICES):
+    edit_offsets, output_target_offsets = table_entry_offsets(layout)
+    if (
+        not is_int(behavior.get("jumpTableEditCount"))
+        or behavior.get("jumpTableEditCount") != len(EXPECTED_CASE_INDICES)
+    ):
         fail("jump-table behavior does not retain all four table edits")
     if not isinstance(layout.get("addressMap"), list):
         fail("jump-table layout has no address-map bindings")
-    if behavior.get("addressMapBindings") != len(layout["addressMap"]):
+    if (
+        not is_int(behavior.get("addressMapBindings"))
+        or behavior.get("addressMapBindings") != len(layout["addressMap"])
+    ):
         fail("jump-table behavior address-map count differs from rehydration evidence")
     if behavior.get("targetResolutionMode") != "bounded-relative-table":
         fail("jump-table target-resolution mode is not the promoted bounded relative table")
@@ -1371,31 +1656,31 @@ def check_positive(root: Path, unit: str) -> None:
     )
     if source_entry_segment["flags"] & 1 == 0:
         fail("selected urp_entry source range is not in an executable PT_LOAD")
+    table_size = 4 * len(EXPECTED_CASE_INDICES)
     source_table_file_offset, _ = mapped_file_offset(
-        source_segments, source_table_address, 4 * len(EXPECTED_CASE_INDICES), "source jump table"
+        source_segments, source_table_address, table_size, "source jump-table symbol range"
     )
-    expected_source_offsets = [
-        source_table_file_offset + index * 4 for index in EXPECTED_CASE_INDICES
+    source_table_values = [
+        struct.unpack_from("<i", source_bytes, source_table_file_offset + index * 4)[0]
+        for index in EXPECTED_CASE_INDICES
     ]
-    if source_entry_offsets != expected_source_offsets:
-        fail("reported jump-table edit offsets do not bind the source ELF jump-table symbol")
-
-    expected_rewritten_offsets = [
+    expected_source_values = [
         address - source_target_addresses[0]
         for address in source_target_addresses
     ]
-    if output_target_offsets != expected_rewritten_offsets:
-        fail("rewritten jump-table entries do not bind the four retained source target symbols in case order")
-    try:
-        source_table_values = [
-            struct.unpack_from("<i", source_bytes, source_table_file_offset + index * 4)[0]
-            for index in EXPECTED_CASE_INDICES
-        ]
-    except struct.error:
-        fail("source jump-table bytes are truncated")
-    if source_table_values != expected_rewritten_offsets:
+    if source_table_values != expected_source_values:
         fail("source jump-table bytes do not encode the retained source target-symbol deltas")
-    validate_jump_table_target_bindings(
+
+    source_producers = validate_relative_table_reference_chain(
+        source_bytes,
+        source_segments,
+        source_entry_address,
+        source_entry_size,
+        source_table_address,
+        source_target_addresses[0],
+        "source urp_entry",
+    )
+    clone_file_offset, clone_virtual_address, table_identity = validate_jump_table_clone(
         layout,
         source_bytes,
         native_bytes,
@@ -1403,18 +1688,41 @@ def check_positive(root: Path, unit: str) -> None:
         native_segments,
         source_table_address,
         source_table_file_offset,
+    )
+    expected_edit_offsets = [clone_file_offset + index * 4 for index in EXPECTED_CASE_INDICES]
+    if edit_offsets != expected_edit_offsets:
+        fail("jump-table edits are not confined to the four entries in the distinct output clone")
+
+    clone_rows = layout["jumpTableClones"]
+    producer_rows = clone_rows[0].get("tableReferenceProducers")
+    if (
+        not isinstance(producer_rows, list)
+        or len(producer_rows) != 2
+        or any(not isinstance(row, dict) for row in producer_rows)
+        or any(not is_int(row.get("instructionAddress")) or not is_int(row.get("kind")) for row in producer_rows)
+    ):
+        fail("jump-table clone does not retain its exact selected consumer producer chain")
+    producer_rows = sorted(producer_rows, key=lambda row: row["instructionAddress"])
+    if [
+        (row["instructionAddress"], row["kind"])
+        for row in producer_rows
+    ] != [(source_producers[0], 1), (source_producers[1], 2)]:
+        fail("jump-table clone producer facts differ from the independently decoded source reference chain")
+
+    output_target_base = validate_jump_table_target_bindings(
+        layout,
+        source_bytes,
+        native_bytes,
+        source_segments,
+        native_segments,
+        source_table_address,
+        source_table_file_offset,
+        clone_file_offset,
+        clone_virtual_address,
         source_target_addresses,
         source_table_values,
     )
-
-    output_table_file_offset, _ = mapped_file_offset(
-        native_segments, source_table_address, 4 * len(EXPECTED_CASE_INDICES), "Native Image jump table"
-    )
-    for index, offset in enumerate(expected_source_offsets):
-        edit_bytes = struct.pack("<i", output_target_offsets[index])
-        if native_bytes[output_table_file_offset + index * 4 : output_table_file_offset + (index + 1) * 4] != edit_bytes:
-            fail("rewritten jump-table entry differs from the corresponding materialized Native Image bytes")
-    validate_source_output_map(
+    output_code_file_offset, output_code_address, output_code_size = validate_source_output_map(
         layout,
         source_segments,
         native_segments,
@@ -1422,6 +1730,19 @@ def check_positive(root: Path, unit: str) -> None:
         source_entry_size,
         source_target_addresses,
     )
+    if output_code_file_offset > len(native_bytes) or output_code_size > len(native_bytes) - output_code_file_offset:
+        fail("selected generated code range exceeds its Native Image bytes")
+    validate_relative_table_reference_chain(
+        native_bytes,
+        native_segments,
+        output_code_address,
+        output_code_size,
+        clone_virtual_address,
+        output_target_base,
+        "transformed urp_entry",
+    )
+    if table_identity != f"0x{source_table_address:X}:4:0:3":
+        fail("jump-table clone identity differs from the independently parsed source table symbol")
 
     facts = behavior.get("targetSelectionFacts")
     expected_facts = {
@@ -1436,8 +1757,8 @@ def check_positive(root: Path, unit: str) -> None:
     }
     if facts != expected_facts:
         fail("jump-table target-selection facts differ from retained source symbols and rewritten table entries")
-    if len(source_entry_offsets) != len(facts["caseIndices"]):
-        fail("jump-table source table entries do not bind every declared target index")
+    if len(edit_offsets) != len(facts["caseIndices"]):
+        fail("jump-table clone edits do not bind every declared target index")
 
     streams = {
         name: require_file(root, f"{unit}/{name}").read_bytes()

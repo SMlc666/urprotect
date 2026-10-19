@@ -251,6 +251,102 @@ public sealed class TlsLocalExecWorkflowTests
     }
 
     [Fact]
+    [Trait("Category", "TlsDesc")]
+    public void TlsDescCompositeFunctionIdentityPassesCallOwnershipAndRetainsLayoutRejection()
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsDescriptorFunctionPie(), "tls.desc.rehydrate", "tls.desc.producer",
+            new[] { ProtectionPass.ControlFlowFlattening }, "tlsdesc_entry");
+        var artifact = ProtectedImageCodec.Decode(setup.Emission.ArtifactBytes!).Image!;
+        var snapshot = SemanticPlanSnapshotCodec.Decode(
+            artifact.Operations.OfType<ProtectedImageSemanticPlanSnapshot>().Single().CanonicalBytes).Snapshot!;
+        Assert.Contains(":0x", Assert.Single(snapshot.AddressMap.Functions).Identity.Value, StringComparison.Ordinal);
+        var result = GenericRehydrationEngine.Rehydrate(
+            setup.Source, setup.Emission.ArtifactBytes!, setup.RehydrationOptions);
+        // This minimal synthetic source still fails the existing output-word layout
+        // gate; source-call ownership must not mask or bypass that independent gate.
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.NativeImage);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsLayoutMismatch);
+        Assert.DoesNotContain(result.Diagnostics, diagnostic =>
+            diagnostic.Code is DiagnosticCode.SemanticDynamicImportOwnerMismatch or DiagnosticCode.IndirectTargetUnresolved);
+    }
+
+    [Theory]
+    [InlineData(0x530, 0u)] // erase the exact static TLSDESC_CALL relocation type
+    [InlineData(0x320, ElfConstants.RArm64GlobDat)] // forge the dynamic descriptor owner
+    [InlineData(0x60C, 0xD63F0040u)] // source BLR X2, not the descriptor resolver X1
+    [InlineData(0x608, 0x91000400u)] // ADD X0,#1 breaks descriptor address formation
+    [Trait("Category", "TlsDesc")]
+    public void TlsDescRejectsRefreshedSourceMarkerOwnerAndProducerTampering(int offset, uint word)
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsDescriptorFunctionPie(), "tls.desc.source-negative", "tls.desc.producer",
+            new[] { ProtectionPass.ControlFlowFlattening }, "tlsdesc_entry");
+        var source = setup.Source.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(offset), word);
+        var hash = Sha256(source);
+        var original = ProtectedImageCodec.Decode(setup.Emission.ArtifactBytes!).Image!;
+        var artifact = ProtectedImageCodec.Encode(original with { SourceSha256 = hash });
+        Assert.True(artifact.IsSuccess, string.Join(Environment.NewLine, artifact.Diagnostics));
+        var result = GenericRehydrationEngine.Rehydrate(
+            source, artifact.ArtifactBytes!, setup.RehydrationOptions with { ExpectedSourceSha256 = hash });
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.NativeImage);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "TlsDesc")]
+    public void TlsDescRejectsMissingBindingOrForgedFunctionIdentityWithoutPublication(bool forgeIdentity)
+    {
+        var setup = CreateEmission(
+            ElfFixture.TlsDescriptorFunctionPie(), "tls.desc.negative", "tls.desc.producer",
+            new[] { ProtectionPass.ControlFlowFlattening }, "tlsdesc_entry");
+        var image = ProtectedImageCodec.Decode(setup.Emission.ArtifactBytes!).Image!;
+        var original = SemanticPlanSnapshotCodec.Decode(
+            image.Operations.OfType<ProtectedImageSemanticPlanSnapshot>().Single().CanonicalBytes).Snapshot!;
+        var entries = original.AddressMap.Entries.Select(entry =>
+            forgeIdentity && entry.Identity.Kind == SemanticEntityKind.Function
+                ? new AddressMapEntry(
+                    SemanticEntityId.Function("Dynamic:999:0x1600"), entry.SourceRange, entry.OutputRange)
+                : entry);
+        var plan = new SemanticRewritePlan(
+            new AddressMap(entries), original.Instructions, original.Plan.Fixups,
+            forgeIdentity ? original.Extensions
+                : original.Extensions.Where(extension => extension is not SemanticTlsBindingExtension),
+            original.Diagnostics);
+        var snapshot = SemanticPlanSnapshotCodec.Create(plan);
+        if (!snapshot.IsSuccess)
+        {
+            Assert.False(forgeIdentity);
+            Assert.Contains(snapshot.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsBindingUnresolved);
+            return;
+        }
+        var changed = image with
+        {
+            Operations = image.Operations.Select(operation => operation is ProtectedImageSemanticPlanSnapshot
+                ? new ProtectedImageSemanticPlanSnapshot(snapshot.Snapshot!.CanonicalBytes, snapshot.PlanSha256!)
+                : operation).ToArray(),
+        };
+        var artifact = ProtectedImageCodec.Encode(changed);
+        if (!artifact.IsSuccess)
+        {
+            Assert.False(forgeIdentity);
+            Assert.Contains(artifact.Diagnostics, diagnostic => diagnostic.Code == DiagnosticCode.TlsBindingUnresolved);
+            return;
+        }
+        var result = GenericRehydrationEngine.Rehydrate(
+            setup.Source, artifact.ArtifactBytes!, setup.RehydrationOptions);
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.NativeImage);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code ==
+            (forgeIdentity ? DiagnosticCode.IndirectTargetUnresolved : DiagnosticCode.TlsBindingUnresolved));
+    }
+
+    [Fact]
     [Trait("Category", "TlsGeneralDynamic")]
     public void SelectedGeneralDynamicFunctionCarriesTypedOwnersThroughSnapshotAndRejectsMissingDtpRelOwner()
     {

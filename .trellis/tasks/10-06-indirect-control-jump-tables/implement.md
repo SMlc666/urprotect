@@ -398,3 +398,132 @@ Implement only a demand-driven selected-function proof query on the existing jum
 12. Run focused and full Release managed tests, full Python suite, fixtures/regression matrix, architecture and AArch64 encoding checks, exact-root evidence checkers, and `git diff --check`; obtain fresh independent read-only review before updating the external-table criterion. Do not promote musl/Bionic from glibc evidence and do not close the child/parent by status shortcut.
 
 Rollback boundaries: keep the existing external-table negative intact; if provider proof fails, remove only the new provider positive path and retain current fail-closed behavior. Never revert existing in-image shared-table support or widen general dependency/indirect-call admission.
+
+### Existing-path evidence closure checkpoint — direct execution
+
+- Scope: repair ordinary indirect-control schema-3 clone evidence validation and
+  TLSDESC source-call publication ownership; no external-provider wiring, new
+  runtime/profile admission, acceptance/status changes, staging or commit.
+- The ordinary checker now verifies the source table, preserved original bytes,
+  PF_R clone placement/policy, exact-integer ownership ordinals, each source/output
+  target/base/entry binding and edit, and the selected consumer reference chain.
+  Its unchanged retained root
+  `.artifacts/indirect-control/existing-path-closure-20261019T052614Z-21660`
+  passes, including all four fail-closed negative rows.
+- TLSDESC BLRs are distinguished from ordinary calls only after source TLS
+  carriers and a freshly projected module/descriptor/full decoded sequence
+  agree with the snapshot. Static-callback completeness recognizes canonical
+  table/index/VA function identities as well as existing exact-range name
+  identities. Ordinary missing-call-owner negatives still pass.
+- Fresh native glibc TLSDESC positive:
+  `.artifacts/tls-runtime/direct-tlsdesc-20261019T104943Z-15079/tlsdesc.host-context-entry.glibc.current-thread`.
+  Both source and transformed entry/process statuses are 43, streams match,
+  release passes, and Protected Image/rehydration/TLS row checkers pass.
+  Retained consumer build SHA-256 matches the current Core assembly
+  (`18d4ca5840e74b03dc39dc3c872c335f3e45cca281fb2f15d1f1e6ecb17d6fed`).
+- Failed matrix subprocesses now retain bounded stage diagnostics, process
+  status, both streams and per-file hashes in `failures/ROW` before temporary
+  work cleanup; tests cover empty stderr, truncation, symlinks, overwrite and
+  path-escape refusal. This does not manufacture a successful matrix.
+- Gates: Release build 0 warnings/errors; focused managed TLS/static-callback/
+  dynamic-import/Protected Image/generic rehydration tests 156/156; related
+  Python evidence suites 74/74; architecture, Python compilation, task context
+  validation and diff checks passed. Task context validation still warns about
+  existing oversized manifest entries. Verification was performed directly by
+  the main assistant as requested, not by an independent child review.
+- Remaining: the minimal eight-word synthetic TLSDESC fixture still fails the
+  existing output-word `TlsLayoutMismatch` gate after source ownership passes;
+  its regression explicitly retains that separate rejection. The real-linker
+  native positive above does not promote arbitrary layouts. Full TLS aggregate,
+  musl/Bionic runtime evidence, canonical CI-root gates, and external-provider
+  production remain open. No successful unrelated producer or complete matrix
+  was rerun, and no old artifact was modified.
+
+### TLS aggregate closure follow-up — direct execution
+
+- Ran the complete PR matrix in a new root. The first aggregate passed its
+  matrix-specific checker but exposed a retention gap on direct generic child
+  review: the collector copied only a partial tree, and stage paths referred
+  to removed temporary work. Preserve that first root as an observation only:
+  `.artifacts/tls-runtime/aggregate-closure-20261019T110041Z-23111`.
+  Do not describe its children as independently validated publication roots.
+- Minimal same-script fix: generate promoted rows directly under the new
+  durable aggregate root, retain the complete original publication trees,
+  add matrix facts, close each child inventory, and run both generic child
+  gates before returning the positive row. Add child SHA256SUMS to row
+  evidencePaths and the outer inventory. No role/path/hash rewriting or
+  source/runtime admission changes were introduced.
+- Fresh corrected evidence:
+  `.artifacts/tls-runtime/complete-aggregate-20261019T110431Z-27457`.
+  All 60 registry rows validate: 4 accepted-and-runs (native AArch64/glibc
+  IE/LD/GD/TLSDESC, HostContext current-thread), 20 environment-unavailable,
+  36 not-applicable. Four source/transformed entry/process pairs return 43
+  with equal actual streams and successful releases. All eight independent
+  invocations of the two generic child checkers pass, and all 363 outer
+  checksum entries validate. This is local producer evidence, not a CI run
+  and not 60 native executions.
+- Tests: related Python suites 75/75 (matrix contract 11/11), including
+  complete-child inventory closure before validation, original metadata
+  preservation, failed checker propagation and symlink refusal. Python
+  compilation, architecture and diff checks pass. Core production code did
+  not change in this follow-up; the prior Release and 156 managed-test
+  results still apply.
+- This supersedes only the prior open TLS-aggregate item. Musl/Bionic
+  execution, canonical CI-root gates, synthetic output layout and external
+  provider production remain open. No staging/commit/task-status changes;
+  the candidate worktree index hash remains
+  `dbd0df747258b85df369390f44ece3684d5d23e6b3fde2c2780e0c5e68504263`.
+
+### Whole-batch pre-commit gate — blocked on existing evaluator registry pin
+
+- Release build passes with zero warnings/errors; full managed suite 680/680.
+- Full Python discovery runs 426 tests, with 22 failures and one error. All
+  23 failing/error blocks stop at the same evaluator registry hash mismatch;
+  do not report this full gate as passed or stage/commit the batch yet.
+- The only mismatched registry is `fixtures/manifest.json`: current and HEAD
+  SHA-256 are both
+  `85fb7495ff95dab5d110f451293ec9cb4d4e6686f27c0ed2459836f268b8b038`,
+  while `fixtures/evaluator/compatibility-corpus.json` retains
+  `7640d3e7836d017dcd9cf8fadc685e1578684a1cb0a145218c3eaeacbd611ff1`.
+  Both files and the evaluator validator are unchanged by this ten-file slice;
+  the inconsistency is already present in HEAD 61b51ce. The other four
+  retained registry digests match. This proves the static input mismatch is
+  pre-existing, not that tests behind that first-failure gate are healthy.
+- Logs retained in
+  `.artifacts/precommit/indirect-tls-20261019T111554Z-9637/{build,managed,python}.log`.
+- Stop for scope confirmation before changing the evaluator's current registry
+  binding. Do not bypass the hash gate, rewrite historical immutable baselines,
+  or silently include an eleventh file in the previously proposed batch.
+
+### Registry synchronization and final evidence recheck — direct execution
+
+- User approved continuing with the existing evaluator registration repair.
+  The prior registry-pin blocker above is now resolved: synchronize the current
+  fixture-matrix retained-registry digest in compatibility-corpus.json, then
+  synchronize its new digest in evaluator-protocol.json. These are exactly two
+  current registration fields; no validator, corpus rows, fixed-row metadata,
+  baseline reference, historical baseline artifact, or support status changed.
+- Rechecked baseline-reference.json and its frozen baseline-zero artifact against
+  their pre-edit SHA-256 values; both remain byte-identical. Live manifest
+  validation still reports baseline-zero and baseline-not-calibrated.
+- Final direct diff review reproduced an over-broad new ADD-immediate decoder:
+  replacing the transformed consumer ADD with ADDG (0x91800021) and refreshing
+  image/evidence hashes was incorrectly accepted. Tighten opcode bit 23 and add
+  that nearest-negative to the Native Image tamper test. It now fails for the
+  dispatch chain, not a stale digest. No production encoding/admission changed.
+- Gates: evaluator-focused tests 22/22 and positive-baseline-v2 tests 7/7;
+  final full Python discovery after the opcode fix 426/426. Original indirect
+  evidence and its four negatives pass; the existing complete TLS aggregate
+  passes all 60 rows and all eight generic child checks. No native producers or
+  historical artifact roots were rerun or rewritten. Prior Release build
+  (0 warnings/errors) and 680/680 managed tests remain applicable: C# files
+  have not changed since those runs.
+- Final architecture, regression-matrix metadata, task-context validation and
+  diff checks pass. Existing context-injection truncation warnings remain.
+  Logs: `.artifacts/precommit/indirect-tls-registry-20261019-YOgHjn/`.
+  Preserve two corrected CLI invocation errors in that root separately from
+  the successful evidence/regression gates; neither was a product failure.
+- Current batch contains twelve modified tracked files, with an empty staged
+  index. No commit, push, task archive, or acceptance/status change was made.
+  Local native glibc evidence does not promote musl/Bionic, external-provider
+  production, arbitrary layouts, or canonical CI execution.

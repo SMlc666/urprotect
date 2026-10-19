@@ -36,6 +36,24 @@ must use the same explicit wrapper contract; test the actual invocation tokens.
   contract binds model, source fixture, function table/index/name, producer,
   expected entry status, unit, runtime, profile, and lifecycle before publication.
   Do not supply initial-exec defaults for a different model.
+- A TLSDESC BLR is TLS-owned only after rehydration rechecks the source static
+  relocation carriers, module/symbol, dynamically projected descriptor owner,
+  and the complete decoded source instruction/register sequence against the
+  canonical snapshot. An R_AARCH64_TLSDESC_CALL label alone is insufficient.
+  Ordinary indirect-call owner completeness still applies to every other BLR.
+  Source function matching accepts the planner's exact
+  `Table:TableIndex:0xVA` identity plus its source VA/size; existing name-based
+  identities still require the exact source VA/size. Neither lookup may select
+  a nearest symbol or ignore the source function range.
+- On a failed promoted-row subprocess, `run-tls-runtime-matrix.py` writes
+  `failures/ROW/runner-result.json` with failed status, actual process status,
+  nullable firstFailureStage and retained diagnostics; it preserves both runner
+  streams and an allowlist of stage files before temporary-work cleanup.
+  `retainedSha256` binds retained bytes; each file is capped at 1 MiB and every
+  capped file is named in `truncatedFiles`. Skip symlink stage files, reject
+  row path escape and existing failure directories. These are failure
+  diagnostics, not a successful matrix or published runtime-failure row; no
+  successful matrix inventory is manufactured.
 - Canonical promotion is exactly the registry's `promotedRows`. Currently four
   models (`initial-exec`, `local-dynamic`, `general-dynamic`, `tlsdesc`) have
   native AArch64 glibc HostContext current-thread evidence. Other tuples remain
@@ -68,12 +86,21 @@ must use the same explicit wrapper contract; test the actual invocation tokens.
 - Wrappers adding files after generic rehydration must close and validate the
   positive child's `SHA256SUMS` after their additions, then close and validate
   the outer inventory. Do not mutate a historical root into passing evidence.
+  In the TLS matrix, generate each promoted child directly under the durable
+  aggregate root, retain its complete original publication tree and paths, add
+  the matrix facts, and run both Protected Image and rehydration checkers after
+  re-closing the child inventory. Retain the child's `SHA256SUMS` in its
+  `evidencePaths` and the outer inventory. Copying only stage/behavior facts
+  from a disposable runner directory is not a self-contained publication row.
 
 ## 4. Validation & Error Matrix
 
 | Condition | Required behavior |
 | --- | --- |
 | missing tuple/source/selector or mismatched model ownership | wrapper exits 2 before publication |
+| missing/forged TLS call marker, descriptor owner, source chain or function identity | reject before Native Image; other BLRs require their ordinary owner |
+| promoted producer exits nonzero with empty stderr | preserve process status, both streams and stage diagnostics outside temporary work; matrix fails |
+| source ownership passes but output-word layout is invalid | preserve the independent layout rejection; source ownership is not publication approval |
 | stage relabeled, path/hash or runtime identity binding differs | evidence checker rejects |
 | baseline missing, status/stream differs despite true equality flags | reject even after checksum regeneration |
 | no-tail or unobserved zero-fill marked observed | reject unsupported observation |
@@ -81,6 +108,7 @@ must use the same explicit wrapper contract; test the actual invocation tokens.
 | intact producer identity names files absent on consumer host | portable identity validation accepts |
 | identity schema, ELF facts or canonical digest inconsistent | reject |
 | wrapper adds child files after child inventory closes | finalized generic child checker rejects |
+| aggregate child loses roles/streams or points into deleted work | do not accept as a self-contained publication row; retain the original durable tree and validate both child gates |
 
 ## 5. Good / Base / Bad Cases
 
@@ -94,7 +122,18 @@ must use the same explicit wrapper contract; test the actual invocation tokens.
 ## 6. Tests Required
 
 - `tests/test_tls_runtime_matrix.py`: actual CI argument tuple and setup order;
-  omitted non-IE inputs, wrong source/selector reject before publication.
+  omitted non-IE inputs, wrong source/selector reject before publication; mocked
+  empty-stderr/nonzero producer retains stage and both streams after temp
+  cleanup, bounded truncation, symlink exclusion, path escape and overwrite refusal;
+  finalization retains original role/stream/stage bytes, hashes matrix additions
+  before both child gates, and propagates a failing gate instead of publishing
+  a successful aggregate.
+- `TlsLocalExecWorkflowTests`: composite function identity reaches TLS layout,
+  while the minimal eight-word synthetic fixture retains its existing
+  `TlsLayoutMismatch` rejection; missing bindings, forged identities, refreshed
+  source call markers/descriptor relocations/register chains publish no Native
+  Image. The real-linker native glibc TLSDESC row is the end-to-end positive.
+  Keep static-callback and dynamic-import owner omission regressions green.
 - `tests/test_tls_runtime_evidence_oracle.py`: model/runtime/profile/lifecycle
   mismatch; changed baseline status/stream; missing streams/oracle; false
   equality; portable identity and tampered schema/digest/ELF/row bindings.

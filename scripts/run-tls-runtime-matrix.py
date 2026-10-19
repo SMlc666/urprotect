@@ -266,6 +266,89 @@ def find_symbol_selector(path: Path, table: str, name: str) -> str:
     return matches[0]
 
 
+def retain_failed_promoted_row(
+    artifact_root: Path, row_id: str, runner_root: Path,
+    completed: subprocess.CompletedProcess[str],
+) -> Path:
+    """Retain bounded failure diagnostics outside the disposable matrix work tree."""
+    if not row_id or Path(row_id).name != row_id or row_id in (".", ".."):
+        fail("invalid failed TLS row identity")
+    destination = artifact_root / "failures" / row_id
+    destination.mkdir(parents=True, exist_ok=False)
+    limit = 1024 * 1024
+    truncated: list[str] = []
+    retained: dict[str, str] = {}
+    for name in (
+        "producer.json", "producer.stderr", "protected-image.json", "stage.json",
+        "rehydration-command.json", "rehydration-command.stderr", "rehydration.json",
+        "native-image.json", "handoff.json", "handoff.stdout", "handoff.stderr",
+    ):
+        path = runner_root / name
+        if path.is_symlink() or not path.is_file():
+            continue
+        with path.open("rb") as stream:
+            data = stream.read(limit + 1)
+        if len(data) > limit:
+            truncated.append(name)
+        output = destination / name
+        output.write_bytes(data[:limit])
+        retained[name] = sha256(output)
+    for name, content in (("runner.stdout", completed.stdout), ("runner.stderr", completed.stderr)):
+        data = (content or "").encode("utf-8")
+        if len(data) > limit:
+            truncated.append(name)
+        output = destination / name
+        output.write_bytes(data[:limit])
+        retained[name] = sha256(output)
+    failure_stage = None
+    diagnostics: list[Any] = []
+    for name in ("rehydration.json", "rehydration-command.json", "producer.json"):
+        path = destination / name
+        if not path.is_file() or name in truncated:
+            continue
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeError):
+            continue
+        if isinstance(record, dict):
+            failure_stage = record.get("firstFailureStage") or failure_stage
+            if isinstance(record.get("diagnostics"), list):
+                diagnostics = record["diagnostics"]
+            if failure_stage:
+                break
+    (destination / "runner-result.json").write_text(
+        json.dumps({
+            "schemaVersion": 1, "status": "failed", "rowId": row_id,
+            "processStatus": completed.returncode, "firstFailureStage": failure_stage,
+            "diagnostics": diagnostics, "retainedSha256": retained,
+            "truncatedFiles": truncated,
+        }, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+    )
+    return destination
+
+
+def finalize_promoted_row(row_root: Path, row_id: str, tier: str) -> None:
+    """Close the complete durable producer row after matrix-specific additions."""
+    paths = sorted(row_root.rglob("*"))
+    if any(path.is_symlink() for path in paths):
+        fail(f"promoted TLS row contains a symlink: {row_id}")
+    entries = [
+        f"{sha256(path)}  {path.relative_to(row_root).as_posix()}"
+        for path in paths if path.is_file() and path != row_root / "SHA256SUMS"
+    ]
+    (row_root / "SHA256SUMS").write_text("\n".join(entries) + "\n", encoding="utf-8")
+    for checker in ("check-protected-image-evidence.py", "check-rehydration-evidence.py"):
+        completed = run([
+            sys.executable, str(ROOT / "scripts" / checker), str(row_root),
+            "--tier", tier, "--runtime", "glibc", "--unit", row_id,
+        ], check=False)
+        if completed.returncode:
+            fail(
+                f"finalized TLS row {row_id} failed {checker}: "
+                + completed.stdout[-2048:] + completed.stderr[-2048:]
+            )
+
+
 def run_promoted_evidence(
     *,
     artifact_root: Path,
@@ -284,7 +367,9 @@ def run_promoted_evidence(
     facts = tls_facts(fixture)
     table, symbol_name = configuration["selector"]
     selector = find_symbol_selector(fixture, table, symbol_name)
-    runner_parent = facts_work / f"runner-{model}"
+    # Keep the original publication paths durable; a partial copy leaves role
+    # and stage paths pointing into deleted temporary work.
+    runner_parent = artifact_root
     environment = os.environ.copy()
     environment["TLS_EVIDENCE_ARTIFACT_ROOT"] = str(runner_parent)
     completed = subprocess.run(
@@ -308,9 +393,13 @@ def run_promoted_evidence(
     )
     runner_root = runner_parent / row_id
     if completed.returncode != 0 or not (runner_root / "protected-image.bin").is_file():
+        failure_root = retain_failed_promoted_row(artifact_root, row_id, runner_root, completed)
+        record = json.loads((failure_root / "runner-result.json").read_text(encoding="utf-8"))
         fail(
-            f"native glibc transformed TLS row {row_id} failed: "
-            + completed.stderr[-4096:]
+            f"native glibc transformed TLS row {row_id} failed "
+            f"(exit {completed.returncode}, stage {record['firstFailureStage']}); "
+            f"retained diagnostics: {failure_root}; "
+            + completed.stdout[-2048:] + completed.stderr[-2048:]
         )
 
     preflight = native_result(fixture)
@@ -342,27 +431,7 @@ def run_promoted_evidence(
         lifecycle_order="entry-dispatch-before-release-image",
         expected_entry_status=configuration["entry_status"],
     )
-    retained = (
-        "protected-image.bin",
-        "native-image.bin",
-        "stage.json",
-        "tls-template.bin",
-        "rehydration.json",
-        "handoff.json",
-        "source-handoff.json",
-        "baseline.stdout",
-        "baseline.stderr",
-        "target.stdout",
-        "target.stderr",
-        "behavior-comparison.json",
-        "behavioral-oracle.json",
-        "tls-readelf.txt",
-    )
-    row_root = artifact_root / row_id
-    for name in retained:
-        source = runner_root / name
-        if source.is_file():
-            copy_evidence(source, row_root / name)
+    row_root = runner_root
     row["sourceSha256"] = sha256(row_root / "source-image.bin")
     row["protectedSha256"] = sha256(row_root / "protected-image.bin")
     row["nativeSha256"] = sha256(row_root / "native-image.bin")
@@ -387,7 +456,9 @@ def run_promoted_evidence(
         f"{row_id}/target.stderr",
         f"{row_id}/behavior-comparison.json",
         f"{row_id}/behavioral-oracle.json",
+        f"{row_id}/SHA256SUMS",
     ]
+    finalize_promoted_row(row_root, row_id, tier)
     return row
 
 

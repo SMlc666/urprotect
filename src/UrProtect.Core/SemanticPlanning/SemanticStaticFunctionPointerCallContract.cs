@@ -292,7 +292,8 @@ public static class SemanticStaticFunctionPointerCallContract
         foreach (var functionEntry in selectedFunctions)
         {
             var functionSymbols = source.FunctionSymbols.Where(symbol =>
-                symbol.Name == functionEntry.Identity.Value
+                (symbol.Name == functionEntry.Identity.Value
+                    || $"{symbol.Table}:{symbol.TableIndex}:0x{symbol.Value:X}" == functionEntry.Identity.Value)
                 && symbol.Value == functionEntry.SourceRange.VirtualAddress.Value
                 && symbol.Size == functionEntry.SourceRange.Size).ToArray();
             if (functionSymbols.Length == 0)

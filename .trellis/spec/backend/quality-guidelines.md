@@ -94,9 +94,20 @@ tests plus the relevant malformed-input path:
   Retain measured source/transformed handoff records and exact baseline/target
   stdout/stderr bytes plus hashes; the evidence checker recomputes status and
   stream comparison from those files, binds the selected function and case
-  symbols to the source ELF dynamic symbols, binds table edit offsets to the
-  source table's mapped file range, and verifies rewritten entry bytes in the
-  Native Image. Its address-map range must cover the selected function and all
+  symbols to the source ELF dynamic symbols, binds source entries to the
+  source table's mapped file range, and binds rewritten entries to the declared
+  output table range. Dispatch-chain recognition must check the exact opcode:
+  in particular, ADD-immediate bit 23 must exclude tagged ADDG rather than
+  accepting it through the shared high-byte prefix. Keep a refreshed-checksum
+  Native Image opcode-substitution regression.
+  The current bounded relative-table row uses a distinct
+  PF_R-only clone under layout schema 3:
+  verify its file-backed placement, ownership ordinal and clone/retarget policy,
+  exact per-entry target/base bindings and bytes, the unchanged original table,
+  and the selected consumer's decoded reference to the clone. Do not apply the
+  retired schema-2 assumption that edit offsets point into the source table.
+  Reject refreshed-checksum forgeries of these facts as well as bool/float/string
+  ownership ordinals. Its address-map range must cover the selected function and all
   case targets and map to file-backed executable output. Layout evidence also
   retains one planner-derived typed binding per table entry: table/entry/target
   identities, entry index and source row, source target/base VAs, and the mapped
@@ -231,6 +242,11 @@ ASLR addresses and timing.
 ## CI and Release Contract
 
 - Required native Linux jobs run on `aarch64` and retain an environment report.
+- Changes to an auxiliary registry such as `fixtures/manifest.json` must
+  synchronize its current `compatibility-corpus.json` retained-registry digest
+  and the current `evaluator-protocol.json` corpus digest in the same batch.
+  Validate the complete live digest chain; do not rewrite historical immutable
+  baselines or weaken digest checks to repair a stale current registration.
 - `fixtures/manifest.json` is the source of truth for fixture IDs, tiers,
   toolchains, runtimes, and execution facts. `fixtures/runtime-matrix.json`
   owns the named AArch64 runtime environment covering set and immutable OCI

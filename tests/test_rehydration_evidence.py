@@ -48,10 +48,14 @@ def _refresh_indirect_manifest(root: Path) -> None:
 
 def _jump_table_elf(*, transformed: bool) -> bytes:
     original_segments = (
-        (5, 0x200, 0x1000, 0x40, 0x40),
+        (5, 0x200, 0x1000, 0x100, 0x100),
         (4, 0x400, 0x2000, 0x10, 0x10),
     )
-    segments = original_segments + (((5, 0x600, 0x3000, 0x100, 0x100),) if transformed else ())
+    output_segments = (
+        (5, 0x600, 0x3000, 0x100, 0x100),
+        (4, 0x700, 0x4000, 0x10, 0x10),
+    )
+    segments = original_segments + (output_segments if transformed else ())
     image = bytearray(0xD00)
     image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
     struct.pack_into(
@@ -102,13 +106,13 @@ def _jump_table_elf(*, transformed: bool) -> bytes:
         dynstr.extend(name.encode("ascii") + b"\0")
     image[0xA00 : 0xA00 + len(dynstr)] = dynstr
     dynamic_rows = (
-        ("urp_jump_table_case1", 0x10, 0x1010, 0, 1),
-        ("urp_entry", 0x12, 0x1000, 0x30, 1),
-        ("urp_jump_table_case2", 0x10, 0x1018, 0, 1),
+        ("urp_jump_table_case1", 0x10, 0x1030, 0, 1),
+        ("urp_entry", 0x12, 0x1000, 0x7C, 1),
+        ("urp_jump_table_case2", 0x10, 0x1038, 0, 1),
         ("urp_jump_table", 0x10, 0x2000, 0, 2),
-        ("urp_jump_table_case3", 0x10, 0x1020, 0, 1),
-        ("urp_jump_table_case0", 0x10, 0x1008, 0, 1),
-        ("urp_jump_table_outside_closure", 0x12, 0x1038, 4, 1),
+        ("urp_jump_table_case3", 0x10, 0x1040, 0, 1),
+        ("urp_jump_table_case0", 0x10, 0x1028, 0, 1),
+        ("urp_jump_table_outside_closure", 0x12, 0x107C, 4, 1),
     )
     for index, (name, info, value, size, section_index) in enumerate(dynamic_rows, start=1):
         struct.pack_into(
@@ -134,7 +138,7 @@ def _jump_table_elf(*, transformed: bool) -> bytes:
     }
     sections = (
         (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-        (sh_name[".text"], 1, 6, 0x1000, 0x200, 0x40, 0, 0, 4, 0),
+        (sh_name[".text"], 1, 6, 0x1000, 0x200, 0x100, 0, 0, 4, 0),
         (sh_name[".rodata"], 1, 2, 0x2000, 0x400, 0x10, 0, 0, 4, 0),
         (sh_name[".dynsym"], 11, 2, 0, 0x900, 8 * 24, 4, 1, 8, 24),
         (sh_name[".dynstr"], 3, 2, 0, 0xA00, len(dynstr), 0, 0, 1, 0),
@@ -143,6 +147,12 @@ def _jump_table_elf(*, transformed: bool) -> bytes:
     for index, section in enumerate(sections):
         struct.pack_into("<IIQQQQIIQQ", image, 0xB00 + index * 64, *section)
     struct.pack_into("<iiii", image, 0x400, 0, 8, 16, 24)
+    source_dispatch = (0xB0000001, 0x91000021, 0xB8A05822, 0x10000063, 0x8B020061, 0xD61F0020)
+    output_dispatch = source_dispatch
+    struct.pack_into("<6I", image, 0x210, *source_dispatch)
+    if transformed:
+        struct.pack_into("<6I", image, 0x610, *output_dispatch)
+        struct.pack_into("<iiii", image, 0x700, 0, 8, 16, 24)
     struct.pack_into("<I", image, 0x238, 0xD65F03C0)
     return bytes(image)
 
@@ -366,37 +376,51 @@ class IndirectControlEvidenceTests(unittest.TestCase):
         target_handoff = {**source_handoff, "nativeImageSha256": native_hash}
         _write_json(positive / "source-handoff.json", source_handoff)
         _write_json(positive / "handoff.json", target_handoff)
-        output_range = {
+        code_output_range = {
             "fileOffset": {"value": 0x600},
             "hasVirtualAddress": True,
             "size": 0x100,
             "virtualAddress": {"value": 0x3000},
         }
+        table_output_range = {
+            "fileOffset": {"value": 0x700},
+            "hasVirtualAddress": True,
+            "size": 16,
+            "virtualAddress": {"value": 0x4000},
+        }
+        source_table_range = {
+            "fileOffset": {"value": 0x400},
+            "hasVirtualAddress": True,
+            "virtualAddress": {"value": 0x2000},
+            "size": 16,
+        }
         edits = [
-            {"offset": {"value": 0x400 + index * 4}, "bytes": base64.b64encode(target.to_bytes(4, "little", signed=True)).decode(), "kind": 8}
+            {"offset": {"value": 0x700 + index * 4}, "bytes": base64.b64encode(target.to_bytes(4, "little", signed=True)).decode(), "kind": 8}
             for index, target in enumerate((0, 8, 16, 24))
         ]
         table_identity = "0x2000:4:0:3"
         target_bindings = [
             {
                 "tableIdentity": {"kind": 5, "value": table_identity},
-                "sourceTableRange": {
-                    "fileOffset": {"value": 0x400},
-                    "virtualAddress": {"value": 0x2000},
-                    "size": 16,
-                },
+                "sourceTableRange": source_table_range,
                 "entryIdentity": {"kind": 6, "value": f"{table_identity}:{index}"},
                 "targetIdentity": {"kind": 1, "value": f"0x{target:X}"},
+                "targetBaseIdentity": {"kind": 1, "value": "0x1028"},
                 "entryIndex": index,
                 "sourceEntryRange": {
                     "fileOffset": {"value": 0x400 + index * 4},
                     "virtualAddress": {"value": 0x2000 + index * 4},
                     "size": 4,
                 },
+                "outputEntryRange": {
+                    "fileOffset": {"value": 0x700 + index * 4},
+                    "virtualAddress": {"value": 0x4000 + index * 4},
+                    "size": 4,
+                },
                 "sourceTargetAddress": {"value": target},
-                "outputTargetAddress": {"value": 0x3008 + index * 8},
-                "sourceTargetBaseAddress": {"value": 0x1008},
-                "outputTargetBaseAddress": {"value": 0x3008},
+                "outputTargetAddress": {"value": 0x3028 + index * 8},
+                "sourceTargetBaseAddress": {"value": 0x1028},
+                "outputTargetBaseAddress": {"value": 0x3028},
                 "entryWidth": 4,
                 "isSigned": True,
                 "scale": 1,
@@ -404,14 +428,31 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "sourceEncodedValue": index * 8,
                 "outputEncodedValue": index * 8,
             }
-            for index, target in enumerate((0x1008, 0x1010, 0x1018, 0x1020))
+            for index, target in enumerate((0x1028, 0x1030, 0x1038, 0x1040))
         ]
+        source_table_producers = [
+            {"instructionAddress": 0x1010, "kind": 1},
+            {"instructionAddress": 0x1014, "kind": 2},
+        ]
+        table_clone = {
+            "tableIdentity": {"kind": 5, "value": table_identity},
+            "sourceTableRange": source_table_range,
+            "requestedOutputRange": table_output_range,
+            "outputRange": table_output_range,
+            "permissions": 4,
+            "ownership": 0,
+            "rewritePolicy": 1,
+            "tableReferenceProducers": source_table_producers,
+            "ownerReferences": [],
+            "ownerInventoryComplete": False,
+        }
         layout = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "sourceSha256": source_hash,
             "outputSha256": native_hash,
             "jumpTableEdits": edits,
             "jumpTableTargetBindings": target_bindings,
+            "jumpTableClones": [table_clone],
             "addressMap": [
                 {
                     "identity": "region:1",
@@ -419,18 +460,24 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                     "sourceRange": {
                         "fileOffset": {"value": 0x200},
                         "hasVirtualAddress": True,
-                        "size": 0x40,
+                        "size": 0x100,
                         "virtualAddress": {"value": 0x1000},
                     },
-                    "outputRange": output_range,
-                }
+                    "outputRange": code_output_range,
+                },
+                {
+                    "identity": table_identity,
+                    "sourceIdentity": table_identity,
+                    "sourceRange": source_table_range,
+                    "outputRange": table_output_range,
+                },
             ],
             "placements": [
                 {
                     "identity": "region:1",
                     "sourceIdentity": "region:1",
-                    "range": output_range,
-                }
+                    "range": code_output_range,
+                },
             ],
         }
         _write_json(
@@ -445,18 +492,18 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "layoutEvidence": layout,
             },
         )
-        target_addresses = [0x1008 + index * 8 for index in range(4)]
+        target_addresses = [0x1028 + index * 8 for index in range(4)]
         symbols = [
             "Symbol table '.dynsym' contains 8 entries:",
             "   Num:    Value          Size Type    Bind   Vis      Ndx Name",
             "     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND ",
             f"     1: {target_addresses[1]:016x}     0 NOTYPE  GLOBAL DEFAULT    1 urp_jump_table_case1",
-            "     2: 0000000000001000    48 FUNC    GLOBAL DEFAULT    1 urp_entry",
+            "     2: 0000000000001000   124 FUNC    GLOBAL DEFAULT    1 urp_entry",
             f"     3: {target_addresses[2]:016x}     0 NOTYPE  GLOBAL DEFAULT    1 urp_jump_table_case2",
             "     4: 0000000000002000     0 NOTYPE  GLOBAL DEFAULT    2 urp_jump_table",
             f"     5: {target_addresses[3]:016x}     0 NOTYPE  GLOBAL DEFAULT    1 urp_jump_table_case3",
             f"     6: {target_addresses[0]:016x}     0 NOTYPE  GLOBAL DEFAULT    1 urp_jump_table_case0",
-            "     7: 0000000000001038     4 FUNC    GLOBAL DEFAULT    1 urp_jump_table_outside_closure",
+            "     7: 000000000000107c     4 FUNC    GLOBAL DEFAULT    1 urp_jump_table_outside_closure",
             "",
             "Symbol table '.symtab' contains 0 entries:",
         ]
@@ -486,7 +533,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             "stdoutEqual": True,
             "stderrEqual": True,
             "jumpTableEditCount": 4,
-            "addressMapBindings": 1,
+            "addressMapBindings": 2,
             "targetResolutionMode": "bounded-relative-table",
             "targetSelectionFacts": {
                 "caseIndices": [0, 1, 2, 3],
@@ -517,11 +564,11 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "negative-out-of-range-target": "outside-executable-load-range",
             }
             if negative_name in mutation_kinds:
-                encoded_value = 0x30 if negative_name == "negative-malformed-table" else 0x7FFFFFE0
+                encoded_value = 0x54 if negative_name == "negative-malformed-table" else 0x7FFFFFE0
                 struct.pack_into("<i", source_bytes, 0x400, encoded_value)
                 assert input_bytes is not None
                 (negative / "input-image.bin").write_bytes(input_bytes)
-                computed_target = 0x1008 + encoded_value
+                computed_target = 0x1028 + encoded_value
                 mutation = {
                     "schemaVersion": 1,
                     "mutationKind": mutation_kinds[negative_name],
@@ -537,7 +584,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                     "entryWidth": 4,
                     "isSigned": True,
                     "targetBaseSymbol": "urp_jump_table_case0",
-                    "targetBaseAddress": 0x1008,
+                    "targetBaseAddress": 0x1028,
                     "originalEncodedValue": 0,
                     "mutatedEncodedValue": encoded_value,
                     "computedTargetAddress": computed_target,
@@ -912,7 +959,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             _refresh_indirect_manifest(root)
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("do not bind the source ELF jump-table symbol", result.stderr)
+            self.assertIn("not confined to the four entries in the distinct output clone", result.stderr)
 
     def test_forged_source_symbol_report_is_rejected_after_hash_refresh(self) -> None:
         with tempfile.TemporaryDirectory(prefix="indirect-control-source-symbols-") as directory:
@@ -922,7 +969,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             root = self.copy_evidence(source, Path(directory))
             readelf_path = root / INDIRECT_UNIT / "source-readelf.txt"
             text = readelf_path.read_text(encoding="utf-8")
-            readelf_path.write_text(text.replace("0000000000001008", "0000000000001088", 1), encoding="utf-8")
+            readelf_path.write_text(text.replace("0000000000001028", "0000000000001088", 1), encoding="utf-8")
             _refresh_indirect_manifest(root)
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)
@@ -943,7 +990,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("no unique retained source-to-output address-map decision", result.stderr)
 
-    def test_layout_evidence_requires_schema_v2_target_bindings(self) -> None:
+    def test_layout_evidence_requires_schema_v3_clone_preserving_contract(self) -> None:
         def mutate(positive: Path) -> None:
             path = positive / "rehydration.json"
             evidence = json.loads(path.read_text(encoding="utf-8"))
@@ -953,7 +1000,72 @@ class IndirectControlEvidenceTests(unittest.TestCase):
 
         result = self.reject_refreshed_mutation(mutate)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("lacks schema v2 per-target output address bindings", result.stderr)
+        self.assertIn("lacks the current schema v3 clone-preserving contract", result.stderr)
+
+    def test_clone_policy_ranges_and_integer_tokens_reject_refreshed_tampering(self) -> None:
+        mutations = {
+            "missing clone": lambda layout: layout.__setitem__("jumpTableClones", []),
+            "duplicate clone": lambda layout: layout["jumpTableClones"].append(layout["jumpTableClones"][0]),
+            "clone file range": lambda layout: layout["jumpTableClones"][0]["outputRange"]["fileOffset"].__setitem__("value", 0x704),
+            "clone VA": lambda layout: layout["jumpTableClones"][0]["outputRange"]["virtualAddress"].__setitem__("value", 0x4004),
+            "source range": lambda layout: layout["jumpTableClones"][0]["sourceTableRange"].__setitem__("size", 12),
+            "permissions": lambda layout: layout["jumpTableClones"][0].__setitem__("permissions", 5),
+            "ownership": lambda layout: layout["jumpTableClones"][0].__setitem__("ownership", 2),
+            "rewrite policy": lambda layout: layout["jumpTableClones"][0].__setitem__("rewritePolicy", 0),
+            "owner inventory": lambda layout: layout["jumpTableClones"][0].__setitem__("ownerInventoryComplete", True),
+            "producer address": lambda layout: layout["jumpTableClones"][0]["tableReferenceProducers"][0].__setitem__("instructionAddress", 0x100C),
+            "output row": lambda layout: layout["jumpTableTargetBindings"][0]["outputEntryRange"]["fileOffset"].__setitem__("value", 0x704),
+            "base identity": lambda layout: layout["jumpTableTargetBindings"][0]["targetBaseIdentity"].__setitem__("value", "0x1030"),
+        }
+        for key, value in (("schemaVersion", 2), ("schemaVersion", 3.0), ("schemaVersion", "3")):
+            mutations[f"{key} {value!r}"] = lambda layout, v=value: layout.__setitem__("schemaVersion", v)
+        for key in ("permissions", "ownership", "rewritePolicy"):
+            for value in (True, 0.0, "0"):
+                mutations[f"{key} {value!r}"] = lambda layout, k=key, v=value: layout["jumpTableClones"][0].__setitem__(k, v)
+        for label, change in mutations.items():
+            with self.subTest(label=label):
+                def mutate(positive: Path) -> None:
+                    path = positive / "rehydration.json"
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                    change(record["layoutEvidence"])
+                    _write_json(path, record)
+                result = self.reject_refreshed_mutation(mutate)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertNotIn("checksum mismatch", result.stderr.lower())
+
+    def test_native_original_clone_permissions_and_consumer_bytes_reject_refreshed_tampering(self) -> None:
+        mutations = {
+            "original table": (lambda image: struct.pack_into("<i", image, 0x400, 4), "changed the original"),
+            "clone bytes": (lambda image: struct.pack_into("<i", image, 0x704, 12), "rewritten clone bytes"),
+            "clone PT_LOAD permissions": (lambda image: struct.pack_into("<I", image, 64 + 3 * 56 + 4, 6), "PF_R-only"),
+            "consumer retargeting": (lambda image: struct.pack_into("<I", image, 0x610, 0xF0FFFFE1), "dispatch chain"),
+            "tagged ADDG instead of ADD": (lambda image: struct.pack_into("<I", image, 0x614, 0x91800021), "dispatch chain"),
+        }
+        for label, (change, message) in mutations.items():
+            with self.subTest(label=label):
+                def mutate(positive: Path) -> None:
+                    native_path = positive / "native-image.bin"
+                    image = bytearray(native_path.read_bytes())
+                    change(image)
+                    native_path.write_bytes(image)
+                    native_hash = _sha(bytes(image))
+                    handoff_path = positive / "handoff.json"
+                    handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+                    handoff["nativeImageSha256"] = native_hash
+                    _write_json(handoff_path, handoff)
+                    behavior_path = positive / "jump-table-behavior.json"
+                    behavior = json.loads(behavior_path.read_text(encoding="utf-8"))
+                    behavior["nativeSha256"] = native_hash
+                    behavior["targetHandoffSha256"] = _sha(handoff_path.read_bytes())
+                    _write_json(behavior_path, behavior)
+                    path = positive / "rehydration.json"
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                    record["nativeImageSha256"] = native_hash
+                    record["layoutEvidence"]["outputSha256"] = native_hash
+                    _write_json(path, record)
+                result = self.reject_refreshed_mutation(mutate)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn(message, result.stderr)
 
     def test_forged_output_target_va_is_rejected_after_hash_refresh(self) -> None:
         def mutate(positive: Path) -> None:
@@ -984,7 +1096,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             (
                 "entry index",
                 lambda binding: binding.__setitem__("entryIndex", 1),
-                "duplicate jump-table target bindings",
+                "missing, duplicate, or unknown jump-table entry bindings",
             ),
             (
                 "source entry offset",
@@ -1046,7 +1158,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             positive = root / INDIRECT_UNIT
             native_path = positive / "native-image.bin"
             native = bytearray(native_path.read_bytes())
-            struct.pack_into("<i", native, 0x404, 12)
+            struct.pack_into("<i", native, 0x704, 12)
             native_path.write_bytes(native)
             native_hash = _sha(bytes(native))
             behavior_path = positive / "jump-table-behavior.json"
@@ -1066,7 +1178,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             _refresh_indirect_manifest(root)
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("rewritten Native Image table bytes", result.stderr)
+            self.assertIn("rewritten clone bytes", result.stderr)
 
     def test_forged_handoff_status_is_rejected_after_all_hashes_refresh(self) -> None:
         with tempfile.TemporaryDirectory(prefix="indirect-control-status-") as directory:
@@ -1236,7 +1348,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             facts = json.loads(report.read_text(encoding="utf-8"))
             self.assertEqual(facts["mutatedEncodedValue"], 0x7FFFFFE0)
-            self.assertEqual(facts["computedTargetAddress"], 0x80000FE8)
+            self.assertEqual(facts["computedTargetAddress"], 0x1028 + 0x7FFFFFE0)
             self.assertEqual(facts["inputSha256"], _sha(original.read_bytes()))
             self.assertEqual(facts["sourceSha256"], _sha(mutated.read_bytes()))
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +21,117 @@ PREREQ_CHECKER = ROOT / "scripts/check-tls-prerequisite-evidence.py"
 
 
 class TlsRuntimeMatrixContractTests(unittest.TestCase):
+    def test_promoted_failure_retains_stage_and_both_streams_after_work_cleanup(self) -> None:
+        with mock.patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+            spec = importlib.util.spec_from_file_location("tls_matrix_failure_test", MATRIX_RUNNER)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        row_id = "tlsdesc.host-context-entry.glibc.current-thread"
+        configuration = module.PROMOTED_MODELS["tlsdesc"]
+        fixture_id = Path(configuration["fixture"]).relative_to(ROOT).as_posix()
+        with tempfile.TemporaryDirectory() as output:
+            artifact_root = Path(output)
+            with tempfile.TemporaryDirectory() as work:
+                work_root = Path(work)
+                row = artifact_root / row_id
+                row.mkdir(parents=True)
+                record = {
+                    "firstFailureStage": "rehydration",
+                    "diagnostics": [{"code": "TlsBindingUnresolved", "message": "missing exact call owner"}],
+                }
+                (row / "rehydration.json").write_text(json.dumps(record), encoding="utf-8")
+                completed = subprocess.CompletedProcess(["runner"], 4, stdout="failed stage report on stdout", stderr="")
+                with mock.patch.object(module, "tls_facts", return_value={}), \
+                     mock.patch.object(module, "find_symbol_selector", return_value="dynsym:2"), \
+                     mock.patch.object(module.subprocess, "run", return_value=completed):
+                    with self.assertRaisesRegex(SystemExit, "exit 4, stage rehydration"):
+                        module.run_promoted_evidence(
+                            artifact_root=artifact_root, facts_work=work_root,
+                            managed_gate_path=work_root / "gate", tier="pr", model="tlsdesc",
+                            row_id=row_id, source_fixture_id=fixture_id, runtime_identity={},
+                            configuration=configuration,
+                        )
+            retained = artifact_root / "failures" / row_id
+            result = json.loads((retained / "runner-result.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["processStatus"], 4)
+            self.assertEqual(result["firstFailureStage"], "rehydration")
+            self.assertEqual(result["diagnostics"], record["diagnostics"])
+            self.assertEqual((retained / "runner.stdout").read_text(), completed.stdout)
+            self.assertEqual((retained / "runner.stderr").read_bytes(), b"")
+            self.assertEqual(json.loads((retained / "rehydration.json").read_text()), record)
+            for name, digest in result["retainedSha256"].items():
+                self.assertEqual(module.sha256(retained / name), digest)
+            self.assertFalse((artifact_root / "matrix.json").exists())
+            self.assertFalse((artifact_root / "SHA256SUMS").exists())
+
+    def test_failure_retention_is_bounded_and_refuses_overwrite_or_path_escape(self) -> None:
+        with mock.patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+            spec = importlib.util.spec_from_file_location("tls_matrix_bounds_test", MATRIX_RUNNER)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            row = root / "row"
+            row.mkdir()
+            (row / "producer.stderr").write_bytes(b"x" * (1024 * 1024 + 1))
+            (row / "producer.json").symlink_to(row / "producer.stderr")
+            completed = subprocess.CompletedProcess(["runner"], 1, "", "")
+            retained = module.retain_failed_promoted_row(root, "tlsdesc", row, completed)
+            result = json.loads((retained / "runner-result.json").read_text())
+            self.assertEqual((retained / "producer.stderr").stat().st_size, 1024 * 1024)
+            self.assertIn("producer.stderr", result["truncatedFiles"])
+            self.assertFalse((retained / "producer.json").exists())
+            with self.assertRaises(FileExistsError):
+                module.retain_failed_promoted_row(root, "tlsdesc", row, completed)
+            with self.assertRaises(SystemExit):
+                module.retain_failed_promoted_row(root, "../escape", row, completed)
+
+    def test_finalized_row_keeps_producer_files_and_closes_inventory_before_both_gates(self) -> None:
+        with mock.patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+            spec = importlib.util.spec_from_file_location("tls_matrix_finalization_test", MATRIX_RUNNER)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as directory:
+            row = Path(directory) / "tlsdesc"
+            row.mkdir()
+            stage_bytes = json.dumps({"artifactPath": str(row / "protected-image.bin")}).encode()
+            (row / "stage.json").write_bytes(stage_bytes)
+            (row / "protected-image.json").write_text("retained original role")
+            (row / "stdout.txt").write_text("")
+            (row / "matrix-added.json").write_text("new matrix fact")
+            (row / "SHA256SUMS").write_text("old incomplete inventory")
+
+            def gate(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                entries = dict(
+                    (name, digest) for digest, name in (
+                        line.split("  ", 1) for line in (row / "SHA256SUMS").read_text().splitlines()
+                    )
+                )
+                self.assertEqual(
+                    set(entries), {"stage.json", "protected-image.json", "stdout.txt", "matrix-added.json"},
+                )
+                for name, digest in entries.items():
+                    self.assertEqual(module.sha256(row / name), digest)
+                self.assertEqual(command[-6:], ["--tier", "pr", "--runtime", "glibc", "--unit", "tlsdesc"])
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with mock.patch.object(module, "run", side_effect=gate) as run_gate:
+                module.finalize_promoted_row(row, "tlsdesc", "pr")
+                self.assertEqual(run_gate.call_count, 2)
+                self.assertEqual(
+                    [Path(call.args[0][1]).name for call in run_gate.call_args_list],
+                    ["check-protected-image-evidence.py", "check-rehydration-evidence.py"],
+                )
+            self.assertEqual((row / "stage.json").read_bytes(), stage_bytes)
+            with mock.patch.object(
+                module, "run", return_value=subprocess.CompletedProcess(["checker"], 1, "bad role path", ""),
+            ):
+                with self.assertRaisesRegex(SystemExit, "bad role path"):
+                    module.finalize_promoted_row(row, "tlsdesc", "pr")
+            (row / "unexpected-link").symlink_to(row / "stage.json")
+            with self.assertRaisesRegex(SystemExit, "symlink"):
+                module.finalize_promoted_row(row, "tlsdesc", "pr")
+
     def test_registry_is_a_closed_four_dimensional_contract(self) -> None:
         registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
         self.assertEqual(registry["schemaVersion"], 1)

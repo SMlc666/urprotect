@@ -407,7 +407,6 @@ public static class GenericRehydrationEngine
                 source,
                 decoded.Snapshot,
                 diagnostics)
-            || !ValidateDynamicImportLogicalOutputMap(source, document, decoded.Snapshot, diagnostics)
             || !SemanticStaticFunctionPointerPublicationValidator.ValidateLogicalOutputMap(
                 document,
                 decoded.Snapshot,
@@ -427,7 +426,8 @@ public static class GenericRehydrationEngine
             // Non-TLS semantic plans, including indirect-target plans, are
             // validated by the canonical codec and retained as the rehydration
             // handoff contract. They do not require PT_TLS projection.
-            return decoded.Snapshot;
+            return ValidateDynamicImportLogicalOutputMap(source, document, decoded.Snapshot, diagnostics)
+                ? decoded.Snapshot : null;
         }
 
         var sourceModule = TlsStructuralAdapter.CreateImageModule(source);
@@ -558,7 +558,8 @@ public static class GenericRehydrationEngine
             }
         }
 
-        return valid ? decoded.Snapshot : null;
+        return valid && ValidateDynamicImportLogicalOutputMap(source, document, decoded.Snapshot, diagnostics)
+            ? decoded.Snapshot : null;
     }
 
     private static bool ValidateJumpTableOwnerReferences(
@@ -1219,6 +1220,13 @@ public static class GenericRehydrationEngine
                     continue;
                 }
 
+                // TLSDESC is a source-revalidated TLS sequence, not an ordinary call owner.
+                // This runs only after the selected TLS relocation carriers are validated.
+                if (IsValidatedTlsDescCall(source, snapshot, address))
+                {
+                    continue;
+                }
+
                 if (!indirectTargetsByCall.TryGetValue((identity, address), out var targetExtensions)
                     || targetExtensions.Length != 1)
                 {
@@ -1265,6 +1273,79 @@ public static class GenericRehydrationEngine
         }
 
         return valid;
+    }
+
+    private static bool IsValidatedTlsDescCall(
+        ElfFile source,
+        SemanticPlanSnapshot snapshot,
+        VirtualAddress address)
+    {
+        var bindings = snapshot.Extensions.OfType<SemanticTlsBindingExtension>()
+            .Select(extension => extension.Binding)
+            .Where(binding => binding.AccessModel == TlsAccessModel.TlsDesc
+                && binding.RelocationSites.Any(site =>
+                    site.SourceRange.VirtualAddress == address
+                    && site.Binding.RelocationType == ElfConstants.RArm64TlsDescCall))
+            .ToArray();
+        if (bindings.Length != 1 || bindings[0].DescriptorOwner is not { } owner
+            || bindings[0].Symbol is not { } symbol)
+        {
+            return false;
+        }
+
+        var binding = bindings[0];
+        var module = TlsStructuralAdapter.CreateImageModule(source);
+        if (!module.IsSuccess || module.Value is null || module.Value != binding.Module)
+        {
+            return false;
+        }
+
+        var descriptor = TlsStructuralAdapter.ProjectDescriptorOwner(source, module.Value, symbol, binding.Addend);
+        if (!descriptor.IsSuccess || descriptor.Value is not { } expected
+            || (expected with { Relocation = owner.Relocation }) != owner
+            || (expected.Relocation with { Target = owner.Relocation.Target }) != owner.Relocation
+            || !owner.Relocation.Target.IsRuntimeResolved
+            || expected.Relocation.Target.RuntimeBinding != owner.Relocation.Target.RuntimeBinding)
+        {
+            return false;
+        }
+
+        var sourceRelocations = source.TlsMetadata.StaticRelocations
+            .Select(fact => fact.Relocation).ToArray();
+        var instructions = new List<SemanticInstruction>();
+        var decoder = new AsmStoneAdapter();
+        foreach (var record in binding.InstructionSequence.Instructions)
+        {
+            if (!source.LoadMap.TryVirtualAddressToFileOffset(
+                    record.SourceRange.VirtualAddress, sizeof(uint), out var offset)
+                || offset != record.SourceRange.FileOffset
+                || offset.Value > (ulong)source.Bytes.Length
+                || sizeof(uint) > (ulong)source.Bytes.Length - offset.Value)
+            {
+                return false;
+            }
+
+            var raw = BinaryPrimitives.ReadUInt32LittleEndian(
+                source.Bytes.Span.Slice(checked((int)offset.Value), sizeof(uint)));
+            var decoded = decoder.Decode(raw, record.SourceRange.VirtualAddress.Value);
+            var projection = Aarch64SemanticInstructionProjector.Project(
+                new Aarch64FunctionInstruction(
+                    offset.Value, record.SourceRange.VirtualAddress.Value, raw, decoded),
+                sourceRelocations);
+            var carried = snapshot.Instructions.Where(instruction =>
+                instruction.SourceVirtualAddress == record.SourceRange.VirtualAddress).ToArray();
+            if (!projection.IsSuccess || projection.Instruction is null
+                || carried.Length != 1
+                || !SemanticDynamicImportCallContract.SameDecodedInstruction(projection.Instruction, carried[0]))
+            {
+                return false;
+            }
+
+            instructions.Add(projection.Instruction);
+        }
+
+        return Aarch64TlsInstructionSemantics.IsSupportedTlsDescSequence(
+            instructions, binding.RelocationSites, expected);
     }
 
     private static bool TryFindSemanticRangeOwner(
