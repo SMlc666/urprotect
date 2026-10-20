@@ -458,6 +458,40 @@
       ]
     },
     {
+      "id": "runtime.indirect-control.external-provider.glibc.host-context-entry",
+      "status": "unknown",
+      "obligation": "Retain a scoped source-to-Protected-Image-to-Native-Image observation for one project-built self-contained AArch64 external provider and its selected consumer, including independent provider/consumer evidence checking and rollback; this row is not a general provider-support claim.",
+      "witness": "scripts/run-external-provider-e2e.sh",
+      "oracle": "scripts/check-external-provider-evidence.py",
+      "evidence": [
+        "native/urprotect-runtime/Makefile",
+        "native/urprotect-runtime/host_context_external_provider_fixture.S",
+        "native/urprotect-runtime/host_context_external_provider_consumer_fixture.S",
+        "scripts/run-external-provider-e2e.sh",
+        "scripts/check-external-provider-evidence.py",
+        "scripts/run-external-provider-rollback-oracle.sh",
+        "scripts/check-external-provider-rollback-evidence.py",
+        "tests/test_external_provider_evidence.py",
+        "tests/test_external_provider_rollback_evidence.py",
+        "src/UrProtect.Core/Application/Protection/ProtectionWorkflow.cs",
+        "src/UrProtect.Core/Application/Rehydration/GenericRehydrationEngine.cs",
+        ".github/workflows/ci.yml",
+        ".artifacts/indirect-control/external-provider/current/SHA256SUMS",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/external-provider-evidence.json",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/transformed-native-rollback.json",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/build-provenance.tar.gz",
+        ".artifacts/indirect-control/provider-loaded-rollback/current/SHA256SUMS",
+        ".artifacts/indirect-control/provider-loaded-rollback/current/report.json",
+        ".artifacts/indirect-control/provider-loaded-rollback/current/rollback-record.json"
+      ],
+      "nextEvidence": "Keep this status unknown/non-promoted until the required native AArch64/glibc CI producers, exact-root independent checkers, and root-bound regressions pass on fresh current roots and final documentation review is complete. Preserve the original PRD's open musl/Bionic runtime rows, other provider/table families, and final general report criteria.",
+      "constraints": [
+        "The observation covers only the project-built self-contained liburprotect-jump-table-provider.so.1 with exact trusted SONAME, build ID, and SHA-256, one selected consumer, and the checked native AArch64/glibc execution; it does not admit arbitrary providers, dependencies, or search paths.",
+        "The report acceptanceState is scoped-observation-not-promoted. Keep registry status unknown until fresh required CI and final documentation review; this row does not prove arbitrary external-table or indirect-call support.",
+        "No musl, Bionic, other runtime/profile, or provider/table family is promoted by this observation."
+      ]
+    },
+    {
       "id": "runtime.host-context.protected-image-tls-initial-exec",
       "status": "validated",
       "obligation": "The managed protection and rehydration workflow preserves a real GCC initial-exec TLSIE image through HostContext handoff and releases it after the TLS-backed entry returns status 43 on native AArch64 glibc.",

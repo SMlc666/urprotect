@@ -505,6 +505,41 @@
       ]
     },
     {
+      "id": "fixture.indirect-control-external-provider-e2e",
+      "class": "host-context",
+      "command": "scripts/run-external-provider-e2e.sh --tier pr --artifact-root .artifacts/indirect-control/external-provider/current && python3 scripts/check-external-provider-evidence.py .artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/external-provider/current/SHA256SUMS",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/external-provider-evidence.json",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/transformed-native-rollback.json",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/build-provenance.tar.gz",
+        ".artifacts/indirect-control/provider-ci-logs/external-provider-*.log"
+      ]
+    },
+    {
+      "id": "native.external-provider-provider-loaded-rollback",
+      "class": "host-context",
+      "command": "scripts/run-external-provider-rollback-oracle.sh --artifact-root .artifacts/indirect-control/provider-loaded-rollback/current && python3 scripts/check-external-provider-rollback-evidence.py --root .artifacts/indirect-control/provider-loaded-rollback/current && URP_PROVIDER_ROLLBACK_EVIDENCE_ROOT=.artifacts/indirect-control/provider-loaded-rollback/current PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.test_external_provider_rollback_evidence",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/provider-loaded-rollback/current/SHA256SUMS",
+        ".artifacts/indirect-control/provider-loaded-rollback/current/report.json",
+        ".artifacts/indirect-control/provider-loaded-rollback/current/rollback-record.json",
+        ".artifacts/indirect-control/provider-ci-logs/provider-loaded-rollback-*.log"
+      ]
+    },
+    {
       "id": "fixture.tls-transformed-runtime-matrix",
       "class": "host-context",
       "command": "python3 scripts/run-tls-runtime-matrix.py --tier pr && python3 scripts/check-tls-runtime-matrix-evidence.py .artifacts/tls-runtime/pr --registry fixtures/tls-runtime-matrix.json",

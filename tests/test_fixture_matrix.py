@@ -104,6 +104,63 @@ class FixtureMatrixTests(unittest.TestCase):
                 self.assertIsNotNone(match, f"CI does not invoke {checker} in {step_name}")
                 self.assertEqual(match.group(1), root)
 
+        provider_id = "runtime.indirect-control.external-provider.glibc.host-context-entry"
+        provider_feature = feature(provider_id)
+        self.assertEqual("unknown", provider_feature["status"])
+        self.assertIn("nextEvidence", provider_feature)
+        provider_block = step("Run required transformed external-provider evidence")
+        provider_root = producer_root(provider_block, "./scripts/run-external-provider-e2e.sh")
+        self.assertEqual(
+            ".artifacts/indirect-control/external-provider/current",
+            provider_root,
+        )
+        self.assertIn("if: always()", provider_block)
+        self.assertIn('--tier "${tier}"', provider_block)
+        provider_runner = (REPO_ROOT / "scripts/run-external-provider-e2e.sh").read_text()
+        self.assertIn('dotnet "$cli" protect-image', provider_runner)
+        self.assertIn('dotnet "$cli" rehydrate-image', provider_runner)
+        self.assertIn("environment-unavailable: external-provider evidence requires native AArch64", provider_runner)
+        self.assertIn("environment-unavailable: external-provider evidence requires glibc", provider_runner)
+        self.assertIn('URP_EXTERNAL_PROVIDER_EVIDENCE_ROOT="$positive"', provider_runner)
+        self.assertIn("test_external_provider_evidence.py", provider_runner)
+        provider_check = step("Independently check transformed external-provider evidence")
+        self.assertIn("if: always()", provider_check)
+        self.assertIn("external-provider-${run_key}.status", provider_check)
+        self.assertIn("external-provider-${run_key}.root", provider_check)
+        self.assertIn("external-provider-check-${run_key}.log", provider_check)
+        self.assertIn("external-provider-check-${run_key}.status", provider_check)
+        self.assertIn('statuses=("${PIPESTATUS[@]}")', provider_check)
+        self.assertIn('python3 scripts/check-external-provider-evidence.py "${positive}"', provider_check)
+
+        rollback_block = step("Run required source-loader provider rollback evidence")
+        rollback_root = producer_root(
+            rollback_block,
+            "./scripts/run-external-provider-rollback-oracle.sh",
+        )
+        self.assertEqual(
+            ".artifacts/indirect-control/provider-loaded-rollback/current",
+            rollback_root,
+        )
+        self.assertIn("if: always()", rollback_block)
+        rollback_check = step("Independently check source-loader rollback evidence and root regressions")
+        self.assertIn("if: always()", rollback_check)
+        self.assertIn("provider-loaded-rollback-${run_key}.root", rollback_check)
+        self.assertIn("provider-loaded-rollback-check-${run_key}.log", rollback_check)
+        self.assertIn("provider-loaded-rollback-check-${run_key}.status", rollback_check)
+        self.assertIn('statuses=("${PIPESTATUS[@]}")', rollback_check)
+        self.assertIn("scripts/check-external-provider-rollback-evidence.py --root", rollback_check)
+        self.assertIn("URP_PROVIDER_ROLLBACK_EVIDENCE_ROOT=", rollback_check)
+        self.assertIn("tests.test_external_provider_rollback_evidence", rollback_check)
+
+        provider_roots = {provider_root, rollback_root}
+        self.assertTrue(provider_roots.isdisjoint(roots))
+        self.assertEqual(2, len(provider_roots))
+        declared_provider_paths = generated_paths(provider_feature)
+        self.assertTrue(
+            all(any(path == root or path.startswith(root + "/") for root in provider_roots)
+                for path in declared_provider_paths),
+            f"{provider_id} evidence must bind only the two exact current provider roots",
+        )
         declaration_gate = step("Check transformed CFI and indirect-control feature declarations")
         for feature_id, _, _, _ in rows:
             self.assertIn(f"--feature {feature_id}", declaration_gate)
@@ -111,6 +168,18 @@ class FixtureMatrixTests(unittest.TestCase):
             "--feature runtime.indirect-control.jump-table.glibc.host-context-entry",
             declaration_gate,
         )
+        self.assertIn(f"--feature {provider_id}", declaration_gate)
+        upload = step("Upload test evidence")
+        self.assertIn(".artifacts/indirect-control/external-provider/", upload)
+        self.assertIn(".artifacts/indirect-control/provider-loaded-rollback/", upload)
+        self.assertIn(".artifacts/indirect-control/provider-ci-logs/", upload)
+        self.assertIn("include-hidden-files: true", upload)
+        workflow_triggers = workflow.split("\njobs:", 1)[0]
+        self.assertRegex(workflow_triggers, r"(?m)^  push:\s*$")
+        self.assertRegex(workflow_triggers, r"(?m)^  pull_request:\s*$")
+        self.assertNotRegex(workflow_triggers, r"(?m)^\s+paths(?:-ignore)?:")
+        build_job = workflow.split("  build-and-test:", 1)[1].split("\n  real-sample-matrix:", 1)[0]
+        self.assertNotRegex(build_job, r"(?m)^    if:")
         self.assertNotIn("proof-binding-fix-20261014T202700Z", workflow)
         self.assertNotIn('cp -a ".artifacts/cfi/', workflow)
         self.assertIn(
@@ -159,6 +228,52 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertEqual(feature["status"], "validated")
         self.assertTrue(
             any(path.endswith("/host-context/build-and-test.log") for path in feature["evidence"])
+        )
+
+    def test_external_provider_observation_stays_unknown_and_digest_chain_is_current(self) -> None:
+        result = self.run_validator(self.data)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        feature = next(
+            item
+            for item in self.data["features"]
+            if item["id"] == "runtime.indirect-control.external-provider.glibc.host-context-entry"
+        )
+        self.assertEqual("unknown", feature["status"])
+        self.assertIn("nextEvidence", feature)
+        constraints = " ".join(feature["constraints"])
+        self.assertIn("scoped-observation-not-promoted", constraints)
+        self.assertIn("No musl, Bionic", constraints)
+        roots = {
+            ".artifacts/indirect-control/external-provider/current/",
+            ".artifacts/indirect-control/provider-loaded-rollback/current/",
+        }
+        generated = [path for path in feature["evidence"] if path.startswith(".artifacts/")]
+        self.assertTrue(generated)
+        self.assertTrue(all(any(path.startswith(root) for root in roots) for path in generated))
+
+        corpus_path = REPO_ROOT / "fixtures/evaluator/compatibility-corpus.json"
+        corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+        fixture_registry = next(
+            item for item in corpus["retainedEvidenceRegistries"]
+            if item["registryId"] == "fixture-matrix"
+        )
+        self.assertEqual(
+            hashlib.sha256(MANIFEST.read_bytes()).hexdigest(),
+            fixture_registry["sha256"],
+        )
+        protocol = json.loads(
+            (REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            hashlib.sha256(corpus_path.read_bytes()).hexdigest(),
+            protocol["manifestDigests"]["compatibilityCorpusSha256"],
+        )
+        baseline_reference_path = REPO_ROOT / "fixtures/evaluator/baseline-reference.json"
+        baseline_reference = json.loads(baseline_reference_path.read_text(encoding="utf-8"))
+        baseline_path = REPO_ROOT / baseline_reference["baselineArtifactPath"]
+        self.assertEqual(
+            baseline_reference["baselineArtifactSha256"],
+            hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         )
 
     def test_release_tier_selects_the_explicit_hardening_witness(self) -> None:

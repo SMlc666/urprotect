@@ -81,6 +81,9 @@ EXTERNAL_PROVIDER_CONSUMER := $(BUILD_DIR)/host-context-external-provider-consum
 EXTERNAL_PROVIDER_BAD_CONSUMER := $(BUILD_DIR)/host-context-external-provider-wrong-consumer.so
 EXTERNAL_PROVIDER_CONSUMER_OBJECT := $(BUILD_DIR)/host-context-external-provider-consumer-fixture.S.o
 EXTERNAL_PROVIDER_TEST := $(BUILD_DIR)/host-context-external-provider-self-test
+EXTERNAL_PROVIDER_HANDOFF := $(BUILD_DIR)/host-context-external-provider-image-handoff
+EXTERNAL_PROVIDER_ROLLBACK_TEST := $(BUILD_DIR)/host-context-external-provider-rollback-self-test
+EXTERNAL_PROVIDER_ROLLBACK_ADAPTER_OBJECT := $(BUILD_DIR)/host_adapter_provider_rollback_test.o
 SHARED_JUMP_TABLE_FIXTURE := $(BUILD_DIR)/host-context-shared-jump-table-fixture.so
 SHARED_JUMP_TABLE_FIXTURE_S := $(BUILD_DIR)/host-context-shared-jump-table-fixture.S.o
 DYNAMIC_IMPORT_FIXTURE := $(BUILD_DIR)/host-context-dynamic-import-fixture.so
@@ -104,7 +107,7 @@ LDLIBS ?= -ldl -pthread
 ENTRY_FIXTURE_LDFLAGS ?=
 HOST_CONTEXT_PLATFORM_CFLAGS ?=
 
-.PHONY: all test runtime self-test host-context-launcher host-context-image-handoff host-image-validation-probe tls-validation-test symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture tlsle-fixture tlsld-fixture tlsgd-fixture tlsdesc-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test cfi-fixture cfi-runtime-test jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture external-provider-fixtures external-provider-self-test shared-jump-table-fixture dynamic-import-fixture static-function-pointer-fixture native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
+.PHONY: all test runtime self-test host-context-launcher host-context-image-handoff host-image-validation-probe tls-validation-test symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture tlsle-fixture tlsld-fixture tlsgd-fixture tlsdesc-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test cfi-fixture cfi-runtime-test jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture external-provider-fixtures external-provider-self-test external-provider-image-handoff external-provider-provider-loaded-rollback-test shared-jump-table-fixture dynamic-import-fixture static-function-pointer-fixture native-image-handoff native-handoff-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
 
 all: test
 
@@ -173,8 +176,13 @@ external-jump-table-fixture: $(EXTERNAL_JUMP_TABLE_FIXTURE)
 
 external-provider-fixtures: $(EXTERNAL_PROVIDER_FIXTURE) $(EXTERNAL_PROVIDER_BAD_SIZE) $(EXTERNAL_PROVIDER_WRONG_SONAME) $(EXTERNAL_PROVIDER_DEPENDENCY) $(EXTERNAL_PROVIDER_CONFLICT) $(EXTERNAL_PROVIDER_SYMBOL_CONFLICT) $(EXTERNAL_PROVIDER_CONSUMER) $(EXTERNAL_PROVIDER_BAD_CONSUMER)
 
-external-provider-self-test: $(EXTERNAL_PROVIDER_TEST) external-provider-fixtures $(DEPENDENCY_FIXTURE)
+external-provider-self-test: $(EXTERNAL_PROVIDER_TEST) external-provider-fixtures $(DEPENDENCY_FIXTURE) external-provider-provider-loaded-rollback-test
 	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(abspath $(EXTERNAL_PROVIDER_TEST))" "$(abspath $(EXTERNAL_PROVIDER_FIXTURE))" "$(abspath $(EXTERNAL_PROVIDER_CONSUMER))" "$(abspath $(EXTERNAL_PROVIDER_BAD_SIZE))" "$(abspath $(EXTERNAL_PROVIDER_WRONG_SONAME))" "$(abspath $(EXTERNAL_PROVIDER_DEPENDENCY))" "$(abspath $(EXTERNAL_PROVIDER_CONFLICT))" "$(abspath $(EXTERNAL_PROVIDER_SYMBOL_CONFLICT))" "$(abspath $(EXTERNAL_PROVIDER_BAD_CONSUMER))" "$(abspath $(DEPENDENCY_FIXTURE))"
+
+external-provider-image-handoff: $(EXTERNAL_PROVIDER_HANDOFF) $(EXTERNAL_PROVIDER_ROLLBACK_TEST) external-provider-fixtures
+
+external-provider-provider-loaded-rollback-test: $(EXTERNAL_PROVIDER_ROLLBACK_TEST) $(EXTERNAL_PROVIDER_FIXTURE) $(EXTERNAL_PROVIDER_CONSUMER) check-host
+	env -u LD_LIBRARY_PATH -u LD_PRELOAD -u LD_AUDIT "$(abspath $(EXTERNAL_PROVIDER_ROLLBACK_TEST))" --provider-loaded-rollback "$(abspath $(EXTERNAL_PROVIDER_FIXTURE))" "$(abspath $(EXTERNAL_PROVIDER_CONSUMER))"
 
 shared-jump-table-fixture: $(SHARED_JUMP_TABLE_FIXTURE)
 
@@ -234,6 +242,18 @@ $(HOST_CONTEXT_IMAGE_HANDOFF): host_context_image_handoff.c ../urprotect-launche
 $(EXTERNAL_PROVIDER_TEST): host_context_external_provider_self_test.c host_image_validation.h include/urp/host_adapter.h $(BUILD_DIR)/host_adapter.o $(HOST_IMAGE_VALIDATION_TEST_OBJECT) $(BUILD_DIR)/sha256.o
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -DURP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS=1 "$<" $(BUILD_DIR)/host_adapter.o $(HOST_IMAGE_VALIDATION_TEST_OBJECT) $(BUILD_DIR)/sha256.o $(LDLIBS) -o "$@"
+
+$(EXTERNAL_PROVIDER_HANDOFF): host_context_external_provider_image_handoff.c host_image_validation.h include/urp/host_adapter.h $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o $(BUILD_DIR)/sha256.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) "$<" $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o $(BUILD_DIR)/sha256.o $(LDLIBS) -o "$@"
+
+$(EXTERNAL_PROVIDER_ROLLBACK_TEST): host_context_external_provider_self_test.c host_adapter_provider_rollback_test.h host_image_validation.h include/urp/host_adapter.h $(EXTERNAL_PROVIDER_ROLLBACK_ADAPTER_OBJECT) $(HOST_IMAGE_VALIDATION_TEST_OBJECT) $(BUILD_DIR)/sha256.o
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -DURP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT=1 -DURP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS=1 "$<" $(EXTERNAL_PROVIDER_ROLLBACK_ADAPTER_OBJECT) $(HOST_IMAGE_VALIDATION_TEST_OBJECT) $(BUILD_DIR)/sha256.o $(LDLIBS) -o "$@"
+
+$(EXTERNAL_PROVIDER_ROLLBACK_ADAPTER_OBJECT): host_adapter.c host_adapter_provider_rollback_test.h host_image_validation.h include/urp/host_context.h include/urp/host_adapter.h
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -DURP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT=1 -c "$<" -o "$@"
 
 $(HOST_IMAGE_VALIDATION_PROBE): host_image_validation_probe.c host_image_validation.h $(BUILD_DIR)/host_image_validation.o
 	@mkdir -p "$(BUILD_DIR)"

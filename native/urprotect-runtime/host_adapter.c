@@ -3,6 +3,12 @@
 #include "urp/host_adapter.h"
 #include "host_image_validation.h"
 #include "sha256.h"
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+#include "host_adapter_provider_rollback_test.h"
+#if !defined(URP_HOST_ADAPTER_TEST_DIAGNOSTICS) || !defined(__GLIBC__)
+#error "provider-binding rollback failpoint is available only in test diagnostics on glibc"
+#endif
+#endif
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -102,6 +108,36 @@ static _Atomic size_t urp_memfd_create_attempt_count;
 static _Atomic size_t urp_loader_attempt_count;
 static _Atomic int urp_fail_next_thread_create;
 static _Atomic int urp_fail_next_thread_join;
+#endif
+
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+static _Atomic int urp_fail_next_provider_binding;
+static urp_host_adapter_test_rollback_observation urp_provider_rollback_observation = {
+    .failureConsumerDlcloseResult = -999,
+    .failureConsumerFdCloseResult = -999,
+    .failureProviderReleaseStatus = -999,
+    .failureProviderDlcloseResult = -999,
+    .failureProviderFdCloseResult = -999,
+    .failureProviderFd = -1,
+    .failureConsumerFd = -1,
+};
+static int urp_capture_provider_binding_cleanup;
+
+static void urp_test_record_rollback_event(uint32_t event)
+{
+    uint32_t index = urp_provider_rollback_observation.eventCount;
+    if (index >= URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_EVENTS) {
+        urp_provider_rollback_observation.eventOverflow = 1U;
+        return;
+    }
+    urp_provider_rollback_observation.events[index] = event;
+    urp_provider_rollback_observation.eventCount = index + 1U;
+}
+
+static int urp_test_descriptor_is_open(int fd)
+{
+    return fd >= 0 && fcntl(fd, F_GETFD) >= 0;
+}
 #endif
 
 static int urp_write_all(int fd, const void *bytes, size_t size)
@@ -612,33 +648,84 @@ static urp_status urp_acquire_provider(
 static urp_status urp_release_provider(urp_loaded_provider *provider)
 {
     if (provider == NULL) return URP_STATUS_OK;
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    ++urp_provider_rollback_observation.providerReleaseCalls;
+#endif
     (void)pthread_mutex_lock(&urp_image_registry_mutex);
     if (provider != urp_active_provider || provider->references == 0U) {
         (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+        if (urp_capture_provider_binding_cleanup != 0) {
+            urp_provider_rollback_observation.failureProviderReleaseStatus = (int)URP_STATUS_LOAD_FAILED;
+        }
+        urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_RELEASE_RETURNED);
+#endif
         return URP_STATUS_LOAD_FAILED;
     }
     --provider->references;
     if (provider->references != 0U) {
         (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+        if (urp_capture_provider_binding_cleanup != 0) {
+            urp_provider_rollback_observation.failureProviderReleaseStatus = (int)URP_STATUS_OK;
+        }
+        urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_RELEASE_RETURNED);
+#endif
         return URP_STATUS_OK;
     }
-    if (dlclose(provider->dl_handle) != 0) {
+    int dlclose_status = dlclose(provider->dl_handle);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    if (urp_capture_provider_binding_cleanup != 0) {
+        urp_provider_rollback_observation.failureProviderDlcloseResult = dlclose_status;
+    }
+    urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_DLCLOSE_RETURNED);
+#endif
+    if (dlclose_status != 0) {
         /* A failed unload remains pinned rather than invalidating a live mapping. */
         (void)pthread_mutex_unlock(&urp_image_registry_mutex);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+        if (urp_capture_provider_binding_cleanup != 0) {
+            urp_provider_rollback_observation.failureProviderReleaseStatus = (int)URP_STATUS_LOAD_FAILED;
+        }
+        urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_RELEASE_RETURNED);
+#endif
         return URP_STATUS_LOAD_FAILED;
     }
     int close_status = close(provider->fd);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    if (urp_capture_provider_binding_cleanup != 0) {
+        urp_provider_rollback_observation.failureProviderFdCloseResult = close_status;
+    }
+    urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_FD_CLOSE_RETURNED);
+#endif
     urp_active_provider = NULL;
     free(provider);
     (void)pthread_mutex_unlock(&urp_image_registry_mutex);
-    return close_status == 0 ? URP_STATUS_OK : URP_STATUS_LOAD_FAILED;
+    urp_status result = close_status == 0 ? URP_STATUS_OK : URP_STATUS_LOAD_FAILED;
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    if (urp_capture_provider_binding_cleanup != 0) {
+        urp_provider_rollback_observation.failureProviderReleaseStatus = (int)result;
+    }
+    urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_RELEASE_RETURNED);
+#endif
+    return result;
 }
 
 static int urp_verify_provider_consumer_binding(
     void *consumer_handle,
     uint64_t got_virtual_address,
-    const urp_loaded_provider *provider)
+    const urp_loaded_provider *provider,
+    uintptr_t *provider_load_bias_out,
+    uintptr_t *provider_table_address_out,
+    uintptr_t *consumer_load_bias_out,
+    uintptr_t *consumer_got_slot_address_out,
+    uintptr_t *consumer_got_value_out)
 {
+    if (provider_load_bias_out != NULL) *provider_load_bias_out = 0U;
+    if (provider_table_address_out != NULL) *provider_table_address_out = 0U;
+    if (consumer_load_bias_out != NULL) *consumer_load_bias_out = 0U;
+    if (consumer_got_slot_address_out != NULL) *consumer_got_slot_address_out = 0U;
+    if (consumer_got_value_out != NULL) *consumer_got_value_out = 0U;
     struct link_map *consumer_map = NULL;
     Lmid_t consumer_namespace = LM_ID_BASE;
     if (consumer_handle == NULL || provider == NULL || provider->link_map == NULL
@@ -649,20 +736,31 @@ static int urp_verify_provider_consumer_binding(
         || (uintptr_t)consumer_map->l_addr > UINTPTR_MAX - (uintptr_t)got_virtual_address) {
         return 0;
     }
-    uintptr_t slot_address = (uintptr_t)consumer_map->l_addr + (uintptr_t)got_virtual_address;
+    uintptr_t consumer_load_bias = (uintptr_t)consumer_map->l_addr;
+    uintptr_t slot_address = consumer_load_bias + (uintptr_t)got_virtual_address;
     uintptr_t slot_value = 0U;
     memcpy(&slot_value, (const void *)slot_address, sizeof(slot_value));
     (void)dlerror();
     void *symbol = dlsym(consumer_handle, URP_HOST_EXTERNAL_TABLE_SYMBOL);
     struct link_map *symbol_map = NULL;
     Dl_info symbol_info;
-    return symbol != NULL && dlerror() == NULL
+    int binding_verified = symbol != NULL && dlerror() == NULL
         && dladdr1(symbol, &symbol_info, (void **)&symbol_map, RTLD_DL_LINKMAP) != 0
         && symbol_map == provider->link_map
         && (uintptr_t)symbol == provider->table_address
         && slot_value == provider->table_address
         && memcmp((const void *)provider->table_address, provider->table_bytes,
             sizeof(provider->table_bytes)) == 0;
+    if (binding_verified) {
+        if (provider_load_bias_out != NULL) {
+            *provider_load_bias_out = (uintptr_t)provider->link_map->l_addr;
+        }
+        if (provider_table_address_out != NULL) *provider_table_address_out = provider->table_address;
+        if (consumer_load_bias_out != NULL) *consumer_load_bias_out = consumer_load_bias;
+        if (consumer_got_slot_address_out != NULL) *consumer_got_slot_address_out = slot_address;
+        if (consumer_got_value_out != NULL) *consumer_got_value_out = slot_value;
+    }
+    return binding_verified;
 }
 #endif
 
@@ -698,6 +796,14 @@ static urp_status urp_adapter_load_image(
 #if defined(__GLIBC__)
         urp_status provider_status = urp_acquire_provider(adapter, &provider);
         if (provider_status != URP_STATUS_OK) return provider_status;
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+        ++urp_provider_rollback_observation.providerAcquisitions;
+        urp_provider_rollback_observation.latestProviderTableAddress = provider->table_address;
+        urp_provider_rollback_observation.latestProviderLoadBias = (uintptr_t)provider->link_map->l_addr;
+        (void)urp_host_adapter_test_identity_from_fd(
+            provider->fd, &urp_provider_rollback_observation.latestProviderIdentity);
+        urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_ACQUIRED);
+#endif
 #else
         return URP_STATUS_UNSUPPORTED;
 #endif
@@ -762,13 +868,85 @@ static urp_status urp_adapter_load_image(
         return URP_STATUS_LOAD_FAILED;
     }
 #if defined(__GLIBC__)
-    if (uses_provider
-        && !urp_verify_provider_consumer_binding(
-            dl_handle, provider_got_virtual_address, provider)) {
-        (void)dlclose(dl_handle);
-        (void)close(fd);
-        (void)urp_release_provider(provider);
-        return URP_STATUS_UNSUPPORTED;
+    if (uses_provider) {
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+        ++urp_provider_rollback_observation.consumerDlmopenSuccesses;
+        urp_test_record_rollback_event(URP_TEST_EVENT_CONSUMER_DLMOPEN_SUCCEEDED);
+#endif
+        uintptr_t provider_load_bias = 0U;
+        uintptr_t provider_table_address = 0U;
+        uintptr_t consumer_load_bias = 0U;
+        uintptr_t consumer_got_slot_address = 0U;
+        uintptr_t consumer_got_value = 0U;
+        int binding_verified = urp_verify_provider_consumer_binding(
+            dl_handle, provider_got_virtual_address, provider,
+            &provider_load_bias, &provider_table_address, &consumer_load_bias,
+            &consumer_got_slot_address, &consumer_got_value);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+        if (binding_verified) {
+            ++urp_provider_rollback_observation.bindingVerifications;
+            urp_provider_rollback_observation.latestProviderLoadBias = provider_load_bias;
+            urp_provider_rollback_observation.latestProviderTableAddress = provider_table_address;
+            urp_provider_rollback_observation.latestConsumerLoadBias = consumer_load_bias;
+            urp_provider_rollback_observation.latestConsumerGotSlotAddress = consumer_got_slot_address;
+            urp_provider_rollback_observation.latestConsumerGotValue = consumer_got_value;
+            (void)urp_host_adapter_test_identity_from_fd(
+                fd, &urp_provider_rollback_observation.latestConsumerIdentity);
+            urp_test_record_rollback_event(URP_TEST_EVENT_PROVIDER_BINDING_VERIFIED);
+        }
+#endif
+        if (!binding_verified) {
+            (void)dlclose(dl_handle);
+            (void)close(fd);
+            (void)urp_release_provider(provider);
+            return URP_STATUS_UNSUPPORTED;
+        }
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+        if (atomic_exchange_explicit(&urp_fail_next_provider_binding, 0, memory_order_relaxed) != 0) {
+            ++urp_provider_rollback_observation.failpointReached;
+            urp_provider_rollback_observation.failureProviderFd = provider->fd;
+            urp_provider_rollback_observation.failureConsumerFd = fd;
+            urp_provider_rollback_observation.failureProviderTableAddress = provider_table_address;
+            urp_provider_rollback_observation.failureProviderLoadBias = provider_load_bias;
+            urp_provider_rollback_observation.failureConsumerGotSlotAddress = consumer_got_slot_address;
+            urp_provider_rollback_observation.failureConsumerGotValue = consumer_got_value;
+            urp_provider_rollback_observation.failureConsumerLoadBias = consumer_load_bias;
+            urp_provider_rollback_observation.failureProviderIdentity =
+                urp_provider_rollback_observation.latestProviderIdentity;
+            urp_provider_rollback_observation.failureConsumerIdentity =
+                urp_provider_rollback_observation.latestConsumerIdentity;
+            urp_provider_rollback_observation.failureMappingCaptureSucceeded =
+                (uint32_t)(urp_host_adapter_test_capture_process_mappings(
+                    urp_provider_rollback_observation.failureProcessMappings,
+                    URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS,
+                    &urp_provider_rollback_observation.failureProcessMappingCount)
+                && urp_host_adapter_test_capture_mappings(
+                    &urp_provider_rollback_observation.failureProviderIdentity,
+                    urp_provider_rollback_observation.failureProviderMappings,
+                    URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS,
+                    &urp_provider_rollback_observation.failureProviderMappingCount)
+                && urp_host_adapter_test_capture_mappings(
+                    &urp_provider_rollback_observation.failureConsumerIdentity,
+                    urp_provider_rollback_observation.failureConsumerMappings,
+                    URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS,
+                    &urp_provider_rollback_observation.failureConsumerMappingCount));
+            urp_test_record_rollback_event(URP_TEST_EVENT_BINDING_FAILPOINT_REACHED);
+            int consumer_dlclose_result = dlclose(dl_handle);
+            urp_provider_rollback_observation.failureConsumerDlcloseResult = consumer_dlclose_result;
+            ++urp_provider_rollback_observation.failureConsumerDlcloseCalls;
+            urp_test_record_rollback_event(URP_TEST_EVENT_FAILURE_CONSUMER_DLCLOSE_RETURNED);
+            int consumer_fd_close_result = close(fd);
+            urp_provider_rollback_observation.failureConsumerFdCloseResult = consumer_fd_close_result;
+            ++urp_provider_rollback_observation.failureConsumerFdCloseCalls;
+            urp_test_record_rollback_event(URP_TEST_EVENT_FAILURE_CONSUMER_FD_CLOSE_RETURNED);
+            urp_capture_provider_binding_cleanup = 1;
+            urp_status provider_release_status = urp_release_provider(provider);
+            urp_capture_provider_binding_cleanup = 0;
+            urp_provider_rollback_observation.failureProviderReleaseStatus = (int)provider_release_status;
+            urp_test_record_rollback_event(URP_TEST_EVENT_FIRST_LOAD_REJECTED);
+            return URP_STATUS_UNSUPPORTED;
+        }
+#endif
     }
 #endif
 
@@ -797,6 +975,9 @@ static urp_status urp_adapter_load_image(
         return URP_STATUS_LOAD_FAILED;
     }
     image->handle = urp_next_image_handle++;
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    urp_test_record_rollback_event(URP_TEST_EVENT_IMAGE_HANDLE_PUBLISHED);
+#endif
     image->registry_next = urp_image_registry;
     urp_image_registry = image;
     (void)pthread_mutex_unlock(&urp_image_registry_mutex);
@@ -963,6 +1144,9 @@ static urp_status urp_adapter_release_image(void *userdata, urp_image_handle han
     }
     image->release_active = 1;
     image->release_started = 1;
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    urp_test_record_rollback_event(URP_TEST_EVENT_IMAGE_RELEASE_STARTED);
+#endif
     (void)pthread_mutex_unlock(&urp_image_registry_mutex);
 
     for (;;) {
@@ -999,6 +1183,9 @@ static urp_status urp_adapter_release_image(void *userdata, urp_image_handle han
     }
 
     int dl_result = dlclose(image->dl_handle);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    urp_test_record_rollback_event(URP_TEST_EVENT_IMAGE_DLCLOSE_RETURNED);
+#endif
     if (dl_result != 0) {
         /* Keep the mapping and fd pinned when loader teardown reports failure. */
         (void)pthread_mutex_lock(&urp_image_registry_mutex);
@@ -1007,6 +1194,9 @@ static urp_status urp_adapter_release_image(void *userdata, urp_image_handle han
         return URP_STATUS_LOAD_FAILED;
     }
     int close_result = close(image->fd);
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    urp_test_record_rollback_event(URP_TEST_EVENT_IMAGE_FD_CLOSE_RETURNED);
+#endif
     urp_status provider_release_status = URP_STATUS_OK;
 #if defined(__GLIBC__)
     if (image->provider != NULL) {
@@ -1025,8 +1215,12 @@ static urp_status urp_adapter_release_image(void *userdata, urp_image_handle han
     }
     (void)pthread_mutex_unlock(&urp_image_registry_mutex);
     free(image);
-    return close_result == 0 && provider_release_status == URP_STATUS_OK
+    urp_status release_result = close_result == 0 && provider_release_status == URP_STATUS_OK
         ? URP_STATUS_OK : URP_STATUS_LOAD_FAILED;
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    urp_test_record_rollback_event(URP_TEST_EVENT_IMAGE_RELEASE_RETURNED);
+#endif
+    return release_result;
 }
 
 int urp_host_adapter_image_is_sealed(urp_image_handle handle)
@@ -1063,6 +1257,51 @@ void urp_host_adapter_test_fail_next_thread_create(void)
 void urp_host_adapter_test_fail_next_thread_join(void)
 {
     atomic_store_explicit(&urp_fail_next_thread_join, 1, memory_order_relaxed);
+}
+#endif
+
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+void urp_host_adapter_test_arm_provider_binding_failure(void)
+{
+    memset(&urp_provider_rollback_observation, 0, sizeof(urp_provider_rollback_observation));
+    urp_provider_rollback_observation.failureConsumerDlcloseResult = -999;
+    urp_provider_rollback_observation.failureConsumerFdCloseResult = -999;
+    urp_provider_rollback_observation.failureProviderReleaseStatus = -999;
+    urp_provider_rollback_observation.failureProviderDlcloseResult = -999;
+    urp_provider_rollback_observation.failureProviderFdCloseResult = -999;
+    urp_provider_rollback_observation.failureProviderFd = -1;
+    urp_provider_rollback_observation.failureConsumerFd = -1;
+    urp_capture_provider_binding_cleanup = 0;
+    atomic_store_explicit(&urp_fail_next_provider_binding, 1, memory_order_relaxed);
+}
+
+void urp_host_adapter_test_rollback_read_observation(
+    urp_host_adapter_test_rollback_observation *observation)
+{
+    if (observation != NULL) *observation = urp_provider_rollback_observation;
+}
+
+void urp_host_adapter_test_rollback_read_state(
+    urp_host_adapter_test_rollback_state *state)
+{
+    if (state == NULL) return;
+    memset(state, 0, sizeof(*state));
+    (void)pthread_mutex_lock(&urp_image_registry_mutex);
+    state->nextImageHandle = urp_next_image_handle;
+    if (urp_active_provider != NULL) {
+        state->activeProviderPresent = 1U;
+        state->activeProviderReferences = (uint64_t)urp_active_provider->references;
+        state->activeProviderDescriptorOpen = urp_test_descriptor_is_open(urp_active_provider->fd) ? 1U : 0U;
+    }
+    for (urp_fd_image *image = urp_image_registry; image != NULL; image = image->registry_next) {
+        ++state->registeredImageCount;
+        if (urp_test_descriptor_is_open(image->fd)) ++state->registeredImageDescriptorCount;
+    }
+    state->failureProviderDescriptorOpen = urp_test_descriptor_is_open(
+        urp_provider_rollback_observation.failureProviderFd) ? 1U : 0U;
+    state->failureConsumerDescriptorOpen = urp_test_descriptor_is_open(
+        urp_provider_rollback_observation.failureConsumerFd) ? 1U : 0U;
+    (void)pthread_mutex_unlock(&urp_image_registry_mutex);
 }
 #endif
 

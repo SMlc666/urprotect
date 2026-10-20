@@ -3,9 +3,17 @@
 #include "host_image_validation.h"
 #include "sha256.h"
 #include "urp/host_adapter.h"
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+#include "host_adapter_provider_rollback_test.h"
+#endif
 
+#include <ctype.h>
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#if defined(__GLIBC__)
+#include <gnu/libc-version.h>
+#endif
 #include <link.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -708,8 +716,660 @@ static int no_mapping_at(uintptr_t address)
     return !address_mapping(address, permissions, NULL, 0U);
 }
 
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+static const char *rollback_event_name(uint32_t event)
+{
+    switch (event) {
+        case URP_TEST_EVENT_PROVIDER_ACQUIRED: return "provider-acquired";
+        case URP_TEST_EVENT_CONSUMER_DLMOPEN_SUCCEEDED: return "consumer-dlmopen-succeeded";
+        case URP_TEST_EVENT_PROVIDER_BINDING_VERIFIED: return "provider-binding-verified";
+        case URP_TEST_EVENT_BINDING_FAILPOINT_REACHED: return "binding-failpoint-reached";
+        case URP_TEST_EVENT_FAILURE_CONSUMER_DLCLOSE_RETURNED: return "failure-consumer-dlclose-returned";
+        case URP_TEST_EVENT_FAILURE_CONSUMER_FD_CLOSE_RETURNED: return "failure-consumer-fd-close-returned";
+        case URP_TEST_EVENT_PROVIDER_DLCLOSE_RETURNED: return "provider-dlclose-returned";
+        case URP_TEST_EVENT_PROVIDER_FD_CLOSE_RETURNED: return "provider-fd-close-returned";
+        case URP_TEST_EVENT_PROVIDER_RELEASE_RETURNED: return "provider-release-returned";
+        case URP_TEST_EVENT_FIRST_LOAD_REJECTED: return "first-load-rejected";
+        case URP_TEST_EVENT_IMAGE_HANDLE_PUBLISHED: return "image-handle-published";
+        case URP_TEST_EVENT_IMAGE_RELEASE_STARTED: return "image-release-started";
+        case URP_TEST_EVENT_IMAGE_DLCLOSE_RETURNED: return "image-dlclose-returned";
+        case URP_TEST_EVENT_IMAGE_FD_CLOSE_RETURNED: return "image-fd-close-returned";
+        case URP_TEST_EVENT_IMAGE_RELEASE_RETURNED: return "image-release-returned";
+        default: return "unknown";
+    }
+}
+
+static int count_open_descriptors(uint64_t *count_out)
+{
+    if (count_out == NULL) return 0;
+    DIR *directory = opendir("/proc/self/fd");
+    if (directory == NULL) return 0;
+    uint64_t count = 0U;
+    struct dirent *entry;
+    while ((entry = readdir(directory)) != NULL) {
+        if (entry->d_name[0] == '\0') continue;
+        int numeric = 1;
+        for (const char *cursor = entry->d_name; *cursor != '\0'; ++cursor) {
+            if (isdigit((unsigned char)*cursor) == 0) {
+                numeric = 0;
+                break;
+            }
+        }
+        if (numeric) ++count;
+    }
+    int close_status = closedir(directory);
+    if (close_status != 0) return 0;
+    *count_out = count;
+    return 1;
+}
+
+static void write_rollback_state_json(
+    const urp_host_adapter_test_rollback_state *state,
+    uint64_t open_descriptors,
+    int include_failure_descriptors)
+{
+    const char *failure_consumer_open = include_failure_descriptors != 0
+        ? (state->failureConsumerDescriptorOpen != 0U ? "true" : "false") : "null";
+    const char *failure_provider_open = include_failure_descriptors != 0
+        ? (state->failureProviderDescriptorOpen != 0U ? "true" : "false") : "null";
+    (void)printf(
+        "{\"activeProviderDescriptorOpen\":%s,\"activeProviderPresent\":%s,"
+        "\"activeProviderReferences\":%llu,\"failureConsumerDescriptorOpen\":%s,"
+        "\"failureProviderDescriptorOpen\":%s,\"nextImageHandle\":%llu,"
+        "\"openDescriptorCount\":%llu,\"registeredImageCount\":%llu,"
+        "\"registeredImageDescriptorCount\":%llu}",
+        state->activeProviderDescriptorOpen != 0U ? "true" : "false",
+        state->activeProviderPresent != 0U ? "true" : "false",
+        (unsigned long long)state->activeProviderReferences,
+        failure_consumer_open,
+        failure_provider_open,
+        (unsigned long long)state->nextImageHandle,
+        (unsigned long long)open_descriptors,
+        (unsigned long long)state->registeredImageCount,
+        (unsigned long long)state->registeredImageDescriptorCount);
+}
+
+static int capture_rollback_sample(
+    urp_host_adapter_test_rollback_observation *observation,
+    urp_host_adapter_test_rollback_state *state,
+    uint64_t *open_descriptors)
+{
+    urp_host_adapter_test_rollback_read_observation(observation);
+    urp_host_adapter_test_rollback_read_state(state);
+    return count_open_descriptors(open_descriptors);
+}
+
+static void write_backing_identity_json(const urp_host_adapter_test_file_identity *identity)
+{
+    (void)printf("{\"deviceMajor\":%u,\"deviceMinor\":%u,\"inode\":%llu}",
+        identity->deviceMajor, identity->deviceMinor, (unsigned long long)identity->inode);
+}
+
+static void write_mapping_rows_json(
+    const urp_host_adapter_test_mapping *mappings,
+    uint32_t count)
+{
+    (void)printf("[");
+    for (uint32_t index = 0U; index < count; ++index) {
+        const urp_host_adapter_test_mapping *mapping = &mappings[index];
+        (void)printf("%s{\"deviceMajor\":%u,\"deviceMinor\":%u,\"end\":%llu,"
+            "\"inode\":%llu,\"offset\":%llu,\"permissions\":\"%s\",\"start\":%llu}",
+            index == 0U ? "" : ",", mapping->deviceMajor, mapping->deviceMinor,
+            (unsigned long long)mapping->end, (unsigned long long)mapping->inode,
+            (unsigned long long)mapping->offset, mapping->permissions,
+            (unsigned long long)mapping->start);
+    }
+    (void)printf("]");
+}
+
+static int capture_identity_mappings(
+    const urp_host_adapter_test_file_identity *identity,
+    urp_host_adapter_test_mapping mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS],
+    uint32_t *count)
+{
+    return urp_host_adapter_test_capture_mappings(
+        identity, mappings, URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS, count);
+}
+
+typedef struct runtime_load_bias_query {
+    const urp_host_adapter_test_file_identity *identity;
+    uintptr_t load_bias;
+    uint32_t matches;
+} runtime_load_bias_query;
+
+static int find_runtime_load_bias_callback(
+    struct dl_phdr_info *info,
+    size_t information_size,
+    void *opaque)
+{
+    (void)information_size;
+    runtime_load_bias_query *query = (runtime_load_bias_query *)opaque;
+    if (info->dlpi_name == NULL || info->dlpi_name[0] == '\0') return 0;
+    urp_host_adapter_test_file_identity mapped_identity;
+    if (urp_host_adapter_test_identity_from_path(info->dlpi_name, &mapped_identity)
+        && mapped_identity.deviceMajor == query->identity->deviceMajor
+        && mapped_identity.deviceMinor == query->identity->deviceMinor
+        && mapped_identity.inode == query->identity->inode) {
+        query->load_bias = (uintptr_t)info->dlpi_addr;
+        ++query->matches;
+    }
+    return 0;
+}
+
+static int capture_runtime_library(
+    const char *path,
+    urp_host_adapter_test_file_identity *identity,
+    uintptr_t *load_bias,
+    urp_host_adapter_test_mapping mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS],
+    uint32_t *mapping_count)
+{
+    if (!urp_host_adapter_test_identity_from_path(path, identity)) return 0;
+    runtime_load_bias_query query = {identity, 0U, 0U};
+    (void)dl_iterate_phdr(find_runtime_load_bias_callback, &query);
+    if (query.matches != 1U || !capture_identity_mappings(identity, mappings, mapping_count)
+        || *mapping_count == 0U) return 0;
+    *load_bias = query.load_bias;
+    return 1;
+}
+
+static void write_runtime_library_json(
+    const urp_host_adapter_test_file_identity *identity,
+    uintptr_t load_bias,
+    const urp_host_adapter_test_mapping *mappings,
+    uint32_t mapping_count)
+{
+    (void)printf("{\"identity\":");
+    write_backing_identity_json(identity);
+    (void)printf(",\"loadBias\":%llu,\"mappings\":",
+        (unsigned long long)load_bias);
+    write_mapping_rows_json(mappings, mapping_count);
+    (void)printf("}");
+}
+
+static int run_provider_loaded_rollback_oracle(
+    const char *provider_path,
+    const char *consumer_path,
+    int transformed_native_image,
+    const char *libc_path,
+    const char *loader_path)
+{
+    uint8_t *provider_bytes = NULL;
+    uint8_t *consumer_bytes = NULL;
+    size_t provider_size = 0U;
+    size_t consumer_size = 0U;
+    char build_id[URP_HOST_PROVIDER_BUILD_ID_HEX_CAPACITY] = {0};
+    char provider_sha256[URP_HOST_PROVIDER_SHA256_HEX_CAPACITY] = {0};
+    if (!read_file(provider_path, &provider_bytes, &provider_size)
+        || !read_file(consumer_path, &consumer_bytes, &consumer_size)
+        || !identify_provider(provider_path, build_id, provider_sha256)) {
+        (void)fprintf(stderr, "rollback oracle could not read and identify the exact provider/consumer fixtures\n");
+        free(provider_bytes);
+        free(consumer_bytes);
+        return 1;
+    }
+    urp_host_external_provider_facts provider_facts;
+    if (urp_host_external_provider_validate(
+            provider_bytes, provider_size, URP_HOST_EXTERNAL_TABLE_PROVIDER_SONAME,
+            build_id, &provider_facts) != URP_STATUS_OK) {
+        (void)fprintf(stderr, "rollback oracle could not independently preflight provider bytes\n");
+        free(provider_bytes);
+        free(consumer_bytes);
+        return 1;
+    }
+
+    urp_host_adapter_v1 adapter;
+    if (!configured_adapter(
+            &adapter, provider_path, URP_HOST_EXTERNAL_TABLE_PROVIDER_SONAME,
+            build_id, provider_sha256)) {
+        (void)fprintf(stderr, "rollback oracle could not configure exact trusted provider identity\n");
+        free(provider_bytes);
+        free(consumer_bytes);
+        return 1;
+    }
+    urp_host_adapter_test_file_identity libc_identity = {0};
+    urp_host_adapter_test_file_identity loader_identity = {0};
+    uintptr_t libc_load_bias = 0U;
+    uintptr_t loader_load_bias = 0U;
+    uint32_t libc_mapping_count = 0U;
+    uint32_t loader_mapping_count = 0U;
+    urp_host_adapter_test_mapping libc_mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    urp_host_adapter_test_mapping loader_mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    uint32_t baseline_process_mapping_count = 0U;
+    urp_host_adapter_test_mapping baseline_process_mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS] = {{0}};
+    int runtime_mapping_capture_ok = transformed_native_image == 0
+        || (libc_path != NULL && loader_path != NULL
+            && capture_runtime_library(libc_path, &libc_identity, &libc_load_bias,
+                libc_mappings, &libc_mapping_count)
+            && capture_runtime_library(loader_path, &loader_identity, &loader_load_bias,
+                loader_mappings, &loader_mapping_count)
+            && urp_host_adapter_test_capture_process_mappings(baseline_process_mappings,
+                URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS, &baseline_process_mapping_count));
+    uint64_t baseline_open_descriptors = 0U;
+    if (!runtime_mapping_capture_ok || !count_open_descriptors(&baseline_open_descriptors)) {
+        (void)fprintf(stderr, "rollback oracle could not snapshot the baseline descriptor set\n");
+        free(provider_bytes);
+        free(consumer_bytes);
+        return 1;
+    }
+    urp_host_adapter_test_rollback_state baseline_state;
+    urp_host_adapter_test_rollback_read_state(&baseline_state);
+    size_t memfd_before = urp_host_adapter_memfd_create_attempts();
+    size_t loaders_before = urp_host_adapter_loader_attempts();
+    urp_host_adapter_test_arm_provider_binding_failure();
+
+    urp_image_handle failed_handle = UINT64_MAX;
+    urp_status first_load_status = adapter.context.load_image(
+        adapter.context.userdata, consumer_bytes, consumer_size,
+        URP_LOAD_IMAGE_IMMUTABLE, &failed_handle);
+    size_t memfd_after_failure = urp_host_adapter_memfd_create_attempts();
+    size_t loaders_after_failure = urp_host_adapter_loader_attempts();
+    urp_host_adapter_test_rollback_observation failure_observation;
+    urp_host_adapter_test_rollback_state failure_state;
+    uint64_t failure_open_descriptors = 0U;
+    if (!capture_rollback_sample(
+            &failure_observation, &failure_state, &failure_open_descriptors)) {
+        (void)fprintf(stderr, "rollback oracle could not capture post-failure state\n");
+        free(provider_bytes);
+        free(consumer_bytes);
+        return 1;
+    }
+    uint32_t failure_provider_after_cleanup_count = 0U;
+    uint32_t failure_consumer_after_cleanup_count = 0U;
+    urp_host_adapter_test_mapping failure_provider_after_cleanup[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    urp_host_adapter_test_mapping failure_consumer_after_cleanup[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    uint32_t failure_process_after_cleanup_count = 0U;
+    urp_host_adapter_test_mapping failure_process_after_cleanup[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS] = {{0}};
+    int failure_mapping_capture_ok = failure_observation.failureMappingCaptureSucceeded != 0U
+        && capture_identity_mappings(&failure_observation.failureProviderIdentity,
+            failure_provider_after_cleanup, &failure_provider_after_cleanup_count)
+        && capture_identity_mappings(&failure_observation.failureConsumerIdentity,
+            failure_consumer_after_cleanup, &failure_consumer_after_cleanup_count)
+        && urp_host_adapter_test_capture_process_mappings(failure_process_after_cleanup,
+            URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS,
+            &failure_process_after_cleanup_count);
+    char failure_provider_permissions[5] = {0};
+    char failure_consumer_permissions[5] = {0};
+    int failure_provider_mapping_present = address_mapping(
+        failure_observation.failureProviderTableAddress,
+        failure_provider_permissions, NULL, 0U);
+    int failure_consumer_mapping_present = address_mapping(
+        failure_observation.failureConsumerGotSlotAddress,
+        failure_consumer_permissions, NULL, 0U);
+
+    size_t memfd_before_retry = urp_host_adapter_memfd_create_attempts();
+    size_t loaders_before_retry = urp_host_adapter_loader_attempts();
+    urp_image_handle retry_handle = 0U;
+    urp_status retry_load_status = adapter.context.load_image(
+        adapter.context.userdata, consumer_bytes, consumer_size,
+        URP_LOAD_IMAGE_IMMUTABLE, &retry_handle);
+    urp_host_adapter_test_rollback_observation retry_observation;
+    urp_host_adapter_test_rollback_state retry_state;
+    uint64_t retry_open_descriptors = 0U;
+    if (!capture_rollback_sample(&retry_observation, &retry_state, &retry_open_descriptors)) {
+        (void)fprintf(stderr, "rollback oracle could not capture successful retry state\n");
+        free(provider_bytes);
+        free(consumer_bytes);
+        return 1;
+    }
+    size_t memfd_after_retry = urp_host_adapter_memfd_create_attempts();
+    size_t loaders_after_retry = urp_host_adapter_loader_attempts();
+    urp_host_adapter_test_file_identity retry_provider_identity = retry_observation.latestProviderIdentity;
+    urp_host_adapter_test_file_identity retry_consumer_identity = retry_observation.latestConsumerIdentity;
+    uint32_t retry_provider_mapping_count = 0U;
+    uint32_t retry_consumer_mapping_count = 0U;
+    urp_host_adapter_test_mapping retry_provider_mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    urp_host_adapter_test_mapping retry_consumer_mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    uint32_t retry_process_mapping_count = 0U;
+    urp_host_adapter_test_mapping retry_process_mappings[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS] = {{0}};
+    int retry_mapping_capture_ok = capture_identity_mappings(&retry_provider_identity,
+            retry_provider_mappings, &retry_provider_mapping_count)
+        && capture_identity_mappings(&retry_consumer_identity,
+            retry_consumer_mappings, &retry_consumer_mapping_count)
+        && urp_host_adapter_test_capture_process_mappings(retry_process_mappings,
+            URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS, &retry_process_mapping_count);
+    char retry_provider_permissions[5] = {0};
+    char retry_consumer_permissions[5] = {0};
+    int retry_provider_mapping_present = address_mapping(
+        retry_observation.latestProviderTableAddress, retry_provider_permissions, NULL, 0U);
+    int retry_consumer_mapping_present = address_mapping(
+        retry_observation.latestConsumerGotSlotAddress, retry_consumer_permissions, NULL, 0U);
+    uint8_t retry_table_bytes[16] = {0};
+    if (retry_provider_mapping_present) {
+        memcpy(retry_table_bytes, (const void *)retry_observation.latestProviderTableAddress,
+            sizeof(retry_table_bytes));
+    }
+
+    uintptr_t entry_address = 0U;
+    uintptr_t observer_address = 0U;
+    urp_status entry_lookup_status = retry_load_status == URP_STATUS_OK
+        ? adapter.context.lookup_symbol(adapter.context.userdata, retry_handle,
+            "urp_entry", NULL, &entry_address)
+        : URP_STATUS_LOAD_FAILED;
+    urp_status observer_lookup_status = retry_load_status == URP_STATUS_OK
+        ? adapter.context.lookup_symbol(adapter.context.userdata, retry_handle,
+            "urp_observer", NULL, &observer_address)
+        : URP_STATUS_LOAD_FAILED;
+    int32_t entry_status = INT32_MIN;
+    int32_t observer_status = INT32_MIN;
+    uint8_t stdout_bytes[TEST_CAPTURE_LIMIT] = {0};
+    uint8_t stderr_bytes[TEST_CAPTURE_LIMIT] = {0};
+    size_t stdout_size = 0U;
+    size_t stderr_size = 0U;
+    int dispatch_captured = 0;
+    if (entry_lookup_status == URP_STATUS_OK && observer_lookup_status == URP_STATUS_OK) {
+        dispatch_captured = capture_dispatch(
+            (urp_entry_fn)entry_address, (urp_entry_fn)observer_address, &adapter.context,
+            0U, &entry_status, &observer_status, stdout_bytes, &stdout_size,
+            stderr_bytes, &stderr_size);
+    }
+    char stdout_hex[TEST_CAPTURE_LIMIT * 2U + 1U];
+    char stderr_hex[TEST_CAPTURE_LIMIT * 2U + 1U];
+    char stdout_sha256[65];
+    char stderr_sha256[65];
+    char provider_table_hex[33];
+    bytes_hex(provider_facts.table_bytes, sizeof(provider_facts.table_bytes), provider_table_hex);
+    bytes_hex(stdout_bytes, stdout_size, stdout_hex);
+    bytes_hex(stderr_bytes, stderr_size, stderr_hex);
+    digest_hex(stdout_bytes, stdout_size, stdout_sha256);
+    digest_hex(stderr_bytes, stderr_size, stderr_sha256);
+
+    urp_status retry_release_status = retry_load_status == URP_STATUS_OK
+        ? adapter.context.release_image(adapter.context.userdata, retry_handle)
+        : URP_STATUS_LOAD_FAILED;
+    urp_host_adapter_test_rollback_observation final_observation;
+    urp_host_adapter_test_rollback_state final_state;
+    uint64_t final_open_descriptors = 0U;
+    if (!capture_rollback_sample(
+            &final_observation, &final_state, &final_open_descriptors)) {
+        (void)fprintf(stderr, "rollback oracle could not capture final released state\n");
+        free(provider_bytes);
+        free(consumer_bytes);
+        return 1;
+    }
+    uint32_t retry_provider_after_release_count = 0U;
+    uint32_t retry_consumer_after_release_count = 0U;
+    urp_host_adapter_test_mapping retry_provider_after_release[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    urp_host_adapter_test_mapping retry_consumer_after_release[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_MAPS] = {{0}};
+    uint32_t retry_process_after_release_count = 0U;
+    urp_host_adapter_test_mapping retry_process_after_release[URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS] = {{0}};
+    int release_mapping_capture_ok = capture_identity_mappings(&retry_provider_identity,
+            retry_provider_after_release, &retry_provider_after_release_count)
+        && capture_identity_mappings(&retry_consumer_identity,
+            retry_consumer_after_release, &retry_consumer_after_release_count)
+        && urp_host_adapter_test_capture_process_mappings(retry_process_after_release,
+            URP_HOST_ADAPTER_TEST_ROLLBACK_MAX_PROCESS_MAPS, &retry_process_after_release_count);
+    int retry_provider_mapping_after_release = no_mapping_at(
+        retry_observation.latestProviderTableAddress);
+    int retry_consumer_mapping_after_release = no_mapping_at(
+        retry_observation.latestConsumerGotSlotAddress);
+    size_t memfd_after_all = urp_host_adapter_memfd_create_attempts();
+    size_t loaders_after_all = urp_host_adapter_loader_attempts();
+
+    int first_events_ok = failure_observation.eventCount >= 10U
+        && failure_observation.events[0] == URP_TEST_EVENT_PROVIDER_ACQUIRED
+        && failure_observation.events[1] == URP_TEST_EVENT_CONSUMER_DLMOPEN_SUCCEEDED
+        && failure_observation.events[2] == URP_TEST_EVENT_PROVIDER_BINDING_VERIFIED
+        && failure_observation.events[3] == URP_TEST_EVENT_BINDING_FAILPOINT_REACHED
+        && failure_observation.events[9] == URP_TEST_EVENT_FIRST_LOAD_REJECTED;
+    int retry_events_ok = final_observation.eventCount == 21U
+        && final_observation.events[10] == URP_TEST_EVENT_PROVIDER_ACQUIRED
+        && final_observation.events[11] == URP_TEST_EVENT_CONSUMER_DLMOPEN_SUCCEEDED
+        && final_observation.events[12] == URP_TEST_EVENT_PROVIDER_BINDING_VERIFIED
+        && final_observation.events[13] == URP_TEST_EVENT_IMAGE_HANDLE_PUBLISHED
+        && final_observation.events[14] == URP_TEST_EVENT_IMAGE_RELEASE_STARTED
+        && final_observation.events[20] == URP_TEST_EVENT_IMAGE_RELEASE_RETURNED;
+    int oracle_passed = first_load_status == URP_STATUS_UNSUPPORTED
+        && failed_handle == 0U
+        && failure_observation.providerAcquisitions == 1U
+        && failure_observation.consumerDlmopenSuccesses == 1U
+        && failure_observation.bindingVerifications == 1U
+        && failure_observation.failpointReached == 1U
+        && failure_observation.failureConsumerDlcloseCalls == 1U
+        && failure_observation.failureConsumerFdCloseCalls == 1U
+        && failure_observation.providerReleaseCalls == 1U
+        && failure_observation.failureConsumerDlcloseResult == 0
+        && failure_observation.failureConsumerFdCloseResult == 0
+        && failure_observation.failureProviderReleaseStatus == (int)URP_STATUS_OK
+        && failure_observation.failureProviderDlcloseResult == 0
+        && failure_observation.failureProviderFdCloseResult == 0
+        && failure_observation.eventOverflow == 0U
+        && first_events_ok
+        && failure_state.activeProviderPresent == 0U
+        && failure_state.activeProviderReferences == 0U
+        && failure_state.activeProviderDescriptorOpen == 0U
+        && failure_state.registeredImageCount == 0U
+        && failure_state.registeredImageDescriptorCount == 0U
+        && failure_state.failureProviderDescriptorOpen == 0U
+        && failure_state.failureConsumerDescriptorOpen == 0U
+        && failure_open_descriptors == baseline_open_descriptors
+        && !failure_provider_mapping_present && !failure_consumer_mapping_present
+        && (transformed_native_image == 0
+            || (runtime_mapping_capture_ok && failure_mapping_capture_ok
+                && failure_observation.failureProviderIdentity.inode != 0U
+                && failure_observation.failureConsumerIdentity.inode != 0U
+                && failure_observation.failureProviderMappingCount != 0U
+                && failure_observation.failureConsumerMappingCount != 0U
+                && failure_observation.failureProcessMappingCount != 0U
+                && failure_process_after_cleanup_count != 0U
+                && failure_provider_after_cleanup_count == 0U
+                && failure_consumer_after_cleanup_count == 0U))
+        && failure_state.nextImageHandle == baseline_state.nextImageHandle
+        && memfd_after_failure - memfd_before == 2U
+        && loaders_after_failure - loaders_before == 2U
+        && retry_load_status == URP_STATUS_OK && retry_handle != 0U
+        && retry_observation.providerAcquisitions == 2U
+        && retry_observation.consumerDlmopenSuccesses == 2U
+        && retry_observation.bindingVerifications == 2U
+        && retry_observation.failpointReached == 1U
+        && retry_state.activeProviderPresent == 1U
+        && retry_state.activeProviderReferences == 1U
+        && retry_state.activeProviderDescriptorOpen == 1U
+        && retry_state.registeredImageCount == 1U
+        && retry_state.registeredImageDescriptorCount == 1U
+        && retry_provider_mapping_present && retry_consumer_mapping_present
+        && (transformed_native_image == 0
+            || (retry_mapping_capture_ok && retry_provider_mapping_count != 0U
+                && retry_consumer_mapping_count != 0U && retry_process_mapping_count != 0U
+                && retry_provider_identity.inode != 0U && retry_consumer_identity.inode != 0U
+                && (retry_provider_identity.inode != retry_consumer_identity.inode
+                    || retry_provider_identity.deviceMajor != retry_consumer_identity.deviceMajor
+                    || retry_provider_identity.deviceMinor != retry_consumer_identity.deviceMinor)))
+        && strcmp(retry_provider_permissions, "r--p") == 0
+        && strcmp(retry_consumer_permissions, "r--p") == 0
+        && retry_open_descriptors == baseline_open_descriptors + 2U
+        && retry_observation.latestProviderTableAddress == retry_observation.latestConsumerGotValue
+        && memcmp(retry_table_bytes, provider_facts.table_bytes, sizeof(retry_table_bytes)) == 0
+        && entry_lookup_status == URP_STATUS_OK && observer_lookup_status == URP_STATUS_OK
+        && dispatch_captured && entry_status == 17 && observer_status == 17
+        && stdout_size == 0U && stderr_size == 0U
+        && retry_release_status == URP_STATUS_OK
+        && final_state.activeProviderPresent == 0U
+        && final_state.activeProviderReferences == 0U
+        && final_state.activeProviderDescriptorOpen == 0U
+        && final_state.registeredImageCount == 0U
+        && final_state.registeredImageDescriptorCount == 0U
+        && final_state.failureProviderDescriptorOpen == 0U
+        && final_state.failureConsumerDescriptorOpen == 0U
+        && retry_provider_mapping_after_release && retry_consumer_mapping_after_release
+        && (transformed_native_image == 0
+            || (release_mapping_capture_ok && retry_provider_after_release_count == 0U
+                && retry_consumer_after_release_count == 0U
+                && retry_process_after_release_count != 0U
+                && libc_mapping_count != 0U && loader_mapping_count != 0U
+                && baseline_process_mapping_count != 0U))
+        && final_open_descriptors == baseline_open_descriptors
+        && final_state.nextImageHandle == baseline_state.nextImageHandle + 1U
+        && final_observation.eventOverflow == 0U && retry_events_ok
+        && memfd_before_retry - memfd_before == 2U
+        && loaders_before_retry - loaders_before == 2U
+        && memfd_after_retry - memfd_after_failure == 2U
+        && loaders_after_retry - loaders_after_failure == 2U
+        && memfd_after_all - memfd_before == 4U
+        && loaders_after_all - loaders_before == 4U
+        && final_observation.providerReleaseCalls == 2U;
+
+    (void)printf(
+        "{\"schemaVersion\":%u,\"oracle\":\"%s\","
+        "\"architecture\":\"aarch64\",\"runtime\":\"glibc\",\"glibcVersion\":\"%s\","
+        "\"provider\":{\"soname\":\"%s\",\"buildId\":\"%s\",\"sha256\":\"%s\","
+        "\"size\":%llu,\"tableBytesHex\":\"%s\"},\"input\":{",
+        transformed_native_image != 0 ? 2U : 1U,
+        transformed_native_image != 0
+            ? "transformed-native-image-provider-loaded-consumer-binding-failure-rollback"
+            : "provider-loaded-consumer-binding-failure-rollback",
+        gnu_get_libc_version(), URP_HOST_EXTERNAL_TABLE_PROVIDER_SONAME,
+        build_id, provider_sha256, (unsigned long long)provider_size, provider_table_hex);
+    char consumer_sha256[65];
+    digest_hex(consumer_bytes, consumer_size, consumer_sha256);
+    if (transformed_native_image != 0) {
+        (void)printf("\"nativeImageSha256\":\"%s\",\"nativeImageSize\":%llu},",
+            consumer_sha256, (unsigned long long)consumer_size);
+    } else {
+        (void)printf("\"consumerSha256\":\"%s\",\"consumerSize\":%llu},",
+            consumer_sha256, (unsigned long long)consumer_size);
+    }
+    (void)printf("\"baseline\":{\"nextImageHandle\":%llu,\"openDescriptorCount\":%llu,"
+        "\"registeredImageCount\":%llu,\"activeProviderPresent\":%s},",
+        (unsigned long long)baseline_state.nextImageHandle,
+        (unsigned long long)baseline_open_descriptors,
+        (unsigned long long)baseline_state.registeredImageCount,
+        baseline_state.activeProviderPresent != 0U ? "true" : "false");
+    (void)printf("\"failpoint\":{\"oneShot\":true,\"placement\":\"after-provider-consumer-GOT-binding-verification-before-image-handle-publication\","
+        "\"providerAcquisitions\":%llu,\"consumerDlmopenSuccesses\":%llu,"
+        "\"bindingVerifications\":%llu,\"reached\":%llu},",
+        (unsigned long long)failure_observation.providerAcquisitions,
+        (unsigned long long)failure_observation.consumerDlmopenSuccesses,
+        (unsigned long long)failure_observation.bindingVerifications,
+        (unsigned long long)failure_observation.failpointReached);
+    (void)printf("\"firstLoad\":{\"statusCode\":%d,\"expectedFailureStatusCode\":%d,"
+        "\"publishedHandle\":%llu,\"memfdAttemptsDelta\":%zu,\"loaderAttemptsDelta\":%zu,"
+        "\"providerTableAddress\":%llu,\"providerLoadBias\":%llu,"
+        "\"consumerGotSlotAddress\":%llu,\"consumerGotValue\":%llu,\"consumerLoadBias\":%llu,"
+        "\"providerMappingPresentAfterCleanup\":%s,\"consumerMappingPresentAfterCleanup\":%s,"
+        "\"postCleanupState\":",
+        (int)first_load_status, (int)URP_STATUS_UNSUPPORTED,
+        (unsigned long long)failed_handle,
+        memfd_after_failure - memfd_before, loaders_after_failure - loaders_before,
+        (unsigned long long)failure_observation.failureProviderTableAddress,
+        (unsigned long long)failure_observation.failureProviderLoadBias,
+        (unsigned long long)failure_observation.failureConsumerGotSlotAddress,
+        (unsigned long long)failure_observation.failureConsumerGotValue,
+        (unsigned long long)failure_observation.failureConsumerLoadBias,
+        failure_provider_mapping_present ? "true" : "false",
+        failure_consumer_mapping_present ? "true" : "false");
+    write_rollback_state_json(&failure_state, failure_open_descriptors, 1);
+    (void)printf("},\"cleanup\":{\"consumerDlcloseResult\":%d,\"consumerFdCloseResult\":%d,"
+        "\"providerReleaseStatus\":%d,\"providerDlcloseResult\":%d,\"providerFdCloseResult\":%d,"
+        "\"providerReleaseCallsAfterFailure\":%llu,\"consumerDlcloseCalls\":%llu,"
+        "\"consumerFdCloseCalls\":%llu},",
+        failure_observation.failureConsumerDlcloseResult,
+        failure_observation.failureConsumerFdCloseResult,
+        failure_observation.failureProviderReleaseStatus,
+        failure_observation.failureProviderDlcloseResult,
+        failure_observation.failureProviderFdCloseResult,
+        (unsigned long long)failure_observation.providerReleaseCalls,
+        (unsigned long long)failure_observation.failureConsumerDlcloseCalls,
+        (unsigned long long)failure_observation.failureConsumerFdCloseCalls);
+    (void)printf("\"retry\":{\"loadStatusCode\":%d,\"handlePublished\":%s,"
+        "\"memfdAttemptsDelta\":%zu,\"loaderAttemptsDelta\":%zu,"
+        "\"providerTableAddress\":%llu,\"providerLoadBias\":%llu,"
+        "\"providerMappingPermissions\":\"%s\",\"consumerGotSlotAddress\":%llu,"
+        "\"consumerGotPermissions\":\"%s\",\"consumerGotValue\":%llu,\"consumerLoadBias\":%llu,"
+        "\"providerTableBytesHex\":\"%s\",\"entryLookupStatus\":%d,\"observerLookupStatus\":%d,"
+        "\"entryStatus\":%d,\"observerStatus\":%d,\"stdoutHex\":\"%s\","
+        "\"stdoutSha256\":\"%s\",\"stderrHex\":\"%s\",\"stderrSha256\":\"%s\","
+        "\"activeState\":",
+        (int)retry_load_status, retry_handle != 0U ? "true" : "false",
+        memfd_after_retry - memfd_after_failure, loaders_after_retry - loaders_after_failure,
+        (unsigned long long)retry_observation.latestProviderTableAddress,
+        (unsigned long long)retry_observation.latestProviderLoadBias,
+        retry_provider_permissions,
+        (unsigned long long)retry_observation.latestConsumerGotSlotAddress,
+        retry_consumer_permissions,
+        (unsigned long long)retry_observation.latestConsumerGotValue,
+        (unsigned long long)retry_observation.latestConsumerLoadBias,
+        provider_table_hex,
+        (int)entry_lookup_status, (int)observer_lookup_status,
+        entry_status, observer_status, stdout_hex, stdout_sha256, stderr_hex, stderr_sha256);
+    write_rollback_state_json(&retry_state, retry_open_descriptors, 0);
+    (void)printf("},\"release\":{\"statusCode\":%d,\"providerMappingAbsent\":%s,"
+        "\"consumerMappingAbsent\":%s,\"finalState\":",
+        (int)retry_release_status,
+        retry_provider_mapping_after_release ? "true" : "false",
+        retry_consumer_mapping_after_release ? "true" : "false");
+    write_rollback_state_json(&final_state, final_open_descriptors, 0);
+    (void)printf("},\"counters\":{\"memfdAttemptsBefore\":%zu,\"memfdAttemptsAfter\":%zu,"
+        "\"loaderAttemptsBefore\":%zu,\"loaderAttemptsAfter\":%zu},\"events\":[",
+        memfd_before, memfd_after_all, loaders_before, loaders_after_all);
+    for (uint32_t index = 0U; index < final_observation.eventCount; ++index) {
+        (void)printf("%s\"%s\"", index == 0U ? "" : ",",
+            rollback_event_name(final_observation.events[index]));
+    }
+    (void)printf("],\"eventOverflow\":%s,\"oraclePassed\":%s",
+        final_observation.eventOverflow != 0U ? "true" : "false",
+        oracle_passed ? "true" : "false");
+    if (transformed_native_image != 0) {
+        (void)printf(",\"mappingEvidence\":{\"failpoint\":{\"provider\":{\"identity\":");
+        write_backing_identity_json(&failure_observation.failureProviderIdentity);
+        (void)printf(",\"beforeCleanup\":");
+        write_mapping_rows_json(failure_observation.failureProviderMappings,
+            failure_observation.failureProviderMappingCount);
+        (void)printf(",\"afterCleanup\":");
+        write_mapping_rows_json(failure_provider_after_cleanup, failure_provider_after_cleanup_count);
+        (void)printf("},\"consumer\":{\"identity\":");
+        write_backing_identity_json(&failure_observation.failureConsumerIdentity);
+        (void)printf(",\"beforeCleanup\":");
+        write_mapping_rows_json(failure_observation.failureConsumerMappings,
+            failure_observation.failureConsumerMappingCount);
+        (void)printf(",\"afterCleanup\":");
+        write_mapping_rows_json(failure_consumer_after_cleanup, failure_consumer_after_cleanup_count);
+        (void)printf("},\"processMapsBeforeCleanup\":");
+        write_mapping_rows_json(failure_observation.failureProcessMappings,
+            failure_observation.failureProcessMappingCount);
+        (void)printf(",\"processMapsAfterCleanup\":");
+        write_mapping_rows_json(failure_process_after_cleanup, failure_process_after_cleanup_count);
+        (void)printf("},\"retry\":{\"provider\":{\"identity\":");
+        write_backing_identity_json(&retry_provider_identity);
+        (void)printf(",\"active\":");
+        write_mapping_rows_json(retry_provider_mappings, retry_provider_mapping_count);
+        (void)printf(",\"afterRelease\":");
+        write_mapping_rows_json(retry_provider_after_release, retry_provider_after_release_count);
+        (void)printf("},\"consumer\":{\"identity\":");
+        write_backing_identity_json(&retry_consumer_identity);
+        (void)printf(",\"active\":");
+        write_mapping_rows_json(retry_consumer_mappings, retry_consumer_mapping_count);
+        (void)printf(",\"afterRelease\":");
+        write_mapping_rows_json(retry_consumer_after_release, retry_consumer_after_release_count);
+        (void)printf("},\"processMapsActive\":");
+        write_mapping_rows_json(retry_process_mappings, retry_process_mapping_count);
+        (void)printf(",\"processMapsAfterRelease\":");
+        write_mapping_rows_json(retry_process_after_release, retry_process_after_release_count);
+        (void)printf("},\"runtimeLibraries\":{\"processMapsBaseline\":");
+        write_mapping_rows_json(baseline_process_mappings, baseline_process_mapping_count);
+        (void)printf(",\"libc\":");
+        write_runtime_library_json(&libc_identity, libc_load_bias, libc_mappings, libc_mapping_count);
+        (void)printf(",\"loader\":");
+        write_runtime_library_json(&loader_identity, loader_load_bias, loader_mappings, loader_mapping_count);
+        (void)printf("}}");
+    }
+    (void)printf("}\n");
+
+    free(provider_bytes);
+    free(consumer_bytes);
+    return oracle_passed ? 0 : 1;
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#if defined(URP_HOST_ADAPTER_TEST_PROVIDER_BINDING_FAILPOINT)
+    if (argc == 4 && strcmp(argv[1], "--provider-loaded-rollback") == 0) {
+        return run_provider_loaded_rollback_oracle(argv[2], argv[3], 0, NULL, NULL);
+    }
+    if (argc == 6 && strcmp(argv[1], "--native-image-provider-loaded-rollback") == 0) {
+        return run_provider_loaded_rollback_oracle(argv[2], argv[3], 1, argv[4], argv[5]);
+    }
+#endif
     if (argc != 10) {
         (void)fprintf(stderr, "usage: %s provider consumer bad-size wrong-soname bad-dependencies conflict symbol-conflict wrong-consumer versioned-libc\n", argv[0]);
         return 2;
