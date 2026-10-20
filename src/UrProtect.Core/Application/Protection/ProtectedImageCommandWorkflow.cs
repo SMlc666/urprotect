@@ -24,7 +24,10 @@ public sealed record ProtectedImageCommandRequest(
     IReadOnlyList<FunctionSelector> Functions,
     IReadOnlyList<ProtectionPass> Passes,
     IReadOnlyList<string> CommandArguments,
-    string ToolVersion);
+    string ToolVersion)
+{
+    public ExternalJumpTableProviderInput? ExternalJumpTableProviderInput { get; init; }
+}
 
 /// <summary>Producer output and stage evidence consumed by CLI rendering.</summary>
 public sealed record ProtectedImageCommandResult(
@@ -61,7 +64,10 @@ public static class ProtectedImageCommandWorkflow
                 request.StagePath,
             }.Concat(request.JsonPath is { Length: > 0 } and not "-"
                 ? new[] { request.JsonPath }
-                : Array.Empty<string>()),
+                : Array.Empty<string>())
+                .Concat(request.ExternalJumpTableProviderInput is { } providerInput
+                    ? new[] { providerInput.Path }
+                    : Array.Empty<string>()),
             "Usage: protect-image input and evidence output paths must be distinct.",
             "Usage: invalid Protected Image output path");
         if (pathDiagnostics.Any(diagnostic => diagnostic.IsError))
@@ -98,7 +104,10 @@ public static class ProtectedImageCommandWorkflow
             producerBuildSha256,
             request.RehydratorConsumerId,
             request.ExpectedSourceSha256,
-            request.ExpectedRequestSha256);
+            request.ExpectedRequestSha256)
+        {
+            ExternalJumpTableProviderInput = request.ExternalJumpTableProviderInput,
+        };
         var emission = new ProtectionWorkflow().Emit(
             input.Bytes,
             new FunctionProtectionOptions(request.Functions, request.Passes),

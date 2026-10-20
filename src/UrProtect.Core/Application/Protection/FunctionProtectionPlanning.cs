@@ -14,7 +14,27 @@ public sealed partial class FunctionProtectionService
     public FunctionProtectionPlanResult Plan(
         ReadOnlyMemory<byte> input,
         FunctionProtectionOptions options,
-        Aarch64HostContextProofContext? proofContext = null)
+        Aarch64HostContextProofContext? proofContext = null) =>
+        PlanCore(input, options, proofContext, externalProviderFacts: null, externalProviderExtension: null);
+
+    internal FunctionProtectionPlanResult PlanWithExternalProvider(
+        ReadOnlyMemory<byte> input,
+        FunctionProtectionOptions options,
+        Aarch64HostContextProofContext? proofContext,
+        Aarch64ExternalJumpTableProviderFacts externalProviderFacts,
+        SemanticExternalJumpTableExtension externalProviderExtension)
+    {
+        ArgumentNullException.ThrowIfNull(externalProviderFacts);
+        ArgumentNullException.ThrowIfNull(externalProviderExtension);
+        return PlanCore(input, options, proofContext, externalProviderFacts, externalProviderExtension);
+    }
+
+    private FunctionProtectionPlanResult PlanCore(
+        ReadOnlyMemory<byte> input,
+        FunctionProtectionOptions options,
+        Aarch64HostContextProofContext? proofContext,
+        Aarch64ExternalJumpTableProviderFacts? externalProviderFacts,
+        SemanticExternalJumpTableExtension? externalProviderExtension)
     {
         ArgumentNullException.ThrowIfNull(options);
         var diagnostics = new DiagnosticBag();
@@ -33,7 +53,8 @@ public sealed partial class FunctionProtectionService
             sourceSnapshot,
             selectorSnapshot,
             passSnapshot,
-            proofContext);
+            proofContext,
+            externalProviderFacts);
         diagnostics.AddRange(selectedPlan.Diagnostics);
         functionResults.AddRange(selectedPlan.FunctionResults);
         if (!selectedPlan.IsSuccess)
@@ -62,7 +83,8 @@ public sealed partial class FunctionProtectionService
             selectedPlan.File,
             analyses,
             protectedCode.Patches,
-            diagnostics);
+            diagnostics,
+            externalProviderExtension);
         if (diagnostics.HasErrors)
         {
             return new FunctionProtectionPlanResult(null, functionResults, diagnostics.ToArray());
@@ -130,13 +152,15 @@ public sealed partial class FunctionProtectionService
         ElfFile file,
         IReadOnlyList<Aarch64FunctionAnalysis> analyses,
         IReadOnlyList<FunctionPatch> patches,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        SemanticExternalJumpTableExtension? externalProviderExtension = null)
     {
         var hasIndirectTargets = analyses.Any(analysis =>
             analysis.IndirectTargetResolutions.Count > 0
             || analysis.JumpTableResolutions.Count > 0
             || analysis.RuntimeIndirectCallResolutions.Count > 0
-            || analysis.StaticFunctionPointerCallResolutions.Count > 0);
+            || analysis.StaticFunctionPointerCallResolutions.Count > 0
+            || analysis.ExternalJumpTableConsumerProofs.Count > 0);
         var hasTls = analyses.Any(analysis =>
             file.TlsMetadata.StaticRelocations
                 .Concat(file.TlsMetadata.Dynamic.Relocations)
@@ -182,7 +206,7 @@ public sealed partial class FunctionProtectionService
             // projected by Aarch64SemanticPlanFactory. CFI must win this
             // selection because callback-shaped BLR instructions can coexist
             // with unwind-covered transformed code.
-            var cfiSnapshot = BuildCfiSemanticSnapshot(file, analyses, patches, diagnostics);
+            var cfiSnapshot = BuildCfiSemanticSnapshot(file, analyses, patches, diagnostics, externalProviderExtension);
             if (cfiSnapshot is not null || diagnostics.HasErrors)
             {
                 return cfiSnapshot;
@@ -191,7 +215,7 @@ public sealed partial class FunctionProtectionService
 
         if (hasIndirectTargets)
         {
-            return BuildIndirectSemanticSnapshot(file, analyses, patches, diagnostics);
+            return BuildIndirectSemanticSnapshot(file, analyses, patches, diagnostics, externalProviderExtension);
         }
 
         if (hasTls)
@@ -292,6 +316,16 @@ public sealed partial class FunctionProtectionService
 
         foreach (var reference in analysis.AddressReferences)
         {
+            if (analysis.ExternalJumpTableConsumerProofs.Any(proof =>
+                    proof.GotPageProducerAddress == reference.PageProducerAddress
+                    && proof.GotLoadProducerAddress == reference.LoadProducerAddress
+                    && proof.GotSlotAddress.Value == reference.TargetAddress.Value))
+            {
+                // The typed external-provider consumer proof owns this table object
+                // import. It is not an indirect-call dynamic-import owner.
+                continue;
+            }
+
             if (reference.RelocationOwner is not { } relocation
                 || !emittedRelocations.Add(relocation.Offset))
             {
@@ -755,14 +789,16 @@ public sealed partial class FunctionProtectionService
         ElfFile file,
         IReadOnlyList<Aarch64FunctionAnalysis> analyses,
         IReadOnlyList<FunctionPatch> patches,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        SemanticExternalJumpTableExtension? externalProviderExtension)
     {
         var indirectAnalyses = analyses
             .Where(analysis =>
                 analysis.IndirectTargetResolutions.Count > 0
                 || analysis.JumpTableResolutions.Count > 0
                 || analysis.RuntimeIndirectCallResolutions.Count > 0
-                || analysis.StaticFunctionPointerCallResolutions.Count > 0)
+                || analysis.StaticFunctionPointerCallResolutions.Count > 0
+                || analysis.ExternalJumpTableConsumerProofs.Count > 0)
             .ToArray();
         if (indirectAnalyses.Length != 1 || analyses.Count != 1)
         {
@@ -773,7 +809,22 @@ public sealed partial class FunctionProtectionService
             return null;
         }
 
-        var ownerExtensions = BuildAddressReferenceOwnerExtensions(file, indirectAnalyses[0], diagnostics);
+        var ownerExtensions = BuildAddressReferenceOwnerExtensions(file, indirectAnalyses[0], diagnostics).ToList();
+        if (indirectAnalyses[0].ExternalJumpTableConsumerProofs.Count > 0)
+        {
+            if (externalProviderExtension is null
+                || indirectAnalyses[0].ExternalJumpTableConsumerProofs.Count != 1)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanMalformed,
+                    "An external provider-table proof requires one configured provider extension and one selected consumer.",
+                    indirectAnalyses[0].Function.Value);
+                return null;
+            }
+
+            ownerExtensions.Add(externalProviderExtension);
+        }
+
         var result = Aarch64SemanticPlanFactory.Create(
             indirectAnalyses[0],
             Array.Empty<RelaRelocation>(),
@@ -849,7 +900,8 @@ public sealed partial class FunctionProtectionService
         ElfFile file,
         IReadOnlyList<Aarch64FunctionAnalysis> analyses,
         IReadOnlyList<FunctionPatch> patches,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        SemanticExternalJumpTableExtension? externalProviderExtension)
     {
         if (analyses.Count != 1)
         {
@@ -877,7 +929,21 @@ public sealed partial class FunctionProtectionService
             return null;
         }
 
-        var ownerExtensions = BuildAddressReferenceOwnerExtensions(file, analysis, diagnostics);
+        var ownerExtensions = BuildAddressReferenceOwnerExtensions(file, analysis, diagnostics).ToList();
+        if (analysis.ExternalJumpTableConsumerProofs.Count > 0)
+        {
+            if (externalProviderExtension is null || analysis.ExternalJumpTableConsumerProofs.Count != 1)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanMalformed,
+                    "An external provider-table proof requires one configured provider extension and one selected consumer.",
+                    analysis.Function.Value);
+                return null;
+            }
+
+            ownerExtensions.Add(externalProviderExtension);
+        }
+
         var projected = Aarch64SemanticPlanFactory.Create(
             analysis,
             Array.Empty<RelaRelocation>(),

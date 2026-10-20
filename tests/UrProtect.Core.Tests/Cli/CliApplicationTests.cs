@@ -82,6 +82,8 @@ public sealed class CliApplicationTests
         Assert.Equal((int)ProductExitCode.Success, exitCode);
         Assert.Contains("--observe-analysis", stdout.ToString(), StringComparison.Ordinal);
         Assert.Contains("Structural validation is the default", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--provider-file", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--provider-sha256", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -243,6 +245,206 @@ public sealed class CliApplicationTests
         Assert.True(stage.GetProperty("analysisDurationMilliseconds").GetInt64() >= 0);
         Assert.True(stage.GetProperty("emissionDurationMilliseconds").GetInt64() >= 0);
         Assert.Contains("stage.json", File.ReadAllText(manifestPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "ProtectedImageCli")]
+    public void ProtectImageAcceptsAllPinnedProviderFlagsAndRejectsPartialProviderConfiguration()
+    {
+        using var directory = new TemporaryDirectory();
+        var sourcePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ExternalJumpTable", "liburprotect-external-table-consumer.so");
+        var providerPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ExternalJumpTable", "liburprotect-jump-table-provider.so.1");
+        var source = File.ReadAllBytes(sourcePath);
+        var provider = File.ReadAllBytes(providerPath);
+        var artifactPath = directory.Path("external-protected.bin");
+        var rolePath = directory.Path("external-protected.json");
+        const string unitId = "external-provider-cli.fixture";
+        const string producerId = "urprotect.tests.external-provider-producer";
+        const string rehydratorId = "urprotect.tests.external-provider-rehydrator";
+        var producerBuildSha256 = new string('1', 64);
+        var sourceSha256 = Convert.ToHexString(SHA256.HashData(source)).ToLowerInvariant();
+        var requestSha256 = UrProtect.Core.Application.Protection.ProtectedImageCodec.ComputeRequestSha256(
+            new[] { UrProtect.Core.Application.Protection.FunctionSelector.ByName("urp_entry") },
+            new[] { UrProtect.Core.Application.Protection.ProtectionPass.ControlFlowFlattening });
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var success = CliApplication.Run(
+            new[]
+            {
+                "protect-image", sourcePath,
+                "--artifact", artifactPath,
+                "--role", rolePath,
+                "--manifest", directory.Path("external.sha256"),
+                "--stage", directory.Path("external-stage.json"),
+                "--unit", unitId,
+                "--profile", "outer-execveat",
+                "--producer-id", producerId,
+                "--producer-build-sha256", producerBuildSha256,
+                "--rehydrator", rehydratorId,
+                "--source-sha256", sourceSha256,
+                "--request-sha256", requestSha256,
+                "--function", "urp_entry",
+                "--pass", "control-flow-flattening",
+                "--provider-file", providerPath,
+                "--provider-soname", "liburprotect-jump-table-provider.so.1",
+                "--provider-build-id", "99ed42afaf9f2a6b87adebeffecb0ad95d4b5f66",
+                "--provider-sha256", Convert.ToHexString(SHA256.HashData(provider)).ToLowerInvariant(),
+            },
+            stdout,
+            stderr);
+
+        Assert.True(
+            success == (int)ProductExitCode.Success,
+            $"Unexpected CLI failure ({success}). stdout: {stdout} stderr: {stderr}");
+        Assert.Empty(stderr.ToString());
+        Assert.True(File.Exists(artifactPath));
+        Assert.True(File.Exists(rolePath));
+
+        var nativeImagePath = directory.Path("external-native-image.so");
+        var nativeRolePath = directory.Path("external-native-image.json");
+        var recordPath = directory.Path("external-rehydration.json");
+        using var rehydrateStdout = new StringWriter();
+        using var rehydrateStderr = new StringWriter();
+        var rehydrate = CliApplication.Run(
+            new[]
+            {
+                "rehydrate-image", sourcePath,
+                "--artifact", artifactPath,
+                "--native-image", nativeImagePath,
+                "--role", nativeRolePath,
+                "--record", recordPath,
+                "--unit", unitId,
+                "--profile", "outer-execveat",
+                "--source-sha256", sourceSha256,
+                "--request-sha256", requestSha256,
+                "--producer-id", producerId,
+                "--producer-build-sha256", producerBuildSha256,
+                "--consumer-id", rehydratorId,
+                "--consumer-build-sha256", new string('2', 64),
+                "--provider-file", providerPath,
+                "--provider-soname", "liburprotect-jump-table-provider.so.1",
+                "--provider-build-id", "99ed42afaf9f2a6b87adebeffecb0ad95d4b5f66",
+                "--provider-sha256", Convert.ToHexString(SHA256.HashData(provider)).ToLowerInvariant(),
+            },
+            rehydrateStdout,
+            rehydrateStderr);
+        Assert.True(
+            rehydrate == (int)ProductExitCode.Success,
+            $"Unexpected rehydration CLI failure ({rehydrate}). stdout: {rehydrateStdout} stderr: {rehydrateStderr}");
+        Assert.True(File.Exists(nativeImagePath));
+        Assert.True(File.Exists(nativeRolePath));
+        Assert.True(File.Exists(recordPath));
+
+        using var invalidStdout = new StringWriter();
+        using var invalidStderr = new StringWriter();
+        var partial = CliApplication.Run(
+            new[]
+            {
+                "protect-image", sourcePath,
+                "--artifact", directory.Path("partial.bin"),
+                "--role", directory.Path("partial-role.json"),
+                "--manifest", directory.Path("partial.sha256"),
+                "--stage", directory.Path("partial-stage.json"),
+                "--unit", "external-provider-cli.fixture",
+                "--profile", "outer-execveat",
+                "--function", "urp_entry",
+                "--pass", "control-flow-flattening",
+                "--provider-file", providerPath,
+            },
+            invalidStdout,
+            invalidStderr);
+
+        Assert.Equal((int)ProductExitCode.Usage, partial);
+        Assert.Contains("must be supplied all together", invalidStderr.ToString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(directory.Path("partial.bin")));
+
+        var partialNativeImage = directory.Path("partial-native.so");
+        using var partialRehydrateStdout = new StringWriter();
+        using var partialRehydrateStderr = new StringWriter();
+        var partialRehydrate = CliApplication.Run(
+            new[]
+            {
+                "rehydrate-image", sourcePath,
+                "--artifact", artifactPath,
+                "--native-image", partialNativeImage,
+                "--role", directory.Path("partial-native-role.json"),
+                "--record", directory.Path("partial-rehydration.json"),
+                "--unit", unitId,
+                "--profile", "outer-execveat",
+                "--source-sha256", sourceSha256,
+                "--request-sha256", requestSha256,
+                "--producer-id", producerId,
+                "--producer-build-sha256", producerBuildSha256,
+                "--consumer-id", rehydratorId,
+                "--consumer-build-sha256", new string('2', 64),
+                "--provider-file", providerPath,
+            },
+            partialRehydrateStdout,
+            partialRehydrateStderr);
+
+        Assert.Equal((int)ProductExitCode.Usage, partialRehydrate);
+        Assert.Contains("must be supplied all together", partialRehydrateStderr.ToString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(partialNativeImage));
+    }
+
+    [Fact]
+    [Trait("Category", "ProtectedImageCli")]
+    public void ProtectImageRedactsProviderPathFromDiagnosticsAndReportText()
+    {
+        using var directory = new TemporaryDirectory();
+        const string sentinel = "DO_NOT_REPORT_PROVIDER_PATH_9C41E2";
+        var sourcePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ExternalJumpTable", "liburprotect-external-table-consumer.so");
+        var providerFixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "ExternalJumpTable", "liburprotect-jump-table-provider.so.1");
+        var providerPath = directory.Path($"{sentinel}.so");
+        var source = File.ReadAllBytes(sourcePath);
+        var provider = File.ReadAllBytes(providerFixturePath);
+        var artifactPath = directory.Path("redacted.bin");
+        var rolePath = directory.Path("redacted-role.json");
+        var stagePath = directory.Path("redacted-stage.json");
+        const string unitId = "external-provider-redaction.fixture";
+        const string producerId = "urprotect.tests.external-provider-producer";
+        const string rehydratorId = "urprotect.tests.external-provider-rehydrator";
+        var producerBuildSha256 = new string('1', 64);
+        var sourceSha256 = Convert.ToHexString(SHA256.HashData(source)).ToLowerInvariant();
+        var requestSha256 = UrProtect.Core.Application.Protection.ProtectedImageCodec.ComputeRequestSha256(
+            new[] { UrProtect.Core.Application.Protection.FunctionSelector.ByName("urp_entry") },
+            new[] { UrProtect.Core.Application.Protection.ProtectionPass.ControlFlowFlattening });
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = CliApplication.Run(
+            new[]
+            {
+                "protect-image", sourcePath,
+                "--artifact", artifactPath,
+                "--role", rolePath,
+                "--manifest", directory.Path("redacted.sha256"),
+                "--stage", stagePath,
+                "--unit", unitId,
+                "--profile", "outer-execveat",
+                "--producer-id", producerId,
+                "--producer-build-sha256", producerBuildSha256,
+                "--rehydrator", rehydratorId,
+                "--source-sha256", sourceSha256,
+                "--request-sha256", requestSha256,
+                "--function", "urp_entry",
+                "--pass", "control-flow-flattening",
+                "--provider-file", providerPath,
+                "--provider-soname", "liburprotect-jump-table-provider.so.1",
+                "--provider-build-id", "99ed42afaf9f2a6b87adebeffecb0ad95d4b5f66",
+                "--provider-sha256", Convert.ToHexString(SHA256.HashData(provider)).ToLowerInvariant(),
+                "--json", "-",
+            },
+            stdout,
+            stderr);
+
+        Assert.NotEqual((int)ProductExitCode.Success, exitCode);
+        var stageReport = File.ReadAllText(stagePath);
+        var reportText = stdout.ToString() + stderr.ToString() + stageReport;
+        Assert.Contains("The bounded input could not be read.", reportText, StringComparison.Ordinal);
+        Assert.DoesNotContain(sentinel, reportText, StringComparison.Ordinal);
+        Assert.False(File.Exists(artifactPath));
     }
 
     [Fact]

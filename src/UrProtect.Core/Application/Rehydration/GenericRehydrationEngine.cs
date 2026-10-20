@@ -33,7 +33,11 @@ public sealed record RehydrationOptions(
     string ConsumerBuildSha256,
     string? ExpectedEntrySymbol = null,
     uint HostContextAbiVersion = HostContextContract.AbiVersion,
-    HostContextCapability HostContextRequiredCapabilities = HostContextContract.MandatoryCapabilities);
+    HostContextCapability HostContextRequiredCapabilities = HostContextContract.MandatoryCapabilities)
+{
+    /// <summary>Trusted host-only provider input required to rederive external-table proofs.</summary>
+    public ExternalJumpTableProviderInput? ExternalJumpTableProviderInput { get; init; }
+}
 
 public sealed record NativeImageDescriptor(
     int SchemaVersion,
@@ -239,9 +243,20 @@ public static class GenericRehydrationEngine
         }
 
         SemanticPlanSnapshot? semanticSnapshot = null;
+        Aarch64FunctionAnalysis? externalConsumerAnalysis = null;
         if (document is not null && sourceFile is not null)
         {
             semanticSnapshot = ValidateSemanticPlanSnapshotPresence(sourceFile, document, diagnostics);
+            if (semanticSnapshot is not null && !diagnostics.HasErrors)
+            {
+                SemanticExternalJumpTablePublicationValidator.ValidateSourceAndProvider(
+                    sourceFile,
+                    document,
+                    semanticSnapshot,
+                    options.ExternalJumpTableProviderInput,
+                    diagnostics,
+                    out externalConsumerAnalysis);
+            }
         }
 
         if (document is not null && sourceFile is not null && profilePolicy is not null && !diagnostics.HasErrors)
@@ -262,6 +277,13 @@ public static class GenericRehydrationEngine
                     layoutResult.ParsedOutput,
                     layoutResult.Plan,
                     semanticSnapshot,
+                    diagnostics)
+                && SemanticExternalJumpTablePublicationValidator.ValidateRehydratedImage(
+                    sourceFile,
+                    layoutResult.ParsedOutput,
+                    layoutResult.Plan,
+                    semanticSnapshot,
+                    externalConsumerAnalysis,
                     diagnostics)
                 && profilePolicy.ValidateOutput(layoutResult.ParsedOutput, options, diagnostics))
             {

@@ -154,7 +154,7 @@ public static partial class SemanticPlanSnapshotCodec
         var extensions = new List<ISemanticPlanExtension>(extensionCount);
         for (var index = 0; index < extensionCount; index++)
         {
-            if (!TryReadExtension(reader, out var extension))
+            if (!TryReadExtension(reader, extensions, out var extension))
             {
                 return MalformedReaderResult(reader, diagnostics);
             }

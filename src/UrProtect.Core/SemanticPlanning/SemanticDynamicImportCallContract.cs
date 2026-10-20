@@ -337,6 +337,10 @@ internal static class SemanticDynamicImportCallContract
             .OfType<SemanticDynamicImportCallExtension>()
             .Select(owner => (CallAddress: owner.CallAddress.Value, RelocationOffset: owner.RelocationOffset))
             .ToArray();
+        var externalProviderGotPageProducers = snapshot.Extensions
+            .OfType<SemanticExternalJumpTableConsumerExtension>()
+            .Select(extension => extension.ConsumerProof.GotPageProducerAddress)
+            .ToHashSet();
         var dynamicGotOffsets = source.RelaRelocations
             .Where(relocation => !relocation.IsPlt && relocation.Type == ElfConstants.RArm64GlobDat)
             .Select(relocation => relocation.Offset)
@@ -373,6 +377,13 @@ internal static class SemanticDynamicImportCallContract
         var valid = true;
         foreach (var sourceInstruction in sourceInstructions.OrderBy(instruction => instruction.Address))
         {
+            if (externalProviderGotPageProducers.Contains(sourceInstruction.Address))
+            {
+                // The external signed-relative table contract independently proves
+                // this imported object is a table base, not a dynamic call target.
+                continue;
+            }
+
             if (!string.Equals(sourceInstruction.Decode.Instruction?.Mnemonic, "ADRP", StringComparison.OrdinalIgnoreCase))
             {
                 continue;

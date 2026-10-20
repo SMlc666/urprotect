@@ -598,6 +598,11 @@ public static partial class SemanticPlanSnapshotCodec
 
                 context.WriteExternalProviderBytes(externalTable.TableBytesSpan);
                 break;
+            case SemanticExternalJumpTableConsumerExtension externalConsumer:
+                WriteExternalProviderEntityId(context, externalConsumer.ProviderTableIdentity);
+                context.WriteExternalProviderString(externalConsumer.ProviderSha256);
+                WriteExternalConsumerProof(context, externalConsumer.ConsumerProof);
+                break;
             case SemanticCfiEffectExtension cfi:
                 WriteEntityId(context, cfi.SourceIdentity);
                 WriteRange(context, cfi.SourceRange);
@@ -660,6 +665,70 @@ public static partial class SemanticPlanSnapshotCodec
         context.Writer.Write(symbol.Range.VirtualAddress.Value);
         context.Writer.Write(symbol.Range.Size);
         context.Writer.Write(symbol.LoadSegmentFlags);
+    }
+
+    private static void WriteExternalConsumerProof(
+        CanonicalWriteContext context,
+        Aarch64ExternalJumpTableConsumerProof proof)
+    {
+        var function = proof.SelectedFunction;
+        context.WriteString(function.Name);
+        context.Writer.Write((byte)function.Table);
+        context.Writer.Write(function.TableIndex);
+        context.Writer.Write(function.Binding);
+        context.Writer.Write(function.Other);
+        context.Writer.Write(function.SectionIndex);
+        context.Writer.Write(function.Value);
+        context.Writer.Write(function.Size);
+        context.Writer.Write(proof.CompareAddress);
+        context.Writer.Write(proof.BoundsBranchAddress);
+        context.Writer.Write(proof.SafeDefaultAddress);
+        context.WriteCount(proof.SafeDefaultPathAddresses.Count);
+        foreach (var address in proof.SafeDefaultPathAddresses)
+        {
+            context.Writer.Write(address);
+        }
+
+        context.Writer.Write(proof.GotPageProducerAddress);
+        context.Writer.Write(proof.GotLoadProducerAddress);
+        context.Writer.Write(proof.IndexedLoadAddress);
+        context.Writer.Write(proof.TableBaseAddAddress);
+        context.Writer.Write(proof.BranchAddress);
+        context.WriteCount(proof.ProducerAddresses.Count);
+        foreach (var address in proof.ProducerAddresses)
+        {
+            context.Writer.Write(address);
+        }
+
+        WriteRegister(context, proof.IndexRegister);
+        WriteRegister(context, proof.GotPointerRegister);
+        WriteRegister(context, proof.LoadedDisplacementRegister);
+        WriteRegister(context, proof.TargetRegister);
+        context.Writer.Write(proof.EntryWidth);
+        context.Writer.Write(proof.IsSigned);
+        context.Writer.Write(proof.IndexScaleShift);
+        context.Writer.Write(proof.LowerBound);
+        context.Writer.Write(proof.UpperBound);
+        context.Writer.Write(proof.GotSlotAddress.Value);
+        context.Writer.Write(proof.GotSlotFileOffset.Value);
+
+        var imported = proof.ImportOwner;
+        context.Writer.Write(imported.GotAddress);
+        context.Writer.Write(imported.RelocationSourceAddress);
+        context.Writer.Write(imported.SymbolIndex);
+        context.WriteString(imported.SymbolName);
+        context.Writer.Write(imported.SymbolBinding);
+        context.Writer.Write(imported.SymbolType);
+        context.Writer.Write(imported.SymbolVisibility);
+        context.Writer.Write(imported.AddressPageProducerAddress);
+        context.Writer.Write(imported.PointerLoadProducerAddress);
+        context.Writer.Write(imported.PageAddress);
+        context.Writer.Write(imported.Relocation.Offset);
+        context.Writer.Write(imported.Relocation.Info);
+        context.Writer.Write(imported.Relocation.Addend);
+        context.Writer.Write(imported.Relocation.SourceAddress);
+        context.Writer.Write(imported.Relocation.IsPlt);
+        context.EnsureWithinCanonicalLimit();
     }
 
     private static void WriteStaticFunctionPointerRelocationRow(

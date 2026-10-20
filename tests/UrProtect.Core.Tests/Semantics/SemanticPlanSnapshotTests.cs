@@ -249,6 +249,9 @@ public sealed class SemanticPlanSnapshotTests
         var decoded = SemanticPlanSnapshotCodec.Decode(encoded.CanonicalBytes!);
         Assert.True(decoded.IsSuccess, Describe(decoded.Diagnostics));
         var actual = Assert.Single(decoded.Snapshot!.Extensions.OfType<SemanticExternalJumpTableExtension>());
+        Assert.Empty(decoded.Snapshot.Extensions.OfType<SemanticExternalJumpTableConsumerExtension>());
+        Assert.Equal((SemanticPlanExtensionKind)8, actual.Kind);
+        Assert.Equal(encoded.CanonicalBytes, decoded.CanonicalBytes);
 
         Assert.Equal(external.ProviderSoname, actual.ProviderSoname);
         Assert.Equal(external.ProviderBuildIdHex, actual.ProviderBuildIdHex);
@@ -269,6 +272,32 @@ public sealed class SemanticPlanSnapshotTests
         Assert.DoesNotContain(decoded.Snapshot.AddressMapEntries, entry =>
             string.Equals(entry.Identity.Value, actual.TableIdentity.Value, StringComparison.Ordinal));
         Assert.Equal(-1, encoded.CanonicalBytes!.AsSpan().IndexOf(Encoding.UTF8.GetBytes(operatorPath)));
+    }
+
+    [Fact]
+    public void PreviouslyEmittedProviderOnlySps6SnapshotStillDecodesWithIdenticalCanonicalBytes()
+    {
+        var legacyBytes = Convert.FromBase64String(File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory,
+            "Fixtures",
+            "ExternalJumpTable",
+            "provider-only-urp-sps6-legacy.b64")));
+        var decoded = SemanticPlanSnapshotCodec.Decode(legacyBytes);
+
+        Assert.True(decoded.IsSuccess, Describe(decoded.Diagnostics));
+        Assert.Equal(legacyBytes, decoded.CanonicalBytes);
+        Assert.Equal((ushort)6, SemanticPlanSnapshotCodec.Version);
+        Assert.Empty(decoded.Snapshot!.Extensions.OfType<SemanticExternalJumpTableConsumerExtension>());
+        var provider = Assert.Single(decoded.Snapshot.Extensions.OfType<SemanticExternalJumpTableExtension>());
+        Assert.Equal((SemanticPlanExtensionKind)8, provider.Kind);
+
+        var encoded = SemanticPlanSnapshotCodec.Create(CreatePlan(extensions: new ISemanticPlanExtension[]
+        {
+            CreateExternalProviderTable(targetBinding: 0, targetVisibility: 2),
+        }));
+
+        Assert.True(encoded.IsSuccess, Describe(encoded.Diagnostics));
+        Assert.Equal(legacyBytes, encoded.CanonicalBytes);
     }
 
     [Theory]

@@ -257,6 +257,13 @@ public sealed class Aarch64ExternalJumpTableConsumerProofTests
     public void NearestExternalConsumerProofNegativesFailClosed(string mutation)
     {
         var fixture = CreateFixture(mutation);
+        if (mutation is "duplicate-rela" or "duplicate-symbol-owner")
+        {
+            Assert.Equal(2, fixture.File.RelaRelocations
+                .Select(relocation => relocation.SourceAddress)
+                .Distinct()
+                .Count());
+        }
 
         var success = Aarch64JumpTableResolver.TryProveExternalProviderTableConsumer(
             fixture.Instructions,
@@ -516,7 +523,11 @@ public sealed class Aarch64ExternalJumpTableConsumerProofTests
         var relocations = mutation switch
         {
             "missing-rela" => Array.Empty<RelaRelocation>(),
-            "duplicate-rela" => new[] { relocation, relocation },
+            "duplicate-rela" => new[]
+            {
+                relocation,
+                relocation with { SourceAddress = 0x2518 },
+            },
             "wrong-rela-type" => new[] { relocation with { Info = (1UL << 32) | ElfConstants.RArm64JumpSlot } },
             "duplicate-symbol-owner" => new[]
             {

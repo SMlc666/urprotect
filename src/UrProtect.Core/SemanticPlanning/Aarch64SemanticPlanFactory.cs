@@ -202,6 +202,8 @@ public static class Aarch64SemanticPlanFactory
             .ToDictionary(resolution => resolution.SourceAddress);
         var staticFunctionPointerCalls = analysis.StaticFunctionPointerCallResolutions
             .ToDictionary(resolution => resolution.SourceAddress);
+        var externalJumpTableConsumers = analysis.ExternalJumpTableConsumerProofs
+            .ToDictionary(resolution => resolution.BranchAddress);
         var projections = new List<ProjectedInstruction>(layout.Instructions.Count);
         var projectedInstructions = new List<SemanticInstruction>(layout.Instructions.Count);
         var fixups = new List<SemanticFixup>();
@@ -219,7 +221,9 @@ public static class Aarch64SemanticPlanFactory
                 || analysis.RuntimeIndirectCallResolutions.Any(
                     resolution => resolution.SourceAddress == sourceInstruction.Address)
                 || analysis.StaticFunctionPointerCallResolutions.Any(
-                    resolution => resolution.SourceAddress == sourceInstruction.Address);
+                    resolution => resolution.SourceAddress == sourceInstruction.Address)
+                || analysis.ExternalJumpTableConsumerProofs.Any(
+                    resolution => resolution.BranchAddress == sourceInstruction.Address);
             diagnostics.AddRange(projection.Diagnostics.Where(diagnostic =>
                 !(resolvedIndirect
                     && diagnostic.Code == DiagnosticCode.SemanticTargetUnresolved
@@ -246,6 +250,12 @@ public static class Aarch64SemanticPlanFactory
             else if (staticFunctionPointerCalls.TryGetValue(sourceInstruction.Address, out var staticFunctionPointerCall))
             {
                 instruction = ApplyStaticFunctionPointerCallTarget(instruction, staticFunctionPointerCall);
+            }
+            else if (externalJumpTableConsumers.TryGetValue(sourceInstruction.Address, out var externalJumpTableConsumer))
+            {
+                instruction = ApplyRuntimeResolvedTarget(
+                    instruction,
+                    SemanticExternalJumpTableContract.GetConsumerRuntimeBinding(externalJumpTableConsumer));
             }
 
             if (TryNormalizeUndiscoverableLiteral(
@@ -300,6 +310,11 @@ public static class Aarch64SemanticPlanFactory
             analysis,
             extensions,
             mapEntries,
+            diagnostics);
+
+        AddExternalJumpTableConsumerExtensions(
+            analysis,
+            extensions,
             diagnostics);
 
         AddJumpTableExtensions(
@@ -1183,9 +1198,14 @@ public static class Aarch64SemanticPlanFactory
 
     private static SemanticInstruction ApplyRuntimeIndirectCallTarget(
         SemanticInstruction instruction,
-        Aarch64RuntimeIndirectCallResolution resolution)
+        Aarch64RuntimeIndirectCallResolution resolution) =>
+        ApplyRuntimeResolvedTarget(instruction, resolution.RuntimeBinding);
+
+    private static SemanticInstruction ApplyRuntimeResolvedTarget(
+        SemanticInstruction instruction,
+        string runtimeBinding)
     {
-        var target = SemanticTarget.RuntimeResolved(resolution.RuntimeBinding);
+        var target = SemanticTarget.RuntimeResolved(runtimeBinding);
         var references = instruction.References
             .Select(reference => reference.Kind == SemanticReferenceKind.ControlFlowTarget
                 ? reference with { Target = target }
@@ -1304,6 +1324,53 @@ public static class Aarch64SemanticPlanFactory
                 DiagnosticCode.SemanticPlanMalformed,
                 "The selected-function analysis contains duplicate indirect-target resolutions.",
                 analysis.Function.Value);
+        }
+    }
+
+    private static void AddExternalJumpTableConsumerExtensions(
+        Aarch64FunctionAnalysis analysis,
+        List<ISemanticPlanExtension> extensions,
+        DiagnosticBag diagnostics)
+    {
+        foreach (var proof in analysis.ExternalJumpTableConsumerProofs)
+        {
+            var providerOwners = extensions.OfType<SemanticExternalJumpTableExtension>()
+                .Where(extension => extension.TableIdentity.Value == proof.ProviderFacts.TableIdentity
+                    && extension.ProviderSha256 == proof.ProviderFacts.ProviderSha256)
+                .ToArray();
+            if (providerOwners.Length != 1)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanMalformed,
+                    "An external provider-table consumer proof must be bound to exactly one provider-facts extension.",
+                    proof.BranchAddress);
+                continue;
+            }
+
+            var providerOwner = providerOwners[0];
+            extensions.Add(new SemanticExternalJumpTableConsumerExtension(
+                providerOwner.TableIdentity,
+                providerOwner.ProviderSha256,
+                proof));
+
+            var sourceIdentity = SemanticEntityId.Instruction(new VirtualAddress(proof.BranchAddress));
+            extensions.RemoveAll(extension => extension is SemanticIndirectTargetExtension indirect
+                && indirect.SourceInstruction == sourceIdentity
+                && indirect.SourceAddress.Value == proof.BranchAddress);
+            extensions.Add(new SemanticIndirectTargetExtension(
+                sourceIdentity,
+                new VirtualAddress(proof.BranchAddress),
+                SemanticTarget.RuntimeResolved(SemanticExternalJumpTableContract.GetConsumerRuntimeBinding(proof)),
+                SemanticExternalJumpTableContract.ConsumerProofKind));
+        }
+
+        if (analysis.ExternalJumpTableConsumerProofs
+            .GroupBy(proof => proof.BranchAddress)
+            .Any(group => group.Count() != 1))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SemanticPlanMalformed,
+                "An external provider-table analysis contains duplicate consumer proofs.");
         }
     }
 

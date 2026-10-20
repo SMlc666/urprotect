@@ -185,6 +185,8 @@ public enum SemanticPlanExtensionKind
     DynamicImportCall,
     StaticFunctionPointerCall,
     ExternalJumpTable,
+    // SPS6 discriminators are stable; append new extension kinds only.
+    ExternalJumpTableConsumer = 9,
 }
 
 public interface ISemanticPlanExtension

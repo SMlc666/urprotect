@@ -4,6 +4,7 @@ using UrProtect.Core.Application.Rehydration;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.Infrastructure;
 using UrProtect.Core.ElfLayout;
+using UrProtect.Core.SemanticPlanning;
 
 namespace UrProtect.Core.Application.Protection;
 
@@ -129,7 +130,27 @@ public sealed class ProtectionWorkflow
     public ProtectionWorkflowPlan Plan(
         ReadOnlyMemory<byte> source,
         FunctionProtectionOptions options,
-        Aarch64HostContextProofContext? proofContext = null)
+        Aarch64HostContextProofContext? proofContext = null) =>
+        PlanCore(source, options, proofContext, externalProviderFacts: null, externalProviderExtension: null);
+
+    internal ProtectionWorkflowPlan PlanWithExternalProvider(
+        ReadOnlyMemory<byte> source,
+        FunctionProtectionOptions options,
+        Aarch64HostContextProofContext? proofContext,
+        Aarch64ExternalJumpTableProviderFacts externalProviderFacts,
+        SemanticExternalJumpTableExtension externalProviderExtension)
+    {
+        ArgumentNullException.ThrowIfNull(externalProviderFacts);
+        ArgumentNullException.ThrowIfNull(externalProviderExtension);
+        return PlanCore(source, options, proofContext, externalProviderFacts, externalProviderExtension);
+    }
+
+    private ProtectionWorkflowPlan PlanCore(
+        ReadOnlyMemory<byte> source,
+        FunctionProtectionOptions options,
+        Aarch64HostContextProofContext? proofContext,
+        Aarch64ExternalJumpTableProviderFacts? externalProviderFacts,
+        SemanticExternalJumpTableExtension? externalProviderExtension)
     {
         var diagnostics = new DiagnosticBag();
         if (!TryNormalize(options, out var normalized, out var normalizationDiagnostics))
@@ -147,7 +168,14 @@ public sealed class ProtectionWorkflow
                 ProtectionWorkflowStage.RequestNormalization);
         }
 
-        var plan = planningService.Plan(source, normalized, proofContext);
+        var plan = externalProviderFacts is null || externalProviderExtension is null
+            ? planningService.Plan(source, normalized, proofContext)
+            : planningService.PlanWithExternalProvider(
+                source,
+                normalized,
+                proofContext,
+                externalProviderFacts,
+                externalProviderExtension);
         diagnostics.AddRange(plan.Diagnostics);
         return new ProtectionWorkflowPlan(
             normalized,

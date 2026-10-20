@@ -136,8 +136,8 @@ public sealed class CliApplication
         writer.WriteLine("    Structural validation is the default; use --observe-analysis for explicit whole-image observation.");
         writer.WriteLine("  urprotect pack <input> --output <wrapper> [--json <path|->] [--launcher <path>] [--profile <outer-execveat|host-context-entry>] [--entry-symbol <name>] [--thread-lifetime] [--path-preserving]");
         writer.WriteLine("  urprotect protect <input> --output <protected> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--pass <...>] [--json <path|->]");
-        writer.WriteLine("  urprotect protect-image <input> --artifact <path> --role <path> --manifest <path> --stage <path> --unit <id> --profile <outer-execveat|host-context-entry> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--producer-id <id>] [--producer-build-sha256 <sha256>] [--rehydrator <id>] [--source-sha256 <sha256>] [--request-sha256 <sha256>] [--json <path|->]");
-        writer.WriteLine("  urprotect rehydrate-image <source> --artifact <path> --native-image <path> --role <path> --record <path> --unit <id> --profile <outer-execveat|host-context-entry> --source-sha256 <sha256> --request-sha256 <sha256> --producer-id <id> --producer-build-sha256 <sha256> --consumer-id <id> --consumer-build-sha256 <sha256> [--json <path|->]");
+        writer.WriteLine("  urprotect protect-image <input> --artifact <path> --role <path> --manifest <path> --stage <path> --unit <id> --profile <outer-execveat|host-context-entry> --function <name>|--function-id <symtab|dynsym>:<index>|--function-address <0xaddr> --pass <control-flow-flattening|register-permutation> [--producer-id <id>] [--producer-build-sha256 <sha256>] [--rehydrator <id>] [--source-sha256 <sha256>] [--request-sha256 <sha256>] [--provider-file <path> --provider-soname <soname> --provider-build-id <hex> --provider-sha256 <sha256>] [--json <path|->]");
+        writer.WriteLine("  urprotect rehydrate-image <source> --artifact <path> --native-image <path> --role <path> --record <path> --unit <id> --profile <outer-execveat|host-context-entry> --source-sha256 <sha256> --request-sha256 <sha256> --producer-id <id> --producer-build-sha256 <sha256> --consumer-id <id> --consumer-build-sha256 <sha256> [--provider-file <path> --provider-soname <soname> --provider-build-id <hex> --provider-sha256 <sha256>] [--json <path|->]");
     }
 
     private static int RunValidation(CliOptions options, TextWriter stdout, TextWriter stderr)
@@ -330,7 +330,10 @@ public sealed class CliApplication
                 options.Functions,
                 options.Passes,
                 options.CommandArguments,
-                ToolVersion));
+                ToolVersion)
+            {
+                ExternalJumpTableProviderInput = options.ExternalJumpTableProviderInput,
+            });
         if (command.Diagnostics.Any(diagnostic => diagnostic.Code == DiagnosticCode.OutputPathConflict))
         {
             return WriteProtectedImageUsageFailure(
@@ -369,7 +372,10 @@ public sealed class CliApplication
                     options.ProducerId,
                     options.ProducerBuildSha256,
                     options.ConsumerId,
-                    options.ConsumerBuildSha256)));
+                    options.ConsumerBuildSha256)
+                {
+                    ExternalJumpTableProviderInput = options.ExternalJumpTableProviderInput,
+                }));
         if (command.Diagnostics.Any(diagnostic => diagnostic.Code == DiagnosticCode.OutputPathConflict))
         {
             stderr.WriteLine(command.Diagnostics.First(diagnostic => diagnostic.Code == DiagnosticCode.OutputPathConflict).Message);

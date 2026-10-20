@@ -10,6 +10,41 @@ namespace UrProtect.Core.Application.Protection;
 
 public sealed partial class FunctionProtectionService
 {
+    /// <summary>
+    /// Re-emits the bounded external consumer from independently decoded source
+    /// analysis at its final address. Publication uses the existing emitter's
+    /// complete control flow and instruction offsets, never snapshot assertions,
+    /// to distinguish the live dispatch from a self-consistent dead copy.
+    /// </summary>
+    internal bool TryReemitExternalConsumer(
+        ElfFile source,
+        Aarch64FunctionAnalysis analysis,
+        ulong outputAddress,
+        out byte[] bytes,
+        out IReadOnlyDictionary<ulong, ulong> instructionOffsets)
+    {
+        bytes = Array.Empty<byte>();
+        instructionOffsets = new Dictionary<ulong, ulong>();
+        if (!analysis.IsComplete
+            || analysis.ExternalJumpTableConsumerProofs.Count != 1
+            || !TryBuildProtectedCode(
+                source,
+                new[] { analysis },
+                new[] { ProtectionPass.ControlFlowFlattening },
+                out var code,
+                out _,
+                out _,
+                codeBaseOverride: outputAddress)
+            || code.Patches.Count != 1)
+        {
+            return false;
+        }
+
+        bytes = code.Bytes;
+        instructionOffsets = code.Patches[0].InstructionOutputOffsets;
+        return true;
+    }
+
     private bool TryBuildProtectedCode(
         ElfFile sourceFile,
         IReadOnlyList<Aarch64FunctionAnalysis> analyses,
@@ -358,7 +393,9 @@ public sealed partial class FunctionProtectionService
             var isResolvedIndirectTarget = analysis.IndirectTargetResolutions.Any(
                 resolution => resolution.SourceAddress == instruction.Address)
                 || analysis.JumpTableResolutions.Any(
-                    resolution => resolution.SourceAddress == instruction.Address);
+                    resolution => resolution.SourceAddress == instruction.Address)
+                || analysis.ExternalJumpTableConsumerProofs.Any(
+                    proof => proof.BranchAddress == instruction.Address);
             var isRuntimeIndirectCall = analysis.RuntimeIndirectCallResolutions.Any(
                 resolution => resolution.SourceAddress == instruction.Address);
             var isStaticFunctionPointerCall = analysis.StaticFunctionPointerCallResolutions.Any(
@@ -420,14 +457,21 @@ public sealed partial class FunctionProtectionService
         }
 
         if ((analysis.IndirectTargetResolutions.Count > 0
-                || analysis.JumpTableResolutions.Count > 0)
+                || analysis.JumpTableResolutions.Count > 0
+                || analysis.ExternalJumpTableConsumerProofs.Count > 0)
             && (!flatten || permutation))
         {
             var indirect = analysis.IndirectTargetResolutions.Count > 0
                 ? analysis.IndirectTargetResolutions[0]
                 : null;
             var sourceAddress = indirect?.SourceAddress
-                ?? analysis.JumpTableResolutions[0].SourceAddress;
+                ?? (analysis.JumpTableResolutions.Count > 0
+                    ? analysis.JumpTableResolutions[0].SourceAddress
+                    : (ulong?)null)
+                ?? (analysis.ExternalJumpTableConsumerProofs.Count > 0
+                    ? analysis.ExternalJumpTableConsumerProofs[0].BranchAddress
+                    : (ulong?)null)
+                ?? analysis.Function.Value;
             diagnostic = new Diagnostic(
                 DiagnosticSeverity.Error,
                 DiagnosticCode.IndirectTargetUnsupported,
@@ -669,7 +713,9 @@ public sealed partial class FunctionProtectionService
                     var isResolvedIndirectTarget = Source.IndirectTargetResolutions.Any(
                         resolution => resolution.SourceAddress == instruction.Address)
                         || Source.JumpTableResolutions.Any(
-                            resolution => resolution.SourceAddress == instruction.Address);
+                            resolution => resolution.SourceAddress == instruction.Address)
+                        || Source.ExternalJumpTableConsumerProofs.Any(
+                            proof => proof.BranchAddress == instruction.Address);
                     var isRuntimeIndirectCall = Source.RuntimeIndirectCallResolutions.Any(
                         resolution => resolution.SourceAddress == instruction.Address);
                     var isStaticFunctionPointerCall = Source.StaticFunctionPointerCallResolutions.Any(
@@ -721,6 +767,8 @@ public sealed partial class FunctionProtectionService
                     resolution => resolution.SourceAddress == last.Address);
                 var isStaticFunctionPointerCallTerminator = Source.StaticFunctionPointerCallResolutions.Any(
                     resolution => resolution.SourceAddress == last.Address);
+                var isExternalJumpTableConsumerTerminator = Source.ExternalJumpTableConsumerProofs.Any(
+                    proof => proof.BranchAddress == last.Address);
                 var isStableDirectCallTerminator = StableDirectCallAddresses.Contains(last.Address);
                 if (last.Decode.Instruction!.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
                     && !isTlsDescCallTerminator
@@ -728,6 +776,18 @@ public sealed partial class FunctionProtectionService
                     && !isStaticFunctionPointerCallTerminator)
                 {
                     InstructionOutputOffsets[last.Address] = emitter.PositionAddress - OutputAddress;
+                    if (isExternalJumpTableConsumerTerminator)
+                    {
+                        // Provider addresses remain in the provider ELF identity domain.
+                        // Keep the source BR and move only its consumer-owned GOT producer.
+                        if (!EmitSourceInstruction(emitter, encoder, last, diagnostics))
+                        {
+                            return false;
+                        }
+
+                        continue;
+                    }
+
                     if (Source.JumpTableResolutions.Any(
                             resolution => resolution.SourceAddress == last.Address))
                     {

@@ -1002,6 +1002,7 @@ public static partial class SemanticPlanSnapshotCodec
 
     private static bool TryReadExtension(
         SnapshotReader reader,
+        IReadOnlyList<ISemanticPlanExtension> priorExtensions,
         out ISemanticPlanExtension? extension)
     {
         extension = null;
@@ -1450,6 +1451,8 @@ public static partial class SemanticPlanSnapshotCodec
                 return TryReadStaticFunctionPointerCallExtension(reader, out extension);
             case SemanticPlanExtensionKind.ExternalJumpTable:
                 return TryReadExternalJumpTableExtension(reader, out extension);
+            case SemanticPlanExtensionKind.ExternalJumpTableConsumer:
+                return TryReadExternalJumpTableConsumerExtension(reader, priorExtensions, out extension);
             case SemanticPlanExtensionKind.CfiEffect:
                 if (!TryReadEntityId(reader, out var cfiIdentity)
                     || !TryReadRange(reader, out var cfiRange)
@@ -1585,6 +1588,195 @@ public static partial class SemanticPlanSnapshotCodec
             entries,
             tableBytes,
             (SemanticExternalJumpTableEncoding)encoding);
+        return true;
+    }
+
+    private static bool TryReadExternalJumpTableConsumerExtension(
+        SnapshotReader reader,
+        IReadOnlyList<ISemanticPlanExtension> priorExtensions,
+        out ISemanticPlanExtension? extension)
+    {
+        extension = null;
+        if (!reader.TryReadExternalProviderString(out var tableIdentity)
+            || !reader.TryReadExternalProviderString(out var providerSha256))
+        {
+            return false;
+        }
+
+        var providers = priorExtensions.OfType<SemanticExternalJumpTableExtension>()
+            .Where(provider => string.Equals(provider.TableIdentity.Value, tableIdentity, StringComparison.Ordinal)
+                && string.Equals(provider.ProviderSha256, providerSha256, StringComparison.Ordinal))
+            .ToArray();
+        if (providers.Length != 1)
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotMalformed,
+                "The external consumer proof does not reference exactly one preceding provider-facts extension.");
+        }
+
+        Aarch64ExternalJumpTableProviderFacts providerFacts;
+        try
+        {
+            providerFacts = providers[0].CreateConsumerProofInput();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IndexOutOfRangeException)
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotMalformed,
+                "The provider-facts extension cannot supply the external consumer proof identity.");
+        }
+
+        if (!TryReadExternalConsumerProof(reader, providerFacts, out var consumerProof))
+        {
+            return false;
+        }
+
+        extension = new SemanticExternalJumpTableConsumerExtension(
+            new SemanticExternalProviderTableIdentity(tableIdentity),
+            providerSha256,
+            consumerProof!);
+        return true;
+    }
+
+    private static bool TryReadExternalConsumerProof(
+        SnapshotReader reader,
+        Aarch64ExternalJumpTableProviderFacts providerFacts,
+        out Aarch64ExternalJumpTableConsumerProof? proof)
+    {
+        proof = null;
+        if (!reader.TryReadUtf8String(out var functionName)
+            || !reader.TryReadByte(out var functionTable)
+            || !reader.TryReadUInt32(out var functionTableIndex)
+            || !reader.TryReadByte(out var functionBinding)
+            || !reader.TryReadByte(out var functionOther)
+            || !reader.TryReadUInt16(out var functionSectionIndex)
+            || !reader.TryReadUInt64(out var functionValue)
+            || !reader.TryReadUInt64(out var functionSize)
+            || !reader.TryReadUInt64(out var compareAddress)
+            || !reader.TryReadUInt64(out var boundsBranchAddress)
+            || !reader.TryReadUInt64(out var safeDefaultAddress)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumInstructions, out var safePathCount))
+        {
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(ElfSymbolTableKind), (ElfSymbolTableKind)functionTable))
+        {
+            return reader.Fail(DiagnosticCode.SemanticPlanSnapshotUnsupported, "The external consumer function has an unsupported symbol-table kind.");
+        }
+
+        var safeDefaultPath = new ulong[safePathCount];
+        for (var index = 0; index < safePathCount; index++)
+        {
+            if (!reader.TryReadUInt64(out safeDefaultPath[index]))
+            {
+                return false;
+            }
+        }
+
+        if (!reader.TryReadUInt64(out var gotPageProducer)
+            || !reader.TryReadUInt64(out var gotLoadProducer)
+            || !reader.TryReadUInt64(out var indexedLoad)
+            || !reader.TryReadUInt64(out var tableBaseAdd)
+            || !reader.TryReadUInt64(out var branchAddress)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumProducerAddresses, out var producerCount))
+        {
+            return false;
+        }
+
+        var producers = new ulong[producerCount];
+        for (var index = 0; index < producerCount; index++)
+        {
+            if (!reader.TryReadUInt64(out producers[index]))
+            {
+                return false;
+            }
+        }
+
+        if (!TryReadRegister(reader, out var indexRegister)
+            || !TryReadRegister(reader, out var gotPointerRegister)
+            || !TryReadRegister(reader, out var loadedDisplacementRegister)
+            || !TryReadRegister(reader, out var targetRegister)
+            || !reader.TryReadInt32(out var entryWidth)
+            || !reader.TryReadBool(out var isSigned)
+            || !reader.TryReadInt32(out var indexScaleShift)
+            || !reader.TryReadInt32(out var lowerBound)
+            || !reader.TryReadInt32(out var upperBound)
+            || !reader.TryReadUInt64(out var gotSlotAddress)
+            || !reader.TryReadUInt64(out var gotSlotFileOffset)
+            || !reader.TryReadUInt64(out var importGotAddress)
+            || !reader.TryReadUInt64(out var importRelocationSource)
+            || !reader.TryReadUInt32(out var importSymbolIndex)
+            || !reader.TryReadUtf8String(out var importSymbolName)
+            || !reader.TryReadByte(out var importSymbolBinding)
+            || !reader.TryReadByte(out var importSymbolType)
+            || !reader.TryReadByte(out var importSymbolVisibility)
+            || !reader.TryReadUInt64(out var importPageProducer)
+            || !reader.TryReadUInt64(out var importPointerLoadProducer)
+            || !reader.TryReadUInt64(out var importPageAddress)
+            || !reader.TryReadUInt64(out var relocationOffset)
+            || !reader.TryReadUInt64(out var relocationInfo)
+            || !reader.TryReadInt64(out var relocationAddend)
+            || !reader.TryReadUInt64(out var relocationSourceAddress)
+            || !reader.TryReadBool(out var relocationIsPlt))
+        {
+            return false;
+        }
+
+        var relocation = new RelaRelocation(
+            relocationOffset,
+            relocationInfo,
+            relocationAddend,
+            relocationSourceAddress,
+            relocationIsPlt);
+        var imported = new Aarch64DynamicImportBinding(
+            importGotAddress,
+            importRelocationSource,
+            importSymbolIndex,
+            importSymbolName,
+            importSymbolBinding,
+            importSymbolType,
+            importSymbolVisibility,
+            importPageProducer,
+            importPointerLoadProducer,
+            relocation)
+        {
+            PageAddress = importPageAddress,
+        };
+        proof = new Aarch64ExternalJumpTableConsumerProof(
+            new ElfFunctionSymbol(
+                functionName,
+                (ElfSymbolTableKind)functionTable,
+                functionTableIndex,
+                functionBinding,
+                functionOther,
+                functionSectionIndex,
+                functionValue,
+                functionSize),
+            compareAddress,
+            boundsBranchAddress,
+            safeDefaultAddress,
+            safeDefaultPath,
+            gotPageProducer,
+            gotLoadProducer,
+            indexedLoad,
+            tableBaseAdd,
+            branchAddress,
+            producers,
+            indexRegister,
+            gotPointerRegister,
+            loadedDisplacementRegister,
+            targetRegister,
+            entryWidth,
+            isSigned,
+            indexScaleShift,
+            lowerBound,
+            upperBound,
+            new VirtualAddress(gotSlotAddress),
+            new FileOffset(gotSlotFileOffset),
+            imported,
+            providerFacts,
+            SemanticExternalJumpTableContract.ConsumerProofKind);
         return true;
     }
 

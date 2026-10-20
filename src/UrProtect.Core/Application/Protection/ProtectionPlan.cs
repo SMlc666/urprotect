@@ -40,7 +40,11 @@ public sealed record ProtectedImageProducerOptions(
     string ProducerBuildSha256,
     string RehydratorConsumerId,
     string? ExpectedSourceSha256 = null,
-    string? ExpectedRequestSha256 = null);
+    string? ExpectedRequestSha256 = null)
+{
+    /// <summary>Trusted host-only provider input; never copied into artifact operations.</summary>
+    public ExternalJumpTableProviderInput? ExternalJumpTableProviderInput { get; init; }
+}
 
 public sealed record ProtectedImageRoleRecord(
     int SchemaVersion,
@@ -189,6 +193,34 @@ public sealed class ProtectedImageProducer
             return new ProtectedImageEmissionResult(null, null, functions, diagnostics.ToArray());
         }
 
+        Aarch64ExternalJumpTableProviderFacts? externalProviderFacts = null;
+        SemanticExternalJumpTableExtension? externalProviderExtension = null;
+        if (producerOptions.ExternalJumpTableProviderInput is { } providerInput)
+        {
+            var providerSnapshot = ExternalJumpTableProviderFileReader.Read(providerInput);
+            diagnostics.AddRange(providerSnapshot.Diagnostics);
+            if (!providerSnapshot.IsSuccess || providerSnapshot.Bytes is null)
+            {
+                return new ProtectedImageEmissionResult(null, null, functions, diagnostics.ToArray());
+            }
+
+            var providerRead = SemanticExternalJumpTableProviderReader.ReadPrivateSnapshot(
+                providerSnapshot.Bytes,
+                providerInput.ExpectedSoname,
+                providerInput.ExpectedBuildIdHex,
+                providerInput.ExpectedSha256,
+                new SemanticExternalProviderTableIdentity("external-provider-table"));
+            diagnostics.AddRange(providerRead.Diagnostics);
+            if (!providerRead.IsSuccess || providerRead.Extension is null
+                || providerRead.CreateConsumerProofInput() is not { } derivedFacts)
+            {
+                return new ProtectedImageEmissionResult(null, null, functions, diagnostics.ToArray());
+            }
+
+            externalProviderFacts = derivedFacts;
+            externalProviderExtension = providerRead.Extension;
+        }
+
         var analysisStarted = Stopwatch.GetTimestamp();
         var parsedSource = ElfParser.Parse(sourceSnapshot);
         var proofContext = parsedSource.IsSuccess && parsedSource.File is not null
@@ -197,10 +229,15 @@ public sealed class ProtectedImageProducer
                 producerOptions.Profile,
                 HostContextContract.EntrySymbol)
             : null;
-        var workflowPlan = workflow.Plan(
-            sourceSnapshot,
-            new FunctionProtectionOptions(selectors, passes),
-            proofContext);
+        var normalizedRequest = new FunctionProtectionOptions(selectors, passes);
+        var workflowPlan = externalProviderFacts is null || externalProviderExtension is null
+            ? workflow.Plan(sourceSnapshot, normalizedRequest, proofContext)
+            : workflow.PlanWithExternalProvider(
+                sourceSnapshot,
+                normalizedRequest,
+                proofContext,
+                externalProviderFacts,
+                externalProviderExtension);
         var analysisDurationMilliseconds = (long)Stopwatch.GetElapsedTime(analysisStarted).TotalMilliseconds;
         var planResult = workflowPlan.FunctionPlan;
         functions = planResult.Functions.ToArray();

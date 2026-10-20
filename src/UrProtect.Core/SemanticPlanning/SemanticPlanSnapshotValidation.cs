@@ -614,6 +614,9 @@ public static partial class SemanticPlanSnapshotCodec
             case SemanticExternalJumpTableExtension externalTable:
                 SemanticExternalJumpTableContract.ValidateExtensionFields(externalTable, diagnostics);
                 break;
+            case SemanticExternalJumpTableConsumerExtension externalConsumer:
+                SemanticExternalJumpTableContract.ValidateConsumerExtensionFields(externalConsumer, diagnostics);
+                break;
             case SemanticJumpTableExtension jumpTable:
                 ValidateEntityId(jumpTable.TableIdentity, "jump-table identity", diagnostics);
                 ValidateRange(jumpTable.TableRange, "jump-table range", diagnostics);
@@ -2039,6 +2042,10 @@ public static partial class SemanticPlanSnapshotCodec
             SemanticExternalJumpTableExtension externalTable =>
                 GetIntSortKey((int)extension.Kind)
                 + GetOptionalStringSortKey(externalTable.TableIdentity.Value),
+            SemanticExternalJumpTableConsumerExtension externalConsumer =>
+                GetIntSortKey((int)extension.Kind)
+                + GetOptionalStringSortKey(externalConsumer.ProviderTableIdentity.Value)
+                + GetOptionalStringSortKey(externalConsumer.ProviderSha256),
             SemanticCfiEffectExtension cfi =>
                 GetIntSortKey((int)extension.Kind)
                 + GetEntitySortKey(cfi.SourceIdentity),

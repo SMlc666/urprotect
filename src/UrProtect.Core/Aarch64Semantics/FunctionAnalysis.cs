@@ -58,6 +58,9 @@ public sealed record Aarch64FunctionAnalysis(
     public IReadOnlyList<Aarch64StaticFunctionPointerCallResolution> StaticFunctionPointerCallResolutions { get; init; } =
         Array.Empty<Aarch64StaticFunctionPointerCallResolution>();
 
+    public IReadOnlyList<Aarch64ExternalJumpTableConsumerProof> ExternalJumpTableConsumerProofs { get; init; } =
+        Array.Empty<Aarch64ExternalJumpTableConsumerProof>();
+
     public IReadOnlyList<Aarch64AddressReferenceResolution> AddressReferences { get; init; } =
         Array.Empty<Aarch64AddressReferenceResolution>();
 
@@ -232,7 +235,24 @@ public sealed class Aarch64FunctionAnalyzer
     public Aarch64FunctionAnalysis Analyze(
         ElfFile file,
         ElfFunctionSymbol function,
+        Aarch64HostContextProofContext? proofContext = null) =>
+        AnalyzeCore(file, function, proofContext, externalProviderFacts: null);
+
+    internal Aarch64FunctionAnalysis AnalyzeWithExternalProvider(
+        ElfFile file,
+        ElfFunctionSymbol function,
+        Aarch64ExternalJumpTableProviderFacts externalProviderFacts,
         Aarch64HostContextProofContext? proofContext = null)
+    {
+        ArgumentNullException.ThrowIfNull(externalProviderFacts);
+        return AnalyzeCore(file, function, proofContext, externalProviderFacts);
+    }
+
+    private Aarch64FunctionAnalysis AnalyzeCore(
+        ElfFile file,
+        ElfFunctionSymbol function,
+        Aarch64HostContextProofContext? proofContext,
+        Aarch64ExternalJumpTableProviderFacts? externalProviderFacts)
     {
         ArgumentNullException.ThrowIfNull(file);
         var diagnostics = new DiagnosticBag();
@@ -301,6 +321,7 @@ public sealed class Aarch64FunctionAnalyzer
         var jumpTableResolutions = new Dictionary<ulong, Aarch64JumpTableResolution>();
         var runtimeIndirectCalls = new Dictionary<ulong, Aarch64RuntimeIndirectCallResolution>();
         var staticFunctionPointerCalls = new Dictionary<ulong, Aarch64StaticFunctionPointerCallResolution>();
+        var externalJumpTableConsumers = new Dictionary<ulong, Aarch64ExternalJumpTableConsumerProof>();
         var establishedProofContext = proofContext is not null
             && proofContext.MatchesEntry(function)
             && proofContext.MatchesSource(file)
@@ -363,6 +384,19 @@ public sealed class Aarch64FunctionAnalyzer
                         out var staticFunctionPointerCall):
                     staticFunctionPointerCalls.Add(instruction.Address, staticFunctionPointerCall);
                     AddFallthroughStart(starts, instruction.Address, functionEnd);
+                    break;
+                case Aarch64ControlFlowKind.IndirectBranch
+                    when externalProviderFacts is not null
+                        && Aarch64JumpTableResolver.TryProveExternalProviderTableConsumer(
+                            instructions,
+                            instructionIndex,
+                            function,
+                            file,
+                            externalProviderFacts,
+                            out var externalConsumer,
+                            out _)
+                        && externalConsumer is not null:
+                    externalJumpTableConsumers.Add(instruction.Address, externalConsumer);
                     break;
                 case Aarch64ControlFlowKind.IndirectBranch
                     when decoded.Mnemonic.Equals("blr", StringComparison.OrdinalIgnoreCase):
@@ -525,6 +559,17 @@ public sealed class Aarch64FunctionAnalyzer
             }
         }
 
+        var externalProviderAddressReferences = externalJumpTableConsumers.Values
+            .Select(proof => new Aarch64AddressReferenceResolution(
+                proof.GotPageProducerAddress,
+                proof.GotLoadProducerAddress,
+                new VirtualAddress(proof.GotSlotAddress.Value & ~0xFFFUL),
+                proof.GotSlotAddress,
+                sizeof(ulong),
+                proof.ImportOwner.Relocation,
+                proof.ImportOwner,
+                "The selected external provider-table consumer uses the source consumer's pinned GLOB_DAT-owned GOT slot."));
+
         return new Aarch64FunctionAnalysis(
             function,
             Aarch64FunctionAnalysisStatus.Complete,
@@ -544,7 +589,14 @@ public sealed class Aarch64FunctionAnalyzer
             StaticFunctionPointerCallResolutions = Array.AsReadOnly(staticFunctionPointerCalls.Values
                 .OrderBy(resolution => resolution.SourceAddress)
                 .ToArray()),
-            AddressReferences = indirectCallProof.AddressReferences,
+            ExternalJumpTableConsumerProofs = Array.AsReadOnly(externalJumpTableConsumers.Values
+                .OrderBy(resolution => resolution.BranchAddress)
+                .ToArray()),
+            AddressReferences = Array.AsReadOnly(indirectCallProof.AddressReferences
+                .Concat(externalProviderAddressReferences)
+                .OrderBy(reference => reference.PageProducerAddress)
+                .ThenBy(reference => reference.LoadProducerAddress)
+                .ToArray()),
         };
     }
 

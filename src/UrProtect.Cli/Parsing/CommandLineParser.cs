@@ -1,4 +1,5 @@
 using UrProtect.Core.ArtifactProtocol;
+using UrProtect.Core.Application;
 using UrProtect.Core.Application.Protection;
 using UrProtect.Core.Application.Validation;
 using UrProtect.Core.StructuralElf;
@@ -232,6 +233,10 @@ internal static class CommandLineParser
         string? producerBuildSha256 = null;
         string? consumerId = null;
         string? consumerBuildSha256 = null;
+        string? providerFile = null;
+        string? providerSoname = null;
+        string? providerBuildId = null;
+        string? providerSha256 = null;
         string? jsonPath = null;
         var profile = default(ProtectedImageProfile);
         var profileSet = false;
@@ -291,6 +296,18 @@ internal static class CommandLineParser
                 case "--consumer-build-sha256":
                     if (!SetOnce(ref consumerBuildSha256, value, flag, out error)) return false;
                     break;
+                case "--provider-file":
+                    if (!SetOnce(ref providerFile, value, flag, out error)) return false;
+                    break;
+                case "--provider-soname":
+                    if (!SetOnce(ref providerSoname, value, flag, out error)) return false;
+                    break;
+                case "--provider-build-id":
+                    if (!SetOnce(ref providerBuildId, value, flag, out error)) return false;
+                    break;
+                case "--provider-sha256":
+                    if (!SetOnce(ref providerSha256, value, flag, out error)) return false;
+                    break;
                 case "--json":
                     if (!SetOnce(ref jsonPath, value, flag, out error)) return false;
                     break;
@@ -308,9 +325,19 @@ internal static class CommandLineParser
             return false;
         }
 
+        if (!TryCreateExternalProviderInput(
+                providerFile, providerSoname, providerBuildId, providerSha256,
+                out var externalProviderInput, out error))
+        {
+            return false;
+        }
+
         options = new RehydrationCliOptions(
             args[1], artifactPath!, nativeImagePath!, nativeImageRolePath!, recordPath!, jsonPath,
-            unitId!, profile, sourceSha256!, requestSha256!, producerId!, producerBuildSha256!, consumerId!, consumerBuildSha256!);
+            unitId!, profile, sourceSha256!, requestSha256!, producerId!, producerBuildSha256!, consumerId!, consumerBuildSha256!)
+        {
+            ExternalJumpTableProviderInput = externalProviderInput,
+        };
         return true;
 
         static bool SetOnce(ref string? target, string value, string flag, out string usageError)
@@ -351,6 +378,10 @@ internal static class CommandLineParser
         string? rehydratorConsumerId = null;
         string? expectedSourceSha256 = null;
         string? expectedRequestSha256 = null;
+        string? providerFile = null;
+        string? providerSoname = null;
+        string? providerBuildId = null;
+        string? providerSha256 = null;
         ProtectedImageProfile profile = default;
         var profileSet = false;
         var functions = new List<FunctionSelector>();
@@ -477,6 +508,38 @@ internal static class CommandLineParser
                     }
 
                     break;
+                case "--provider-file":
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || providerFile is not null)
+                    {
+                        error = "Usage: --provider-file requires one provider path and may be specified only once.";
+                        return false;
+                    }
+                    providerFile = args[++index];
+                    break;
+                case "--provider-soname":
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || providerSoname is not null)
+                    {
+                        error = "Usage: --provider-soname requires one value and may be specified only once.";
+                        return false;
+                    }
+                    providerSoname = args[++index];
+                    break;
+                case "--provider-build-id":
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || providerBuildId is not null)
+                    {
+                        error = "Usage: --provider-build-id requires one value and may be specified only once.";
+                        return false;
+                    }
+                    providerBuildId = args[++index].ToLowerInvariant();
+                    break;
+                case "--provider-sha256":
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith('-') || providerSha256 is not null)
+                    {
+                        error = "Usage: --provider-sha256 requires one value and may be specified only once.";
+                        return false;
+                    }
+                    providerSha256 = args[++index].ToLowerInvariant();
+                    break;
                 case "--function" when index + 1 < args.Length && !args[index + 1].StartsWith('-'):
                     functions.Add(FunctionSelector.ByName(args[++index]));
                     break;
@@ -584,6 +647,13 @@ internal static class CommandLineParser
             return false;
         }
 
+        if (!TryCreateExternalProviderInput(
+                providerFile, providerSoname, providerBuildId, providerSha256,
+                out var externalProviderInput, out error))
+        {
+            return false;
+        }
+
         options = new ProtectedImageOptions(
             args[1],
             artifactPath,
@@ -600,7 +670,47 @@ internal static class CommandLineParser
             expectedRequestSha256,
             functions,
             passes,
-            args.ToArray());
+            args.ToArray())
+        {
+            ExternalJumpTableProviderInput = externalProviderInput,
+        };
+        return true;
+    }
+
+    private static bool TryCreateExternalProviderInput(
+        string? path,
+        string? soname,
+        string? buildId,
+        string? sha256,
+        out ExternalJumpTableProviderInput? input,
+        out string error)
+    {
+        input = null;
+        error = string.Empty;
+        var values = new[] { path, soname, buildId, sha256 };
+        if (values.All(value => value is null))
+        {
+            return true;
+        }
+
+        if (values.Any(string.IsNullOrWhiteSpace))
+        {
+            error = "Usage: --provider-file, --provider-soname, --provider-build-id, and --provider-sha256 must be supplied all together.";
+            return false;
+        }
+
+        var normalizedBuildId = buildId!.ToLowerInvariant();
+        var normalizedSha256 = sha256!.ToLowerInvariant();
+        if (normalizedBuildId.Length is < 8 or > 128
+            || (normalizedBuildId.Length & 1) != 0
+            || !normalizedBuildId.All(Uri.IsHexDigit)
+            || !IsSha256(normalizedSha256))
+        {
+            error = "Usage: provider build ID must be 8-128 even hexadecimal characters and provider SHA-256 exactly 64 hexadecimal characters.";
+            return false;
+        }
+
+        input = new ExternalJumpTableProviderInput(path!, soname!, normalizedBuildId, normalizedSha256);
         return true;
     }
 

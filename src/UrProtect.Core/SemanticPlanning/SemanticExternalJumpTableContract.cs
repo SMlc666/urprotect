@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
+using UrProtect.Core.Aarch64Semantics;
 using UrProtect.Core.Diagnostics;
 using UrProtect.Core.StructuralElf;
 
@@ -8,6 +10,7 @@ namespace UrProtect.Core.SemanticPlanning;
 /// <summary>Validation shared by snapshot authors and the strict SPS6 decoder.</summary>
 internal static class SemanticExternalJumpTableContract
 {
+    public const string ConsumerProofKind = "external-provider-signed-relative32-consumer-v1";
     private const ushort FirstReservedSectionIndex = 0xFF00;
     private const byte ProviderTableBinding = 1; // STB_GLOBAL
     private const byte ProviderTableVisibility = 0; // STV_DEFAULT
@@ -194,6 +197,33 @@ internal static class SemanticExternalJumpTableContract
         {
             Error(diagnostics, "Provider-local target symbol ranges must not alias or overlap.");
         }
+
+    }
+
+    public static void ValidateConsumerExtensionFields(
+        SemanticExternalJumpTableConsumerExtension extension,
+        DiagnosticBag diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        if (!IsCanonicalProviderTableIdentity(extension.ProviderTableIdentity.Value)
+            || !TryValidateText(extension.ProviderTableIdentity.Value, "provider table identity", diagnostics))
+        {
+            Error(diagnostics, "An external consumer proof requires a canonical provider-domain identity, not a path.");
+        }
+
+        if (!TryValidateText(extension.ProviderSha256, "provider SHA-256 reference", diagnostics)
+            || !IsLowercaseHex(extension.ProviderSha256, minimumCharacters: 64, maximumCharacters: 64))
+        {
+            Error(diagnostics, "An external consumer proof requires the canonical provider content SHA-256 reference.");
+        }
+
+        if (!string.Equals(extension.ConsumerProof.ProviderFacts.TableIdentity, extension.ProviderTableIdentity.Value, StringComparison.Ordinal)
+            || !string.Equals(extension.ConsumerProof.ProviderFacts.ProviderSha256, extension.ProviderSha256, StringComparison.Ordinal))
+        {
+            Error(diagnostics, "The external consumer proof does not match its provider identity and content-hash reference.");
+        }
     }
 
     public static void ValidateAggregate(
@@ -203,7 +233,9 @@ internal static class SemanticExternalJumpTableContract
         ArgumentNullException.ThrowIfNull(extensions);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
-        var externalTables = extensions.OfType<SemanticExternalJumpTableExtension>().ToArray();
+        var allExtensions = extensions.ToArray();
+        var externalTables = allExtensions.OfType<SemanticExternalJumpTableExtension>().ToArray();
+        var consumerExtensions = allExtensions.OfType<SemanticExternalJumpTableConsumerExtension>().ToArray();
         ValidateCount(externalTables.Length, SemanticPlanSnapshotLimits.MaximumExternalProviderTables, "external provider table", diagnostics);
 
         var providerHashes = new HashSet<string>(StringComparer.Ordinal);
@@ -211,6 +243,8 @@ internal static class SemanticExternalJumpTableContract
         long entries = 0;
         long strings = 0;
         long bytes = 0;
+        var consumerBranches = new HashSet<ulong>();
+        var indirectTargets = allExtensions.OfType<SemanticIndirectTargetExtension>().ToArray();
         foreach (var extension in externalTables)
         {
             if (string.IsNullOrEmpty(extension.ProviderSha256)
@@ -235,6 +269,37 @@ internal static class SemanticExternalJumpTableContract
             }
         }
 
+        foreach (var consumerExtension in consumerExtensions)
+        {
+            var proof = consumerExtension.ConsumerProof;
+            var matchingProviders = externalTables.Where(provider =>
+                    string.Equals(provider.TableIdentity.Value, consumerExtension.ProviderTableIdentity.Value, StringComparison.Ordinal)
+                    && string.Equals(provider.ProviderSha256, consumerExtension.ProviderSha256, StringComparison.Ordinal))
+                .ToArray();
+            if (matchingProviders.Length != 1)
+            {
+                Error(diagnostics, "An external consumer proof must link to exactly one provider-facts extension by table identity and content hash.");
+                continue;
+            }
+
+            var provider = matchingProviders[0];
+            ValidateConsumerProofFields(provider, proof, diagnostics);
+            if (!consumerBranches.Add(proof.BranchAddress))
+            {
+                Error(diagnostics, "An external consumer branch may be owned only once in a canonical snapshot.");
+            }
+
+            var expectedSourceIdentity = SemanticEntityId.Instruction(new VirtualAddress(proof.BranchAddress));
+            var matchingTargets = indirectTargets.Where(target => target.SourceAddress.Value == proof.BranchAddress).ToArray();
+            if (matchingTargets.Length != 1
+                || matchingTargets[0].SourceInstruction != expectedSourceIdentity
+                || matchingTargets[0].Target.Resolution != SemanticTargetResolution.RuntimeResolved
+                || !string.Equals(matchingTargets[0].Target.RuntimeBinding, GetConsumerRuntimeBinding(proof), StringComparison.Ordinal))
+            {
+                Error(diagnostics, "An external provider-table proof must bind one exact branch-identity and runtime-resolved indirect-target carrier.");
+            }
+        }
+
         if (symbols > SemanticPlanSnapshotLimits.MaximumExternalProviderSymbols)
         {
             Limit(diagnostics, "provider symbol", SemanticPlanSnapshotLimits.MaximumExternalProviderSymbols);
@@ -254,6 +319,113 @@ internal static class SemanticExternalJumpTableContract
         {
             Limit(diagnostics, "provider table byte", SemanticPlanSnapshotLimits.MaximumExternalProviderTableBytes);
         }
+    }
+
+    public static string GetConsumerRuntimeBinding(Aarch64ExternalJumpTableConsumerProof proof) =>
+        $"external-provider-table:{proof.ProviderFacts.ProviderSha256}:{proof.ProviderFacts.TableIdentity}";
+
+    public static string GetConsumerRuntimeBinding(SemanticExternalJumpTableExtension extension) =>
+        $"external-provider-table:{extension.ProviderSha256}:{extension.TableIdentity.Value}";
+
+    private static void ValidateConsumerProofFields(
+        SemanticExternalJumpTableExtension extension,
+        Aarch64ExternalJumpTableConsumerProof proof,
+        DiagnosticBag diagnostics)
+    {
+        if (proof.ProviderFacts is null || proof.ImportOwner is null)
+        {
+            Error(diagnostics, "The external provider consumer proof is missing its provider facts or import owner.");
+            return;
+        }
+
+        var provider = proof.ProviderFacts;
+        var imported = proof.ImportOwner;
+        var relocation = imported.Relocation;
+        var expectedProducers = new[]
+        {
+            proof.GotPageProducerAddress,
+            proof.GotLoadProducerAddress,
+            proof.IndexedLoadAddress,
+            proof.TableBaseAddAddress,
+            proof.BranchAddress,
+        };
+        if (!string.Equals(provider.TableIdentity, extension.TableIdentity.Value, StringComparison.Ordinal)
+            || !string.Equals(provider.ProviderSoname, extension.ProviderSoname, StringComparison.Ordinal)
+            || !string.Equals(provider.ProviderBuildIdHex, extension.ProviderBuildIdHex, StringComparison.Ordinal)
+            || !string.Equals(provider.ProviderSha256, extension.ProviderSha256, StringComparison.Ordinal)
+            || !string.Equals(provider.TableObjectName, extension.TableObject.Name, StringComparison.Ordinal)
+            || provider.TableObjectSize != extension.TableObject.Range.Size
+            || !string.Equals(provider.TableBytesSha256, Convert.ToHexString(SHA256.HashData(extension.TableBytesSpan)).ToLowerInvariant(), StringComparison.Ordinal)
+            || !ProviderTargetMappingMatchesProof(extension, provider)
+            || proof.EntryWidth != sizeof(int)
+            || !proof.IsSigned
+            || proof.IndexScaleShift != 2
+            || proof.LowerBound != 0
+            || proof.UpperBound != 3
+            || proof.ProducerAddresses.Count != expectedProducers.Length
+            || !proof.ProducerAddresses.SequenceEqual(expectedProducers)
+            || proof.BranchAddress == 0
+            || proof.CompareAddress == 0
+            || proof.BoundsBranchAddress == 0
+            || proof.SafeDefaultAddress == 0
+            || proof.SafeDefaultPathAddresses.Count == 0
+            || proof.SafeDefaultPathAddresses[0] != proof.SafeDefaultAddress
+            || proof.SafeDefaultPathAddresses.Count > SemanticPlanSnapshotLimits.MaximumInstructions
+            || !string.Equals(imported.SymbolName, extension.TableObject.Name, StringComparison.Ordinal)
+            || imported.SymbolType != ElfConstants.SttObject
+            || imported.SymbolBinding != 1
+            || imported.SymbolVisibility != 0
+            || imported.SymbolIndex == 0
+            || imported.GotAddress != proof.GotSlotAddress.Value
+            || relocation.Type != ElfConstants.RArm64GlobDat
+            || relocation.IsPlt
+            || relocation.Offset != proof.GotSlotAddress.Value
+            || relocation.SourceAddress != imported.RelocationSourceAddress
+            || relocation.SymbolIndex != imported.SymbolIndex
+            || relocation.Info != (((ulong)imported.SymbolIndex << 32) | ElfConstants.RArm64GlobDat)
+            || proof.SelectedFunction.Size == 0
+            || !proof.SelectedFunction.TryGetEnd(out _))
+        {
+            Error(diagnostics, "The external provider consumer proof does not bind exact provider identity, four signed-32 entries, safe bounds, ordered producers, and one GLOB_DAT/GOT owner.");
+        }
+    }
+
+    private static bool ProviderTargetMappingMatchesProof(
+        SemanticExternalJumpTableExtension extension,
+        Aarch64ExternalJumpTableProviderFacts provider)
+    {
+        if (extension.Entries.Count != provider.TargetSymbols.Count
+            || extension.Entries.Any(entry => entry is null))
+        {
+            return false;
+        }
+
+        var symbolsByIdentity = new Dictionary<(ElfSymbolTableKind Table, uint Index), SemanticExternalProviderSymbol>();
+        foreach (var symbol in extension.TargetSymbols)
+        {
+            if (symbol is null || !symbolsByIdentity.TryAdd((symbol.SymbolTable, symbol.SymbolIndex), symbol))
+            {
+                return false;
+            }
+        }
+
+        var entries = extension.Entries.OrderBy(entry => entry.Index).ToArray();
+        var providerTargets = provider.TargetSymbols.OrderBy(target => target.Index).ToArray();
+        for (var index = 0; index < entries.Length; index++)
+        {
+            var entry = entries[index];
+            var providerTarget = providerTargets[index];
+            if (entry is null
+                || entry.Index != index
+                || providerTarget.Index != index
+                || !symbolsByIdentity.TryGetValue((entry.TargetSymbolTable, entry.TargetSymbolIndex), out var symbol)
+                || !string.Equals(symbol.Name, providerTarget.SymbolName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void ValidateSymbol(

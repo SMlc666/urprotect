@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Security.Cryptography;
+using UrProtect.Core.Aarch64Semantics;
 using UrProtect.Core.StructuralElf;
 
 namespace UrProtect.Core.SemanticPlanning;
@@ -165,5 +167,55 @@ public sealed record SemanticExternalJumpTableExtension : ISemanticPlanExtension
 
     public SemanticExternalJumpTableEncoding Encoding { get; }
 
+    public Aarch64ExternalJumpTableProviderFacts CreateConsumerProofInput()
+    {
+        var targets = new Aarch64ExternalProviderTargetIdentity[Entries.Count];
+        foreach (var entry in Entries)
+        {
+            var symbol = TargetSymbols.Single(target =>
+                target.SymbolTable == entry.TargetSymbolTable && target.SymbolIndex == entry.TargetSymbolIndex);
+            targets[entry.Index] = new Aarch64ExternalProviderTargetIdentity(entry.Index, symbol.Name);
+        }
+
+        var tableHash = Convert.ToHexString(SHA256.HashData(tableBytes)).ToLowerInvariant();
+        return new Aarch64ExternalJumpTableProviderFacts(
+            TableIdentity.Value,
+            ProviderSoname,
+            ProviderBuildIdHex,
+            ProviderSha256,
+            TableObject.Name,
+            TableObject.Range.Size,
+            tableHash,
+            targets);
+    }
+
     public SemanticPlanExtensionKind Kind => SemanticPlanExtensionKind.ExternalJumpTable;
+}
+
+/// <summary>
+/// Source-consumer proof linked to one provider-facts extension by its stable
+/// provider table identity and complete-file content hash. This companion has
+/// its own SPS6 discriminator; it does not change the provider-only wire record.
+/// </summary>
+public sealed record SemanticExternalJumpTableConsumerExtension : ISemanticPlanExtension
+{
+    public SemanticExternalJumpTableConsumerExtension(
+        SemanticExternalProviderTableIdentity providerTableIdentity,
+        string providerSha256,
+        Aarch64ExternalJumpTableConsumerProof consumerProof)
+    {
+        ArgumentNullException.ThrowIfNull(providerSha256);
+        ArgumentNullException.ThrowIfNull(consumerProof);
+        ProviderTableIdentity = providerTableIdentity;
+        ProviderSha256 = providerSha256;
+        ConsumerProof = consumerProof;
+    }
+
+    public SemanticExternalProviderTableIdentity ProviderTableIdentity { get; }
+
+    public string ProviderSha256 { get; }
+
+    public Aarch64ExternalJumpTableConsumerProof ConsumerProof { get; }
+
+    public SemanticPlanExtensionKind Kind => SemanticPlanExtensionKind.ExternalJumpTableConsumer;
 }

@@ -32,7 +32,8 @@ internal sealed class SelectedFunctionProtectionPlanner
         ReadOnlyMemory<byte> input,
         IReadOnlyList<FunctionSelector> selectors,
         IReadOnlyList<ProtectionPass> passes,
-        Aarch64HostContextProofContext? proofContext = null)
+        Aarch64HostContextProofContext? proofContext = null,
+        Aarch64ExternalJumpTableProviderFacts? externalProviderFacts = null)
     {
         ArgumentNullException.ThrowIfNull(selectors);
         ArgumentNullException.ThrowIfNull(passes);
@@ -83,10 +84,10 @@ internal sealed class SelectedFunctionProtectionPlanner
             var functionProofContext = proofContext is not null && proofContext.MatchesEntry(function)
                 ? proofContext
                 : null;
-            var analysis = new Aarch64FunctionAnalyzer(decoder).Analyze(
-                parsed.File,
-                function,
-                functionProofContext);
+            var analyzer = new Aarch64FunctionAnalyzer(decoder);
+            var analysis = externalProviderFacts is null
+                ? analyzer.Analyze(parsed.File, function, functionProofContext)
+                : analyzer.AnalyzeWithExternalProvider(parsed.File, function, externalProviderFacts, functionProofContext);
             analyses.Add(analysis);
             if (!analysis.IsComplete)
             {

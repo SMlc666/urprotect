@@ -200,6 +200,59 @@ public static class SemanticExternalJumpTableProviderReader
         // The caller may retain a writable alias to this memory. Hash, parse,
         // and derive every byte fact from one private bounded snapshot instead.
         var providerSnapshot = providerBytes.ToArray();
+        return ReadSnapshot(providerSnapshot, expectedProviderSoname, expectedBuildIdHex, expectedSha256, tableIdentity);
+    }
+
+    /// <summary>
+    /// Reads a byte array already owned as a private Infrastructure snapshot.
+    /// This avoids a second full-size copy while preserving the public Read
+    /// method's isolation for arbitrary caller-owned memory.
+    /// </summary>
+    internal static SemanticExternalJumpTableProviderReadResult ReadPrivateSnapshot(
+        byte[] providerSnapshot,
+        string expectedProviderSoname,
+        string expectedBuildIdHex,
+        string expectedSha256,
+        SemanticExternalProviderTableIdentity tableIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(providerSnapshot);
+        ArgumentNullException.ThrowIfNull(expectedProviderSoname);
+        ArgumentNullException.ThrowIfNull(expectedBuildIdHex);
+        ArgumentNullException.ThrowIfNull(expectedSha256);
+
+        var diagnostics = new DiagnosticBag();
+        if (!IsCanonicalSoname(expectedProviderSoname)
+            || !IsCanonicalTableIdentity(tableIdentity.Value)
+            || !IsCanonicalHex(expectedBuildIdHex, minimumCharacters: 8, maximumCharacters: 128, evenLength: true)
+            || !IsCanonicalHex(expectedSha256, minimumCharacters: 64, maximumCharacters: 64, evenLength: true))
+        {
+            Error(
+                diagnostics,
+                DiagnosticCode.SemanticPlanSnapshotMalformed,
+                "The pinned provider SONAME, GNU build ID, SHA-256, or canonical table identity is malformed.");
+            return Failure(diagnostics);
+        }
+
+        if (providerSnapshot.Length > MaximumProviderElfBytes)
+        {
+            Error(
+                diagnostics,
+                DiagnosticCode.SemanticPlanSnapshotLimitExceeded,
+                $"The raw provider ELF exceeds the {MaximumProviderElfBytes}-byte input limit.");
+            return Failure(diagnostics);
+        }
+
+        return ReadSnapshot(providerSnapshot, expectedProviderSoname, expectedBuildIdHex, expectedSha256, tableIdentity);
+    }
+
+    private static SemanticExternalJumpTableProviderReadResult ReadSnapshot(
+        byte[] providerSnapshot,
+        string expectedProviderSoname,
+        string expectedBuildIdHex,
+        string expectedSha256,
+        SemanticExternalProviderTableIdentity tableIdentity)
+    {
+        var diagnostics = new DiagnosticBag();
         var actualSha256Bytes = SHA256.HashData(providerSnapshot);
         var expectedSha256Bytes = Convert.FromHexString(expectedSha256);
         if (!CryptographicOperations.FixedTimeEquals(actualSha256Bytes, expectedSha256Bytes))
