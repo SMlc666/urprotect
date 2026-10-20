@@ -138,3 +138,70 @@ Add before promotion:
 - Let `Aarch64InstructionEncoder`/AsmStone own every generated or relocated instruction word. Table entries are data edits, but their arithmetic and ownership must be typed and validated before the one layout writer consumes them.
 - Let `ElfLayoutPlanner` choose placement and `ElfLayoutMaterializer` apply edits/reparse/validate. The semantic resolver must not write ELF bytes directly.
 - Preserve explicit unresolved/deferred/runtime states in the plan and evidence; publication requires a validated destination or an explicit preservation/translation contract.
+
+## Current scoped implementation and evidence addendum (2026-10-20)
+
+This addendum supersedes the earlier pre-implementation inventory where it
+said that the provider runner, checker, transformed observation, rollback
+oracle, or required CI wiring did not yet exist. The original audit remains
+historical context. One provider family is now implemented and independently
+checked on native AArch64/glibc; the row remains `unknown` and
+`scoped-observation-not-promoted` until hosted CI and the still-open task
+criteria are satisfied.
+
+### Target-resolution modes versus fixup states
+
+`SemanticTargetResolution` has four target modes: `Exact`, `BoundedSet`,
+`RuntimeResolved`, and `Unresolved`. `Deferred` is not another target mode: it
+is a `SemanticFixupResolutionState` used when an exact static output binding is
+not yet available. Current projection maps Exact to Resolved, BoundedSet and
+RuntimeResolved to Deferred, and Unresolved to Unresolved. Do not infer
+runtime ownership from a Deferred fixup, or treat a runtime target as a local
+bounded candidate.
+
+| Mode | Current meaning in the bounded indirect-control work | Address-map consequence |
+|---|---|---|
+| `Exact` | A uniquely proven source target/instruction identity, including fixed local targets where the owner is rederived from source. | A movable local instruction/target must have a checked source→output `AddressMap` binding. Preserve-original-VA owners require identity mapping and byte/symbol validation. |
+| `BoundedSet` | A finite, bounded candidate set, used for local bounded control-flow/table resolution; a candidate list alone is not output-placement proof. | Each moved local target needs its own checked output mapping. In the shared signed-relative table row, schema-3 target bindings separately connect table/entry/target identities, source target/base VAs, mapped output target/base VAs, source entry bytes, edits and Native Image bytes. |
+| `RuntimeResolved` | A target resolved by a runtime owner rather than a statically known consumer VA. The external provider `BR` carrier is linked to `external-provider-table:{ProviderSha256}:{TableIdentity}`; dynamic imports and TLS have their own owner bindings. | Provider table/target addresses stay in the provider identity domain: no fabricated consumer `AddressMap` rows, no provider-table clone, and no VA translation in managed publication. At runtime the checker derives provider mappings/load bias and binds each entry displacement to the provider target symbol and measured mapping. Consumer GOT/page mappings remain identity-preserved and are validated separately. |
+| `Unresolved` | Missing, ambiguous or unsupported proof; this includes unsafe bounds/default, missing owner evidence, malformed range, or unproven selected indirect edges. | No output mapping can make the unresolved proof publishable. Fail closed before the applicable artifact/loader boundary and retain the first diagnostic/stage. |
+
+This summary distinguishes the semantic address map from runtime loader
+mappings. The former relates source-image local addresses to emitted output;
+the latter proves where a separately identified provider DSO/table/target was
+actually mapped. A provider target address is not a source-image address merely
+because the target is executable at runtime.
+
+### Completed scoped provider evidence and still-open promotion gates
+
+- The transformed source→`protect-image`→`rehydrate-image`→Native Image run is
+  retained at
+  `.artifacts/indirect-control/provider-rollback-native-image-implementation-20261020-4/runtime.indirect-control.external-provider.glibc.host-context-entry`.
+  It exercises selected `urp_entry` and control `urp_observer` for indices
+  0–3 and the safe default, binds provider SONAME/build ID/SHA-256, consumer
+  GLOB_DAT/GOT, table bytes, all four target symbol rows, statuses/streams,
+  Native Image output and release, and remains explicitly
+  `scoped-observation-not-promoted`.
+- The dedicated post-acquisition rollback root is
+  `.artifacts/indirect-control/provider-loaded-rollback-ci-validation-20261020T153308Z-18193`.
+  Its source-loader oracle rejects after provider/consumer binding, checks
+  cleanup of mappings/descriptors/references, then verifies successful reload,
+  entry/observer dispatch and release. This source-loader root is distinct from
+  both the wrong-pin prepublication negative and transformed Native Image
+  rollback record.
+- The independent integration review reported a scoped pass for the current
+  transformed and source-loader roots, checker suites, CI workflow shape, and
+  unknown/non-promoted registry status. Local managed/native/Python and matrix
+  validations are recorded in the child `implement.md`. The official hosted
+  workflow has not run on the uncommitted YAML; hosted artifact upload and
+  branch-protection mapping remain to be confirmed.
+- `fixtures/manifest.json` remains `unknown`; evaluator digest registration is
+  current. `tests/regression-matrix.json` requires the transformed provider and
+  separate source-loader rollback rows on native AArch64. No musl/Bionic,
+  arbitrary provider/dependency, other table family, or general indirect-call
+  result is inferred.
+- The task now records its scoped external-table evidence criterion as complete,
+  but the general ownership-policy criterion, three-runtime evidence, and final
+  general target-resolution/address-map report remain unchecked. The historical
+  Bionic staged-merge failures listed in the earlier audit remain unexplained;
+  a later green full Python suite does not explain those failures.

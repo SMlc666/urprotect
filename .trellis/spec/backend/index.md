@@ -14,7 +14,7 @@ no database-backed application layer.
 | [Error Handling](./error-handling.md) | Diagnostics, failure propagation, and CLI exit codes | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | .NET, binary-safety, testing, and CI contracts | Filled |
 | [Runtime Compatibility](./runtime-compatibility.md) | HostContext, no-path handoff, and matrix evidence contracts | Filled |
-| [External Consumer Proof](./external-consumer-proof.md) | Selected external-table proof-only API, exact instruction semantics, and admission boundary | Filled |
+| [External Consumer Proof](./external-consumer-proof.md) | Host-pinned provider input, exact selected-consumer proof, SPS6 companion, managed publication, and scoped native AArch64/glibc evidence; runtime row remains unknown/non-promoted pending hosted CI | Filled |
 | [TLS Rewrite](./tls-rewrite.md) | Typed AArch64 TLS semantic rewrite and TLSDESC ownership contracts | Filled |
 | [TLS Evidence Oracle](./tls-evidence-oracle.md) | Explicit row identities, measured baselines, portable runtime facts, and closed child inventories | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Diagnostics and stdout/stderr behavior | Filled; no logging framework |
@@ -25,6 +25,10 @@ no database-backed application layer.
   frames, pack validation, and the byte-preserving pipeline.
 - `UrProtect.Cli` owns command parsing, stable product exit codes, human output,
   JSON report serialization, and the native `execve` handoff entry point.
+- Host-supplied provider bytes are read by the Infrastructure bounded private-
+  snapshot adapter; Application coordinates input and publication but performs
+  no direct file I/O. See the external-consumer, safe-input, and error-handling
+  contracts linked above.
 - `tests/UrProtect.Core.Tests` owns unit, malformed-input, property, golden
   report, and pack integration tests.
 - `native/`, `scripts/`, `fixtures/`, and `third_party/` are integration and

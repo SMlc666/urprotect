@@ -153,3 +153,131 @@ or silently fall back from a required native ARM64 job to QEMU, another host
 architecture, or the C# packer as a wrapper launcher. Do not silently fall
 back from an AsmStone encoding failure to source-word retention or manual
 bitfield assembly.
+
+## Scenario: Managed external-provider failures
+
+### 1. Scope / Trigger
+
+Apply this contract at the `protect-image` / `rehydrate-image` host-input,
+provider-reader, canonical-snapshot and final Native Image publication
+boundaries. Managed admission alone does not establish runtime behavior. A
+scoped native AArch64/glibc source-versus-rehydrated-Native-Image observation
+and separate provider-loaded rollback evidence are retained, but the runtime row
+remains unknown/non-promoted pending hosted CI and broader runtime gates. Owners
+and exact proof/fixup checks are in
+[external consumer publication](./external-consumer-proof.md); descriptor
+requirements are in [safe provider input](./quality-guidelines.md#scenario-bounded-private-provider-file-input).
+
+### 2. Signatures
+
+```csharp
+ExternalJumpTableProviderFileReader.Read(ExternalJumpTableProviderInput input)
+    -> ExternalJumpTableProviderFileSnapshot // Bytes?, Diagnostics, IsSuccess
+
+FileSystemAdapter.ReadBoundedPrivateSnapshot(string path, int maximumBytes)
+    -> FileSnapshot // FullPath, Bytes, SourceMode?, Diagnostics, IsSuccess
+
+SemanticExternalJumpTableProviderReader.Read(
+    ReadOnlyMemory<byte> providerBytes, string expectedProviderSoname,
+    string expectedBuildIdHex, string expectedSha256,
+    SemanticExternalProviderTableIdentity tableIdentity)
+    -> SemanticExternalJumpTableProviderReadResult
+```
+
+These are API summaries; the first two owners are Application coordination and
+Infrastructure I/O respectively. The public semantic reader takes no path.
+Its internal `ReadPrivateSnapshot` overload consumes the Infrastructure-owned
+byte array; neither a reader result nor a constructed proof is publication
+permission. The internal publication validator reports through `DiagnosticBag`
+and returns no validated analysis on a source/provider validation failure.
+
+### 3. Contracts
+
+- The four provider flags are all-or-none, once per command, with canonicalized
+  hex pins; partial/empty/duplicate or invalid hex groups fail command parsing.
+  Absent flags do not implicitly select a provider from a payload or environment.
+- The provider file coordinator must delegate all I/O. Expected filesystem,
+  path, unsupported-platform and missing-native-entry failures become bounded
+  diagnostics. Do not propagate the host path or `exception.Message` into the
+  provider diagnostic/report; preserve the original diagnostic code rather
+  than replacing it with an incidental parse failure.
+- Failed bounded Infrastructure reads return empty `FileSnapshot.Bytes`;
+  failed Application provider snapshots return `Bytes == null`. Consumers must
+  check `IsSuccess` and never parse failure bytes as an empty ELF/provider.
+- Only one private bounded observation is hashed/parsed. Wrong hash stops before
+  parsing, even if the input is also malformed. Truncation/growth during the
+  same-handle read rejects the whole snapshot, never a prefix. Unsupported safe
+  open/statx hosts have no `ReadAllBytes` fallback.
+- Snapshot local validation is necessary, not sufficient: rederive source
+  instructions, fixups and full consumer/provider owner facts, then check the
+  complete physical emitter result, producer offsets, entry/dependencies and
+  unchanged GOT before publication. Refreshing all nested/outer digests must
+  not bypass these semantic checks. No caught encoder/validation failure may
+  retain source words as a success fallback.
+- Failure may retain a failed record, diagnostics and raw failure evidence;
+  it must not publish a successful Protected Image/role, Native Image/role or
+  loader/behavior success. No native loader is invoked by these managed tests.
+
+### 4. Validation & Error Matrix
+
+| Condition | Stable boundary/result |
+|---|---|
+| Partial/duplicate/empty provider CLI group or malformed hex pin | usage error, CLI 2; no publication |
+| Incomplete direct `ExternalJumpTableProviderInput`, invalid path or negative byte limit | `InvalidArgument`, sanitized message |
+| Safe-open failure, final symlink, non-regular input, unaudited host or missing `statx` fields | `InputIoFailure`; no bytes; path/raw exception redacted |
+| Initial provider input > 8 MiB | `SemanticPlanSnapshotLimitExceeded` before copy/read/parse |
+| Short read, growth probe or final descriptor mismatch | `InputIoFailure`; discard snapshot |
+| Snapshot SHA differs from host pin | `OutputIdentityMismatch` before ELF parsing |
+| Wrong pinned SONAME/build ID | `OutputIdentityMismatch`; no provider extension |
+| Invalid provider ELF/profile/table/target range | existing bounded parser/provider diagnostic; no proof input |
+| Missing host provider or unique consumer owner at executable rehydration, provider/source proof mismatch | `SemanticPlanSnapshotMalformed`; no Native Image |
+| Canonically valid forged source instruction/fixup, including jointly omitted instruction/fixup | `SemanticPlanSnapshotMalformed` with `source-derived projection` message |
+| Forged GOT/page or producer source/file/output mapping, invalid neutral output chain | `SemanticPlanSnapshotMalformed` with `GOT output mapping` message |
+| Final symbol/DT_NEEDED, entry stub, dispatcher, bounds/default, producer chain, GOT owner/bytes or complete emission mismatch | `SemanticPlanSnapshotMalformed` with final `instruction/reference chain` message |
+| Invalid nested version/kind or digest | `SemanticPlanSnapshotUnsupported` / `SemanticPlanSnapshotMalformed` / `SemanticPlanSnapshotIntegrityMismatch` as owned by the codec; no historical decoder |
+
+Do not create a new public diagnostic code for the proof query's `false` /
+`failure` string. Test the intended diagnostic **and** failing boundary, not
+only that some earlier malformed input happened to reject.
+
+### 5. Good / Base / Bad Cases
+
+- Good: a nonexistent provider yields sanitized `InputIoFailure`; a wrong hash
+  yields `OutputIdentityMismatch` before parse; a forged valid-canonical fixup
+  reaches source-projection validation and fails without a Native Image.
+- Base: ordinary structural parser behavior, non-provider imports and the
+  earlier external-table nearest-negative retain their separate contracts.
+- Bad: echoing an absolute provider path in JSON, reporting a FIFO hang as a
+  successful rejection, or accepting a dead chain because checksums agree.
+
+### 6. Tests Required
+
+- `CliApplicationTests.ProtectImageAcceptsAllPinnedProviderFlagsAndRejectsPartialProviderConfiguration`
+  covers the producer and rehydrator groups. Path-redaction tests require a
+  sentinel host path absent from diagnostics and report text, not just stderr.
+- `LinuxSafeFileInputTests` asserts sanitized errors, exact-limit/plus-one,
+  special-file refusal, descriptor replacement, deterministic growth and
+  truncation; the no-writer FIFO must return within two seconds.
+- Provider-reader tests assert wrong-hash-before-parse and no caller-memory
+  access at maximum-plus-one. Publication tests assert exact diagnostics,
+  no artifact/native bytes and checksum-refreshed semantic rejection for each
+  fixup/map/output/owner mutation, including coordinated co-omission and dead
+  copies with live BR removed. Keep original regressions unchanged.
+- Keep the native negative boundaries distinct: a wrong provider SHA fails at
+  rehydration before Native Image publication and loader invocation; the
+  provider-loaded source-loader oracle injects failure after provider/consumer
+  binding and verifies cleanup plus successful retry/release; the transformed
+  Native Image rollback record verifies the corresponding post-binding failure
+  path for the produced image. Root-bound checkers validate each record and
+  refreshed-checksum regressions. These local artifacts do not replace the
+  hosted CI result or promote other runtime profiles.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: catch IOException and append exception.Message (host path), parse an
+       empty/short snapshot, or publish after matching only a retained BR chain.
+Correct: return sanitized boundary diagnostics, discard every partial snapshot,
+         rederive source semantics, compare complete physical emission and
+         owners, and publish no success artifact on any failure.
+```

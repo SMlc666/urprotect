@@ -15,7 +15,7 @@ selected function pass
 
 IndirectTargetResolver
   -> demand-driven table/relocation/symbol/target queries
-  -> exact/bounded/runtime/deferred target contract
+  -> exact/bounded/runtime/unresolved target modes; separate deferred fixup state
 
 ProtectionRewritePlan + AddressMap
   -> selected-function dependency closure and target bindings
@@ -37,7 +37,7 @@ Whole-ELF structural parsing is allowed and required. Whole-ELF instruction scan
 
 ### Outputs
 
-- `IndirectTargetResolution` records with `Exact`, `BoundedSet`, `RuntimeResolved`, `Deferred`, or `Unresolved` state.
+- `IndirectTargetResolution` records use the target modes `Exact`, `BoundedSet`, `RuntimeResolved`, or `Unresolved`. `Deferred` is a separate fixup-resolution state, not a fifth `SemanticTargetResolution` value.
 - `JumpTablePlan` records containing table encoding, bounds, ownership, target identities, source references, and rewrite policy.
 - Semantic extension records attached to the shared `SemanticRewritePlan`; no parallel raw-byte model.
 - Typed table-entry/reference fixups consumed by `ElfLayoutPlan` and the semantic encoder.
@@ -88,15 +88,24 @@ A relative-address family is not rejected because it is indirect. It is resolved
 
 ## Target-resolution lattice
 
-Resolution is monotonic and evidence-bearing:
+Resolution is monotonic and evidence-bearing across two related but distinct
+dimensions:
 
 1. **Exact**: one target identity/address is proven.
 2. **BoundedSet**: a finite target set and index/default bounds are proven.
-3. **RuntimeResolved**: the target remains runtime-owned but a versioned binding and target-translation contract exist.
-4. **Deferred**: the representation is understood but a layout or runtime resolver must supply a missing decision.
-5. **Unresolved**: the required expression, bound, ownership, or target mapping is not proven.
+3. **RuntimeResolved**: the target remains runtime-owned and has an explicit
+   runtime binding; this does not itself assert static target translation.
+4. **Unresolved**: the required expression, bound, ownership, or target mapping
+   is not proven.
 
-`BoundedSet` is never collapsed to one target because one candidate currently maps. All candidates remain in the semantic snapshot and evidence.
+`SemanticTargetResolution` implements exactly these four modes. `Deferred` is a
+`SemanticFixupResolutionState` for a known representation that lacks a final
+static output binding; current canonical projection maps `BoundedSet` and
+`RuntimeResolved` targets to deferred fixups, while `Exact` is resolved and
+`Unresolved` remains unresolved. Do not encode `Deferred` as a target mode or
+infer runtime ownership from a deferred fixup. `BoundedSet` is never collapsed
+to one target because one candidate currently maps. All candidates remain in
+the semantic snapshot and evidence.
 
 ## Jump-table model
 
@@ -200,7 +209,7 @@ A missing static proof never implicitly enables runtime translation.
 - Structural wrapper validation is decoder-independent by default.
 - Unknown instructions outside selected analysis scope do not affect structural validation or selected-function publication.
 - Malformed tables, ambiguous ownership, out-of-range entries, inconsistent relocations, and missing target proofs produce stable diagnostics with no partial publication unless a preservation strategy is explicitly valid.
-- Evidence distinguishes transformed, preserved, deferred, runtime-resolved, and unresolved targets.
+- Evidence distinguishes target-resolution modes (`Exact`, `BoundedSet`, `RuntimeResolved`, `Unresolved`) from fixup states (`Resolved`, `Deferred`, `Unresolved`) and rewrite outcomes (transformed or preserved); none substitutes for another.
 - A selected function is not claimed fully transformed unless every reachable indirect target required by the pass has a validated destination or declared preservation/translation contract.
 
 ## Verification plan
@@ -243,14 +252,42 @@ The user-selected provider path is a bounded external-table contract, not a rela
 
 ### Managed ownership and rewriting
 
-- `protect-image` and `rehydrate-image` accept an explicit provider input for this family. The path is an operator/runtime input and is not serialized as a payload-controlled path; the canonical semantic record carries content identity and typed provider facts.
-- Introduce one typed `SemanticExternalJumpTable` owner extension, and advance the nested semantic snapshot strictly to URP-SPS6/version 6. Reject URP-SPS1 through SPS5; do not add historical decoders. Keep the outer Protected Image ABI v1 unless its independent contract truly changes.
-- The typed record binds the consumer function/call, complete ordered producer chain, bounds/default edge, undefined dynsym identity, exact non-PLT GLOB_DAT relocation and writable GOT slot; it also binds the provider SONAME/build ID/hash, defined object symbol/range/bytes, encoding/base, and each exact provider-local target symbol/range. Enforce count and aggregate-work bounds.
-- At production and rehydration publication, independently parse both ELF images and rederive the complete relation from their bytes. Compare provider object bytes and target identities, consumer instruction projection, relocation/symbol identity, GOT mapping, control-flow/bounds proof, and serialized owner set. Missing provider input, mismatched bytes, missing/duplicate owner, changed provider object/target, wrong GOT slot, or checksum-refreshed semantic tampering fails before publication.
+- `protect-image` and `rehydrate-image` accept an explicit host-only provider input for this family. The provider path and operator pin object are not serialized into semantic snapshots; provider-derived content identity and table facts remain semantic provider facts.
+- Keep the nested semantic snapshot at URP-SPS6/version 6 and reject URP-SPS1 through SPS5; do not add historical decoders. Preserve the existing provider-facts-only `SemanticExternalJumpTableExtension` wire representation byte-for-byte so existing provider-only SPS6 records continue to decode. Store the selected consumer/GOT/branch proof in a separate typed `SemanticExternalJumpTableConsumerExtension` with a stable appended discriminator. The companion links to exactly one provider-facts extension by table identity and provider content SHA-256; aggregate validation checks the proof’s provider facts against that record and checks the carrier’s exact `SemanticEntityId.Instruction(branch)` identity, source address, and runtime binding. Provider-only facts remain valid without a consumer companion. Keep the outer Protected Image ABI v1 unless its independent contract truly changes.
+- The consumer companion binds the consumer function, complete ordered producer chain, bounds/default edge, undefined dynsym identity, exact non-PLT GLOB_DAT relocation and writable GOT slot. The provider-facts extension binds provider SONAME/build ID/hash, defined object symbol/range/bytes, encoding/base, and each exact provider-local target symbol/range. Enforce count and aggregate-work bounds.
+- Application coordinates through an Infrastructure bounded private-file snapshot reader; check the raw provider byte length before allocation and redact paths and raw exception text from read diagnostics. At production and rehydration publication, independently parse both ELF images and rederive the complete relation from their bytes. Compare provider object bytes and target identities, consumer instruction projection, relocation/symbol identity, GOT mapping, control-flow/bounds proof, and serialized owner set. Missing provider input, mismatched bytes, missing/duplicate owner, changed provider object/target, wrong GOT slot, wrong branch identity, or checksum-refreshed semantic tampering fails before publication.
 - The table and target functions are external/runtime-owned and remain unchanged. Rewriting applies only to the selected consumer. Its moved GOT-page producer is re-encoded through the existing instruction encoder; no external table clone, local `AddressMap` mapping for provider addresses, veneer, or implicit target translation is allowed. An unselected observer continues to use the same provider table.
 
 ### Evidence and explicit non-goals
 
-The target runtime row is intended to run baseline and transformed selected consumer plus an unselected observer through HostContext on native AArch64/glibc. It independently verifies all four case values and target identities, safe default behavior, source/transformed statuses and streams, release ordering, provider/consumer/native-image digests, and provider mapping/GOT/table relations. The native adapter/self-test implementation slice is source-loader evidence only; it is not managed transformation or rehydration evidence. Nearest negatives include absent provider configuration, missing `DT_NEEDED` with both configured and unconfigured adapters, same-SONAME wrong-hash provider, wrong provider symbol/type/size/permissions, altered table entry/target, consumer dynsym/RELA/GOT mismatch, exact/over aggregate-work limits, and provider tampering between production and rehydration. Each negative must fail before the relevant publication or loader boundary and leave no partial artifacts.
+The bounded source-versus-transformed row now has local retained evidence at
+`.artifacts/indirect-control/provider-rollback-native-image-implementation-20261020-4/runtime.indirect-control.external-provider.glibc.host-context-entry`.
+It runs source and rehydrated Native Image selected consumer plus an unselected
+observer through HostContext on native AArch64/glibc. The independent checker
+verifies all four case values and provider target identities, safe-default
+behavior, source/transformed process and entry statuses, exact streams, release
+ordering, provider/consumer/native-image digests, and provider mapping/GOT/table
+relations. The evidence report deliberately remains
+`scoped-observation-not-promoted`. Separate source-loader rollback evidence at
+`.artifacts/indirect-control/provider-loaded-rollback-ci-validation-20261020T153308Z-18193`
+verifies post-provider-acquisition failure cleanup and successful reload; it is
+not a substitute for the transformed behavior record. A wrong-provider-SHA
+negative remains a pre-publication/no-loader case, and the transformed Native
+Image rollback is a separate failure stage. The CI producers/checkers and
+unknown fixture/regression row are wired locally, but an official hosted CI run
+and branch-protection confirmation remain open.
 
-This slice does not support multiple providers, arbitrary provider DSOs, provider dependencies, payload paths/search paths, external target code, non-relative entries, runtime translation, or cross-runtime inference. Musl and Bionic need distinct provider builds/identities and complete native source-versus-transformed evidence before any row is promoted.
+Nearest negatives include absent provider configuration, missing `DT_NEEDED`
+with both configured and unconfigured adapters, same-SONAME wrong-hash provider,
+wrong provider symbol/type/size/permissions, altered table entry/target,
+consumer dynsym/RELA/GOT mismatch, exact/over aggregate-work limits, provider
+tampering between production and rehydration, checksum-refreshed output-range
+truncation/overlap, provenance decompression bounds, and post-acquisition
+rollback. Each negative must fail at its applicable publication or loader
+boundary, retain the actual first failure and leave no partial artifacts.
+
+This slice does not support multiple providers, arbitrary provider DSOs,
+provider dependencies, payload paths/search paths, external target code,
+non-relative entries, runtime translation, or cross-runtime inference. Musl
+and Bionic need distinct provider builds/identities and complete native
+source-versus-transformed evidence before any row is promoted.

@@ -117,9 +117,11 @@ tests plus the relevant malformed-input path:
   missing, duplicate, remapped, or checksum-refreshed forged bindings fail.
   The shared-table copy slice first introduced canonical semantic snapshot v3
   (`URP-SPS3`) to persist bounded owner/reference-site evidence; the current
-  single semantic schema is v6 (`URP-SPS6`) and adds a typed provider-facts-only
-  external-table extension alongside the static function-pointer call owner,
-  while strictly rejecting v1-v5. SPS6 retains the semantic snapshot byte
+  single semantic schema is v6 (`URP-SPS6`), with the unchanged provider-facts
+  external-table record (discriminator 8) and appended typed selected-consumer
+  companion (9) alongside the static function-pointer call owner, while strictly
+  rejecting v1-v5. See [external consumer publication](./external-consumer-proof.md)
+  for exact source/fixup, logical-map and complete final-emission validation. SPS6 retains the semantic snapshot byte
   ordinals `SelectedFunctionPrivate=0`, `Shared=1`, `External=2`,
   `RuntimeOwned=3`, and `Ambiguous=4`. These are distinct from layout-evidence
   schema v3 JSON ownership ordinals; see
@@ -131,9 +133,19 @@ tests plus the relevant malformed-input path:
   copy/access, wrong-hash rejection before parsing, and deterministic mutation
   on a later caller-memory observation. Its strict single-`PT_DYNAMIC` /
   no-`PT_INTERP` rule is provider-profile-only: retain the ordinary parser's
-  zero-`PT_DYNAMIC` behavior. Provider facts do not establish consumer
-  `GLOB_DAT`/GOT semantics, protect/rehydrate admission, or native/runtime
-  support. Layout evidence
+  zero-`PT_DYNAMIC` behavior. Provider facts alone still do not establish
+  consumer `GLOB_DAT`/GOT semantics or executable publication. Managed pinned
+  admission requires the linked consumer companion, independently rederived
+  source analysis/fixups and unchanged GOT mappings, then whole-output
+  re-emission plus exact producer-offset, entry, dependency and owner checks.
+  Neither managed publication nor the earlier native source-loader self-test
+  alone establishes runtime acceptance. A scoped native AArch64/glibc
+  source-versus-rehydrated-Native-Image run and separate provider-loaded
+  rollback evidence are now retained with exact-root checkers and local CI
+  wiring; the feature remains `unknown` / `scoped-observation-not-promoted`
+  until the hosted gate passes. See the [runtime evidence contract and current
+  inventory](./runtime-compatibility.md#scenario-external-provider-managed-admission-and-scoped-native-evidence).
+  Do not promote musl/Bionic or general provider/table support. Layout evidence
   remains schema 3 to retain clone ranges, permissions, ownership, rewrite
   policy, and per-entry target/base bindings. The Protected Image ABI
   remains v1. Its independent native glibc checker proves one selected
@@ -268,6 +280,13 @@ ASLR addresses and timing.
 - Does every failure return a stable diagnostic and avoid publishing output?
 - Are stripped ELF files, unknown records, and unsupported semantics handled
   without guessing?
+- For host-pinned provider input, does Infrastructure open nonblocking and
+  no-final-symlink, verify regular-file type/size through the descriptor, and
+  snapshot that same handle before pre-parse SHA verification? Is a FIFO with
+  no writer promptly rejected rather than blocking before validation?
+- Do external-consumer tamper tests refresh both snapshot/artifact digests and
+  include a mapped dead chain after the live BR is removed? Does publication
+  compare the full source-derived emitted output and offsets, not branch counts?
 - Are tests present for both the valid path and the nearest malformed path?
 - Are concurrency, large-input, fuzz, and E2E profiles bounded, reproducible,
   and assigned to the correct CI tier?
@@ -678,3 +697,125 @@ retain an already-resolved page/low-12 field; accept it only when the decoded
 page and scaled low-12 value equal the carried GOT owner plus addend. The
 relocatable zero-field form remains valid, and any inconsistent nonzero field
 fails before snapshot or publication.
+
+## Scenario: Bounded private provider-file input
+
+### 1. Scope / Trigger
+
+Apply this contract to host-supplied external provider bytes before semantic
+planning or rehydration. Application code coordinates but performs no direct
+file I/O. Do not replace the Infrastructure adapter with `File.ReadAllBytes`,
+a blocking `FileStream` followed by type validation, or a path-stat/reopen pair.
+See [managed publication](./external-consumer-proof.md) for admission after the
+snapshot has been pinned and [provider errors](./error-handling.md#scenario-managed-external-provider-failures)
+for sanitized failure propagation.
+
+### 2. Signatures
+
+```csharp
+// Application coordinator; returns private bytes or sanitized diagnostics.
+public static ExternalJumpTableProviderFileSnapshot Read(
+    ExternalJumpTableProviderInput input); // ExternalJumpTableProviderFileReader
+
+// Infrastructure owns all path/descriptor access.
+public static FileSnapshot ReadBoundedPrivateSnapshot(
+    string path, int maximumBytes); // FileSystemAdapter
+
+// Internal Linux descriptor owner and deterministic race-test seam.
+internal static SafeFileHandle OpenReadOnly(string path); // LinuxSafeFileInput
+internal static FileSnapshot ReadFromOpenedHandle(
+    SafeFileHandle handle, int maximumBytes, string fullPath = "",
+    Action? afterInitialSizeValidation = null);
+```
+
+### 3. Contracts
+
+- Supported safe-open hosts are **Linux/AArch64 and Linux/x64** with audited
+  open flags and `statx` UAPI; other architectures and non-Linux hosts fail
+  closed with `InputIoFailure`. This is a managed input-helper policy, **not**
+  an x64 ELF/runtime backend. The product ELF remains AArch64-only. Linux/AArch64
+  safe-file tests were executed; Linux/x64 and unsupported-host branches were
+  statically reviewed, not executed by the accepted review.
+- Normalize the host path, open once with
+  `O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK`, immediately transfer descriptor
+  ownership to `SafeFileHandle`, and dispose it on every path. `O_NOFOLLOW` is
+  `0x8000` for AArch64 and `0x20000` for x64; never guess on another architecture.
+  This forbids a **final-component** symlink; it does not promise a sandbox or
+  no-follow traversal of every ancestor directory.
+- Query **that descriptor** using `statx(fd, "", AT_EMPTY_PATH, STATX_TYPE |
+  STATX_SIZE, ...)` and the fixed 256-byte Linux UAPI shape; require both mask
+  bits and `S_IFREG` before allocating or reading file bytes. No fallback to a
+  libc-specific `struct stat` layout or reopening a checked path is allowed.
+  A directory/device/FIFO is not an empty provider. `O_NONBLOCK` is required
+  before type inspection: an unopened FIFO cannot first be rejected by fstat.
+- Reject length above the supplied maximum (provider maximum **8 MiB**) before
+  allocating; checked-convert only the accepted descriptor length. Read exactly
+  that length with offset-based `RandomAccess.Read` on the same handle. Early
+  EOF is truncation, never success with a shorter array. Probe one byte at the
+  original end for growth, query descriptor type/size again, and require the
+  original regular-file size. Reject growth even if the initial length fit.
+  Path replacement must not change which inode supplies the snapshot.
+- File size checks are not a content-integrity proof. Public provider-reader
+  input gets one private copy after the raw-size gate; the managed file path
+  passes its already private bytes to `ReadPrivateSnapshot`. Hash that snapshot
+  and require fixed-time SHA-256 equality **before** ELF parsing. Every retained
+  provider identity, table byte and target fact must use that same byte array.
+- Provider paths, the `ExternalJumpTableProviderInput` pin object and raw
+  exception text never enter semantic snapshots or provider diagnostics/reports.
+  Derived SONAME/build-ID/content hash remain semantic facts. Internal
+  `FileSnapshot.FullPath` is host bookkeeping, not a serialization field;
+  Application projects only bytes/diagnostics into provider planning.
+- No new provider environment key is introduced. The native configured-provider
+  aggregate parser-work budget (8 MiB) is a separate work contract, not the
+  managed raw-file length limit; neither can substitute for the other.
+
+### 4. Validation & Error Matrix
+
+| Boundary | Required result |
+|---|---|
+| Blank/invalid path or negative byte limit | sanitized `InvalidArgument`; no successful snapshot |
+| Non-Linux, unaudited architecture, unavailable `open`/`statx` or failed descriptor query | sanitized `InputIoFailure`; no portable read fallback |
+| Final symlink, directory, FIFO without writer or device | `InputIoFailure`, empty bytes; FIFO rejected promptly without an external writer |
+| Initial size is maximum + 1 | `SemanticPlanSnapshotLimitExceeded` before file-byte allocation/read |
+| EOF before initial length, end probe sees data or final descriptor size/type differs | `InputIoFailure`, empty bytes; no partial snapshot |
+| Path replaced after descriptor size query | original descriptor bytes, never replacement-path bytes |
+| Correct bounded snapshot, wrong SHA | `OutputIdentityMismatch` before ELF parser invocation |
+| Correct snapshot/hash, invalid ELF/provider profile | bounded semantic/parser failure, no publication |
+
+### 5. Good / Base / Bad Cases
+
+- Good: exact-limit regular file, one nonblocking no-final-symlink descriptor,
+  same-handle snapshot, pre-parse SHA match, bounded provider facts.
+- Base: a symlink or FIFO is refused with redacted diagnostics; no output is
+  published and no missing host capability is labeled native coverage.
+- Bad: size-check a pathname then reopen it, block on FIFO open before checking
+  type, silently accept a shortened read, or hash caller memory and parse it
+  again after a possible mutation.
+
+### 6. Tests Required
+
+- `LinuxSafeFileInputTests.ReadsRegularFileWithinExactLimitAndRejectsMaximumPlusOne`
+  asserts exact bytes versus limit diagnostic/empty failure bytes.
+- `RejectsDirectoryAndFinalSymlinkWithoutFollowingTheSymlink`,
+  `RejectsFifoPromptlyWithoutAnExternalWriter` (two-second bound) and
+  `RejectsCharacterDeviceInput` assert `InputIoFailure` and path-redacted messages.
+- `DescriptorRemainsBoundToOriginalRegularFileIfPathIsReplaced` replaces the
+  path at `afterInitialSizeValidation`; assert original snapshot and distinct
+  replacement bytes. Growth and truncation tests mutate deterministically at
+  that same seam and assert failure/empty bytes/redaction, not a flaky race.
+- `SemanticExternalJumpTableProviderReaderTests` asserts maximum-plus-one refusal
+  before observing caller memory, hash rejection before parsing and mutation
+  isolation through one private snapshot. CLI/publication tests assert missing
+  provider and sanitized errors leave no successful artifacts.
+- Preserve the accepted Linux/AArch64 executed-versus-Linux/x64 static-review
+  distinction in any report; an unavailable host/test skip cannot promote it.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: FileInfo(path).Length -> FileStream(path) -> reject non-regular file
+       (can hang on a FIFO or reopen a replacement); hash then reread path.
+Correct: no-follow/nonblocking open -> descriptor regular-file/size check
+         -> exact same-handle read + growth/final-size checks -> private bytes
+         -> fixed-time SHA comparison -> bounded parse -> publication validation.
+```
