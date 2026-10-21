@@ -82,8 +82,16 @@ this subset); unresolved weak functions resolve to zero. The real managed
 AArch64 glibc fixture observes zero and returns status 53. This does not claim
 generic PLT/JUMP_SLOT or cross-libc PLT resolution. Partial or malformed PLT
 tables and all out-of-slice symbol combinations remain pre-handoff rejections;
-legacy REL tables remain rejected. The exact `libc.so.6` dependency slice,
-including its import-version boundary, is specified separately below.
+legacy REL tables remain rejected. A separate bounded native AArch64 glibc
+HostContext row now validates a source-built shared signed-32-bit relative
+jump table: the selected consumer reads a distinct read-only file-backed clone,
+while an unselected observer retains the original table and producer bytes.
+The evidence checker independently binds static owner relocations, source and
+clone ranges/bytes, selected ADRP/ADD/LDRSW/ADR/ADD/BR code, both consumer
+handoffs, and closed artifact hashes. This row does not promote other table
+encodings, imported/runtime-owned tables, function pointers, musl, or bionic.
+The exact `libc.so.6` dependency slice, including its import-version boundary,
+is specified separately below.
 Broader dependency graphs, dynamic TLS, live-thread lifecycle, and unknown GNU
 properties remain outside the bounded validated rows.
 
@@ -130,9 +138,11 @@ The associated import-side symbol-version slice is recorded as
 `runtime.host-context.dependency-symbol-version-requirements`: it requires the
 complete `DT_VERSYM`/`DT_VERNEED`/`DT_VERNEEDNUM` tuple, bounded and terminating
 version-need/auxiliary chains, valid version-name hash/index fields, non-weak
-requirements, exact equality between every `vn_file` and the `DT_NEEDED`
-basename `libc.so.6`, and no versioned imports attached to recognized musl or
-bionic sonames. It requires `DT_GNU_HASH`, rejects `DT_SYMBOLIC`, and excludes
+requirements, and exact equality between every `vn_file` and a declared
+`DT_NEEDED` basename. Only the existing `libc.so.6` singleton or the exact
+already-validated `libc.so.6` plus `ld-linux-aarch64.so.1` pair is admitted; no
+other dependency is admitted by this version-file rule, and versioned imports
+attached to recognized musl or bionic sonames remain rejected. It requires `DT_GNU_HASH`, rejects `DT_SYMBOLIC`, and excludes
 SysV `DT_HASH` alone or combined. The native preflight bounds the hash-derived symbol count to
 1,048,576 and checks the file-backed version-symbol table. `RTLD_NOW` delegates
 resolution to the native loader; a
@@ -141,10 +151,17 @@ returns status 37 on native AArch64 glibc. This does not add arbitrary
 versioned definitions, entry selection, dependency graphs, or search paths.
 
 PT_TLS has a bounded validated HostContext slice, recorded as
-`runtime.host-context.pt-tls` in the matrix. It covers AArch64 initial-exec TLS
-with a structurally bounded PT_TLS segment and `R_AARCH64_TLS_TPREL64`; the
-system loader owns module allocation and initialization. The managed v3 oracle
-uses a real TLS-backed entry and returns status 43. The separate
+`runtime.host-context.pt-tls` in the matrix. Native preflight bounds AArch64
+`R_AARCH64_TLS_TPREL64`, `R_AARCH64_TLS_DTPMOD64`,
+`R_AARCH64_TLS_DTPREL64`, and `R_AARCH64_TLSDESC` owners against the declared
+PT_TLS module. For ELF64 `ET_DYN`, `STT_TLS` `st_value` is a TLS-block-relative
+offset, not a virtual address; preflight checks the symbol extent and
+relocation addend before loader handoff. The system loader owns module
+allocation and initialization. Separate transformed HostContext
+current-thread rows for initial-exec, local-dynamic, general-dynamic, and
+TLSDESC use distinct fixtures and each return status 43 with retained
+stage/rehydration/handoff and behavior-comparison evidence on native AArch64
+glibc. The separate
 `runtime.host-context.threaded-initial-exec-tls` row is opt-in through
 `pack --profile host-context-entry --thread-lifetime` and is validated only on
 native AArch64 glibc. The extension provides owner-thread `create_image_thread`
@@ -156,9 +173,10 @@ constructor/entry ordering, worker completion, TLS teardown, and destructor
 ordering for both explicit join and automatic release join. The packed-wrapper
 harness uses inherited event/gate pipes; a native runtime harness exercises two
 concurrent independent dispatches. `--thread-lifetime` is absent by default and
-is invalid for `outer-execveat`. Dynamic/general-dynamic, local-dynamic,
-TLSDESC, unmanaged workers, worker-triggered recursive dispatch, and threaded
-musl/bionic claims remain outside scope.
+is invalid for `outer-execveat`. Dynamic TLS worker lifecycle, unmanaged
+workers, worker-triggered recursive dispatch, and threaded musl/bionic claims
+remain outside scope. The four current-thread rows do not promote
+outer-execveat, registered-worker, musl, or bionic.
 
 PT_GNU_PROPERTY has a bounded validated HostContext feature recorded as
 `runtime.host-context.gnu-property`. The adapter accepts a GNU property note

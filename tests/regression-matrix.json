@@ -439,9 +439,110 @@
       ]
     },
     {
+      "id": "fixture.cfi-transformed-unwind",
+      "class": "host-context",
+      "command": "scripts/run-cfi-host-context-e2e.sh --tier pr",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/cfi/*/SHA256SUMS",
+        ".artifacts/cfi/*/cpp-runtime-identity.json",
+        ".artifacts/cfi/*/glibc-runtime-identity.json",
+        ".artifacts/cfi/*/cpp-harness-unwind-readelf.txt",
+        ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/cfi-behavior.json",
+        ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/rehydration.json",
+        ".artifacts/cfi/*/positive/runtime.cfi.transformed-backtrace.glibc.host-context-entry/transformed-unwind.txt",
+        ".artifacts/cfi/*/negative-malformed-eh-frame/negative-result.json"
+      ]
+    },
+    {
+      "id": "fixture.indirect-control-jump-table",
+      "class": "host-context",
+      "command": "scripts/run-indirect-control-e2e.sh --tier pr",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/*/SHA256SUMS",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/jump-table-behavior.json",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/source-handoff.json",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/handoff.json",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/baseline.stdout",
+        ".artifacts/indirect-control/*/runtime.indirect-control.jump-table.glibc.host-context-entry/target.stdout",
+        ".artifacts/indirect-control/*/negative-malformed-table/negative-result.json",
+        ".artifacts/indirect-control/*/negative-index-clobber/negative-result.json",
+        ".artifacts/indirect-control/*/negative-out-of-range-target/negative-result.json",
+        ".artifacts/indirect-control/*/negative-external-table/negative-result.json",
+        ".artifacts/indirect-control/*/negative-external-table/external-table-facts.json"
+      ]
+    },
+    {
+      "id": "fixture.indirect-control-shared-jump-table-copy",
+      "class": "host-context",
+      "command": "scripts/run-shared-jump-table-copy-e2e.sh --tier pr",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/shared-copy-*/SHA256SUMS",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/shared-table-behavior.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/source-handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/observer-source-handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/observer-transformed-handoff.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/rehydration.json",
+        ".artifacts/indirect-control/shared-copy-*/runtime.indirect-control.shared-table.glibc.host-context-entry/native-image.bin"
+      ]
+    },
+    {
+      "id": "fixture.indirect-control-external-provider-e2e",
+      "class": "host-context",
+      "command": "scripts/run-external-provider-e2e.sh --tier pr --artifact-root .artifacts/indirect-control/external-provider/current && python3 scripts/check-external-provider-evidence.py .artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/external-provider/current/SHA256SUMS",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/external-provider-evidence.json",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/transformed-native-rollback.json",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/build-provenance.tar.gz",
+        ".artifacts/indirect-control/provider-ci-logs/external-provider-*.log"
+      ]
+    },
+    {
+      "id": "native.external-provider-provider-loaded-rollback",
+      "class": "host-context",
+      "command": "scripts/run-external-provider-rollback-oracle.sh --artifact-root .artifacts/indirect-control/provider-loaded-rollback/current && python3 scripts/check-external-provider-rollback-evidence.py --root .artifacts/indirect-control/provider-loaded-rollback/current && URP_PROVIDER_ROLLBACK_EVIDENCE_ROOT=.artifacts/indirect-control/provider-loaded-rollback/current PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v tests.test_external_provider_rollback_evidence",
+      "tiers": ["pr", "nightly", "release"],
+      "platform": "native-arm64",
+      "budgetSeconds": 1200,
+      "memoryMb": 4096,
+      "required": true,
+      "expected": "pass",
+      "artifacts": [
+        ".artifacts/indirect-control/provider-loaded-rollback/current/SHA256SUMS",
+        ".artifacts/indirect-control/provider-loaded-rollback/current/report.json",
+        ".artifacts/indirect-control/provider-loaded-rollback/current/rollback-record.json",
+        ".artifacts/indirect-control/provider-ci-logs/provider-loaded-rollback-*.log"
+      ]
+    },
+    {
       "id": "fixture.tls-transformed-runtime-matrix",
       "class": "host-context",
-      "command": "python3 scripts/run-tls-runtime-matrix.py --tier ${TLS_MATRIX_TIER:-pr} && python3 scripts/check-tls-runtime-matrix-evidence.py .artifacts/tls-runtime/${TLS_MATRIX_TIER:-pr} --registry fixtures/tls-runtime-matrix.json",
+      "command": "python3 scripts/run-tls-runtime-matrix.py --tier pr && python3 scripts/check-tls-runtime-matrix-evidence.py .artifacts/tls-runtime/pr --registry fixtures/tls-runtime-matrix.json",
       "tiers": ["pr", "nightly", "release"],
       "platform": "native-arm64",
       "budgetSeconds": 1200,
@@ -451,8 +552,22 @@
       "artifacts": [
         ".artifacts/tls-runtime/*/matrix.json",
         ".artifacts/tls-runtime/*/environment.json",
+        ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/source-image.bin",
         ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/protected-image.bin",
         ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/initial-exec.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/local-dynamic.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/general-dynamic.host-context-entry.glibc.current-thread/behavior-comparison.json",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/source-image.bin",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/protected-image.bin",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/native-image.bin",
+        ".artifacts/tls-runtime/*/tlsdesc.host-context-entry.glibc.current-thread/behavior-comparison.json",
         ".artifacts/tls-runtime/*/SHA256SUMS"
       ]
     }

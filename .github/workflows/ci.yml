@@ -378,9 +378,20 @@ jobs:
             release) tier=release ;;
             *) tier=pr ;;
           esac
+          make -C native/urprotect-runtime tls-fixture
+          source_file=native/urprotect-runtime/build/host-context-tls-fixture.so
+          function_id="$(readelf --syms -W "$source_file" | awk '$1 ~ /^[0-9]+:/ && $4 == "FUNC" && $NF == "urp_tls_read" { symidx=$1; sub(/:$/, "", symidx); print "symtab:" symidx }')"
           ./scripts/run-tls-host-context-rehydration-e2e.sh \
             --tier "${tier}" \
-            --unit tls.initial-exec.glibc.host-context-entry
+            --unit tls.initial-exec.glibc.host-context-entry \
+            --model initial-exec \
+            --profile host-context-entry \
+            --runtime glibc \
+            --lifecycle current-thread \
+            --source "$source_file" \
+            --function-id "$function_id" \
+            --entry-status 43 \
+            --producer-id gcc-c-tls-initial-exec
       - name: Check managed TLS initial-exec transformed-image evidence
         if: always()
         run: |
@@ -453,6 +464,199 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-prerequisite-probes
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-transformed-runtime-matrix
 
+      - name: Run transformed CFI/unwind native evidence
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          if ! ./scripts/run-cfi-host-context-e2e.sh --tier "${tier}" \
+              --artifact-root .artifacts/cfi/current; then
+            echo 'CFI evidence producer failed; retained producer diagnostics:' >&2
+            find .artifacts/cfi/current -type f \
+              \( -name producer.json -o -name rehydration.stderr -o -name native-build.stderr -o -name transformed-unwind.txt -o -name transformed-unwind.stderr -o -name baseline-unwind.txt \) \
+              -print -exec cat -- {} \; >&2 || true
+            exit 1
+          fi
+          python3 scripts/check-cfi-evidence.py \
+            .artifacts/cfi/current --tier "${tier}" --runtime glibc \
+            --unit runtime.cfi.transformed-backtrace.glibc.host-context-entry
+      - name: Run transformed indirect-control Jump Table evidence
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-indirect-control-e2e.sh --tier "${tier}"
+          python3 scripts/check-indirect-control-evidence.py \
+            ".artifacts/indirect-control/${tier}" \
+            --tier "${tier}" \
+            --unit runtime.indirect-control.jump-table.glibc.host-context-entry
+      - name: Run and check transformed shared jump-table evidence
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-shared-jump-table-copy-e2e.sh --tier "${tier}" \
+            --unit runtime.indirect-control.shared-table.glibc.host-context-entry \
+            --artifact-root .artifacts/indirect-control/shared-copy/current
+          shared_positive=.artifacts/indirect-control/shared-copy/current/runtime.indirect-control.shared-table.glibc.host-context-entry
+          python3 scripts/check-rehydration-evidence.py "${shared_positive}" \
+            --tier "${tier}" --runtime glibc \
+            --unit runtime.indirect-control.shared-table.glibc.host-context-entry
+          shared_source=native/urprotect-runtime/build/host-context-shared-jump-table-fixture.so
+          selected_function="$(readelf -Ws "${shared_source}" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
+          [[ "${selected_function}" =~ ^dynsym:[0-9]+$ ]] || { echo 'shared fixture has no selected urp_entry dynsym' >&2; exit 1; }
+          python3 scripts/check-shared-jump-table-evidence.py "${shared_positive}" \
+            --unit runtime.indirect-control.shared-table.glibc.host-context-entry \
+            --selected-function "${selected_function}"
+
+      - name: Run required transformed external-provider evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          root=.artifacts/indirect-control/external-provider/current
+          log_dir=.artifacts/indirect-control/provider-ci-logs
+          run_key="${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
+          mkdir -p "${log_dir}"
+          log="${log_dir}/external-provider-${run_key}.log"
+          status_file="${log_dir}/external-provider-${run_key}.status"
+          printf '%s\n' "${root}" > "${log_dir}/external-provider-${run_key}.root"
+          set +e
+          ./scripts/run-external-provider-e2e.sh --tier "${tier}" --artifact-root .artifacts/indirect-control/external-provider/current 2>&1 | tee "${log}"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          runner_status="${statuses[0]}"
+          tee_status="${statuses[1]}"
+          printf '%s %s\n' "${runner_status}" "${tee_status}" > "${status_file}"
+          if [[ "${runner_status}" != 0 ]]; then exit "${runner_status}"; fi
+          exit "${tee_status}"
+
+      - name: Run required source-loader provider rollback evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          root=.artifacts/indirect-control/provider-loaded-rollback/current
+          log_dir=.artifacts/indirect-control/provider-ci-logs
+          run_key="${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
+          mkdir -p "${log_dir}"
+          log="${log_dir}/provider-loaded-rollback-${run_key}.log"
+          status_file="${log_dir}/provider-loaded-rollback-${run_key}.status"
+          printf '%s\n' "${root}" > "${log_dir}/provider-loaded-rollback-${run_key}.root"
+          set +e
+          ./scripts/run-external-provider-rollback-oracle.sh --artifact-root .artifacts/indirect-control/provider-loaded-rollback/current 2>&1 | tee "${log}"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          runner_status="${statuses[0]}"
+          tee_status="${statuses[1]}"
+          printf '%s %s\n' "${runner_status}" "${tee_status}" > "${status_file}"
+          if [[ "${runner_status}" != 0 ]]; then exit "${runner_status}"; fi
+          exit "${tee_status}"
+
+      - name: Independently check transformed external-provider evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          log_dir=.artifacts/indirect-control/provider-ci-logs
+          run_key="${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
+          root=.artifacts/indirect-control/external-provider/current
+          mkdir -p "${log_dir}"
+          set +e
+          {
+            read -r runner_status producer_log_status < "${log_dir}/external-provider-${run_key}.status"
+            [[ "${runner_status}" == 0 && "${producer_log_status}" == 0 ]] || {
+              echo "external-provider producer did not complete successfully (runner=${runner_status}, log=${producer_log_status})" >&2
+              exit 1
+            }
+            [[ "$(cat "${log_dir}/external-provider-${run_key}.root")" == "${root}" ]] || {
+              echo "external-provider producer root marker does not match the required exact root" >&2
+              exit 1
+            }
+            positive="${root}/runtime.indirect-control.external-provider.glibc.host-context-entry"
+            [[ -d "${positive}" ]] || { echo "external-provider exact evidence root is missing: ${positive}" >&2; exit 1; }
+            python3 scripts/check-external-provider-evidence.py "${positive}"
+            python_root=".artifacts/indirect-control/provider-python/${run_key}/positive"
+            [[ ! -e "${python_root}" && ! -L "${python_root}" ]] || { echo "provider Python root already exists: ${python_root}" >&2; exit 1; }
+            mkdir -p "$(dirname "${python_root}")"
+            cp -a "${positive}/." "${python_root}/"
+            URP_EXTERNAL_PROVIDER_EVIDENCE_ROOT="${python_root}" PYTHONDONTWRITEBYTECODE=1 \
+              python3 -m unittest -v tests.test_external_provider_evidence
+          } 2>&1 | tee "${log_dir}/external-provider-check-${run_key}.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          checker_status="${statuses[0]}"
+          checker_log_status="${statuses[1]}"
+          printf '%s %s\n' "${checker_status}" "${checker_log_status}" > "${log_dir}/external-provider-check-${run_key}.status"
+          if [[ "${checker_status}" != 0 ]]; then exit "${checker_status}"; fi
+          exit "${checker_log_status}"
+
+      - name: Independently check source-loader rollback evidence and root regressions
+        if: always()
+        run: |
+          set -euo pipefail
+          log_dir=.artifacts/indirect-control/provider-ci-logs
+          run_key="${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
+          root=.artifacts/indirect-control/provider-loaded-rollback/current
+          mkdir -p "${log_dir}"
+          set +e
+          {
+            read -r runner_status producer_log_status < "${log_dir}/provider-loaded-rollback-${run_key}.status"
+            [[ "${runner_status}" == 0 && "${producer_log_status}" == 0 ]] || {
+              echo "provider-loaded rollback producer did not complete successfully (runner=${runner_status}, log=${producer_log_status})" >&2
+              exit 1
+            }
+            [[ "$(cat "${log_dir}/provider-loaded-rollback-${run_key}.root")" == "${root}" ]] || {
+              echo "provider-loaded rollback root marker does not match the required exact root" >&2
+              exit 1
+            }
+            python3 scripts/check-external-provider-rollback-evidence.py --root "${root}"
+            python_root=".artifacts/indirect-control/provider-python/${run_key}/rollback"
+            [[ ! -e "${python_root}" && ! -L "${python_root}" ]] || { echo "provider rollback Python root already exists: ${python_root}" >&2; exit 1; }
+            mkdir -p "$(dirname "${python_root}")"
+            cp -a "${root}/." "${python_root}/"
+            URP_PROVIDER_ROLLBACK_EVIDENCE_ROOT="${python_root}" PYTHONDONTWRITEBYTECODE=1 \
+              python3 -m unittest -v tests.test_external_provider_rollback_evidence
+          } 2>&1 | tee "${log_dir}/provider-loaded-rollback-check-${run_key}.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          checker_status="${statuses[0]}"
+          checker_log_status="${statuses[1]}"
+          printf '%s %s\n' "${checker_status}" "${checker_log_status}" > "${log_dir}/provider-loaded-rollback-check-${run_key}.status"
+          if [[ "${checker_status}" != 0 ]]; then exit "${checker_status}"; fi
+          exit "${checker_log_status}"
+
+      - name: Require full CFI and indirect-control evidence declarations
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          if [[ "${tier}" != pr ]]; then
+            rm -rf .artifacts/indirect-control/pr
+            mkdir -p .artifacts/indirect-control
+            cp -a ".artifacts/indirect-control/${tier}" .artifacts/indirect-control/pr
+          fi
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --feature runtime.cfi.transformed-backtrace.glibc.host-context-entry
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --feature runtime.indirect-control.jump-table.glibc.host-context-entry
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --feature runtime.indirect-control.shared-jump-table-copy.glibc.host-context-entry
+          python3 scripts/check-evidence.py fixtures/manifest.json \
+            --feature runtime.indirect-control.external-provider.glibc.host-context-entry
       - name: Upload protection-tls evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -462,6 +666,8 @@ jobs:
             .artifacts/protected-image/
             .artifacts/tls-prerequisites/
             .artifacts/tls-runtime/
+            .artifacts/cfi/
+            .artifacts/indirect-control/
             .artifacts/environment/
             /tmp/urprotect-*.out
             /tmp/urprotect-*.err
@@ -573,7 +779,7 @@ jobs:
             .artifacts/host-context/pr/
           readelf -aW native/urprotect-runtime/build/host-context-dependency-fixture.so \
             > .artifacts/host-context/pr/dependency-fixture-readelf.txt
-          make -C native/urprotect-runtime test \
+          URP_HOST_VALIDATION_TRACE=1 make -C native/urprotect-runtime test \
             2>&1 | tee .artifacts/host-context/pr/self-test.log
       - name: Managed HostContext packaging oracle
         run: |
@@ -995,7 +1201,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bionic-native-arm64-${{ github.run_id }}
-          path: .artifacts/bionic/
+          path: |
+            .artifacts/bionic/
+            !.artifacts/bionic/**/apt-archives/lock
+            !.artifacts/bionic/**/apt-indexes/lock
           if-no-files-found: warn
 
   android-container-probe:

@@ -1,0 +1,60 @@
+{
+  "clone": {
+    "outputRange": {
+      "fileOffset": {
+        "value": 73728
+      },
+      "hasVirtualAddress": true,
+      "size": 16,
+      "virtualAddress": {
+        "value": 135168
+      }
+    },
+    "ownership": 2,
+    "permissions": 4,
+    "rewritePolicy": 1,
+    "sourceTableRange": {
+      "fileOffset": {
+        "value": 812
+      },
+      "isInstructionRange": false,
+      "size": 16,
+      "virtualAddress": {
+        "value": 812
+      }
+    },
+    "tableIdentity": {
+      "kind": 5,
+      "value": "0x32C:4:0:3"
+    }
+  },
+  "observerSourceHandoffSha256": "4f3f3ca77cbd92239705c2c9964273ee34636c050b84c2fe6954e941349b12fc",
+  "observerSourceNativeImageSha256": "138e96724ef11294ada8e96803ca45cd02d3d038708134ffff8e8aaacf9fd473",
+  "observerSourceProcessStatus": 91,
+  "observerSourceProcessStatusSha256": "0433e993a3dbc505d6e5cad972a1df0ab189cfe7ceece5e94fd47ca9a074370f",
+  "observerSourceReleaseStatus": "passed",
+  "observerSourceStatus": 91,
+  "observerSourceStderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "observerSourceStderrSize": 0,
+  "observerSourceStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "observerSourceStdoutSize": 0,
+  "observerTransformedHandoffSha256": "697ae274ef624cc56d8845357d2e1c4897ae0338abe0f167df9c97b446e56753",
+  "observerTransformedNativeImageSha256": "908a454354be3f6dcd6614b06704e2d17ac04ead1fe0491b30a8f99446217a42",
+  "observerTransformedProcessStatus": 91,
+  "observerTransformedProcessStatusSha256": "0433e993a3dbc505d6e5cad972a1df0ab189cfe7ceece5e94fd47ca9a074370f",
+  "observerTransformedReleaseStatus": "passed",
+  "observerTransformedStatus": 91,
+  "observerTransformedStderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "observerTransformedStderrSize": 0,
+  "observerTransformedStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "observerTransformedStdoutSize": 0,
+  "schemaVersion": 2,
+  "selectedConsumerReadsClone": true,
+  "selectedEntryStatus": 91,
+  "selectedFunction": "dynsym:2",
+  "selectedSourceHandoffSha256": "ab32cce6c1b7a0a13d548eeaa517b0b10a8e1b7d24d789d25ddec3c061c0edfd",
+  "selectedTransformedHandoffSha256": "07abcdbf037eebb2d2c1dbc72341aaad27105da135018ebf909767ce058f363c",
+  "sourceTableUnchanged": true,
+  "unitId": "runtime.indirect-control.shared-table.glibc.host-context-entry",
+  "unselectedObserverUsesOriginalTable": true
+}

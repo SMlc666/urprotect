@@ -6,10 +6,23 @@ namespace UrProtect.Core.StructuralElf;
 
 public static class ElfParser
 {
-    public static ElfParseResult Parse(ReadOnlyMemory<byte> bytes)
+    public static ElfParseResult Parse(ReadOnlyMemory<byte> bytes) => ParseCore(bytes, limits: null);
+
+    internal static ElfParseResult Parse(ReadOnlyMemory<byte> bytes, ElfParserLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+        return ParseCore(bytes, limits);
+    }
+
+    private static ElfParseResult ParseCore(ReadOnlyMemory<byte> bytes, ElfParserLimits? limits)
     {
         var diagnostics = new DiagnosticBag();
         var reader = new BoundedReader(bytes);
+        var workBudget = limits is null ? null : new ElfParserWorkBudget(limits);
+        if (workBudget is not null && !workBudget.ValidateInputLength(bytes.Length, diagnostics))
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
         if (bytes.Length < ElfConstants.HeaderSize64)
         {
             diagnostics.Error(
@@ -100,7 +113,22 @@ public static class ElfParser
             return new ElfParseResult(null, diagnostics.ToArray());
         }
 
-        var programHeaders = ParseProgramHeaders(reader, header, diagnostics);
+        var programHeaders = ParseProgramHeaders(reader, header, diagnostics, workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
+        if (limits?.RequireSingleDynamicWithoutInterpreter == true
+            && (programHeaders.Count(programHeader => programHeader.Type == ElfConstants.PtDynamic) != 1
+                || programHeaders.Any(programHeader => programHeader.Type == ElfConstants.PtInterp)))
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidProgramHeader,
+                "The bounded ELF parse profile requires exactly one PT_DYNAMIC and no PT_INTERP.");
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
         if (!programHeaders.Any(headerEntry => headerEntry.IsLoadable))
         {
             diagnostics.Error(DiagnosticCode.MissingLoadSegment, "The input has no PT_LOAD segment.");
@@ -111,29 +139,100 @@ public static class ElfParser
             return new ElfParseResult(null, diagnostics.ToArray());
         }
 
-        var sectionHeaders = ParseSectionHeaders(reader, header, diagnostics);
+        var requireCompleteSectionTable = limits?.RequireCompleteSectionHeaderTable == true;
+        var sectionHeaders = ParseSectionHeaders(
+            reader,
+            header,
+            diagnostics,
+            workBudget,
+            requireCompleteSectionTable);
+        if (workBudget?.IsExceeded == true
+            || (requireCompleteSectionTable && diagnostics.HasErrors))
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
         var loadMap = LoadMap.Create(programHeaders);
-        var notes = ParseNotes(reader, programHeaders, diagnostics);
-        var dynamicEntries = ParseDynamicEntries(reader, programHeaders, diagnostics);
-        var dynamicMetadata = ParseDynamicMetadata(reader, loadMap, dynamicEntries, diagnostics);
+        var notes = ParseNotes(reader, programHeaders, diagnostics, workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
+        var dynamicEntries = ParseDynamicEntries(reader, programHeaders, diagnostics, workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
+        if (limits is not null
+            && TryGetForbiddenDynamicTag(
+                dynamicEntries,
+                limits.ForbiddenDynamicTags,
+                limits.ForbiddenDynamicTagValueMasks,
+                out var forbiddenTag))
+        {
+            diagnostics.Error(
+                DiagnosticCode.UnsupportedDynamicTag,
+                $"The bounded ELF parse policy rejects dynamic tag/value 0x{forbiddenTag:X} before expanded metadata traversal.");
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
+        var dynamicMetadata = ParseDynamicMetadata(reader, loadMap, dynamicEntries, diagnostics, workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
         var relaRelocations = ParseRelaRelocations(
             reader,
             loadMap,
             dynamicEntries,
-            diagnostics);
-        var relrWords = ParseRelrWords(reader, loadMap, dynamicEntries, diagnostics);
+            diagnostics,
+            workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
+        var sectionRelocations = ElfSectionRelocationParser.Parse(bytes, sectionHeaders, diagnostics, workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
+        var relrWords = ParseRelrWords(reader, loadMap, dynamicEntries, diagnostics, workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
         var androidPackedRelocations = ParseAndroidPackedRelocations(
             reader,
             loadMap,
             dynamicEntries,
-            diagnostics);
-        var dynamicSymbols = ParseDynamicSymbols(reader, loadMap, dynamicEntries, diagnostics);
+            diagnostics,
+            workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
+
+        var dynamicSymbols = ParseDynamicSymbols(reader, loadMap, dynamicEntries, diagnostics, workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
         var functionSymbols = ParseFunctionSymbols(
             reader,
             sectionHeaders,
             dynamicMetadata,
             dynamicSymbols,
-            diagnostics);
+            diagnostics,
+            workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
         var symbolVersions = ElfSymbolVersionParser.Parse(
             reader,
             loadMap,
@@ -150,7 +249,12 @@ public static class ElfParser
             dynamicMetadata,
             dynamicSymbols,
             relaRelocations,
-            diagnostics);
+            diagnostics,
+            workBudget);
+        if (workBudget?.IsExceeded == true)
+        {
+            return new ElfParseResult(null, diagnostics.ToArray());
+        }
 
         var file = new ElfFile(
             bytes,
@@ -163,6 +267,7 @@ public static class ElfParser
             symbolVersions,
             dynamicEntries,
             relaRelocations,
+            sectionRelocations,
             relrWords,
             androidPackedRelocations,
             dynamicSymbols,
@@ -176,6 +281,27 @@ public static class ElfParser
         }
 
         return new ElfParseResult(file, diagnostics.ToArray());
+    }
+
+    private static bool TryGetForbiddenDynamicTag(
+        IReadOnlyList<DynamicEntry> entries,
+        IReadOnlySet<ulong> forbiddenTags,
+        IReadOnlyDictionary<ulong, ulong> forbiddenValueMasks,
+        out ulong tag)
+    {
+        foreach (var entry in entries)
+        {
+            if (forbiddenTags.Contains(entry.Tag)
+                || (forbiddenValueMasks.TryGetValue(entry.Tag, out var forbiddenMask)
+                    && (entry.Value & forbiddenMask) != 0))
+            {
+                tag = entry.Tag;
+                return true;
+            }
+        }
+
+        tag = default;
+        return false;
     }
 
     private static bool HasElfMagic(BoundedReader reader)
@@ -230,8 +356,21 @@ public static class ElfParser
     private static List<ProgramHeader> ParseProgramHeaders(
         BoundedReader reader,
         ElfHeader header,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
+        if (workBudget is not null
+            && !workBudget.TryReserveTable(
+                header.ProgramHeaderCount,
+                ElfConstants.ProgramHeaderSize64,
+                workBudget.Limits.MaximumProgramHeaders,
+                "program-header table",
+                diagnostics,
+                header.ProgramHeaderOffset))
+        {
+            return new List<ProgramHeader>();
+        }
+
         var result = new List<ProgramHeader>(header.ProgramHeaderCount);
         if (header.ProgramHeaderCount == 0)
         {
@@ -341,8 +480,28 @@ public static class ElfParser
     private static List<SectionHeader> ParseSectionHeaders(
         BoundedReader reader,
         ElfHeader header,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget,
+        bool requireCompleteDeclaredTable)
     {
+        if (workBudget is not null
+            && !workBudget.TryReserveTable(
+                header.SectionHeaderCount,
+                header.SectionHeaderEntrySize,
+                workBudget.Limits.MaximumSectionHeaders,
+                "section-header table",
+                diagnostics,
+                header.SectionHeaderOffset))
+        {
+            return new List<SectionHeader>();
+        }
+
+        if (requireCompleteDeclaredTable
+            && !ValidateSectionHeaderDeclaration(header, diagnostics))
+        {
+            return new List<SectionHeader>();
+        }
+
         var result = new List<SectionHeader>(header.SectionHeaderCount);
         if (header.SectionHeaderOffset == 0 || header.SectionHeaderCount == 0)
         {
@@ -357,10 +516,21 @@ public static class ElfParser
                 reader.Length,
                 out _))
         {
-            diagnostics.Warning(
-                DiagnosticCode.TableOutOfBounds,
-                "The optional section-header table could not be safely read and was ignored.",
-                header.SectionHeaderOffset);
+            if (requireCompleteDeclaredTable)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.TableOutOfBounds,
+                    "The bounded ELF parse profile requires the complete declared section-header table to be in bounds.",
+                    header.SectionHeaderOffset);
+            }
+            else
+            {
+                diagnostics.Warning(
+                    DiagnosticCode.TableOutOfBounds,
+                    "The optional section-header table could not be safely read and was ignored.",
+                    header.SectionHeaderOffset);
+            }
+
             return result;
         }
 
@@ -382,10 +552,21 @@ public static class ElfParser
                 || !reader.TryReadUInt64(offset + 48, out var alignment)
                 || !reader.TryReadUInt64(offset + 56, out var entrySize))
             {
-                diagnostics.Warning(
-                    DiagnosticCode.TableOutOfBounds,
-                    "The optional section-header table was truncated and was ignored.",
-                    offset);
+                if (requireCompleteDeclaredTable)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.TableOutOfBounds,
+                        "The bounded ELF parse profile could not parse every declared section-header row.",
+                        offset);
+                }
+                else
+                {
+                    diagnostics.Warning(
+                        DiagnosticCode.TableOutOfBounds,
+                        "The optional section-header table was truncated and was ignored.",
+                        offset);
+                }
+
                 result.Clear();
                 return result;
             }
@@ -406,11 +587,66 @@ public static class ElfParser
         return result;
     }
 
+    private static bool ValidateSectionHeaderDeclaration(
+        ElfHeader header,
+        DiagnosticBag diagnostics)
+    {
+        var sectionless = header.SectionHeaderOffset == 0
+            && header.SectionHeaderCount == 0
+            && header.SectionNameIndex == 0
+            && header.SectionHeaderEntrySize is 0 or ElfConstants.SectionHeaderSize64;
+        if (sectionless)
+        {
+            return true;
+        }
+
+        if (header.SectionHeaderOffset == 0
+            || header.SectionHeaderCount == 0
+            || header.SectionHeaderEntrySize < ElfConstants.SectionHeaderSize64
+            || header.SectionNameIndex == ElfConstants.ShnXindex
+            || header.SectionNameIndex >= header.SectionHeaderCount)
+        {
+            diagnostics.Error(
+                DiagnosticCode.InvalidHeader,
+                "The bounded ELF parse profile requires a consistent sectionless declaration or a complete declared section table.",
+                ElfHeaderOffsets.SectionHeaderOffset);
+            return false;
+        }
+
+        return true;
+    }
+
     private static List<ElfNote> ParseNotes(
         BoundedReader reader,
         IReadOnlyList<ProgramHeader> programHeaders,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
+        if (workBudget is not null)
+        {
+            ulong totalNoteBytes = 0;
+            foreach (var header in programHeaders)
+            {
+                if (header.Type is not (ElfConstants.PtNote or ElfConstants.PtGnuProperty))
+                {
+                    continue;
+                }
+
+                if (header.FileSize > ulong.MaxValue - totalNoteBytes)
+                {
+                    workBudget.Fail("note-segment work size overflowed", diagnostics, header.Offset);
+                    return new List<ElfNote>();
+                }
+
+                totalNoteBytes += header.FileSize;
+            }
+
+            if (!workBudget.TryCharge(totalNoteBytes, "note-segment traversal", diagnostics))
+            {
+                return new List<ElfNote>();
+            }
+        }
+
         var result = new List<ElfNote>();
         foreach (var header in programHeaders.Where(header =>
                      header.Type is ElfConstants.PtNote or ElfConstants.PtGnuProperty))
@@ -462,6 +698,21 @@ public static class ElfParser
                     break;
                 }
 
+                if (workBudget is not null
+                    && (result.Count >= workBudget.Limits.MaximumNotes
+                        || !workBudget.TryCharge(64, "ELF note record allocation", diagnostics, cursor)))
+                {
+                    if (!workBudget.IsExceeded)
+                    {
+                        workBudget.Fail(
+                            $"ELF note record count exceeds limit {workBudget.Limits.MaximumNotes} before allocation",
+                            diagnostics,
+                            cursor);
+                    }
+
+                    return result;
+                }
+
                 result.Add(new ElfNote(header.Type, type, name, descriptor, cursor));
                 cursor = nextOffset;
             }
@@ -474,7 +725,8 @@ public static class ElfParser
         BoundedReader reader,
         LoadMap loadMap,
         IReadOnlyList<DynamicEntry> dynamicEntries,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var stringTags = dynamicEntries.Where(entry => entry.Tag is
             ElfConstants.DtNeeded or
@@ -485,6 +737,21 @@ public static class ElfParser
         var hasStringSize = TryGetDynamicValue(dynamicEntries, ElfConstants.DtStrSz, out var stringSize);
         if (!hasStringTable && !hasStringSize && stringTags.Length == 0)
         {
+            return ElfDynamicMetadata.Empty;
+        }
+
+        if (workBudget is not null
+            && (stringSize > (ulong)workBudget.Limits.MaximumDynamicStringTableBytes
+                || !workBudget.TryCharge(stringSize, "dynamic string-table bytes", diagnostics, stringAddress)))
+        {
+            if (!workBudget.IsExceeded)
+            {
+                workBudget.Fail(
+                    $"dynamic string-table size {stringSize} exceeds limit {workBudget.Limits.MaximumDynamicStringTableBytes} before string-table traversal",
+                    diagnostics,
+                    stringAddress);
+            }
+
             return ElfDynamicMetadata.Empty;
         }
 
@@ -505,8 +772,13 @@ public static class ElfParser
         string? runPath = null;
         foreach (var entry in stringTags)
         {
-            if (!TryReadString(stringTable, entry.Value, out var value))
+            if (!TryReadString(stringTable, entry.Value, out var value, workBudget, diagnostics))
             {
+                if (workBudget?.IsExceeded == true)
+                {
+                    return ElfDynamicMetadata.Empty;
+                }
+
                 diagnostics.Error(
                     DiagnosticCode.DynamicTableMalformed,
                     $"Dynamic string offset {entry.Value} is outside the string table.",
@@ -537,7 +809,8 @@ public static class ElfParser
     private static IReadOnlyList<DynamicEntry> ParseDynamicEntries(
         BoundedReader reader,
         IReadOnlyList<ProgramHeader> programHeaders,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var dynamicHeader = programHeaders.FirstOrDefault(header => header.Type == ElfConstants.PtDynamic);
         if (dynamicHeader.Type != ElfConstants.PtDynamic)
@@ -555,6 +828,18 @@ public static class ElfParser
         }
 
         var count = dynamicHeader.FileSize / ElfConstants.DynamicEntrySize64;
+        if (workBudget is not null
+            && !workBudget.TryReserveTable(
+                count,
+                ElfConstants.DynamicEntrySize64,
+                workBudget.Limits.MaximumDynamicEntries,
+                "PT_DYNAMIC entry table",
+                diagnostics,
+                dynamicHeader.Offset))
+        {
+            return Array.Empty<DynamicEntry>();
+        }
+
         if (count > int.MaxValue)
         {
             diagnostics.Error(
@@ -606,7 +891,8 @@ public static class ElfParser
         BoundedReader reader,
         LoadMap loadMap,
         IReadOnlyList<DynamicEntry> dynamicEntries,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var result = new List<RelaRelocation>();
         if (TryGetDynamicValue(dynamicEntries, ElfConstants.DtJmpRel, out _)
@@ -656,6 +942,17 @@ public static class ElfParser
             }
 
             var count = size / entrySize;
+            if (workBudget is not null
+                && !workBudget.TryReserveDynamicRelocationTable(
+                    count,
+                    entrySize,
+                    "dynamic RELA relocation table",
+                    diagnostics,
+                    address))
+            {
+                return;
+            }
+
             for (ulong index = 0; index < count; index++)
             {
                 if (!TryElementOffset(fileOffset, entrySize, index, out var offset)
@@ -694,7 +991,8 @@ public static class ElfParser
         BoundedReader reader,
         LoadMap loadMap,
         IReadOnlyList<DynamicEntry> dynamicEntries,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var result = new List<RelrWord>();
         foreach (var tags in new[]
@@ -735,6 +1033,17 @@ public static class ElfParser
             }
 
             var count = size / entrySize;
+            if (workBudget is not null
+                && !workBudget.TryReserveRelrTable(
+                    count,
+                    entrySize,
+                    "RELR relocation table",
+                    diagnostics,
+                    address))
+            {
+                continue;
+            }
+
             for (ulong index = 0; index < count; index++)
             {
                 if (!TryElementOffset(fileOffset, entrySize, index, out var offset)
@@ -768,7 +1077,8 @@ public static class ElfParser
         BoundedReader reader,
         LoadMap loadMap,
         IReadOnlyList<DynamicEntry> dynamicEntries,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var result = new List<AndroidPackedRelocationTable>();
         ParseTable(ElfConstants.DtAndroidRel, ElfConstants.DtAndroidRelsz, isRela: false);
@@ -815,7 +1125,8 @@ public static class ElfParser
         BoundedReader reader,
         LoadMap loadMap,
         IReadOnlyList<DynamicEntry> dynamicEntries,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         if (!TryGetDynamicValue(dynamicEntries, ElfConstants.DtSymTab, out var address))
         {
@@ -842,12 +1153,30 @@ public static class ElfParser
                 loadMap,
                 dynamicEntries,
                 diagnostics,
+                workBudget,
                 out var symbolCount))
         {
+            if (workBudget?.IsExceeded == true)
+            {
+                return Array.Empty<DynamicSymbol>();
+            }
+
             diagnostics.Warning(
                 DiagnosticCode.SymbolTableMalformed,
                 "The dynamic symbol count could not be derived from the available hash table; symbols were not materialized.",
                 address);
+            return Array.Empty<DynamicSymbol>();
+        }
+
+        if (workBudget is not null
+            && !workBudget.TryReserveTable(
+                symbolCount,
+                entrySize,
+                workBudget.Limits.MaximumDynamicSymbols,
+                "dynamic symbol table",
+                diagnostics,
+                address))
+        {
             return Array.Empty<DynamicSymbol>();
         }
 
@@ -897,9 +1226,16 @@ public static class ElfParser
         IReadOnlyList<SectionHeader> sectionHeaders,
         ElfDynamicMetadata dynamicMetadata,
         IReadOnlyList<DynamicSymbol> dynamicSymbols,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var result = new List<ElfFunctionSymbol>();
+        if (workBudget is not null
+            && !workBudget.TryCharge((ulong)dynamicSymbols.Count, "dynamic function-symbol projection", diagnostics))
+        {
+            return result;
+        }
+
         for (var index = 0; index < dynamicSymbols.Count; index++)
         {
             var symbol = dynamicSymbols[index];
@@ -908,8 +1244,13 @@ public static class ElfParser
                 continue;
             }
 
-            if (!TryReadString(dynamicMetadata.StringTable, symbol.Name, out var name))
+            if (!TryReadString(dynamicMetadata.StringTable, symbol.Name, out var name, workBudget, diagnostics))
             {
+                if (workBudget?.IsExceeded == true)
+                {
+                    return result;
+                }
+
                 diagnostics.Warning(
                     DiagnosticCode.SymbolTableMalformed,
                     "A dynamic function symbol name is outside the dynamic string table.",
@@ -961,6 +1302,17 @@ public static class ElfParser
             }
 
             var count = symbolTable.Size / symbolTable.EntrySize;
+            if (workBudget is not null
+                && !workBudget.TryReserveStaticSymbolTable(
+                    count,
+                    symbolTable.EntrySize,
+                    "static symbol table",
+                    diagnostics,
+                    symbolTable.Offset))
+            {
+                return result;
+            }
+
             if (count > int.MaxValue
                 || !reader.Contains(symbolTable.Offset, symbolTable.Size))
             {
@@ -994,7 +1346,7 @@ public static class ElfParser
 
                 if ((info & 0x0F) != ElfConstants.SttFunc
                     || size == 0
-                    || !TryReadString(strings, nameOffset, out var name))
+                    || !TryReadString(strings, nameOffset, out var name, workBudget, diagnostics))
                 {
                     continue;
                 }
@@ -1019,6 +1371,7 @@ public static class ElfParser
         LoadMap loadMap,
         IReadOnlyList<DynamicEntry> dynamicEntries,
         DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget,
         out ulong symbolCount)
     {
         if (TryGetDynamicValue(dynamicEntries, ElfConstants.DtHash, out var hashAddress))
@@ -1027,6 +1380,16 @@ public static class ElfParser
                 && reader.TryReadUInt32(hashFileOffset + 4, out var count))
             {
                 symbolCount = count;
+                if (workBudget is not null
+                    && symbolCount > (ulong)workBudget.Limits.MaximumDynamicSymbols)
+                {
+                    workBudget.Fail(
+                        $"dynamic symbol count {symbolCount} exceeds limit {workBudget.Limits.MaximumDynamicSymbols} before symbol-table allocation",
+                        diagnostics,
+                        hashAddress);
+                    return false;
+                }
+
                 return true;
             }
 
@@ -1047,6 +1410,18 @@ public static class ElfParser
             return false;
         }
 
+        if (workBudget is not null
+            && (bucketCount > (uint)workBudget.Limits.MaximumDynamicSymbols
+                || bloomWordCount > (uint)workBudget.Limits.MaximumDynamicSymbols))
+        {
+            workBudget.Fail(
+                $"GNU hash bucket/bloom count exceeds the dynamic-symbol limit {workBudget.Limits.MaximumDynamicSymbols} before bucket or chain traversal",
+                diagnostics,
+                gnuHashAddress);
+            symbolCount = default;
+            return false;
+        }
+
         if (!TryMultiply(bloomWordCount, sizeof(ulong), out var bloomBytes)
             || !TryMultiply(bucketCount, sizeof(uint), out var bucketBytes)
             || !TryAdd(gnuHashAddress, 16, out var bloomAddress)
@@ -1061,9 +1436,32 @@ public static class ElfParser
             return false;
         }
 
+        if (workBudget is not null
+            && !workBudget.TryCharge(bucketBytes, "GNU hash bucket traversal", diagnostics, bucketAddress))
+        {
+            symbolCount = default;
+            return false;
+        }
+
+        // The bounded provider profile walks GNU hash chains after the bucket array.
+        // Keep the ordinary no-profile parser path unchanged in this scoped remediation.
+        var chainTableAddress = bucketAddress;
+        if (workBudget is not null
+            && !TryAdd(bucketAddress, bucketBytes, out chainTableAddress))
+        {
+            diagnostics.Error(
+                DiagnosticCode.SymbolTableMalformed,
+                "The bounded GNU hash chain table address overflows.",
+                gnuHashAddress);
+            symbolCount = default;
+            return false;
+        }
+
         ulong maxSymbol = symbolOffset == 0 ? 0 : symbolOffset - 1;
         var foundSymbol = false;
-        var maxChainEntries = (ulong)Math.Max(1, reader.Length / sizeof(uint));
+        var maxChainEntries = workBudget is null
+            ? (ulong)Math.Max(1, reader.Length / sizeof(uint))
+            : (ulong)workBudget.Limits.MaximumDynamicSymbols;
         for (ulong bucketIndex = 0; bucketIndex < bucketCount; bucketIndex++)
         {
             if (!TryElementOffset(bucketFileOffset, sizeof(uint), bucketIndex, out var bucketOffset)
@@ -1075,12 +1473,29 @@ public static class ElfParser
 
             foundSymbol = true;
             var symbolIndex = (ulong)bucketValue;
+            if (workBudget is not null && symbolIndex >= (ulong)workBudget.Limits.MaximumDynamicSymbols)
+            {
+                workBudget.Fail(
+                    $"GNU hash bucket symbol index {symbolIndex} exceeds dynamic-symbol limit {workBudget.Limits.MaximumDynamicSymbols}",
+                    diagnostics,
+                    gnuHashAddress);
+                symbolCount = default;
+                return false;
+            }
+
             for (ulong chainIndex = 0; chainIndex < maxChainEntries; chainIndex++)
             {
+                if (workBudget is not null
+                    && !workBudget.TryCharge(sizeof(uint), "GNU hash chain traversal", diagnostics, gnuHashAddress))
+                {
+                    symbolCount = default;
+                    return false;
+                }
+
                 if (symbolIndex < symbolOffset
                     || !TrySubtract(symbolIndex, symbolOffset, out var chainIndexValue)
                     || !TryMultiply(chainIndexValue, sizeof(uint), out var chainDelta)
-                    || !TryAdd(bucketAddress, chainDelta, out var chainAddress)
+                    || !TryAdd(chainTableAddress, chainDelta, out var chainAddress)
                     || !TryResolveVirtualRange(reader, loadMap, chainAddress, sizeof(uint), out var chainFileOffset)
                     || !reader.TryReadUInt32(chainFileOffset, out var chainValue))
                 {
@@ -1111,10 +1526,21 @@ public static class ElfParser
                 symbolIndex++;
                 if (chainIndex == maxChainEntries - 1)
                 {
-                    diagnostics.Error(
-                        DiagnosticCode.SymbolTableMalformed,
-                        "The GNU hash chain has no terminating entry.",
-                        gnuHashAddress);
+                    if (workBudget is not null)
+                    {
+                        workBudget.Fail(
+                            $"GNU hash chain exceeds dynamic-symbol limit {workBudget.Limits.MaximumDynamicSymbols} without termination before reading another chain entry",
+                            diagnostics,
+                            gnuHashAddress);
+                    }
+                    else
+                    {
+                        diagnostics.Error(
+                            DiagnosticCode.SymbolTableMalformed,
+                            "The GNU hash chain has no terminating entry.",
+                            gnuHashAddress);
+                    }
+
                     symbolCount = default;
                     return false;
                 }
@@ -1122,7 +1548,209 @@ public static class ElfParser
         }
 
         symbolCount = foundSymbol ? maxSymbol + 1 : symbolOffset;
+        if (workBudget is not null
+            && symbolCount > (ulong)workBudget.Limits.MaximumDynamicSymbols)
+        {
+            workBudget.Fail(
+                $"GNU-hash-derived dynamic symbol count {symbolCount} exceeds limit {workBudget.Limits.MaximumDynamicSymbols}",
+                diagnostics,
+                gnuHashAddress);
+            return false;
+        }
+
         return true;
     }
 
+}
+
+/// <summary>Opt-in parser limits for a bounded structural ELF consumer.</summary>
+internal sealed record ElfParserLimits(
+    int MaximumInputBytes,
+    int MaximumProgramHeaders,
+    int MaximumSectionHeaders,
+    int MaximumDynamicEntries,
+    int MaximumNotes,
+    int MaximumDynamicSymbols,
+    int MaximumStaticSymbols,
+    int MaximumDynamicRelocationRows,
+    int MaximumSectionRelocationRows,
+    int MaximumRelrRows,
+    int MaximumDynamicStringTableBytes,
+    int MaximumStringScanBytes,
+    ulong MaximumAggregateWorkBytes,
+    IReadOnlySet<ulong> ForbiddenDynamicTags,
+    IReadOnlyDictionary<ulong, ulong> ForbiddenDynamicTagValueMasks,
+    bool RequireSingleDynamicWithoutInterpreter = false,
+    bool RequireCompleteSectionHeaderTable = false);
+
+/// <summary>
+/// Shared work accounting used only by an opt-in bounded parser profile. The
+/// budget is charged before allocations, record walks, or bounded string scans.
+/// </summary>
+internal sealed class ElfParserWorkBudget(ElfParserLimits limits)
+{
+    private ulong workBytes;
+    private ulong staticSymbolRows;
+    private ulong dynamicRelocationRows;
+    private ulong relrRows;
+
+    public ElfParserLimits Limits { get; } = limits ?? throw new ArgumentNullException(nameof(limits));
+
+    public bool IsExceeded { get; private set; }
+
+    public bool ValidateInputLength(int inputBytes, DiagnosticBag diagnostics)
+    {
+        if (inputBytes < 0 || inputBytes > Limits.MaximumInputBytes)
+        {
+            return Fail(
+                $"input size {inputBytes} exceeds the bounded provider parse input limit {Limits.MaximumInputBytes}",
+                diagnostics);
+        }
+
+        return true;
+    }
+
+    public bool TryReserveTable(
+        ulong count,
+        ulong rowSize,
+        int maximumRows,
+        string description,
+        DiagnosticBag diagnostics,
+        ulong? offset = null)
+    {
+        if (count > (ulong)maximumRows)
+        {
+            return Fail(
+                $"{description} declares {count} rows, exceeding its {maximumRows}-row limit before allocation or traversal",
+                diagnostics,
+                offset);
+        }
+
+        if (rowSize != 0 && count > ulong.MaxValue / rowSize)
+        {
+            return Fail($"{description} byte size overflows before allocation or traversal", diagnostics, offset);
+        }
+
+        return TryCharge(count * rowSize, description, diagnostics, offset);
+    }
+
+    public bool TryReserveStaticSymbolTable(
+        ulong count,
+        ulong rowSize,
+        string description,
+        DiagnosticBag diagnostics,
+        ulong? offset = null) =>
+        TryReserveAggregateRows(
+            ref staticSymbolRows,
+            count,
+            rowSize,
+            Limits.MaximumStaticSymbols,
+            description,
+            diagnostics,
+            offset);
+
+    public bool TryReserveDynamicRelocationTable(
+        ulong count,
+        ulong rowSize,
+        string description,
+        DiagnosticBag diagnostics,
+        ulong? offset = null) =>
+        TryReserveAggregateRows(
+            ref dynamicRelocationRows,
+            count,
+            rowSize,
+            Limits.MaximumDynamicRelocationRows,
+            description,
+            diagnostics,
+            offset);
+
+    public bool TryReserveRelrTable(
+        ulong count,
+        ulong rowSize,
+        string description,
+        DiagnosticBag diagnostics,
+        ulong? offset = null) =>
+        TryReserveAggregateRows(
+            ref relrRows,
+            count,
+            rowSize,
+            Limits.MaximumRelrRows,
+            description,
+            diagnostics,
+            offset);
+
+    public bool TryCharge(
+        ulong amount,
+        string description,
+        DiagnosticBag diagnostics,
+        ulong? offset = null)
+    {
+        if (IsExceeded)
+        {
+            return false;
+        }
+
+        if (amount > Limits.MaximumAggregateWorkBytes - workBytes)
+        {
+            return Fail(
+                $"the bounded ELF parser exceeded its {Limits.MaximumAggregateWorkBytes}-byte aggregate work budget before {description}",
+                diagnostics,
+                offset);
+        }
+
+        workBytes += amount;
+        return true;
+    }
+
+    private bool TryReserveAggregateRows(
+        ref ulong reservedRows,
+        ulong count,
+        ulong rowSize,
+        int maximumRows,
+        string description,
+        DiagnosticBag diagnostics,
+        ulong? offset)
+    {
+        if (count > (ulong)maximumRows - reservedRows)
+        {
+            return Fail(
+                $"aggregate {description} rows exceed limit {maximumRows} before allocation or traversal",
+                diagnostics,
+                offset);
+        }
+
+        if (rowSize != 0 && count > ulong.MaxValue / rowSize)
+        {
+            return Fail($"{description} byte size overflows before allocation or traversal", diagnostics, offset);
+        }
+
+        if (!TryCharge(count * rowSize, description, diagnostics, offset))
+        {
+            return false;
+        }
+
+        reservedRows += count;
+        return true;
+    }
+
+    public bool TryGetStringScanLength(
+        ulong remainingBytes,
+        ulong offset,
+        DiagnosticBag diagnostics,
+        out ulong scanLength)
+    {
+        scanLength = Math.Min(remainingBytes, (ulong)Limits.MaximumStringScanBytes);
+        return TryCharge(scanLength, "dynamic/static symbol string scan", diagnostics, offset);
+    }
+
+    public bool Fail(string reason, DiagnosticBag diagnostics, ulong? offset = null)
+    {
+        if (!IsExceeded)
+        {
+            diagnostics.Error(DiagnosticCode.ElfParserWorkLimitExceeded, $"The bounded ELF parser rejected input: {reason}.", offset);
+            IsExceeded = true;
+        }
+
+        return false;
+    }
 }

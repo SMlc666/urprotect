@@ -48,7 +48,11 @@ public static class ElfLayoutMaterializer
             || plan.AddressMap is null
             || plan.BranchDecisions is null
             || plan.Edits is null
-            || plan.TlsFixups is null)
+            || plan.TlsFixups is null
+            || plan.UnwindEdits is null
+            || plan.JumpTableEdits is null
+            || plan.JumpTableTargetBindings is null
+            || plan.JumpTableClones is null)
         {
             diagnostics.Error(DiagnosticCode.ElfLayoutMalformed, "The layout plan collections or strategy are malformed.");
             return Failure(plan, diagnostics);
@@ -85,6 +89,7 @@ public static class ElfLayoutMaterializer
             }
 
             if (!ValidateParsedOutput(sourceFile, parsed.File, plan, output, diagnostics)
+                || !ValidateJumpTableTargetBindings(sourceFile, parsed.File, plan, output, diagnostics)
                 || !ValidateTlsPreserved(sourceFile, parsed.File, diagnostics)
                 || !ValidateTlsFixupOutput(sourceFile, parsed.File, plan, output, diagnostics))
             {
@@ -106,6 +111,10 @@ public static class ElfLayoutMaterializer
                 plan.BranchDecisions)
             {
                 TlsFixups = plan.TlsFixups,
+                UnwindEdits = plan.UnwindEdits,
+                JumpTableEdits = plan.JumpTableEdits,
+                JumpTableTargetBindings = plan.JumpTableTargetBindings,
+                JumpTableClones = plan.JumpTableClones,
             };
             return new ElfLayoutResult(plan, output, parsed.File, evidence, diagnostics.ToArray());
         }
@@ -243,6 +252,7 @@ public static class ElfLayoutMaterializer
                                 ? relocationType is not (ElfConstants.RArm64TlsLdAdrPage21
                                     or ElfConstants.RArm64TlsLdAddLo12Nc
                                     or ElfConstants.RArm64TlsLdAddDtprelHi12
+                                    or ElfConstants.RArm64TlsLdAddDtprelLo12
                                     or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
                                 : relocationType is not (ElfConstants.RArm64TlsGdAdrPage21
                                     or ElfConstants.RArm64TlsGdAddLo12Nc)))))
@@ -272,12 +282,23 @@ public static class ElfLayoutMaterializer
                 - fixup.SequenceOutputRange.FileOffset.Value;
             var logicalVirtualDelta = fixup.RelocationOutputRange.VirtualAddress.Value
                 - fixup.SequenceOutputRange.VirtualAddress.Value;
+            var regionAddressMap = plan.AddressMap.SingleOrDefault(entry =>
+                string.Equals(entry.Identity, decision.RegionIdentity, StringComparison.Ordinal));
+            var sequenceRegionOffset = regionAddressMap?.SourceRange is { } sourceRegionRange
+                && fixup.SequenceOutputRange.VirtualAddress.Value >= sourceRegionRange.VirtualAddress.Value
+                ? fixup.SequenceOutputRange.VirtualAddress.Value - sourceRegionRange.VirtualAddress.Value
+                : ulong.MaxValue;
+            var expectedPhysicalOffset = sequenceRegionOffset != ulong.MaxValue
+                && logicalVirtualDelta <= ulong.MaxValue - sequenceRegionOffset
+                ? sequenceRegionOffset + logicalVirtualDelta
+                : ulong.MaxValue;
             if (regionPlacements.Length != 1
                 || logicalFileDelta != logicalVirtualDelta
+                || expectedPhysicalOffset == ulong.MaxValue
                 || decision.OutputFileOffset.Value < regionPlacements[0].FileOffset.Value
                 || decision.OutputVirtualAddress.Value < regionPlacements[0].VirtualAddress.Value
-                || decision.OutputFileOffset.Value - regionPlacements[0].FileOffset.Value != logicalFileDelta
-                || decision.OutputVirtualAddress.Value - regionPlacements[0].VirtualAddress.Value != logicalVirtualDelta)
+                || decision.OutputFileOffset.Value - regionPlacements[0].FileOffset.Value != expectedPhysicalOffset
+                || decision.OutputVirtualAddress.Value - regionPlacements[0].VirtualAddress.Value != expectedPhysicalOffset)
             {
                 diagnostics.Error(
                     DiagnosticCode.TlsLayoutMismatch,
@@ -626,8 +647,8 @@ public static class ElfLayoutMaterializer
                 var sourceRange = first.Fixup.SequenceSourceRange;
                 var sourceOffset = sourceRange.FileOffset.Value;
                 var outputOffset = first.OutputFileOffset.Value;
-                valid = sourceRange.Size == 8 * sizeof(uint)
-                    && first.Fixup.SequenceOutputRange.Size == 8 * sizeof(uint)
+                valid = sourceRange.Size >= 8 * sizeof(uint)
+                    && first.Fixup.SequenceOutputRange.Size >= 8 * sizeof(uint)
                     && sourceOffset <= (ulong)sourceFile.Bytes.Length
                     && sourceRange.Size <= (ulong)sourceFile.Bytes.Length - sourceOffset
                     && outputOffset <= (ulong)output.Length
@@ -1573,6 +1594,23 @@ public static class ElfLayoutMaterializer
             }
         }
 
+        foreach (var unwindEdit in plan.UnwindEdits)
+        {
+            if (unwindEdit.Kind != ElfLayoutEditKind.UnwindMetadata
+                || unwindEdit.Bytes.Length == 0
+                || unwindEdit.Offset.Value > (ulong)output.Length
+                || (ulong)unwindEdit.Bytes.Length > (ulong)output.Length - unwindEdit.Offset.Value
+                || !output.AsSpan(checked((int)unwindEdit.Offset.Value), unwindEdit.Bytes.Length)
+                    .SequenceEqual(unwindEdit.Bytes))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutPostValidationFailed,
+                    "An unwind metadata edit does not match the materialized output.",
+                    unwindEdit.Offset.Value);
+                return false;
+            }
+        }
+
         foreach (var decision in plan.BranchDecisions)
         {
             var sourceRange = decision.SourceRange;
@@ -1620,6 +1658,474 @@ public static class ElfLayoutMaterializer
         return true;
     }
 
+    private static bool ValidateJumpTableTargetBindings(
+        ElfFile sourceFile,
+        ElfFile outputFile,
+        ElfLayoutPlan plan,
+        byte[] output,
+        DiagnosticBag diagnostics)
+    {
+        var bindings = plan.JumpTableTargetBindings;
+        var materializedTableEdits = plan.Edits
+            .Where(edit => edit.Kind == ElfLayoutEditKind.JumpTableEntry)
+            .ToArray();
+        if (bindings.Count != plan.JumpTableEdits.Count
+            || materializedTableEdits.Length != plan.JumpTableEdits.Count)
+        {
+            diagnostics.Error(
+                DiagnosticCode.ElfLayoutPostValidationFailed,
+                "Jump-table target bindings, planned table edits, and materialized table edits must have one-to-one counts.");
+            return false;
+        }
+
+        var tableEditOffsets = new HashSet<ulong>();
+        foreach (var tableEdit in plan.JumpTableEdits)
+        {
+            var matches = materializedTableEdits
+                .Where(edit => edit.Offset == tableEdit.Offset)
+                .ToArray();
+            if (tableEdit.Kind != ElfLayoutEditKind.JumpTableEntry
+                || !tableEditOffsets.Add(tableEdit.Offset.Value)
+                || matches.Length != 1
+                || !matches[0].Bytes.AsSpan().SequenceEqual(tableEdit.Bytes))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutPostValidationFailed,
+                    "Jump-table edits contain an untyped, duplicate, missing, or mismatched materialized row.",
+                    tableEdit.Offset.Value);
+                return false;
+            }
+        }
+
+        var entryIdentities = new HashSet<SemanticEntityId>();
+        var boundEntryOffsets = new HashSet<ulong>();
+        var cloneIdentities = plan.JumpTableClones.Select(clone => clone.TableIdentity).ToHashSet();
+        if (cloneIdentities.Count != plan.JumpTableClones.Count
+            || !cloneIdentities.SetEquals(bindings.Select(binding => binding.TableIdentity).Distinct()))
+        {
+            diagnostics.Error(
+                DiagnosticCode.ElfLayoutPostValidationFailed,
+                "Jump-table clone records and entry target bindings do not have a one-to-one table identity set.");
+            return false;
+        }
+
+        foreach (var tableGroup in bindings.GroupBy(binding => binding.TableIdentity))
+        {
+            var ordered = tableGroup.OrderBy(binding => binding.EntryIndex).ToArray();
+            if (ordered.Length == 0
+                || tableGroup.Key.Kind != SemanticEntityKind.Table
+                || string.IsNullOrWhiteSpace(tableGroup.Key.Value))
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutPostValidationFailed,
+                    "A jump-table target binding has no typed table identity.");
+                return false;
+            }
+
+            var first = ordered[0];
+            var tableRange = first.SourceTableRange;
+            if (first.EntryWidth is not (1 or 2 or 4 or 8)
+                || tableRange.Size == 0
+                || tableRange.Size % (ulong)first.EntryWidth != 0
+                || tableRange.Size / (ulong)first.EntryWidth != (ulong)ordered.Length
+                || !sourceFile.LoadMap.TryVirtualAddressToFileOffset(
+                    tableRange.VirtualAddress,
+                    tableRange.Size,
+                    out var mappedTableOffset)
+                || mappedTableOffset != tableRange.FileOffset)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutPostValidationFailed,
+                    "A jump-table target binding does not retain a bounded, file-backed source table range.",
+                    tableRange.FileOffset.Value);
+                return false;
+            }
+
+            var tableClones = plan.JumpTableClones
+                .Where(clone => clone.TableIdentity == first.TableIdentity)
+                .ToArray();
+            if (tableClones.Length != 1
+                || tableClones[0].RewritePolicy != SemanticJumpTableRewritePolicy.CopiedAndRetargeted
+                || tableClones[0].SourceTableRange != tableRange
+                || tableClones[0].OutputRange.Size != tableRange.Size
+                || !TryGetFileBackedReadOnlyOffset(
+                    outputFile,
+                    tableClones[0].OutputRange.VirtualAddress,
+                    tableClones[0].OutputRange.Size,
+                    out var mappedCloneOffset)
+                || mappedCloneOffset != tableClones[0].OutputRange.FileOffset
+                || tableRange.FileOffset.Value > int.MaxValue
+                || tableRange.Size > (ulong)sourceFile.Bytes.Length - tableRange.FileOffset.Value
+                || !sourceFile.Bytes.Span.Slice(
+                        checked((int)tableRange.FileOffset.Value),
+                        checked((int)tableRange.Size))
+                    .SequenceEqual(output.AsSpan(
+                        checked((int)tableRange.FileOffset.Value),
+                        checked((int)tableRange.Size)))
+                || !TryMapPhysicalAddress(
+                    plan.AddressMap,
+                    tableRange.VirtualAddress,
+                    out var mappedCloneAddress,
+                    out var mappedCloneAddressFileOffset)
+                || mappedCloneAddress != tableClones[0].OutputRange.VirtualAddress
+                || mappedCloneAddressFileOffset != tableClones[0].OutputRange.FileOffset)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.ElfLayoutPostValidationFailed,
+                    "A jump-table clone is not a distinct PF_R-only mapping, or the original table bytes/address were not preserved.",
+                    tableRange.FileOffset.Value);
+                return false;
+            }
+
+            for (var ordinal = 0; ordinal < ordered.Length; ordinal++)
+            {
+                var binding = ordered[ordinal];
+                var entry = binding.SourceEntryRange;
+                var outputEntry = binding.OutputEntryRange;
+                var width = binding.EntryWidth;
+                var delta = checked((ulong)ordinal * (ulong)width);
+                if (binding.EntryIndex < first.EntryIndex
+                    || binding.EntryIndex - first.EntryIndex != ordinal
+                    || binding.EntryIdentity.Kind != SemanticEntityKind.TableEntry
+                    || binding.EntryIdentity != SemanticEntityId.TableEntry(
+                        $"{binding.TableIdentity.Value}:{binding.EntryIndex}")
+                    || string.IsNullOrWhiteSpace(binding.TargetIdentity.Value)
+                    || !entryIdentities.Add(binding.EntryIdentity)
+                    || binding.SourceTableRange != tableRange
+                    || binding.EntryWidth is not (1 or 2 or 4 or 8)
+                    || binding.Scale <= 0
+                    || entry.Size != (ulong)width
+                    || delta > ulong.MaxValue - tableRange.FileOffset.Value
+                    || delta > ulong.MaxValue - tableRange.VirtualAddress.Value
+                    || entry.FileOffset.Value != tableRange.FileOffset.Value + delta
+                    || entry.VirtualAddress.Value != tableRange.VirtualAddress.Value + delta
+                    || !entry.TryGetFileEnd(out var entryEnd)
+                    || entryEnd > (ulong)sourceFile.Bytes.Length
+                    || entry.FileOffset.Value > int.MaxValue
+                    || outputEntry.Size != (ulong)width
+                    || !boundEntryOffsets.Add(outputEntry.FileOffset.Value))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutPostValidationFailed,
+                        "A jump-table target binding has a missing, duplicate, or mismatched source entry identity/index/range.",
+                        entry.FileOffset.Value);
+                    return false;
+                }
+
+                if (!TryReadJumpTableValue(
+                        sourceFile.Bytes.Span.Slice(checked((int)entry.FileOffset.Value), width),
+                        binding.IsSigned,
+                        out var sourceEncoded)
+                    || sourceEncoded != binding.SourceEncodedValue
+                    || !TryGetRelativeEntryValue(
+                        binding.SourceTargetAddress.Value,
+                        binding.SourceTargetBaseAddress.Value,
+                        binding.Addend,
+                        binding.Scale,
+                        binding.IsSigned,
+                        width,
+                        out var sourceValueFromAddresses)
+                    || sourceValueFromAddresses != sourceEncoded)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutPostValidationFailed,
+                        "A jump-table target binding does not agree with the retained source entry bytes and source target/base addresses.",
+                        entry.FileOffset.Value);
+                    return false;
+                }
+
+                if (!TryMapPhysicalAddress(
+                        plan.AddressMap,
+                        binding.SourceTargetAddress,
+                        out var mappedOutputTarget,
+                        out var mappedOutputTargetFileOffset,
+                        binding.TargetIdentity)
+                    || mappedOutputTarget != binding.OutputTargetAddress
+                    || !TryMapPhysicalAddress(
+                        plan.AddressMap,
+                        binding.SourceTargetBaseAddress,
+                        out var mappedOutputBase,
+                        out var mappedOutputBaseFileOffset,
+                        binding.TargetBaseIdentity)
+                    || mappedOutputBase != binding.OutputTargetBaseAddress
+                    || !TryGetFileBackedExecutableOffset(
+                        sourceFile,
+                        binding.SourceTargetAddress,
+                        sizeof(uint),
+                        out _)
+                    || !TryGetFileBackedExecutableOffset(
+                        outputFile,
+                        binding.OutputTargetAddress,
+                        sizeof(uint),
+                        out var outputTargetFileOffset)
+                    || outputTargetFileOffset != mappedOutputTargetFileOffset
+                    || !TryGetFileBackedExecutableOffset(
+                        outputFile,
+                        binding.OutputTargetBaseAddress,
+                        sizeof(uint),
+                        out var outputBaseFileOffset)
+                    || outputBaseFileOffset != mappedOutputBaseFileOffset)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutPostValidationFailed,
+                        "A jump-table target binding is not uniquely mapped from source to file-backed executable output.",
+                        entry.FileOffset.Value);
+                    return false;
+                }
+
+                if (!TryGetRelativeEntryValue(
+                        binding.OutputTargetAddress.Value,
+                        binding.OutputTargetBaseAddress.Value,
+                        binding.Addend,
+                        binding.Scale,
+                        binding.IsSigned,
+                        width,
+                        out var outputValueFromAddresses)
+                    || outputValueFromAddresses != binding.OutputEncodedValue)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutPostValidationFailed,
+                        "A jump-table target binding's output target/base do not reproduce its encoded entry value.",
+                        entry.FileOffset.Value);
+                    return false;
+                }
+
+                var tableEdits = plan.JumpTableEdits.Where(edit =>
+                    edit.Kind == ElfLayoutEditKind.JumpTableEntry
+                    && edit.Offset == outputEntry.FileOffset).ToArray();
+                var materializedEdits = plan.Edits.Where(edit =>
+                    edit.Kind == ElfLayoutEditKind.JumpTableEntry
+                    && edit.Offset == outputEntry.FileOffset).ToArray();
+                if (tableEdits.Length != 1
+                    || materializedEdits.Length != 1
+                    || tableEdits[0].Bytes.Length != width
+                    || !tableEdits[0].Bytes.AsSpan().SequenceEqual(materializedEdits[0].Bytes)
+                    || !TryReadJumpTableValue(tableEdits[0].Bytes, binding.IsSigned, out var editValue)
+                    || editValue != binding.OutputEncodedValue
+                    || outputEntry.FileOffset.Value > int.MaxValue
+                    || !TryGetFileBackedReadOnlyOffset(
+                        outputFile,
+                        outputEntry.VirtualAddress,
+                        checked((ulong)width),
+                        out var outputEntryFileOffset)
+                    || outputEntryFileOffset != outputEntry.FileOffset
+                    || !output.AsSpan(checked((int)outputEntry.FileOffset.Value), width)
+                        .SequenceEqual(tableEdits[0].Bytes))
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.ElfLayoutPostValidationFailed,
+                        "A jump-table target binding does not match exactly one planned edit and its materialized clone bytes.",
+                        outputEntry.FileOffset.Value);
+                    return false;
+                }
+            }
+        }
+
+        if (!boundEntryOffsets.SetEquals(tableEditOffsets))
+        {
+            diagnostics.Error(
+                DiagnosticCode.ElfLayoutPostValidationFailed,
+                "Jump-table target bindings do not form a one-to-one mapping to materialized table edit offsets.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryMapPhysicalAddress(
+        IReadOnlyList<ElfLayoutAddressMapEntry> addressMap,
+        VirtualAddress sourceAddress,
+        out VirtualAddress outputAddress,
+        out FileOffset outputFileOffset,
+        SemanticEntityId? expectedIdentity = null)
+    {
+        VirtualAddress? mappedAddress = null;
+        FileOffset? mappedFileOffset = null;
+        foreach (var entry in addressMap)
+        {
+            if (expectedIdentity is { } identity
+                && !string.Equals(entry.Identity, identity.Value, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (entry.SourceRange is not { } sourceRange
+                || sourceAddress.Value < sourceRange.VirtualAddress.Value
+                || sourceAddress.Value - sourceRange.VirtualAddress.Value >= sourceRange.Size)
+            {
+                continue;
+            }
+
+            var delta = sourceAddress.Value - sourceRange.VirtualAddress.Value;
+            if (delta >= entry.OutputRange.Size
+                || entry.OutputRange.VirtualAddress.Value > ulong.MaxValue - delta
+                || entry.OutputRange.FileOffset.Value > ulong.MaxValue - delta
+                || mappedAddress is not null)
+            {
+                outputAddress = default;
+                outputFileOffset = default;
+                return false;
+            }
+
+            mappedAddress = new VirtualAddress(entry.OutputRange.VirtualAddress.Value + delta);
+            mappedFileOffset = new FileOffset(entry.OutputRange.FileOffset.Value + delta);
+        }
+
+        outputAddress = mappedAddress.GetValueOrDefault();
+        outputFileOffset = mappedFileOffset.GetValueOrDefault();
+        return mappedAddress is not null && mappedFileOffset is not null;
+    }
+
+    private static bool TryGetFileBackedExecutableOffset(
+        ElfFile file,
+        VirtualAddress address,
+        ulong size,
+        out FileOffset fileOffset)
+    {
+        if (!file.LoadMap.TryVirtualAddressToFileOffset(address, size, out fileOffset))
+        {
+            return false;
+        }
+
+        var mappedFileOffset = fileOffset.Value;
+        return file.LoadMap.Segments.Count(segment =>
+            segment.IsExecutable
+            && segment.ContainsVirtualAddress(address.Value, size)
+            && segment.ContainsFileOffset(mappedFileOffset, size)) == 1;
+    }
+
+    private static bool TryGetFileBackedReadOnlyOffset(
+        ElfFile file,
+        VirtualAddress address,
+        ulong size,
+        out FileOffset fileOffset)
+    {
+        if (!file.LoadMap.TryVirtualAddressToFileOffset(address, size, out fileOffset))
+        {
+            return false;
+        }
+
+        var mappedFileOffset = fileOffset.Value;
+        return file.LoadMap.Segments.Count(segment =>
+            (segment.Flags & ElfConstants.PfR) != 0
+            && (segment.Flags & (ElfConstants.PfW | ElfConstants.PfX)) == 0
+            && segment.ContainsVirtualAddress(address.Value, size)
+            && segment.ContainsFileOffset(mappedFileOffset, size)) == 1;
+    }
+
+    private static bool TryReadJumpTableValue(
+        ReadOnlySpan<byte> bytes,
+        bool isSigned,
+        out long value)
+    {
+        value = default;
+        switch (bytes.Length)
+        {
+            case 1:
+                value = isSigned ? unchecked((sbyte)bytes[0]) : bytes[0];
+                return true;
+            case 2:
+                value = isSigned
+                    ? BinaryPrimitives.ReadInt16LittleEndian(bytes)
+                    : BinaryPrimitives.ReadUInt16LittleEndian(bytes);
+                return true;
+            case 4:
+                value = isSigned
+                    ? BinaryPrimitives.ReadInt32LittleEndian(bytes)
+                    : BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+                return true;
+            case 8:
+                if (isSigned)
+                {
+                    value = BinaryPrimitives.ReadInt64LittleEndian(bytes);
+                    return true;
+                }
+
+                var unsigned = BinaryPrimitives.ReadUInt64LittleEndian(bytes);
+                if (unsigned > long.MaxValue)
+                {
+                    return false;
+                }
+
+                value = checked((long)unsigned);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryGetRelativeEntryValue(
+        ulong target,
+        ulong targetBase,
+        long addend,
+        int scale,
+        bool isSigned,
+        int width,
+        out long encoded)
+    {
+        encoded = default;
+        if (scale <= 0
+            || width is not (1 or 2 or 4 or 8)
+            || !TryGetSignedDelta(target, targetBase, out var delta)
+            || !TrySubtractSigned(delta, addend, out var adjusted)
+            || adjusted % scale != 0)
+        {
+            return false;
+        }
+
+        encoded = adjusted / scale;
+        var bits = checked(width * 8);
+        if (isSigned)
+        {
+            var minimum = bits == 64 ? long.MinValue : -(1L << (bits - 1));
+            var maximum = bits == 64 ? long.MaxValue : (1L << (bits - 1)) - 1;
+            return encoded >= minimum && encoded <= maximum;
+        }
+
+        return encoded >= 0 && (width == 8 || (ulong)encoded <= ((1UL << bits) - 1));
+    }
+
+    private static bool TryGetSignedDelta(ulong left, ulong right, out long delta)
+    {
+        if (left >= right)
+        {
+            var difference = left - right;
+            if (difference > long.MaxValue)
+            {
+                delta = default;
+                return false;
+            }
+
+            delta = checked((long)difference);
+            return true;
+        }
+
+        var negativeDifference = right - left;
+        if (negativeDifference > (1UL << 63))
+        {
+            delta = default;
+            return false;
+        }
+
+        delta = negativeDifference == (1UL << 63)
+            ? long.MinValue
+            : -checked((long)negativeDifference);
+        return true;
+    }
+
+    private static bool TrySubtractSigned(long value, long subtrahend, out long result)
+    {
+        if ((subtrahend > 0 && value < long.MinValue + subtrahend)
+            || (subtrahend < 0 && value > long.MaxValue + subtrahend))
+        {
+            result = default;
+            return false;
+        }
+
+        result = value - subtrahend;
+        return true;
+    }
+
     private static string? TryGetDynamicSymbolName(ElfFile file, uint symbolIndex)
     {
         if (symbolIndex >= file.DynamicSymbols.Count)
@@ -1632,7 +2138,6 @@ public static class ElfLayoutMaterializer
             ? name
             : null;
     }
-
 
     private static bool TryGetBranchEncoding(
         ElfLayoutPlan plan,

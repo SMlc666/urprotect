@@ -1,4 +1,5 @@
 using UrProtect.Core.ArtifactProtocol;
+using UrProtect.Core.Application;
 using UrProtect.Core.Application.Protection;
 using UrProtect.Core.Application.Validation;
 using UrProtect.Core.StructuralElf;
@@ -44,7 +45,10 @@ internal sealed record ProtectedImageOptions(
     string? ExpectedRequestSha256,
     IReadOnlyList<FunctionSelector> Functions,
     IReadOnlyList<ProtectionPass> Passes,
-    IReadOnlyList<string> CommandArguments);
+    IReadOnlyList<string> CommandArguments)
+{
+    public ExternalJumpTableProviderInput? ExternalJumpTableProviderInput { get; init; }
+}
 
 internal sealed record RehydrationCliOptions(
     string InputPath,
@@ -60,4 +64,7 @@ internal sealed record RehydrationCliOptions(
     string ProducerId,
     string ProducerBuildSha256,
     string ConsumerId,
-    string ConsumerBuildSha256);
+    string ConsumerBuildSha256)
+{
+    public ExternalJumpTableProviderInput? ExternalJumpTableProviderInput { get; init; }
+}

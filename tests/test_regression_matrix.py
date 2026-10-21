@@ -45,6 +45,46 @@ class RegressionMatrixTests(unittest.TestCase):
             "fixture.runtime-covering-matrix-nightly",
             "fixture.runtime-covering-matrix-release",
         }.issubset(runtime_cases))
+        provider_cases = {
+            case["id"]: case
+            for case in self.data["cases"]
+            if case["id"] in {
+                "fixture.indirect-control-external-provider-e2e",
+                "native.external-provider-provider-loaded-rollback",
+            }
+        }
+        self.assertEqual(
+            {
+                "fixture.indirect-control-external-provider-e2e",
+                "native.external-provider-provider-loaded-rollback",
+            },
+            provider_cases.keys(),
+        )
+        for case in provider_cases.values():
+            self.assertTrue(case["required"])
+            self.assertEqual("native-arm64", case["platform"])
+            self.assertEqual(["pr", "nightly", "release"], case["tiers"])
+        e2e = provider_cases["fixture.indirect-control-external-provider-e2e"]
+        external_root = ".artifacts/indirect-control/external-provider/current"
+        rollback_root = ".artifacts/indirect-control/provider-loaded-rollback/current"
+        self.assertIn("run-external-provider-e2e.sh", e2e["command"])
+        self.assertIn("--artifact-root " + external_root, e2e["command"])
+        self.assertIn(
+            external_root + "/runtime.indirect-control.external-provider.glibc.host-context-entry",
+            e2e["command"],
+        )
+        self.assertIn("check-external-provider-evidence.py", e2e["command"])
+        self.assertIn(external_root + "/SHA256SUMS", e2e["artifacts"])
+        self.assertIn("transformed-native-rollback.json", " ".join(e2e["artifacts"]))
+        self.assertIn("provider-ci-logs/external-provider-*.log", " ".join(e2e["artifacts"]))
+        rollback = provider_cases["native.external-provider-provider-loaded-rollback"]
+        self.assertIn("run-external-provider-rollback-oracle.sh", rollback["command"])
+        self.assertIn("--artifact-root " + rollback_root, rollback["command"])
+        self.assertIn("--root " + rollback_root, rollback["command"])
+        self.assertIn("check-external-provider-rollback-evidence.py", rollback["command"])
+        self.assertIn("tests.test_external_provider_rollback_evidence", rollback["command"])
+        self.assertIn(rollback_root + "/SHA256SUMS", rollback["artifacts"])
+        self.assertIn("provider-ci-logs/provider-loaded-rollback-*.log", " ".join(rollback["artifacts"]))
 
     def test_duplicate_case_id_is_rejected(self) -> None:
         data = copy.deepcopy(self.data)

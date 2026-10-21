@@ -12,9 +12,9 @@ namespace UrProtect.Core.SemanticPlanning;
 public static partial class SemanticPlanSnapshotCodec
 {
 
-    public const ushort Version = 1;
+    public const ushort Version = 6;
     public const ushort Aarch64Architecture = ElfConstants.MachineAarch64;
-    public const string MagicText = "URP-SPS1";
+    public const string MagicText = "URP-SPS6";
 
     private const int DigestSize = 32;
     private const int MagicSize = 8;
@@ -154,7 +154,7 @@ public static partial class SemanticPlanSnapshotCodec
         var extensions = new List<ISemanticPlanExtension>(extensionCount);
         for (var index = 0; index < extensionCount; index++)
         {
-            if (!TryReadExtension(reader, out var extension))
+            if (!TryReadExtension(reader, extensions, out var extension))
             {
                 return MalformedReaderResult(reader, diagnostics);
             }
@@ -293,6 +293,67 @@ public static partial class SemanticPlanSnapshotCodec
             diagnostics.Concat(canonicalPlan.Diagnostics)));
     }
 
+    private static void ValidateJumpTableAddressBindings(
+        SemanticRewritePlan plan,
+        DiagnosticBag diagnostics)
+    {
+        foreach (var table in plan.Extensions.OfType<SemanticJumpTableExtension>())
+        {
+            if (!table.HasStructuredProof)
+            {
+                continue;
+            }
+
+            var tableMappings = plan.AddressMap.Entries
+                .Where(entry => entry.Identity == table.TableIdentity)
+                .ToArray();
+            if (tableMappings.Length != 1
+                || table.OutputRange is not { } outputRange
+                || tableMappings[0].SourceRange != table.TableRange
+                || tableMappings[0].OutputRange != outputRange)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanSnapshotMalformed,
+                    "A copied jump-table snapshot must retain one exact source-to-requested-clone address-map binding.",
+                    table.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            var entryMappings = plan.AddressMap.Entries
+                .Where(entry => entry.Identity.Kind == SemanticEntityKind.TableEntry
+                    && table.Entries.Any(binding => binding.EntryIdentity == entry.Identity))
+                .ToArray();
+            if (entryMappings.Length != table.Entries.Count)
+            {
+                diagnostics.Error(
+                    DiagnosticCode.SemanticPlanSnapshotMalformed,
+                    "A copied jump-table snapshot does not retain one planned address-map row for every table entry.",
+                    table.TableRange.FileOffset.Value);
+                continue;
+            }
+
+            foreach (var binding in table.Entries)
+            {
+                var mapping = entryMappings.SingleOrDefault(entry => entry.Identity == binding.EntryIdentity);
+                var outputEnd = checked(outputRange.VirtualAddress.Value + outputRange.Size);
+                var fileEnd = checked(outputRange.FileOffset.Value + outputRange.Size);
+                if (mapping is null
+                    || mapping.SourceRange != binding.SourceRange
+                    || mapping.OutputRange.Size != (ulong)table.EntrySize
+                    || mapping.OutputRange.VirtualAddress.Value < outputRange.VirtualAddress.Value
+                    || mapping.OutputRange.VirtualAddress.Value > outputEnd - (ulong)table.EntrySize
+                    || mapping.OutputRange.FileOffset.Value < outputRange.FileOffset.Value
+                    || mapping.OutputRange.FileOffset.Value > fileEnd - (ulong)table.EntrySize)
+                {
+                    diagnostics.Error(
+                        DiagnosticCode.SemanticPlanSnapshotMalformed,
+                        "A jump-table entry output mapping is not contained by the declared clone range.",
+                        binding.SourceRange.FileOffset.Value);
+                }
+            }
+        }
+    }
+
     private static CanonicalPlan? Canonicalize(
         SemanticRewritePlan plan,
         DiagnosticBag diagnostics)
@@ -354,6 +415,11 @@ public static partial class SemanticPlanSnapshotCodec
         {
             ValidateExtension(extension, extensionKeys, diagnostics);
         }
+
+        SemanticExternalJumpTableContract.ValidateAggregate(plan.Extensions, diagnostics);
+        ValidateJumpTableAddressBindings(plan, diagnostics);
+        SemanticDynamicImportCallContract.ValidatePlan(plan, diagnostics);
+        SemanticStaticFunctionPointerCallContract.ValidatePlan(plan, diagnostics);
 
         foreach (var diagnostic in plan.Diagnostics)
         {

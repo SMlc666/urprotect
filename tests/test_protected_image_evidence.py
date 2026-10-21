@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,13 @@ def run_checker(root: Path, expect_failure: bool = False) -> subprocess.Complete
     return subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
 
 
-def write_tls_evidence(root: Path, stage: dict, *, result: str = "accepted-and-runs") -> None:
+def write_tls_evidence(
+    root: Path,
+    stage: dict,
+    *,
+    result: str = "accepted-and-runs",
+    runtime_identity: dict | None = None,
+) -> None:
     source = root / "source-image.bin"
     source.write_bytes(b"tls source image")
     template = root / "pt-tls-template.bin"
@@ -40,6 +47,20 @@ def write_tls_evidence(root: Path, stage: dict, *, result: str = "accepted-and-r
         artifact.write_bytes(bytes(body) + hashlib.sha256(body).digest())
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
     artifact_sha = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    if result == "accepted-and-runs":
+        native_candidate = Path(shutil.which("true") or "/bin/true")
+        native_bytes = native_candidate.read_bytes()
+        if len(native_bytes) < 20 or native_bytes[:6] != b"\x7fELF\x02\x01" or int.from_bytes(native_bytes[18:20], "little") != 183:
+            raise AssertionError("accepted TLS projection fixture requires a real AArch64 ELF byte input")
+        (root / "native-image.bin").write_bytes(native_bytes)
+        if runtime_identity is None:
+            raise AssertionError("accepted TLS projection fixture requires measured native glibc identity")
+        native_image_path = "native-image.bin"
+        native_image_sha = hashlib.sha256(native_bytes).hexdigest()
+    else:
+        native_image_path = None
+        native_image_sha = None
+        runtime_identity = None
     stage.update({
         "sourceSha256": source_sha,
         "artifactSha256": artifact_sha,
@@ -52,6 +73,7 @@ def write_tls_evidence(root: Path, stage: dict, *, result: str = "accepted-and-r
         "profile": stage["profile"],
         "runtime": "glibc",
         "lifecycle": "current-thread" if result == "accepted-and-runs" else "not-run",
+        "expectedEntryStatus": 43,
         "result": result,
         "sourcePath": "source-image.bin",
         "sourceSha256": source_sha,
@@ -59,6 +81,10 @@ def write_tls_evidence(root: Path, stage: dict, *, result: str = "accepted-and-r
         "transformedSha256": artifact_sha,
         "artifactPath": "protected-image.bin",
         "artifactSha256": artifact_sha,
+        "nativeImagePath": native_image_path,
+        "nativeImageSha256": native_image_sha,
+        "runtimeIdentity": runtime_identity,
+        "runtimeIdentitySha256": runtime_identity.get("identitySha256") if runtime_identity else None,
         "toolchainIdentity": "gcc-13.3;ld-2.42",
         "loaderIdentity": "ld-linux-aarch64.so.1",
         "ptTls": {
@@ -71,9 +97,9 @@ def write_tls_evidence(root: Path, stage: dict, *, result: str = "accepted-and-r
             "owningLoad": 1,
         },
         "perThread": "observed" if result == "accepted-and-runs" else "not-run",
-        "zeroFill": "observed" if result == "accepted-and-runs" else "not-run",
+        "zeroFill": "not-run",
         "teardown": "observed" if result == "accepted-and-runs" else "not-run",
-        "firstFailureStage": None if result == "accepted-and-runs" else "environment" if result == "environment-unavailable" else "target-loader",
+        "firstFailureStage": None if result == "accepted-and-runs" else "environment" if result == "environment-unavailable" else "rehydration",
         "publicationResult": "published",
         "rollbackResult": "not-applicable",
     }
@@ -111,7 +137,18 @@ class ProtectedImageEvidenceTests(unittest.TestCase):
             "abiVersion": 1,
             "publicationComplete": True,
         }
-        write_tls_evidence(root, stage, result=result)
+        runtime_identity = None
+        if result == "accepted-and-runs":
+            identity_probe = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/tls_runtime_identity.py")],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            if identity_probe.returncode != 0:
+                self.skipTest("accepted TLS projection requires measured native AArch64 glibc")
+            runtime_identity = json.loads(identity_probe.stdout)
+        write_tls_evidence(root, stage, result=result, runtime_identity=runtime_identity)
         role = {
             "schemaVersion": 1,
             "artifactRole": "protected-image",
@@ -153,8 +190,40 @@ class ProtectedImageEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-runtime-failure-") as directory:
             root = Path(directory) / "unit"
             self.make_tls_tree(root, "runtime-failure")
+            stage = json.loads((root / "stage.json").read_text(encoding="utf-8"))
+            self.assertIsNone(stage["tlsEvidence"]["nativeImagePath"])
+            self.assertIsNone(stage["tlsEvidence"]["runtimeIdentity"])
             result = run_checker(root)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tls_environment_unavailable_rejects_native_runtime_claim(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-environment-native-negative-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "environment-unavailable")
+            stage_path = root / "stage.json"
+            stage = json.loads(stage_path.read_text(encoding="utf-8"))
+            native_path = root / "native-image.bin"
+            native_path.write_bytes(b"not an observed native image")
+            stage["tlsEvidence"]["nativeImagePath"] = native_path.name
+            stage["tlsEvidence"]["nativeImageSha256"] = hashlib.sha256(native_path.read_bytes()).hexdigest()
+            stage_path.write_text(json.dumps(stage, indent=2) + "\n", encoding="utf-8")
+            write_closed_manifest(root)
+            result = run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("environment-unavailable", result.stderr.lower())
+
+    def test_target_loader_failure_requires_measured_runtime_inputs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-runtime-native-negative-") as directory:
+            root = Path(directory) / "unit"
+            self.make_tls_tree(root, "runtime-failure")
+            stage_path = root / "stage.json"
+            stage = json.loads(stage_path.read_text(encoding="utf-8"))
+            stage["tlsEvidence"]["firstFailureStage"] = "target-loader"
+            stage_path.write_text(json.dumps(stage, indent=2) + "\n", encoding="utf-8")
+            write_closed_manifest(root)
+            result = run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires measured runtime", result.stderr.lower())
 
     def test_tls_environment_unavailable_rejects_lifecycle_observation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="urprotect-tls-evidence-environment-negative-") as directory:

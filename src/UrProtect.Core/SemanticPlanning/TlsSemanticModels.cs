@@ -467,7 +467,7 @@ public static class Aarch64TlsInstructionSemantics
         ArgumentNullException.ThrowIfNull(instructions);
         ArgumentNullException.ThrowIfNull(relocationSites);
         ArgumentNullException.ThrowIfNull(descriptorOwner);
-        if (instructions.Count != 8
+        if (instructions.Count < 8
             || relocationSites.Count != 4
             || descriptorOwner.DescriptorRange.Size != 2 * sizeof(ulong)
             || descriptorOwner.ResolverPltRange.Size != 6 * sizeof(uint)
@@ -477,8 +477,7 @@ public static class Aarch64TlsInstructionSemantics
             || descriptorOwner.Relocation.Addend != 0
             || descriptorOwner.Addend != 0
             || descriptorOwner.DescriptorRange.VirtualAddress.Value % sizeof(ulong) != 0
-            || descriptorOwner.DescriptorRange.FileOffset.Value % sizeof(ulong) != 0
-            || (descriptorOwner.DescriptorRange.VirtualAddress.Value & 0xFFF) != 0)
+            || descriptorOwner.DescriptorRange.FileOffset.Value % sizeof(ulong) != 0)
         {
             return false;
         }
@@ -498,7 +497,9 @@ public static class Aarch64TlsInstructionSemantics
         var siteIndices = orderedSites
             .Select(site => FindInstructionIndex(instructions, site.SourceRange.VirtualAddress))
             .ToArray();
-        if (!siteIndices.SequenceEqual(TlsDescPairOrdinals)
+        if (siteIndices.Length != 4
+            || siteIndices.Any(index => index < 0)
+            || !siteIndices.Select((index, ordinal) => index == siteIndices[0] + ordinal).All(value => value)
             || instructions.Zip(instructions.Skip(1)).Any(pair =>
                 pair.Second.SourceVirtualAddress.Value != pair.First.SourceVirtualAddress.Value + sizeof(uint)
                 || pair.Second.SourceFileOffset.Value != pair.First.SourceFileOffset.Value + sizeof(uint)))
@@ -506,15 +507,21 @@ public static class Aarch64TlsInstructionSemantics
             return false;
         }
 
+        var coreIndex = siteIndices[0];
+        if (coreIndex > instructions.Count - 7)
+        {
+            return false;
+        }
+
         var descriptorAddress = descriptorOwner.DescriptorRange.VirtualAddress.Value;
-        var adrp = instructions[0];
-        var load = instructions[1];
-        var add = instructions[2];
-        var call = instructions[3];
-        var threadPointer = instructions[4];
-        var finalAdd = instructions[5];
-        var access = instructions[6];
-        var ret = instructions[7];
+        var descriptorLow12 = descriptorAddress & 0xFFFUL;
+        var adrp = instructions[coreIndex];
+        var load = instructions[coreIndex + 1];
+        var add = instructions[coreIndex + 2];
+        var call = instructions[coreIndex + 3];
+        var threadPointer = instructions[coreIndex + 4];
+        var finalAdd = instructions[coreIndex + 5];
+        var access = instructions[coreIndex + 6];
         var loadMemory = GetMemory(load);
         var accessMemory = GetMemory(access);
         var adrpTarget = GetTarget(adrp);
@@ -522,18 +529,35 @@ public static class Aarch64TlsInstructionSemantics
         var addImmediate = GetImmediate(add);
         var finalAddInputs = GetRegisters(finalAdd, Aarch64OperandDirection.Input);
         var finalAddOutput = GetRegister(finalAdd, Aarch64OperandDirection.Output);
-        var accessBase = accessMemory?.Base;
+        var returnIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.index > coreIndex + 6
+                && string.Equals(item.instruction.Mnemonic, "ret", StringComparison.OrdinalIgnoreCase)
+                && item.instruction.ControlFlow == Aarch64ControlFlowKind.Return)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .First();
+        if (returnIndex < 0
+            || instructions
+                .Skip(coreIndex + 7)
+                .Take(returnIndex - (coreIndex + 7))
+                .Any(instruction => instruction.ControlFlow != Aarch64ControlFlowKind.None))
+        {
+            return false;
+        }
+
         return string.Equals(adrp.Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
             && HasRegister(adrp, Aarch64OperandDirection.Output, 0, 64)
             && adrpTarget is { } target
             && (target & ~0xFFFUL) == (descriptorAddress & ~0xFFFUL)
             && string.Equals(load.Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
             && loadValueRegister is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64, Role: Aarch64RegisterRole.None }
-            && loadMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64, Role: Aarch64RegisterRole.None }, Index: null, Offset: 0, AccessSize: 8, WritesBack: false }
+            && loadMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64, Role: Aarch64RegisterRole.None }, Index: null, AccessSize: 8, WritesBack: false }
+            && loadMemory.Offset == checked((long)descriptorLow12)
             && string.Equals(add.Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
             && HasRegister(add, Aarch64OperandDirection.Input, 0, 64)
             && HasRegister(add, Aarch64OperandDirection.Output, 0, 64)
-            && addImmediate == 0
+            && addImmediate == checked((long)descriptorLow12)
             && string.Equals(call.Mnemonic, "blr", StringComparison.OrdinalIgnoreCase)
             && call.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
             && HasRegister(call, Aarch64OperandDirection.Input, 1, 64)
@@ -546,8 +570,7 @@ public static class Aarch64TlsInstructionSemantics
             && GetImmediate(finalAdd) is null
             && accessMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64, Role: Aarch64RegisterRole.None }, Index: null, AccessSize: 1 or 2 or 4 or 8, WritesBack: false }
             && string.Equals(access.Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(ret.Mnemonic, "ret", StringComparison.OrdinalIgnoreCase)
-            && ret.ControlFlow == Aarch64ControlFlowKind.Return;
+            && returnIndex > coreIndex + 6;
     }
 
     /// <summary>Re-encodes one exact TLSDESC marker through the project encoder.</summary>
@@ -563,18 +586,13 @@ public static class Aarch64TlsInstructionSemantics
         ArgumentNullException.ThrowIfNull(descriptorOwner);
         encoded = 0;
         if (descriptorOwner.DescriptorRange.VirtualAddress.Value > ulong.MaxValue - (2 * sizeof(ulong))
-            || (descriptorOwner.DescriptorRange.VirtualAddress.Value & 0xFFF) != 0)
+            || descriptorOwner.DescriptorRange.VirtualAddress.Value % sizeof(ulong) != 0)
         {
             return false;
         }
 
         var descriptorAddress = descriptorOwner.DescriptorRange.VirtualAddress.Value;
         var low12 = descriptorAddress & 0xFFFUL;
-        if (low12 != 0)
-        {
-            return false;
-        }
-
         if (relocationType == ElfConstants.RArm64TlsDescCall)
         {
             var source = new AsmStoneAdapter().Decode(sourceEncoding, sourceAddress);
@@ -605,13 +623,14 @@ public static class Aarch64TlsInstructionSemantics
         }
 
         if (relocationType == ElfConstants.RArm64TlsDescLd64Lo12
-            && (GetMemory(sourceInstruction.Instruction!) is not { Offset: 0, AccessSize: 8 }))
+            && (GetMemory(sourceInstruction.Instruction!) is not { AccessSize: 8 } sourceMemory
+                || sourceMemory.Offset != checked((long)low12)))
         {
             return false;
         }
 
         if (relocationType == ElfConstants.RArm64TlsDescAddLo12
-            && GetImmediate(sourceInstruction.Instruction!) != 0)
+            && GetImmediate(sourceInstruction.Instruction!) != checked((long)low12))
         {
             return false;
         }
@@ -841,12 +860,15 @@ public static class Aarch64TlsInstructionSemantics
             .Where(item => IsMemoryInstruction(item.instruction))
             .Select(item => item.index)
             .ToArray();
-        if (memoryIndices.Length != 1 || memoryIndices[0] != moduleIndex + 3)
+        var tlsAccessIndices = memoryIndices
+            .Where(index => index > resolverIndex)
+            .ToArray();
+        if (tlsAccessIndices.Length == 0 || tlsAccessIndices[0] != moduleIndex + 3)
         {
             return false;
         }
 
-        var memoryBase = instructions[memoryIndices[0]].Operands
+        var memoryBase = instructions[tlsAccessIndices[0]].Operands
             .Select(operand => operand.Memory?.Base)
             .FirstOrDefault(register => register.HasValue);
         return memoryBase is { } baseRegister
@@ -902,6 +924,7 @@ public static class Aarch64TlsInstructionSemantics
         var dtpRelSites = relocationSites
             .Where(site => site.Binding.RelocationType is
                 ElfConstants.RArm64TlsLdAddDtprelHi12
+                or ElfConstants.RArm64TlsLdAddDtprelLo12
                 or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
             .OrderBy(site => site.PairOrdinal)
             .ToArray();
@@ -992,17 +1015,14 @@ public static class Aarch64TlsInstructionSemantics
             return false;
         }
 
-        var memoryIndices = instructions
-            .Select((instruction, index) => (instruction, index))
-            .Where(item => IsMemoryInstruction(item.instruction))
-            .Select(item => item.index)
-            .ToArray();
-        if (memoryIndices.Length != 1 || memoryIndices[0] != moduleIndex + 5)
+        var tlsAccessIndex = moduleIndex + 5;
+        if (tlsAccessIndex >= instructions.Count
+            || !IsMemoryInstruction(instructions[tlsAccessIndex]))
         {
             return false;
         }
 
-        var memoryBase = instructions[memoryIndices[0]].Operands
+        var memoryBase = instructions[tlsAccessIndex].Operands
             .Select(operand => operand.Memory?.Base)
             .FirstOrDefault(register => register.HasValue);
         return memoryBase is { } baseRegister
@@ -1097,6 +1117,7 @@ public static class Aarch64TlsInstructionSemantics
         encoded = 0;
         if (relocationType is not (
                 ElfConstants.RArm64TlsLdAddDtprelHi12
+                or ElfConstants.RArm64TlsLdAddDtprelLo12
                 or ElfConstants.RArm64TlsLdAddDtprelLo12Nc)
             || !TryGetTlsDynamicAddImmediateRegisters(
                 relocationType,
@@ -1816,11 +1837,10 @@ public static class Aarch64TlsInstructionSemantics
     {
         ArgumentNullException.ThrowIfNull(words);
         ArgumentNullException.ThrowIfNull(descriptorOwner);
-        if (words.Count != 8
+        if (words.Count < 8
             || descriptorOwner.DescriptorRange.Size != 2 * sizeof(ulong)
             || descriptorOwner.DescriptorRange.FileOffset.Value % sizeof(ulong) != 0
             || descriptorOwner.DescriptorRange.VirtualAddress.Value % sizeof(ulong) != 0
-            || (descriptorOwner.DescriptorRange.VirtualAddress.Value & 0xFFF) != 0
             || descriptorOwner.Relocation.Kind != Aarch64RelocationKind.ThreadLocal
             || descriptorOwner.Relocation.RelocationType != ElfConstants.RArm64TlsDesc
             || descriptorOwner.Relocation.Addend != 0
@@ -1844,20 +1864,34 @@ public static class Aarch64TlsInstructionSemantics
         }
 
         var instructions = decoded.Select(result => result.Instruction!).ToArray();
+        var returnIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.ControlFlow == Aarch64ControlFlowKind.Return)
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .Last();
         var loadMemory = GetMemory(instructions[1]);
         var accessMemory = GetMemory(instructions[6]);
         var descriptorAddress = descriptorOwner.DescriptorRange.VirtualAddress.Value;
-        return string.Equals(instructions[0].Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
+        var descriptorLow12 = descriptorAddress & 0xFFFUL;
+        return returnIndex >= 7
+            && returnIndex == instructions.Length - 1
+            && instructions
+                .Skip(7)
+                .Take(returnIndex - 7)
+                .All(instruction => instruction.ControlFlow == Aarch64ControlFlowKind.None)
+            && string.Equals(instructions[0].Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
             && HasRegister(instructions[0], Aarch64OperandDirection.Output, 0, 64)
             && instructions[0].DirectTarget is { } adrpTarget
             && (adrpTarget & ~0xFFFUL) == (descriptorAddress & ~0xFFFUL)
             && string.Equals(instructions[1].Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
             && HasRegister(instructions[1], Aarch64OperandDirection.Output, 1, 64)
-            && loadMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 }, Offset: 0, AccessSize: 8, Index: null, WritesBack: false }
+            && loadMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 }, AccessSize: 8, Index: null, WritesBack: false }
+            && loadMemory.Offset == checked((long)descriptorLow12)
             && string.Equals(instructions[2].Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
             && HasRegister(instructions[2], Aarch64OperandDirection.Input, 0, 64)
             && HasRegister(instructions[2], Aarch64OperandDirection.Output, 0, 64)
-            && GetImmediate(instructions[2]) == 0
+            && GetImmediate(instructions[2]) == checked((long)descriptorLow12)
             && IsTlsDescCall(instructions[3])
             && IsThreadPointerMrs(words[4])
             && HasRegister(instructions[4], Aarch64OperandDirection.Output, 1, 64)
@@ -1866,9 +1900,7 @@ public static class Aarch64TlsInstructionSemantics
             && HasRegister(instructions[5], Aarch64OperandDirection.Input, 1, 64)
             && HasRegister(instructions[5], Aarch64OperandDirection.Output, 0, 64)
             && accessMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 }, Index: null, AccessSize: 1 or 2 or 4 or 8, WritesBack: false }
-            && string.Equals(instructions[6].Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(instructions[7].Mnemonic, "ret", StringComparison.OrdinalIgnoreCase)
-            && instructions[7].ControlFlow == Aarch64ControlFlowKind.Return;
+            && string.Equals(instructions[6].Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsThreadPointerMrs(uint encoding) =>
@@ -1882,7 +1914,7 @@ public static class Aarch64TlsInstructionSemantics
         ArgumentNullException.ThrowIfNull(instructions);
         ArgumentNullException.ThrowIfNull(relocationSites);
         ArgumentNullException.ThrowIfNull(descriptorOwner);
-        if (instructions.Count != 8
+        if (instructions.Count < 8
             || relocationSites.Count != 4
             || descriptorOwner.DescriptorRange.Size != 2 * sizeof(ulong))
         {
@@ -1890,26 +1922,48 @@ public static class Aarch64TlsInstructionSemantics
         }
 
         var orderedSites = relocationSites.OrderBy(site => site.PairOrdinal).ToArray();
-        return orderedSites.Select(site => site.PairOrdinal).SequenceEqual(TlsDescPairOrdinals)
+        var siteIndices = orderedSites
+            .Select(site => instructions
+                .Select((instruction, index) => (instruction, index))
+                .Where(item => item.instruction.SourceRange.VirtualAddress == site.SourceRange.VirtualAddress)
+                .Select(item => item.index)
+                .DefaultIfEmpty(-1)
+                .First())
+            .ToArray();
+        var coreIndex = siteIndices.Length == 0 ? -1 : siteIndices[0];
+        var returnIndex = instructions
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.Mnemonic.Equals("ret", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.index)
+            .DefaultIfEmpty(-1)
+            .Last();
+        return coreIndex >= 0
+            && coreIndex <= instructions.Count - 8
+            && siteIndices.Length == 4
+            && siteIndices.All(index => index >= coreIndex && index < coreIndex + 4)
+            && siteIndices.Select((index, ordinal) => index == coreIndex + ordinal).All(value => value)
+            && returnIndex == instructions.Count - 1
+            && orderedSites.Select(site => site.PairOrdinal).SequenceEqual(TlsDescPairOrdinals)
             && orderedSites.Select(site => site.Binding.RelocationType).SequenceEqual(TlsDescRelocationOrder.Select(type => (uint?)type))
             && orderedSites.Zip(orderedSites.Skip(1)).All(pair => IsAdjacentTlsSites(pair.First, pair.Second))
-            && instructions[0].Role == TlsInstructionRole.AddressFormation
-            && instructions[1].Role == TlsInstructionRole.DescriptorLoad
-            && instructions[2].Role == TlsInstructionRole.AddressFormation
-            && instructions[3].Role == TlsInstructionRole.DescriptorCall
-            && instructions[4].Role == TlsInstructionRole.ThreadPointerRead
-            && instructions[5].Role == TlsInstructionRole.AddressFinalization
-            && instructions[6].Role == TlsInstructionRole.TlsMemoryAccess
-            && instructions[7].Mnemonic.Equals("ret", StringComparison.OrdinalIgnoreCase)
-            && instructions[1].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
-            && instructions[1].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
-            && instructions[3].IsCall
-            && instructions[3].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
-            && instructions[4].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
-            && instructions[5].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
-            && instructions[5].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
-            && instructions[5].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
-            && instructions[6].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 });
+            && instructions[coreIndex].Role == TlsInstructionRole.AddressFormation
+            && instructions[coreIndex + 1].Role == TlsInstructionRole.DescriptorLoad
+            && instructions[coreIndex + 2].Role == TlsInstructionRole.AddressFormation
+            && instructions[coreIndex + 3].Role == TlsInstructionRole.DescriptorCall
+            && instructions[coreIndex + 4].Role == TlsInstructionRole.ThreadPointerRead
+            && instructions[coreIndex + 5].Role == TlsInstructionRole.AddressFinalization
+            && instructions[coreIndex + 6].Role == TlsInstructionRole.TlsMemoryAccess
+            && instructions.Skip(coreIndex + 7).Take(returnIndex - (coreIndex + 7)).All(instruction =>
+                instruction.Role == TlsInstructionRole.SequencePreservation)
+            && instructions[coreIndex + 1].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[coreIndex + 1].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
+            && instructions[coreIndex + 3].IsCall
+            && instructions[coreIndex + 3].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[coreIndex + 4].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[coreIndex + 5].OutputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
+            && instructions[coreIndex + 5].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 1, Width: 64 })
+            && instructions[coreIndex + 5].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 })
+            && instructions[coreIndex + 6].InputRegisters.Any(register => register is { Class: Aarch64RegisterClass.General, Index: 0, Width: 64 });
     }
 
 
@@ -2852,6 +2906,7 @@ public static class Aarch64TlsInstructionSemantics
         {
             ElfConstants.RArm64TlsLdAddLo12Nc
                 or ElfConstants.RArm64TlsGdAddLo12Nc
+                or ElfConstants.RArm64TlsLdAddDtprelLo12
                 or ElfConstants.RArm64TlsLdAddDtprelLo12Nc => 0u,
             ElfConstants.RArm64TlsLdAddDtprelHi12 => 1u,
             _ => uint.MaxValue,

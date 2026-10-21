@@ -20,6 +20,7 @@ public enum SemanticEntityKind
     Literal,
     Veneer,
     Table,
+    TableEntry,
     RelocationTarget,
     RelocationSite,
 }
@@ -38,6 +39,8 @@ public readonly record struct SemanticEntityId(SemanticEntityKind Kind, string V
     public static SemanticEntityId Veneer(string value) => new(SemanticEntityKind.Veneer, value);
 
     public static SemanticEntityId Table(string value) => new(SemanticEntityKind.Table, value);
+
+    public static SemanticEntityId TableEntry(string value) => new(SemanticEntityKind.TableEntry, value);
 
     public static SemanticEntityId RelocationTarget(string value) =>
         new(SemanticEntityKind.RelocationTarget, value);

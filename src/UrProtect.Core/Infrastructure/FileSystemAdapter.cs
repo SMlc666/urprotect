@@ -28,6 +28,55 @@ public sealed record FilePublicationResult(
 /// </summary>
 public static class FileSystemAdapter
 {
+    /// <summary>
+    /// Reads one private bounded input snapshot. The size is checked from the
+    /// opened file before allocating or copying any input bytes; diagnostics do
+    /// not disclose the host path or underlying exception text.
+    /// </summary>
+    public static FileSnapshot ReadBoundedPrivateSnapshot(string path, int maximumBytes)
+    {
+        var diagnostics = new DiagnosticBag();
+        if (string.IsNullOrWhiteSpace(path) || maximumBytes < 0)
+        {
+            diagnostics.Error(DiagnosticCode.InvalidArgument, "The bounded input path or byte limit is invalid.");
+            return new FileSnapshot(string.Empty, Array.Empty<byte>(), null, diagnostics.ToArray());
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(path);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
+        {
+            diagnostics.Error(DiagnosticCode.InvalidArgument, "The bounded input path is invalid.");
+            return new FileSnapshot(string.Empty, Array.Empty<byte>(), null, diagnostics.ToArray());
+        }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            diagnostics.Error(
+                DiagnosticCode.InputIoFailure,
+                "Bounded private input reads are unavailable on this host.");
+            return new FileSnapshot(fullPath, Array.Empty<byte>(), null, diagnostics.ToArray());
+        }
+
+        try
+        {
+            using var handle = LinuxSafeFileInput.OpenReadOnly(fullPath);
+            return LinuxSafeFileInput.ReadFromOpenedHandle(handle, maximumBytes, fullPath);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException
+                or System.Security.SecurityException or DllNotFoundException or EntryPointNotFoundException
+                or BadImageFormatException)
+        {
+            diagnostics.Error(DiagnosticCode.InputIoFailure, "The bounded input could not be read.");
+            return new FileSnapshot(fullPath, Array.Empty<byte>(), null, diagnostics.ToArray());
+        }
+    }
+
     public static FileSnapshot Read(string path, bool captureUnixMode = false)
     {
         var diagnostics = new DiagnosticBag();
@@ -92,9 +141,10 @@ public static class FileSystemAdapter
                 normalized.Add(Path.GetFullPath(path));
             }
         }
-        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
         {
-            diagnostics.Error(DiagnosticCode.InvalidArgument, $"{invalidPathMessage}: {exception.Message}");
+            diagnostics.Error(DiagnosticCode.InvalidArgument, invalidPathMessage);
             return diagnostics.ToArray();
         }
 

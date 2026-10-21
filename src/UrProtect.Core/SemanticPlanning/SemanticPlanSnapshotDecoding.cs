@@ -15,6 +15,11 @@ public static partial class SemanticPlanSnapshotCodec
     {
         private readonly BoundedReader reader;
         private int metadataBytes;
+        private int externalProviderTables;
+        private int externalProviderSymbols;
+        private int externalProviderEntries;
+        private int externalProviderStringBytes;
+        private int externalProviderTableBytes;
 
         public SnapshotReader(ReadOnlyMemory<byte> source)
         {
@@ -147,7 +152,11 @@ public static partial class SemanticPlanSnapshotCodec
             return true;
         }
 
-        public bool TryReadUtf8String(out string value)
+        public bool TryReadUtf8String(out string value) => TryReadUtf8StringCore(out value, externalProvider: false);
+
+        public bool TryReadExternalProviderString(out string value) => TryReadUtf8StringCore(out value, externalProvider: true);
+
+        private bool TryReadUtf8StringCore(out string value, bool externalProvider)
         {
             value = string.Empty;
             if (!TryReadUInt32(out var byteLength))
@@ -187,7 +196,80 @@ public static partial class SemanticPlanSnapshotCodec
                     "The semantic-plan snapshot metadata exceeds its bounded byte limit.");
             }
 
+            if (externalProvider
+                && externalProviderStringBytes > SemanticPlanSnapshotLimits.MaximumExternalProviderStringBytes - (int)byteLength)
+            {
+                return Fail(
+                    DiagnosticCode.SemanticPlanSnapshotLimitExceeded,
+                    "The semantic-plan snapshot exceeds its aggregate external-provider string limit.");
+            }
+
             metadataBytes += (int)byteLength;
+            if (externalProvider)
+            {
+                externalProviderStringBytes += (int)byteLength;
+            }
+
+            Position += byteLength;
+            return true;
+        }
+
+        public bool TryAccountExternalProviderTableSymbols(int targetSymbolCount)
+        {
+            var symbolCount = (long)targetSymbolCount + 1;
+            if (targetSymbolCount < 0
+                || externalProviderTables >= SemanticPlanSnapshotLimits.MaximumExternalProviderTables
+                || symbolCount > SemanticPlanSnapshotLimits.MaximumExternalProviderSymbols - externalProviderSymbols)
+            {
+                return Fail(
+                    DiagnosticCode.SemanticPlanSnapshotLimitExceeded,
+                    "The semantic-plan snapshot exceeds an aggregate external-provider table or symbol limit.");
+            }
+
+            externalProviderTables++;
+            externalProviderSymbols += (int)symbolCount;
+            return true;
+        }
+
+        public bool TryAccountExternalProviderEntries(int entryCount)
+        {
+            if (entryCount < 0
+                || entryCount > SemanticPlanSnapshotLimits.MaximumExternalProviderTableEntries - externalProviderEntries)
+            {
+                return Fail(
+                    DiagnosticCode.SemanticPlanSnapshotLimitExceeded,
+                    "The semantic-plan snapshot exceeds its aggregate external-provider table-entry limit.");
+            }
+
+            externalProviderEntries += entryCount;
+            return true;
+        }
+
+        public bool TryReadExternalProviderBytes(int maximum, out byte[] values)
+        {
+            values = Array.Empty<byte>();
+            if (!TryReadUInt32(out var byteLength))
+            {
+                return false;
+            }
+
+            if (byteLength > maximum
+                || byteLength > SemanticPlanSnapshotLimits.MaximumExternalProviderTableBytes - externalProviderTableBytes)
+            {
+                return Fail(
+                    DiagnosticCode.SemanticPlanSnapshotLimitExceeded,
+                    "The semantic-plan snapshot exceeds its bounded external-provider table-byte limit.");
+            }
+
+            if (!reader.TrySlice(Position, byteLength, out var bytes))
+            {
+                return Fail(
+                    DiagnosticCode.SemanticPlanSnapshotMalformed,
+                    "The external-provider table bytes extend beyond the bounded snapshot input.");
+            }
+
+            values = bytes.ToArray();
+            externalProviderTableBytes += checked((int)byteLength);
             Position += byteLength;
             return true;
         }
@@ -575,7 +657,9 @@ public static partial class SemanticPlanSnapshotCodec
             || !TryReadOptionalUInt32(reader, out var indexModifier)
             || !reader.TryReadInt32(out var accessSize)
             || !reader.TryReadUtf8String(out var ordering)
-            || !reader.TryReadBool(out var writesBack))
+            || !reader.TryReadBool(out var writesBack)
+            || !reader.TryReadOptionalString(out var indexModifierKind)
+            || !reader.TryReadInt32(out var indexModifierAmount))
         {
             return false;
         }
@@ -588,7 +672,9 @@ public static partial class SemanticPlanSnapshotCodec
             indexModifier,
             accessSize,
             ordering,
-            writesBack);
+            writesBack,
+            indexModifierKind,
+            indexModifierAmount);
         return true;
     }
 
@@ -916,6 +1002,7 @@ public static partial class SemanticPlanSnapshotCodec
 
     private static bool TryReadExtension(
         SnapshotReader reader,
+        IReadOnlyList<ISemanticPlanExtension> priorExtensions,
         out ISemanticPlanExtension? extension)
     {
         extension = null;
@@ -1006,11 +1093,184 @@ public static partial class SemanticPlanSnapshotCodec
 
                 extension = new SemanticTlsBindingExtension(tlsBinding!, tlsDiagnostic);
                 return true;
+            case SemanticPlanExtensionKind.DynamicImportCall:
+                if (!TryReadEntityId(reader, out var callIdentity)
+                    || !reader.TryReadUInt64(out var callAddress)
+                    || !TryReadRegister(reader, out var targetRegister)
+                    || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumProducerAddresses, out var producerCount))
+                {
+                    return false;
+                }
+
+                var producerAddresses = new List<VirtualAddress>(producerCount);
+                for (var index = 0; index < producerCount; index++)
+                {
+                    if (!reader.TryReadUInt64(out var producerAddress))
+                    {
+                        return false;
+                    }
+
+                    producerAddresses.Add(new VirtualAddress(producerAddress));
+                }
+
+                if (!reader.TryReadUInt64(out var pageProducerAddress)
+                    || !reader.TryReadUInt64(out var loadProducerAddress)
+                    || !reader.TryReadUInt64(out var pageAddress)
+                    || !TryReadRange(reader, out var gotRange)
+                    || !TryReadEntityId(reader, out var relocationSiteIdentity)
+                    || !reader.TryReadUInt64(out var relocationOffset)
+                    || !reader.TryReadUInt64(out var relocationInfo)
+                    || !reader.TryReadInt64(out var relocationAddend)
+                    || !reader.TryReadBool(out var relocationIsPlt)
+                    || !reader.TryReadUInt64(out var relocationTableAddress)
+                    || !reader.TryReadUInt32(out var symbolIndex)
+                    || !reader.TryReadUInt32(out var symbolNameOffset)
+                    || !reader.TryReadUtf8String(out var symbolName)
+                    || !reader.TryReadByte(out var symbolInfo)
+                    || !reader.TryReadByte(out var symbolOther)
+                    || !reader.TryReadByte(out var symbolBinding)
+                    || !reader.TryReadByte(out var symbolType)
+                    || !reader.TryReadByte(out var symbolVisibility)
+                    || !reader.TryReadUInt16(out var symbolSectionIndex)
+                    || !reader.TryReadUInt64(out var symbolValue)
+                    || !reader.TryReadUInt64(out var symbolSize)
+                    || !reader.TryReadBool(out var hasVersionIndex))
+                {
+                    return false;
+                }
+
+                ushort? symbolVersionIndexRaw = null;
+                if (hasVersionIndex)
+                {
+                    if (!reader.TryReadUInt16(out var versionIndexRaw))
+                    {
+                        return false;
+                    }
+
+                    symbolVersionIndexRaw = versionIndexRaw;
+                }
+
+                if (!reader.TryReadBool(out var hasVersionRequirement))
+                {
+                    return false;
+                }
+
+                SemanticDynamicImportVersionRequirement? versionRequirement = null;
+                if (hasVersionRequirement)
+                {
+                    if (!reader.TryReadUInt16(out var recordVersion)
+                        || !reader.TryReadUInt16(out var auxiliaryCount)
+                        || !reader.TryReadUInt32(out var fileNameOffset)
+                        || !reader.TryReadUInt32(out var auxiliaryOffset)
+                        || !reader.TryReadUInt32(out var nextOffset)
+                        || !reader.TryReadUtf8String(out var fileName)
+                        || !reader.TryReadUInt32(out var versionHash)
+                        || !reader.TryReadUInt16(out var versionFlags)
+                        || !reader.TryReadUInt16(out var auxiliaryOther)
+                        || !reader.TryReadUInt32(out var nameOffset)
+                        || !reader.TryReadUtf8String(out var versionName))
+                    {
+                        return false;
+                    }
+
+                    versionRequirement = new SemanticDynamicImportVersionRequirement(
+                        recordVersion,
+                        auxiliaryCount,
+                        fileNameOffset,
+                        auxiliaryOffset,
+                        nextOffset,
+                        fileName,
+                        versionHash,
+                        versionFlags,
+                        auxiliaryOther,
+                        nameOffset,
+                        versionName);
+                }
+
+                if (string.IsNullOrWhiteSpace(symbolName))
+                {
+                    return reader.Fail(
+                        DiagnosticCode.SemanticPlanSnapshotMalformed,
+                        "The dynamic-import call extension has no dynamic-symbol name.");
+                }
+
+                extension = new SemanticDynamicImportCallExtension(
+                    callIdentity,
+                    new VirtualAddress(callAddress),
+                    targetRegister,
+                    producerAddresses,
+                    new VirtualAddress(pageProducerAddress),
+                    new VirtualAddress(loadProducerAddress),
+                    new VirtualAddress(pageAddress),
+                    gotRange,
+                    relocationSiteIdentity,
+                    relocationOffset,
+                    relocationInfo,
+                    relocationAddend,
+                    relocationIsPlt,
+                    new VirtualAddress(relocationTableAddress),
+                    symbolIndex,
+                    symbolNameOffset,
+                    symbolName,
+                    symbolInfo,
+                    symbolOther,
+                    symbolBinding,
+                    symbolType,
+                    symbolVisibility,
+                    symbolSectionIndex,
+                    symbolValue,
+                    symbolSize,
+                    symbolVersionIndexRaw,
+                    versionRequirement);
+                return true;
             case SemanticPlanExtensionKind.JumpTable:
                 if (!TryReadEntityId(reader, out var tableIdentity)
                     || !TryReadRange(reader, out var tableRange)
                     || !reader.TryReadInt32(out var entrySize)
                     || !reader.TryReadOptionalString(out var tableEncoding)
+                    || !reader.TryReadBool(out var hasBaseAddress))
+                {
+                    return false;
+                }
+
+                ulong? baseAddress = null;
+                if (hasBaseAddress)
+                {
+                    if (!reader.TryReadUInt64(out var rawBaseAddress))
+                    {
+                        return false;
+                    }
+
+                    baseAddress = rawBaseAddress;
+                }
+
+                if (!reader.TryReadBool(out var hasTargetBaseAddress))
+                {
+                    return false;
+                }
+
+                ulong? targetBaseAddress = null;
+                if (hasTargetBaseAddress)
+                {
+                    if (!reader.TryReadUInt64(out var rawTargetBaseAddress))
+                    {
+                        return false;
+                    }
+
+                    targetBaseAddress = rawTargetBaseAddress;
+                }
+
+                if (!TryReadOptionalEntityId(reader, out var sourceInstruction)
+                    || !reader.TryReadBool(out var isSigned)
+                    || !reader.TryReadInt32(out var scale)
+                    || !reader.TryReadInt64(out var addend)
+                    || !reader.TryReadInt32(out var lowerBound)
+                    || !reader.TryReadInt32(out var upperBound)
+                    || !TryReadOptionalTarget(reader, out var defaultTarget)
+                    || !reader.TryReadByte(out var ownership)
+                    || !reader.TryReadByte(out var rewritePolicy)
+                    || !TryReadOptionalRange(reader, out var outputRange)
+                    || !reader.TryReadOptionalString(out var tableDiagnostic)
                     || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTargetsPerJumpTable, out var targetCount))
                 {
                     return false;
@@ -1029,11 +1289,138 @@ public static partial class SemanticPlanSnapshotCodec
                     targets.Add(target);
                 }
 
-                if (entrySize <= 0)
+                if (entrySize <= 0
+                    || !Enum.IsDefined(typeof(SemanticJumpTableOwnership), (SemanticJumpTableOwnership)ownership)
+                    || !Enum.IsDefined(typeof(SemanticJumpTableRewritePolicy), (SemanticJumpTableRewritePolicy)rewritePolicy))
                 {
                     return reader.Fail(
                         DiagnosticCode.SemanticPlanSnapshotMalformed,
-                        "The jump-table extension has an invalid entry size.");
+                        "The jump-table extension has an invalid structured contract.");
+                }
+
+                if (!reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumTargetsPerJumpTable, out var entryCount))
+                {
+                    return false;
+                }
+
+                var entries = new List<SemanticJumpTableEntryBinding>(entryCount);
+                for (var index = 0; index < entryCount; index++)
+                {
+                    if (!TryReadEntityId(reader, out var entryIdentity)
+                        || !reader.TryReadInt32(out var entryIndex)
+                        || !reader.TryReadInt32(out var encodedValue)
+                        || !TryReadRange(reader, out var entryRange)
+                        || !TryReadTarget(reader, out var entryTarget)
+                        || entryTarget is null)
+                    {
+                        return false;
+                    }
+
+                    entries.Add(new SemanticJumpTableEntryBinding(
+                        entryIdentity,
+                        entryIndex,
+                        encodedValue,
+                        entryRange,
+                        entryTarget));
+                }
+
+                if (!reader.TryReadBool(out var ownerInventoryComplete)
+                    || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumJumpTableReferenceProducers, out var referenceProducerCount))
+                {
+                    return false;
+                }
+
+                var referenceProducers = new List<Aarch64JumpTableReferenceProducer>(referenceProducerCount);
+                for (var index = 0; index < referenceProducerCount; index++)
+                {
+                    if (!reader.TryReadUInt64(out var instructionAddress)
+                        || !reader.TryReadByte(out var producerKindValue)
+                        || !Enum.IsDefined(typeof(Aarch64JumpTableReferenceKind), (Aarch64JumpTableReferenceKind)producerKindValue))
+                    {
+                        return reader.Fail(
+                            DiagnosticCode.SemanticPlanSnapshotMalformed,
+                            "The jump-table reference-producer evidence is malformed.");
+                    }
+
+                    referenceProducers.Add(new Aarch64JumpTableReferenceProducer(
+                        instructionAddress,
+                        (Aarch64JumpTableReferenceKind)producerKindValue));
+                }
+
+                if (!reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumJumpTableOwnerReferences, out var ownerReferenceCount))
+                {
+                    return false;
+                }
+
+                var ownerReferences = new List<Aarch64JumpTableOwnerReference>(ownerReferenceCount);
+                for (var index = 0; index < ownerReferenceCount; index++)
+                {
+                    if (!reader.TryReadUInt64(out var ownerInstructionAddress)
+                        || !reader.TryReadInt32(out var relocationSectionIndex)
+                        || !reader.TryReadUInt32(out var symbolTableSectionIndex)
+                        || !reader.TryReadUInt32(out var targetSectionIndex)
+                        || !reader.TryReadUInt32(out var ownerFunctionSectionIndex)
+                        || !reader.TryReadUInt32(out var ownerSectionName)
+                        || !reader.TryReadUInt32(out var ownerSectionType)
+                        || !reader.TryReadUInt64(out var ownerSectionFlags)
+                        || !reader.TryReadUInt64(out var ownerSectionAddress)
+                        || !reader.TryReadUInt64(out var ownerSectionOffset)
+                        || !reader.TryReadUInt64(out var ownerSectionSize)
+                        || !reader.TryReadUInt32(out var ownerSectionLink)
+                        || !reader.TryReadUInt32(out var ownerSectionInfo)
+                        || !reader.TryReadUInt64(out var ownerSectionAlignment)
+                        || !reader.TryReadUInt64(out var ownerSectionEntrySize)
+                        || !reader.TryReadUInt64(out var relocationSourceAddress)
+                        || !reader.TryReadUInt32(out var relocationType)
+                        || !reader.TryReadInt64(out var ownerRelocationAddend)
+                        || !reader.TryReadUInt32(out var ownerSymbolIndex)
+                        || !reader.TryReadUtf8String(out var ownerSymbolName)
+                        || !reader.TryReadByte(out var ownerSymbolBinding)
+                        || !reader.TryReadByte(out var ownerSymbolType)
+                        || !reader.TryReadByte(out var ownerSymbolVisibility)
+                        || !reader.TryReadUInt16(out var ownerSymbolSectionIndex)
+                        || !reader.TryReadUInt64(out var ownerSymbolValue)
+                        || !reader.TryReadUInt64(out var ownerSymbolSize)
+                        || !reader.TryReadUtf8String(out var ownerFunctionName)
+                        || !reader.TryReadUInt64(out var ownerFunctionStart)
+                        || !reader.TryReadUInt64(out var ownerFunctionSize)
+                        || !reader.TryReadBool(out var isSelectedFunction))
+                    {
+                        return false;
+                    }
+
+                    ownerReferences.Add(new Aarch64JumpTableOwnerReference(
+                        ownerInstructionAddress,
+                        relocationSectionIndex,
+                        symbolTableSectionIndex,
+                        targetSectionIndex,
+                        ownerFunctionSectionIndex,
+                        new SectionHeader(
+                            ownerSectionName,
+                            ownerSectionType,
+                            ownerSectionFlags,
+                            ownerSectionAddress,
+                            ownerSectionOffset,
+                            ownerSectionSize,
+                            ownerSectionLink,
+                            ownerSectionInfo,
+                            ownerSectionAlignment,
+                            ownerSectionEntrySize),
+                        relocationSourceAddress,
+                        relocationType,
+                        ownerRelocationAddend,
+                        ownerSymbolIndex,
+                        ownerSymbolName,
+                        ownerSymbolBinding,
+                        ownerSymbolType,
+                        ownerSymbolVisibility,
+                        ownerSymbolSectionIndex,
+                        ownerSymbolValue,
+                        ownerSymbolSize,
+                        ownerFunctionName,
+                        ownerFunctionStart,
+                        ownerFunctionSize,
+                        isSelectedFunction));
                 }
 
                 extension = new SemanticJumpTableExtension(
@@ -1041,8 +1428,31 @@ public static partial class SemanticPlanSnapshotCodec
                     tableRange,
                     entrySize,
                     targets,
-                    tableEncoding);
+                    tableEncoding,
+                    baseAddress is { } rawBase ? new VirtualAddress(rawBase) : null,
+                    targetBaseAddress is { } rawTargetBase ? new VirtualAddress(rawTargetBase) : null,
+                    sourceInstruction,
+                    isSigned,
+                    scale,
+                    addend,
+                    lowerBound,
+                    upperBound,
+                    defaultTarget,
+                    (SemanticJumpTableOwnership)ownership,
+                    (SemanticJumpTableRewritePolicy)rewritePolicy,
+                    outputRange,
+                    entries,
+                    tableDiagnostic,
+                    referenceProducers,
+                    ownerReferences,
+                    ownerInventoryComplete);
                 return true;
+            case SemanticPlanExtensionKind.StaticFunctionPointerCall:
+                return TryReadStaticFunctionPointerCallExtension(reader, out extension);
+            case SemanticPlanExtensionKind.ExternalJumpTable:
+                return TryReadExternalJumpTableExtension(reader, out extension);
+            case SemanticPlanExtensionKind.ExternalJumpTableConsumer:
+                return TryReadExternalJumpTableConsumerExtension(reader, priorExtensions, out extension);
             case SemanticPlanExtensionKind.CfiEffect:
                 if (!TryReadEntityId(reader, out var cfiIdentity)
                     || !TryReadRange(reader, out var cfiRange)
@@ -1087,6 +1497,489 @@ public static partial class SemanticPlanSnapshotCodec
                     DiagnosticCode.SemanticPlanSnapshotUnsupported,
                     "The semantic-plan snapshot extension kind is not supported.");
         }
+    }
+
+    private static bool TryReadExternalJumpTableExtension(
+        SnapshotReader reader,
+        out ISemanticPlanExtension? extension)
+    {
+        extension = null;
+        if (!reader.TryReadExternalProviderString(out var identityValue)
+            || !reader.TryReadExternalProviderString(out var providerSoname)
+            || !reader.TryReadExternalProviderString(out var providerBuildId)
+            || !reader.TryReadExternalProviderString(out var providerSha256)
+            || !reader.TryReadUInt64(out var providerFileSize)
+            || !reader.TryReadByte(out var encoding)
+            || !TryReadExternalProviderSymbol(reader, out var tableObject))
+        {
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(SemanticExternalJumpTableEncoding), (SemanticExternalJumpTableEncoding)encoding))
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                "The external-provider table encoding is unsupported.");
+        }
+
+        if (!reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumExternalProviderSymbolsPerTable, out var targetSymbolCount)
+            || !reader.TryAccountExternalProviderTableSymbols(targetSymbolCount))
+        {
+            return false;
+        }
+
+        var targetSymbols = new List<SemanticExternalProviderSymbol>(targetSymbolCount);
+        for (var index = 0; index < targetSymbolCount; index++)
+        {
+            if (!TryReadExternalProviderSymbol(reader, out var targetSymbol))
+            {
+                return false;
+            }
+
+            targetSymbols.Add(targetSymbol!);
+        }
+
+        if (!reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumExternalProviderTableEntriesPerTable, out var entryCount)
+            || !reader.TryAccountExternalProviderEntries(entryCount))
+        {
+            return false;
+        }
+
+        var entries = new List<SemanticExternalJumpTableEntryFact>(entryCount);
+        for (var index = 0; index < entryCount; index++)
+        {
+            if (!reader.TryReadInt32(out var entryIndex)
+                || !reader.TryReadInt32(out var displacement)
+                || !reader.TryReadByte(out var targetSymbolTable)
+                || !reader.TryReadUInt32(out var targetSymbolIndex))
+            {
+                return false;
+            }
+
+            if (!Enum.IsDefined(typeof(ElfSymbolTableKind), (ElfSymbolTableKind)targetSymbolTable))
+            {
+                return reader.Fail(
+                    DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                    "An external-provider table entry contains an unsupported target symbol-table kind.");
+            }
+
+            entries.Add(new SemanticExternalJumpTableEntryFact(
+                entryIndex,
+                displacement,
+                (ElfSymbolTableKind)targetSymbolTable,
+                targetSymbolIndex));
+        }
+
+        if (!reader.TryReadExternalProviderBytes(
+                SemanticPlanSnapshotLimits.MaximumExternalProviderTableBytesPerTable,
+                out var tableBytes))
+        {
+            return false;
+        }
+
+        extension = new SemanticExternalJumpTableExtension(
+            new SemanticExternalProviderTableIdentity(identityValue),
+            providerSoname,
+            providerBuildId,
+            providerSha256,
+            providerFileSize,
+            tableObject!,
+            targetSymbols,
+            entries,
+            tableBytes,
+            (SemanticExternalJumpTableEncoding)encoding);
+        return true;
+    }
+
+    private static bool TryReadExternalJumpTableConsumerExtension(
+        SnapshotReader reader,
+        IReadOnlyList<ISemanticPlanExtension> priorExtensions,
+        out ISemanticPlanExtension? extension)
+    {
+        extension = null;
+        if (!reader.TryReadExternalProviderString(out var tableIdentity)
+            || !reader.TryReadExternalProviderString(out var providerSha256))
+        {
+            return false;
+        }
+
+        var providers = priorExtensions.OfType<SemanticExternalJumpTableExtension>()
+            .Where(provider => string.Equals(provider.TableIdentity.Value, tableIdentity, StringComparison.Ordinal)
+                && string.Equals(provider.ProviderSha256, providerSha256, StringComparison.Ordinal))
+            .ToArray();
+        if (providers.Length != 1)
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotMalformed,
+                "The external consumer proof does not reference exactly one preceding provider-facts extension.");
+        }
+
+        Aarch64ExternalJumpTableProviderFacts providerFacts;
+        try
+        {
+            providerFacts = providers[0].CreateConsumerProofInput();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IndexOutOfRangeException)
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotMalformed,
+                "The provider-facts extension cannot supply the external consumer proof identity.");
+        }
+
+        if (!TryReadExternalConsumerProof(reader, providerFacts, out var consumerProof))
+        {
+            return false;
+        }
+
+        extension = new SemanticExternalJumpTableConsumerExtension(
+            new SemanticExternalProviderTableIdentity(tableIdentity),
+            providerSha256,
+            consumerProof!);
+        return true;
+    }
+
+    private static bool TryReadExternalConsumerProof(
+        SnapshotReader reader,
+        Aarch64ExternalJumpTableProviderFacts providerFacts,
+        out Aarch64ExternalJumpTableConsumerProof? proof)
+    {
+        proof = null;
+        if (!reader.TryReadUtf8String(out var functionName)
+            || !reader.TryReadByte(out var functionTable)
+            || !reader.TryReadUInt32(out var functionTableIndex)
+            || !reader.TryReadByte(out var functionBinding)
+            || !reader.TryReadByte(out var functionOther)
+            || !reader.TryReadUInt16(out var functionSectionIndex)
+            || !reader.TryReadUInt64(out var functionValue)
+            || !reader.TryReadUInt64(out var functionSize)
+            || !reader.TryReadUInt64(out var compareAddress)
+            || !reader.TryReadUInt64(out var boundsBranchAddress)
+            || !reader.TryReadUInt64(out var safeDefaultAddress)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumInstructions, out var safePathCount))
+        {
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(ElfSymbolTableKind), (ElfSymbolTableKind)functionTable))
+        {
+            return reader.Fail(DiagnosticCode.SemanticPlanSnapshotUnsupported, "The external consumer function has an unsupported symbol-table kind.");
+        }
+
+        var safeDefaultPath = new ulong[safePathCount];
+        for (var index = 0; index < safePathCount; index++)
+        {
+            if (!reader.TryReadUInt64(out safeDefaultPath[index]))
+            {
+                return false;
+            }
+        }
+
+        if (!reader.TryReadUInt64(out var gotPageProducer)
+            || !reader.TryReadUInt64(out var gotLoadProducer)
+            || !reader.TryReadUInt64(out var indexedLoad)
+            || !reader.TryReadUInt64(out var tableBaseAdd)
+            || !reader.TryReadUInt64(out var branchAddress)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumProducerAddresses, out var producerCount))
+        {
+            return false;
+        }
+
+        var producers = new ulong[producerCount];
+        for (var index = 0; index < producerCount; index++)
+        {
+            if (!reader.TryReadUInt64(out producers[index]))
+            {
+                return false;
+            }
+        }
+
+        if (!TryReadRegister(reader, out var indexRegister)
+            || !TryReadRegister(reader, out var gotPointerRegister)
+            || !TryReadRegister(reader, out var loadedDisplacementRegister)
+            || !TryReadRegister(reader, out var targetRegister)
+            || !reader.TryReadInt32(out var entryWidth)
+            || !reader.TryReadBool(out var isSigned)
+            || !reader.TryReadInt32(out var indexScaleShift)
+            || !reader.TryReadInt32(out var lowerBound)
+            || !reader.TryReadInt32(out var upperBound)
+            || !reader.TryReadUInt64(out var gotSlotAddress)
+            || !reader.TryReadUInt64(out var gotSlotFileOffset)
+            || !reader.TryReadUInt64(out var importGotAddress)
+            || !reader.TryReadUInt64(out var importRelocationSource)
+            || !reader.TryReadUInt32(out var importSymbolIndex)
+            || !reader.TryReadUtf8String(out var importSymbolName)
+            || !reader.TryReadByte(out var importSymbolBinding)
+            || !reader.TryReadByte(out var importSymbolType)
+            || !reader.TryReadByte(out var importSymbolVisibility)
+            || !reader.TryReadUInt64(out var importPageProducer)
+            || !reader.TryReadUInt64(out var importPointerLoadProducer)
+            || !reader.TryReadUInt64(out var importPageAddress)
+            || !reader.TryReadUInt64(out var relocationOffset)
+            || !reader.TryReadUInt64(out var relocationInfo)
+            || !reader.TryReadInt64(out var relocationAddend)
+            || !reader.TryReadUInt64(out var relocationSourceAddress)
+            || !reader.TryReadBool(out var relocationIsPlt))
+        {
+            return false;
+        }
+
+        var relocation = new RelaRelocation(
+            relocationOffset,
+            relocationInfo,
+            relocationAddend,
+            relocationSourceAddress,
+            relocationIsPlt);
+        var imported = new Aarch64DynamicImportBinding(
+            importGotAddress,
+            importRelocationSource,
+            importSymbolIndex,
+            importSymbolName,
+            importSymbolBinding,
+            importSymbolType,
+            importSymbolVisibility,
+            importPageProducer,
+            importPointerLoadProducer,
+            relocation)
+        {
+            PageAddress = importPageAddress,
+        };
+        proof = new Aarch64ExternalJumpTableConsumerProof(
+            new ElfFunctionSymbol(
+                functionName,
+                (ElfSymbolTableKind)functionTable,
+                functionTableIndex,
+                functionBinding,
+                functionOther,
+                functionSectionIndex,
+                functionValue,
+                functionSize),
+            compareAddress,
+            boundsBranchAddress,
+            safeDefaultAddress,
+            safeDefaultPath,
+            gotPageProducer,
+            gotLoadProducer,
+            indexedLoad,
+            tableBaseAdd,
+            branchAddress,
+            producers,
+            indexRegister,
+            gotPointerRegister,
+            loadedDisplacementRegister,
+            targetRegister,
+            entryWidth,
+            isSigned,
+            indexScaleShift,
+            lowerBound,
+            upperBound,
+            new VirtualAddress(gotSlotAddress),
+            new FileOffset(gotSlotFileOffset),
+            imported,
+            providerFacts,
+            SemanticExternalJumpTableContract.ConsumerProofKind);
+        return true;
+    }
+
+    private static bool TryReadExternalProviderSymbol(
+        SnapshotReader reader,
+        out SemanticExternalProviderSymbol? symbol)
+    {
+        symbol = null;
+        if (!reader.TryReadExternalProviderString(out var name)
+            || !reader.TryReadByte(out var symbolTable)
+            || !reader.TryReadUInt32(out var symbolIndex)
+            || !reader.TryReadByte(out var binding)
+            || !reader.TryReadByte(out var type)
+            || !reader.TryReadByte(out var visibility)
+            || !reader.TryReadUInt16(out var sectionIndex)
+            || !reader.TryReadUInt64(out var fileOffset)
+            || !reader.TryReadUInt64(out var virtualAddress)
+            || !reader.TryReadUInt64(out var size)
+            || !reader.TryReadUInt32(out var loadSegmentFlags))
+        {
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(ElfSymbolTableKind), (ElfSymbolTableKind)symbolTable))
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                "An external-provider symbol contains an unsupported symbol-table kind.");
+        }
+
+        symbol = new SemanticExternalProviderSymbol(
+            name,
+            (ElfSymbolTableKind)symbolTable,
+            symbolIndex,
+            binding,
+            type,
+            visibility,
+            sectionIndex,
+            new SemanticExternalProviderRange(
+                new SemanticExternalProviderFileOffset(fileOffset),
+                new SemanticExternalProviderAddress(virtualAddress),
+                size),
+            loadSegmentFlags);
+        return true;
+    }
+
+    private static bool TryReadStaticFunctionPointerCallExtension(
+        SnapshotReader reader,
+        out ISemanticPlanExtension? extension)
+    {
+        extension = null;
+        if (!TryReadEntityId(reader, out var sourceIdentity)
+            || !TryReadRange(reader, out var sourceRange)
+            || !TryReadRegister(reader, out var targetRegister)
+            || !reader.TryReadCount(SemanticPlanSnapshotLimits.MaximumProducerAddresses, out var producerCount))
+        {
+            return false;
+        }
+
+        var producers = new List<VirtualAddress>(producerCount);
+        for (var index = 0; index < producerCount; index++)
+        {
+            if (!reader.TryReadUInt64(out var producerAddress))
+            {
+                return false;
+            }
+
+            producers.Add(new VirtualAddress(producerAddress));
+        }
+
+        if (!reader.TryReadInt64(out var stackSlotOffset)
+            || !reader.TryReadUtf8String(out var ownerName)
+            || !reader.TryReadByte(out var ownerTable)
+            || !reader.TryReadUInt32(out var ownerTableIndex)
+            || !reader.TryReadByte(out var ownerBinding)
+            || !reader.TryReadByte(out var ownerOther)
+            || !reader.TryReadUInt16(out var ownerSectionIndex)
+            || !reader.TryReadUInt64(out var ownerValue)
+            || !reader.TryReadUInt64(out var ownerSize)
+            || !reader.TryReadInt32(out var relocationSectionIndex)
+            || !TryReadSectionHeader(reader, out var relocationSectionHeader)
+            || !reader.TryReadUInt32(out var symbolTableSectionIndex)
+            || !TryReadSectionHeader(reader, out var symbolTableSectionHeader)
+            || !TryReadSectionHeader(reader, out var callerSectionHeader)
+            || !TryReadSectionHeader(reader, out var targetSectionHeader)
+            || !TryReadStaticFunctionPointerRelocationRow(reader, out var adrpRelocation)
+            || !TryReadStaticFunctionPointerRelocationRow(reader, out var addRelocation)
+            || !TryReadRange(reader, out var targetSourceRange)
+            || !TryReadEntityId(reader, out var targetMappingIdentity)
+            || !TryReadRange(reader, out var targetOutputRange)
+            || !reader.TryReadByte(out var mappingPolicy))
+        {
+            return false;
+        }
+
+        if (!Enum.IsDefined(typeof(ElfSymbolTableKind), (ElfSymbolTableKind)ownerTable)
+            || !Enum.IsDefined(typeof(SemanticStaticFunctionPointerMappingPolicy), (SemanticStaticFunctionPointerMappingPolicy)mappingPolicy))
+        {
+            return reader.Fail(
+                DiagnosticCode.SemanticPlanSnapshotUnsupported,
+                "The static function-pointer owner contains an unsupported symbol-table or mapping policy enum.");
+        }
+
+        extension = new SemanticStaticFunctionPointerCallExtension(
+            sourceIdentity,
+            sourceRange,
+            targetRegister,
+            producers,
+            stackSlotOffset,
+            new ElfFunctionSymbol(
+                ownerName,
+                (ElfSymbolTableKind)ownerTable,
+                ownerTableIndex,
+                ownerBinding,
+                ownerOther,
+                ownerSectionIndex,
+                ownerValue,
+                ownerSize),
+            relocationSectionIndex,
+            relocationSectionHeader,
+            symbolTableSectionIndex,
+            symbolTableSectionHeader,
+            callerSectionHeader,
+            targetSectionHeader,
+            adrpRelocation,
+            addRelocation,
+            targetSourceRange,
+            targetMappingIdentity,
+            targetOutputRange,
+            (SemanticStaticFunctionPointerMappingPolicy)mappingPolicy);
+        return true;
+    }
+
+    private static bool TryReadSectionHeader(SnapshotReader reader, out SectionHeader section)
+    {
+        section = default;
+        if (!reader.TryReadUInt32(out var name)
+            || !reader.TryReadUInt32(out var type)
+            || !reader.TryReadUInt64(out var flags)
+            || !reader.TryReadUInt64(out var address)
+            || !reader.TryReadUInt64(out var offset)
+            || !reader.TryReadUInt64(out var size)
+            || !reader.TryReadUInt32(out var link)
+            || !reader.TryReadUInt32(out var info)
+            || !reader.TryReadUInt64(out var alignment)
+            || !reader.TryReadUInt64(out var entrySize))
+        {
+            return false;
+        }
+
+        section = new SectionHeader(name, type, flags, address, offset, size, link, info, alignment, entrySize);
+        return true;
+    }
+
+    private static bool TryReadStaticFunctionPointerRelocationRow(
+        SnapshotReader reader,
+        out SemanticStaticFunctionPointerRelocationRow row)
+    {
+        row = null!;
+        if (!reader.TryReadInt32(out var relocationSectionIndex)
+            || !reader.TryReadUInt64(out var relocationSectionFileOffset)
+            || !reader.TryReadUInt64(out var relocationSectionAddress)
+            || !reader.TryReadUInt32(out var symbolTableSectionIndex)
+            || !reader.TryReadUInt32(out var targetSectionIndex)
+            || !reader.TryReadUInt64(out var relocationSourceAddress)
+            || !reader.TryReadUInt64(out var siteAddress)
+            || !reader.TryReadUInt64(out var info)
+            || !reader.TryReadUInt32(out var type)
+            || !reader.TryReadUInt32(out var symbolIndex)
+            || !reader.TryReadInt64(out var addend)
+            || !reader.TryReadBool(out var isPlt)
+            || !reader.TryReadUInt32(out var symbolNameOffset)
+            || !reader.TryReadUtf8String(out var name)
+            || !reader.TryReadByte(out var symbolInfo)
+            || !reader.TryReadByte(out var symbolOther)
+            || !reader.TryReadUInt16(out var symbolSectionIndex)
+            || !reader.TryReadUInt64(out var symbolValue)
+            || !reader.TryReadUInt64(out var symbolSize))
+        {
+            return false;
+        }
+
+        row = new SemanticStaticFunctionPointerRelocationRow(
+            relocationSectionIndex,
+            new FileOffset(relocationSectionFileOffset),
+            new VirtualAddress(relocationSectionAddress),
+            symbolTableSectionIndex,
+            targetSectionIndex,
+            relocationSourceAddress,
+            siteAddress,
+            info,
+            type,
+            symbolIndex,
+            addend,
+            isPlt,
+            symbolNameOffset,
+            name,
+            symbolInfo,
+            symbolOther,
+            symbolSectionIndex,
+            symbolValue,
+            symbolSize);
+        return true;
     }
 
     private static bool TryReadTlsBinding(SnapshotReader reader, out TlsBinding? binding)

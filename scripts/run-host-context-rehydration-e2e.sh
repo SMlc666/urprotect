@@ -121,18 +121,22 @@ set +e
 handoff_status=$?
 set -e
 [[ "$handoff_status" -eq "$expected_entry_status" && -s "$handoff_path" ]] || { echo "HostContext native handoff failed with status $handoff_status" >&2; exit 1; }
+cp -- "$artifact_root/handoff.stdout" "$artifact_root/target.stdout"
+cp -- "$artifact_root/handoff.stderr" "$artifact_root/target.stderr"
 
-python3 - "$record_path" "$handoff_path" "$native_role_path" <<'PY'
+python3 - "$record_path" "$handoff_path" "$native_role_path" "$handoff_status" <<'PY'
 import hashlib
 import json
 import pathlib
 import tempfile
 import os
-record_path, handoff_path, role_path = map(pathlib.Path, __import__('sys').argv[1:])
+record_path, handoff_path, role_path = map(pathlib.Path, __import__('sys').argv[1:4])
+process_status = int(__import__('sys').argv[4])
 old = record_path.read_bytes()
 record = json.loads(old.decode())
 handoff = json.loads(handoff_path.read_text())
 pre_hash = hashlib.sha256(old).hexdigest()
+handoff["processStatus"] = process_status
 handoff["rehydrationRecordSha256"] = pre_hash
 handoff_bytes = (json.dumps(handoff, indent=2, sort_keys=True) + "\n").encode()
 handoff_path.write_bytes(handoff_bytes)
@@ -140,6 +144,7 @@ record["preHandoffRecordSha256"] = pre_hash
 record["handoffRecordSha256"] = hashlib.sha256(handoff_bytes).hexdigest()
 record["handoffStatus"] = handoff.get("status")
 record["entryStatus"] = handoff.get("entryStatus")
+record["processStatus"] = process_status
 record["releaseOrder"] = handoff.get("releaseOrder")
 record["loaderIdentity"] = handoff.get("loaderId")
 updated = (json.dumps(record, indent=2, sort_keys=True) + "\n").encode()
@@ -155,46 +160,112 @@ if role_path.is_file():
     role["rehydrationRecordSha256"] = hashlib.sha256(updated).hexdigest()
     role_path.write_text(json.dumps(role, indent=2, sort_keys=True) + "\n")
 PY
-python3 - "$artifact_root" "$source_sha256" "$native_path" "$handoff_path" <<'PY'
+source_handoff_path="$artifact_root/source-handoff.json"
+set +e
+"$repo_root/native/urprotect-runtime/build/host-context-image-handoff" \
+  "$source_path" urp_entry "$source_handoff_path" \
+  >"$artifact_root/baseline.stdout" 2>"$artifact_root/baseline.stderr"
+source_process_status=$?
+set -e
+python3 - "$artifact_root" "$source_sha256" "$native_path" "$handoff_path" "$source_handoff_path" "$source_process_status" "$handoff_status" "$expected_entry_status" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
-root = pathlib.Path(sys.argv[1])
+root = pathlib.Path(sys.argv[1]).resolve()
 source_hash = sys.argv[2]
 native_path = pathlib.Path(sys.argv[3])
-handoff_path = pathlib.Path(sys.argv[4])
-handoff = json.loads(handoff_path.read_text())
-native_hash = hashlib.sha256(native_path.read_bytes()).hexdigest()
-entry_status = handoff.get("entryStatus")
-(root / "stdout.txt").write_bytes(b"")
-(root / "stderr.txt").write_bytes(b"")
-(root / "baseline.stdout").write_bytes(b"")
-(root / "baseline.stderr").write_bytes(b"")
-(root / "target.stdout").write_bytes(b"")
-(root / "target.stderr").write_bytes(b"")
-(root / "target-loader.json").write_text(json.dumps({
-    "schemaVersion": 1, "stage": "target-loader", "status": "passed",
-    "loaderId": handoff["loaderId"], "nativeImageSha256": native_hash,
-    "evidenceSha256": hashlib.sha256(pathlib.Path(handoff_path).read_bytes()).hexdigest(),
-    "handoffRecordSha256": hashlib.sha256(pathlib.Path(handoff_path).read_bytes()).hexdigest(),
-    "targetStatus": entry_status, "targetSignal": None,
-    "stdoutSha256": hashlib.sha256(b"").hexdigest(), "stderrSha256": hashlib.sha256(b"").hexdigest(),
-    "firstFailureStage": None,
-}, indent=2, sort_keys=True) + "\n")
+target_handoff_path = pathlib.Path(sys.argv[4])
+source_handoff_path = pathlib.Path(sys.argv[5])
+source_process_status = int(sys.argv[6])
+target_process_status = int(sys.argv[7])
+expected_entry_status = int(sys.argv[8])
+def sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+def read_record(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+source_record = read_record(source_handoff_path)
+target_record = read_record(target_handoff_path)
+native_hash = sha(native_path)
+source_record["processStatus"] = source_process_status
+source_handoff_path.write_text(json.dumps(source_record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+source_handoff_hash = sha(source_handoff_path)
+target_handoff_hash = sha(target_handoff_path)
+baseline_stdout = (root / "baseline.stdout").read_bytes()
+baseline_stderr = (root / "baseline.stderr").read_bytes()
+target_stdout = (root / "target.stdout").read_bytes()
+target_stderr = (root / "target.stderr").read_bytes()
+(root / "stdout.txt").write_bytes(target_stdout)
+(root / "stderr.txt").write_bytes(target_stderr)
+if max(map(len, (baseline_stdout, baseline_stderr, target_stdout, target_stderr))) > 1024 * 1024:
+    raise SystemExit("HostContext baseline/target streams exceed the evidence bound")
+status_equal = (
+    source_record.get("status") == target_record.get("status") == "passed"
+    and source_process_status == target_process_status
+    and source_record.get("entryStatus") == target_record.get("entryStatus")
+    and source_record.get("releaseStatus") == target_record.get("releaseStatus") == "passed"
+)
+stdout_equal = baseline_stdout == target_stdout
+stderr_equal = baseline_stderr == target_stderr
+source_entry_status = source_record.get("entryStatus")
+target_entry_status = target_record.get("entryStatus")
+if not isinstance(source_entry_status, int) or not isinstance(target_entry_status, int):
+    raise SystemExit("HostContext source or transformed handoff lacks an observed entry status")
 comparison = {
-    "schemaVersion": 1, "unitId": json.loads((root / "stage.json").read_text())["unitId"],
-    "oracleId": "fixture.host-context-entry.v1", "sourceSha256": source_hash,
-    "nativeImageSha256": native_hash, "entryStatus": entry_status,
-    "statusEqual": True, "stdoutEqual": True, "stderrEqual": True,
+    "schemaVersion": 1,
+    "unitId": read_record(root / "stage.json")["unitId"],
+    "oracleId": "fixture.host-context-entry.v1",
+    "sourceSha256": source_hash,
+    "protectedSha256": sha(root / "protected-image.bin"),
+    "nativeImageSha256": native_hash,
+    "sourceHandoffSha256": source_handoff_hash,
+    "targetHandoffSha256": target_handoff_hash,
+    "sourceProcessStatus": source_process_status,
+    "targetProcessStatus": target_process_status,
+    "sourceEntryStatus": source_entry_status,
+    "targetEntryStatus": target_entry_status,
+    "sourceReleaseStatus": source_record.get("releaseStatus"),
+    "targetReleaseStatus": target_record.get("releaseStatus"),
+    "baselineStdoutSha256": sha(root / "baseline.stdout"),
+    "baselineStderrSha256": sha(root / "baseline.stderr"),
+    "targetStdoutSha256": sha(root / "target.stdout"),
+    "targetStderrSha256": sha(root / "target.stderr"),
+    "statusEqual": status_equal,
+    "stdoutEqual": stdout_equal,
+    "stderrEqual": stderr_equal,
 }
-comparison_bytes = (json.dumps(comparison, sort_keys=True, separators=(",", ":")) + "\n").encode()
-(root / "behavior-comparison.json").write_bytes(comparison_bytes)
-(root / "behavioral-oracle.json").write_text(json.dumps({
-    **comparison, "stage": "behavioral-oracle", "status": "passed",
+comparison_bytes = (json.dumps(comparison, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+comparison_path = root / "behavior-comparison.json"
+comparison_path.write_bytes(comparison_bytes)
+overall = status_equal and stdout_equal and stderr_equal
+oracle = {
+    **comparison,
+    "stage": "behavioral-oracle",
+    "status": "passed" if overall else "failed",
     "comparisonSha256": hashlib.sha256(comparison_bytes).hexdigest(),
-    "baselineStatus": 0, "targetStatus": entry_status, "firstFailureStage": None,
-}, indent=2, sort_keys=True) + "\n")
+    "baselineStatus": source_process_status,
+    "targetStatus": target_process_status,
+    "entryStatus": target_entry_status,
+    "expectedEntryStatus": expected_entry_status,
+    "firstFailureStage": None if overall else "behavioral-oracle",
+}
+(root / "behavioral-oracle.json").write_text(json.dumps(oracle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+target_loader = {
+    "schemaVersion": 1,
+    "stage": "target-loader",
+    "status": "passed" if target_record.get("status") == "passed" else "failed",
+    "loaderId": target_record.get("loaderId"),
+    "nativeImageSha256": native_hash,
+    "evidenceSha256": target_handoff_hash,
+    "handoffRecordSha256": target_handoff_hash,
+    "targetStatus": target_entry_status,
+    "targetProcessStatus": target_process_status,
+    "targetSignal": None,
+    "stdoutSha256": sha(root / "target.stdout"),
+    "stderrSha256": sha(root / "target.stderr"),
+    "firstFailureStage": None if target_record.get("status") == "passed" else "target-loader",
+}
+(root / "target-loader.json").write_text(json.dumps(target_loader, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 (root / "negative-rollback.json").write_text(json.dumps({
     "schemaVersion": 1, "kind": "strict-chain-negative-witness", "status": "passed",
     "unitId": comparison["unitId"], "stage": "rehydration",
@@ -202,20 +273,24 @@ comparison_bytes = (json.dumps(comparison, sort_keys=True, separators=(",", ":")
     "nativeImagePublished": False, "loaderInvoked": False, "loaderMarkerObserved": False,
     "artifactPath": "negative-protected-image.bin", "nativeImagePath": "negative-native-image.bin",
     "loaderMarkerPath": "target.stdout",
-}, indent=2, sort_keys=True) + "\n")
-record = json.loads((root / "rehydration.json").read_text())
+}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+record = read_record(root / "rehydration.json")
 (root / "benchmark.json").write_text(json.dumps({
     "schemaVersion": 1, "unitId": comparison["unitId"],
     "rehydrationCpuMilliseconds": record.get("cpuMilliseconds"),
     "rehydrationDurationMilliseconds": record.get("durationMilliseconds"),
-    "producerEmissionDurationMilliseconds": json.loads((root / "stage.json").read_text()).get("emissionDurationMilliseconds"),
+    "producerEmissionDurationMilliseconds": read_record(root / "stage.json").get("emissionDurationMilliseconds"),
     "nativeImageSize": record.get("nativeImageSize"), "handoffDurationNanoseconds": 0,
-    "maxRssBytes": record.get("workingSetBytes"), "targetStatus": entry_status,
-    "firstFailureStage": None,
-}, indent=2, sort_keys=True) + "\n")
+    "maxRssBytes": record.get("workingSetBytes"), "targetStatus": target_entry_status,
+    "firstFailureStage": None if overall else "behavioral-oracle",
+}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 (
   cd "$artifact_root"
   find . -type f ! -name 'SHA256SUMS' -printf '%P\n' | LC_ALL=C sort | xargs -r sha256sum
 ) >"$manifest_path"
-printf 'HostContext rehydration: PASS (entry status %s)\n' "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["entryStatus"])' "$handoff_path")"
+python3 "$repo_root/scripts/check-rehydration-evidence.py" "$artifact_root" \
+  --tier "$tier" --runtime glibc --unit "$unit"
+behavior_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$artifact_root/behavioral-oracle.json")"
+[[ "$behavior_status" == "passed" ]] || { echo "HostContext source-vs-transformed behavioral oracle failed" >&2; exit 1; }
+printf 'HostContext rehydration: PASS (entry status %s; source/transformed status, stdout, and stderr matched)\n' "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["entryStatus"])' "$handoff_path")"

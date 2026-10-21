@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../third_party/AsmStone/src/AsmStone/AsmStone.csproj" />
+    <InternalsVisibleTo Include="UrProtect.Core.Tests" />
   </ItemGroup>
 </Project>

@@ -82,6 +82,94 @@ public sealed class GenericRehydrationTests
 
     [Fact]
     [Trait("Category", "Rehydration")]
+    public void RehydrationAcceptsAValidNonTlsSemanticSnapshotHandoff()
+    {
+        var source = ElfFixture.ExactIndirectBranchFunctionPie();
+        var request = new FunctionProtectionOptions(
+            new[] { FunctionSelector.ByAddress(0x1200) },
+            new[] { ProtectionPass.ControlFlowFlattening });
+        var sourceHash = Sha256(source);
+        var requestHash = ProtectedImageCodec.ComputeRequestSha256(request.Selectors, request.Passes);
+        var emitted = new ProtectedImageProducer().Emit(
+            source,
+            request,
+            new ProtectedImageProducerOptions(
+                UnitId,
+                ProtectedImageProfile.OuterExecveat,
+                ProducerId,
+                ProducerBuild,
+                ConsumerId,
+                sourceHash,
+                requestHash));
+        Assert.True(emitted.IsSuccess, string.Join(Environment.NewLine, emitted.Diagnostics));
+        var decoded = ProtectedImageCodec.Decode(emitted.ArtifactBytes!).Image!;
+        var snapshotOperation = Assert.Single(
+            decoded.Operations.OfType<ProtectedImageSemanticPlanSnapshot>());
+        var result = GenericRehydrationEngine.Rehydrate(
+            source,
+            emitted.ArtifactBytes!,
+            Options(source, emitted.Role!.RequestSha256));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.NativeImage);
+        Assert.Equal("passed", result.Record.Status);
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.ProtectedImageMalformed);
+        Assert.NotEmpty(snapshotOperation.CanonicalBytes);
+    }
+
+    [Fact]
+    [Trait("Category", "Rehydration")]
+    public void RelativeJumpTableSnapshotFlowsThroughSharedLayoutAndReparse()
+    {
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        var parsed = ElfParser.Parse(source);
+        Assert.True(parsed.IsSuccess, string.Join(Environment.NewLine, parsed.Diagnostics));
+        var selected = Assert.Single(
+            parsed.File!.FunctionSymbols,
+            function => function.Table == ElfSymbolTableKind.Static
+                && function.Value == 0x1200);
+        var request = new FunctionProtectionOptions(
+            new[] { FunctionSelector.ByIdentity(ElfSymbolTableKind.Static, selected.TableIndex) },
+            new[] { ProtectionPass.ControlFlowFlattening });
+        var sourceHash = Sha256(source);
+        var requestHash = ProtectedImageCodec.ComputeRequestSha256(request.Selectors, request.Passes);
+        var emitted = new ProtectedImageProducer().Emit(
+            source,
+            request,
+            new ProtectedImageProducerOptions(
+                UnitId,
+                ProtectedImageProfile.OuterExecveat,
+                ProducerId,
+                ProducerBuild,
+                ConsumerId,
+                sourceHash,
+                requestHash));
+        Assert.True(emitted.IsSuccess, string.Join(Environment.NewLine, emitted.Diagnostics));
+
+        var decoded = ProtectedImageCodec.Decode(emitted.ArtifactBytes!, sourceHash, requestHash);
+        Assert.True(decoded.IsSuccess, string.Join(Environment.NewLine, decoded.Diagnostics));
+        var snapshot = Assert.Single(
+            decoded.Image!.Operations.OfType<ProtectedImageSemanticPlanSnapshot>());
+        Assert.NotEmpty(snapshot.CanonicalBytes);
+
+        var result = GenericRehydrationEngine.Rehydrate(
+            source,
+            emitted.ArtifactBytes!,
+            Options(source, emitted.Role!.RequestSha256));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.NotNull(result.NativeImage);
+        Assert.NotNull(result.NativeImage!.LayoutEvidence);
+        Assert.Contains(
+            result.NativeImage.LayoutEvidence!.JumpTableEdits,
+            edit => edit.Kind == ElfLayoutEditKind.JumpTableEntry);
+        Assert.Equal(RehydrationRecord.PassedStatus, result.Record.Status);
+    }
+
+    [Fact]
+    [Trait("Category", "Rehydration")]
     public void RejectsTransformedTlsRelocationWhenSemanticSnapshotIsMissing()
     {
         var source = ElfFixture.TlsStaticRelocationPie();

@@ -20,8 +20,20 @@ public static class ElfConstants
     public const ushort RelrEntrySize64 = 8;
     public const uint ShtSymTab = 2;
     public const uint ShtStrTab = 3;
+    public const uint ShtProgbits = 1;
     public const uint ShtRela = 4;
+    public const uint ShtRel = 9;
+    public const uint ShtRelr = 19;
+    public const uint ShtAndroidRel = 0x60000001;
+    public const uint ShtAndroidRela = 0x60000002;
+    public const uint ShtAndroidRelr = 0x6FFFFF00;
+    public const uint ShtGnuVerdef = 0x6FFFFFFD;
+    public const uint ShtGnuVerneed = 0x6FFFFFFE;
+    public const uint ShtGnuVersym = 0x6FFFFFFF;
+    public const uint ShtNobits = 8;
     public const uint ShtDynSym = 11;
+    public const ulong ShfExecInstr = 0x4;
+    public const byte SttObject = 1;
     public const byte SttFunc = 2;
     public const byte SttTls = 6;
     public const ushort PnXnum = ushort.MaxValue;
@@ -65,6 +77,8 @@ public static class ElfConstants
     public const ulong DtRelSz = 18;
     public const ulong DtRelEnt = 19;
     public const ulong DtPltRel = 20;
+    public const ulong DtRelCount = 0x6FFFFFFA;
+    public const ulong DtRelaCount = 0x6FFFFFF9;
     public const ulong DtJmpRel = 23;
     public const ulong DtInitArray = 25;
     public const ulong DtFiniArray = 26;
@@ -73,8 +87,12 @@ public static class ElfConstants
     public const ulong DtRunPath = 29;
     public const ulong DtFlags = 30;
     public const ulong DtFlags1 = 0x6FFFFFFB;
+    public const ulong DfTextRel = 0x00000004;
     public const ulong Df1Pie = 0x08000000;
     public const ulong DtGnuHash = 0x6FFFFEF5;
+    public const ulong DtConfig = 0x6FFFFEFA;
+    public const ulong DtDepAudit = 0x6FFFFEFB;
+    public const ulong DtAudit = 0x6FFFFEFC;
     public const ulong DtVersym = 0x6FFFFFF0;
     public const ulong DtVerdef = 0x6FFFFFFC;
     public const ulong DtVerdefNum = 0x6FFFFFFD;
@@ -93,6 +111,8 @@ public static class ElfConstants
     public const ulong DtAndroidRelrsz = 0x6FFFE001;
     public const ulong DtAndroidRelrent = 0x6FFFE003;
     public const ulong DtAndroidRelrCount = 0x6FFFE005;
+    public const ulong DtAuxiliary = 0x7FFFFFFD;
+    public const ulong DtFilter = 0x7FFFFFFF;
 
     public static IReadOnlyList<ulong> AndroidPackedRelocationTags { get; } = Array.AsReadOnly(new[]
     {
@@ -575,6 +595,7 @@ public sealed class ElfFile
         ElfSymbolVersionMetadata symbolVersions,
         IReadOnlyList<DynamicEntry> dynamicEntries,
         IReadOnlyList<RelaRelocation> relaRelocations,
+        IReadOnlyList<ElfSectionRelocation> sectionRelocations,
         IReadOnlyList<RelrWord> relrWords,
         IReadOnlyList<AndroidPackedRelocationTable> androidPackedRelocations,
         IReadOnlyList<DynamicSymbol> dynamicSymbols,
@@ -591,6 +612,7 @@ public sealed class ElfFile
         SymbolVersions = symbolVersions;
         DynamicEntries = dynamicEntries;
         RelaRelocations = relaRelocations;
+        SectionRelocations = sectionRelocations;
         RelrWords = relrWords;
         AndroidPackedRelocations = androidPackedRelocations;
         DynamicSymbols = dynamicSymbols;
@@ -617,6 +639,9 @@ public sealed class ElfFile
     public IReadOnlyList<DynamicEntry> DynamicEntries { get; }
 
     public IReadOnlyList<RelaRelocation> RelaRelocations { get; }
+
+    /// <summary>Section-owned static RELA rows, empty for sectionless or stripped ELF inputs.</summary>
+    public IReadOnlyList<ElfSectionRelocation> SectionRelocations { get; }
 
     public IReadOnlyList<RelrWord> RelrWords { get; }
 

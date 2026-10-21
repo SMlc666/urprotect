@@ -1,0 +1,14 @@
+{
+  "entryStatus": 91,
+  "entrySymbol": "urp_entry",
+  "firstFailureStage": null,
+  "loaderId": "host-context.sealed-memfd.dlopen",
+  "nativeImageSha256": "908a454354be3f6dcd6614b06704e2d17ac04ead1fe0491b30a8f99446217a42",
+  "processStatus": 91,
+  "rehydrationRecordSha256": "bcd544bc4fb322746ebc21df0ee0b70ddfe85d0bcee0e7f0cd1d6e50d10811ce",
+  "releaseOrder": "entry-dispatch-before-release-image",
+  "releaseStatus": "passed",
+  "schemaVersion": 1,
+  "stage": "host-context-handoff",
+  "status": "passed"
+}

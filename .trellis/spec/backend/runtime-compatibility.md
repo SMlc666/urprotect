@@ -235,15 +235,97 @@ executable pathname.
   `URP_STATUS_LOAD_FAILED`, a cleared image handle, one memfd attempt, and no
   net descriptor increase after rollback.
   The pair claim does not extend to musl or bionic.
+- `runtime.host-context.external-table-provider` remains **unknown and
+  non-promoted**, not a validated transformed-runtime row. Managed Slice B is
+  accepted for one explicitly host-pinned consumer with typed GLOB_DAT/GOT
+  ownership, source-derived fixup validation, and complete final-emission
+  checking. A scoped native AArch64/glibc source-versus-rehydrated-Native-Image
+  observation now also exists: it checks selected `urp_entry`, unselected
+  `urp_observer`, all four provider targets and the safe default, mappings,
+  bytes, statuses, streams, release, and rollback. The retained report still
+  says `scoped-observation-not-promoted`; only local retained-root checks have
+  been performed and no official hosted CI run has confirmed the new workflow.
+  Keep the fixture/evaluator row `unknown` until the required CI gate passes.
+  See [managed admission and scoped native evidence](#scenario-external-provider-managed-admission-and-scoped-native-evidence),
+  [external consumer publication](./external-consumer-proof.md), and the
+  [current gap audit](../../tasks/10-06-indirect-control-jump-tables/research/current-gap-audit.md).
+  This does not widen the libc singleton/pair, arbitrary dependency-graph, or
+  general indirect-control rules. The earlier native source-loader self-tests
+  remain source/loader-only; the new provider-loaded rollback oracle is a
+  separate source-loader observation and must not be called transformed
+  execution. The host supplies a provider path and pins its exact `DT_SONAME`,
+  GNU build ID, and SHA-256 outside the image. The adapter snapshots a bounded
+  no-follow regular file, compares SHA-256 before ELF parsing, and accepts only
+  the dependency-free provider DSO with a 16-byte defined table object in a
+  file-backed read-only `PT_LOAD` and bounded executable targets.
+  The consumer may declare exactly that one configured provider SONAME; missing,
+  extra, duplicate, or mismatched provider dependencies and the provider table
+  import without its exact `DT_NEEDED` fail before memfd creation or loader
+  activity. The consumer's undefined global/default `STT_OBJECT` may have
+  `st_size == 0` (as GNU ld emits); its size/range is established by the pinned
+  provider definition and checked runtime binding, not by the undefined row.
+  Provider RPATH/RUNPATH and dependencies are rejected; `LD_LIBRARY_PATH`,
+  `LD_PRELOAD`, and `LD_AUDIT` must be unset or empty. No payload path, search
+  root, or environment variable selects the provider. After `DT_NEEDED` parsing
+  identifies the configured provider dependency, any consumer `DT_VERSYM`,
+  `DT_VERNEED`, `DT_VERNEEDNUM`, `DT_VERDEF`, or `DT_VERDEFNUM` tag is rejected
+  with `URP_STATUS_UNSUPPORTED` before generic symbol-version traversal or
+  provider-specific RELA accounting. The RELA-side version-tag check remains as
+  defense-in-depth. This provider-only ordering does not change the accepted
+  non-provider libc version-requirement path.
+
+  The glibc adapter hashes before parsing, loads the sealed provider descriptor
+  with `dlmopen(LM_ID_NEWLM, ..., RTLD_NOW | RTLD_LOCAL)`, then loads the
+  consumer into that exact `Lmid_t` with local visibility. It verifies the
+  actual provider link map, read-only table mapping/bytes, and consumer GOT
+  pointer against that provider before publishing the consumer handle, and
+  retains the provider until all consumer images are released. A pre-existing
+  same-SONAME base-namespace mapping is rejected by policy; unrelated
+  different-SONAME global definitions do not affect isolated binding. The
+  configured-provider consumer candidate preflight has one aggregate 8 MiB
+  work budget initialized before its program-header walk or dynamic-tag scan.
+  It charges program-header scans and PT_LOAD range lookups, the bounded
+  dynamic-entry scan, each byte examined in a `DT_NEEDED` name, version records,
+  version-name scans/hash work, RELA/PLT/RELR entries and target queries,
+  GNU-hash buckets/chains, dynsym scans, and provider-specific consumer checks.
+  The same work object continues through consumer RELA validation; entering the
+  RELA path does not reset it. Candidate `DT_NEEDED` scanning stops after the
+  longest accepted configured-provider, libc, or loader SONAME plus its
+  terminator; longer and unrecognized names are rejected before version,
+  relocation, provider-parser, memfd, or loader work. This budget applies in
+  configured mode even when classification ends at an otherwise valid generic
+  libc image, so the libc symbol-version positive must continue to pass. With
+  no configured provider, the established generic non-provider preflight path
+  is unchanged. The pinned provider DSO parser retains its own independent
+  aggregate 8 MiB budget for its program-header/indexed-range, GNU-hash,
+  dynsym, and string work. Exact-limit and one-under consumer-candidate tests
+  include dynamic entries, range lookups, and NEEDED bytes; the one-under case
+  must fail before provider parsing, memfd creation, or loader attempts. A long
+  adversarial NEEDED-name regression checks bounded rejection, and provider
+  version-tag negatives remain before generic symbol-version traversal.
+
+  On native AArch64/glibc, verify this boundary with a focused clean provider
+  self-test and the complete isolated runtime suite (use distinct `/tmp` build
+  directories for each run):
+  `make -C native/urprotect-runtime BUILD_DIR=/tmp/urp-provider-preflight-focused-<unique> clean external-provider-self-test`
+  `make -C native/urprotect-runtime BUILD_DIR=/tmp/urp-provider-preflight-full-<unique> clean test`
+  `git diff --check`
+  The native self-test also checks missing-`DT_NEEDED` rejection with configured
+  and unconfigured adapters and unchanged memfd/loader-attempt counters. This is
+  native source/loader evidence only, not managed transformation or rehydration
+  evidence, and does not establish musl or bionic support.
 - The same `libc.so.6` dependency slice accepts only import-side GNU
   version requirements recorded as
   `runtime.host-context.dependency-symbol-version-requirements`: `DT_GNU_HASH`
-  is required, SysV `DT_HASH` and `DT_SYMBOLIC` are rejected, and `DT_VERSYM`, `DT_VERNEED`, and
-  `DT_VERNEEDNUM` must be complete; the bounded `Verneed` and
+  is required, SysV `DT_HASH` and `DT_SYMBOLIC` are rejected, and `DT_VERSYM`,
+  `DT_VERNEED`, and `DT_VERNEEDNUM` must be complete; bounded `Verneed` and
   `Vernaux` chains must terminate at their declared counts, all version names
-  and hashes/indices must be valid, and every `vn_file` must exactly match the
-  `DT_NEEDED` basename `libc.so.6`. Weak-version requirement flags and version
-  requirements attached to recognized musl/bionic sonames are rejected. Native
+  and hashes/indices must be valid, and every `vn_file` must exactly match a
+  declared `DT_NEEDED` basename. The only declared names are the existing
+  `libc.so.6` singleton or the already-validated exact pair `libc.so.6` plus
+  `ld-linux-aarch64.so.1`; no other dependency is admitted by this version-file
+  rule. Weak-version requirement flags and version requirements attached to
+  recognized musl/bionic sonames are rejected. Native
   preflight caps hash symbol counts, `Verneed` records, and aggregate auxiliary
   records at 1,048,576. The native loader resolves the imported libc versions at
   `RTLD_NOW`; the retained runtime cell is native AArch64 glibc and unavailable
@@ -320,10 +402,18 @@ executable pathname.
   image handle is created. Protection semantics for the accepted
   non-executable case remain delegated to the native system loader.
 - `PT_TLS` has a bounded validated feature row (`runtime.host-context.pt-tls`).
-  The first slice accepts structurally bounded AArch64 initial-exec TLS with
-  `R_AARCH64_TLS_TPREL64`; the system loader owns per-thread module allocation
-  and initializes the `p_filesz` template plus zero-fill through `p_memsz`. The
-  retained current-thread oracle returns status 43 on native glibc.
+  Native metadata preflight bounds AArch64 `R_AARCH64_TLS_TPREL64`,
+  `R_AARCH64_TLS_DTPMOD64`, `R_AARCH64_TLS_DTPREL64`, and `R_AARCH64_TLSDESC`
+  owners against the declared PT_TLS module. For ELF64 `ET_DYN`, `STT_TLS`
+  `st_value` is a TLS-block-relative offset (not a virtual address); preflight
+  validates the symbol extent and relocation addend before loader handoff. The
+  system loader owns per-thread module allocation and initializes the
+  `p_filesz` template plus zero-fill through `p_memsz`. Separate transformed
+  HostContext current-thread rows for initial-exec, local-dynamic,
+  general-dynamic, and TLSDESC return status 43 on native AArch64 glibc, each
+  with its own linked fixture, stage/rehydration/handoff evidence, and
+  baseline-vs-transformed behavior comparison. These rows do not promote
+  registered-worker, outer-execveat, musl, or bionic behavior.
   Registered-worker initial-exec behavior is a separate
   `runtime.host-context.threaded-initial-exec-tls` row, limited to native
   AArch64 glibc. The optional `--thread-lifetime` pack flag sets the required
@@ -335,9 +425,9 @@ executable pathname.
   registered workers and TLS teardown, then invokes image destructors and
   unloads. The retained linker fixture validates constructor/entry/worker/TLS
   destructor/image destructor ordering for explicit and automatic joins and
-  exercises concurrent independent dispatches. Dynamic/general-dynamic,
-  local-dynamic, TLSDESC, unmanaged workers, recursive worker dispatch, and
-  musl/bionic threaded claims remain outside scope; malformed TLS and
+  exercises concurrent independent dispatches. Dynamic TLS worker lifecycle,
+  unmanaged workers, recursive worker dispatch, and musl/bionic threaded claims
+  remain outside scope; malformed TLS and
   unsupported models fail closed.
 - `PT_GNU_PROPERTY` has a bounded validated feature row
   (`runtime.host-context.gnu-property`). The adapter accepts a GNU property
@@ -748,6 +838,17 @@ layout consumer supplies output addresses, veneers, and runtime bindings; it
 must not reconstruct semantic meaning by re-reading raw bytes or by importing
 AsmStone model types.
 
+A selected dynamic-import `BLR` uses the current typed
+`SemanticDynamicImportCall` extension kind. The extension binds one exact call
+identity/address and target register, the full bounded producer-address chain
+(including ADRP, pointer load, and every register-copy producer), the computed
+ADRP page, exact writable file-backed 8-byte GOT source range, relocation-site
+identity and complete non-PLT RELA tuple (`r_offset`, `r_info`, addend, PLT
+identity, and RELA source-table address), plus the exact dynamic-symbol row
+(index/name offset/name/info/bind/type/other/visibility/section/value/size) and
+symbol-version index/DT_VERNEED facts when present. The chain is bounded to 64
+producer instructions and rehydration never uses `Proof` prose as evidence.
+
 ### 2. Signatures
 
 ```text
@@ -779,11 +880,51 @@ Aarch64SemanticPlanValidator.Validate(
     -> SemanticPlanValidationResult
 ```
 
-The canonical handoff representation is version `1`, architecture `EM_AARCH64`
-(`183`), magic `URP-SPS1`, and includes a trailing SHA-256 digest. Its digest
-is computed over the canonical bytes owned by `SemanticPlanSnapshotCodec`.
-Protected Image producers may bind this digest; they must not duplicate the
-semantic serializer.
+The current canonical handoff representation is version `6`, architecture
+`EM_AARCH64` (`183`), magic `URP-SPS6`, and includes a trailing SHA-256 digest.
+Versions `1` through `5` are rejected; the managed codec has one current schema
+and no historical or dual decoder. Its digest is computed over the canonical
+bytes owned by `SemanticPlanSnapshotCodec`. Protected Image producers may bind
+this digest; they must not duplicate the semantic serializer. The outer
+Protected Image ABI remains v1.
+
+The byte-serialized `SemanticJumpTableOwnership` ordinals retain their
+established values: `SelectedFunctionPrivate=0`, `Shared=1`, `External=2`, and
+`RuntimeOwned=3`; `Ambiguous=4` remains appended. SPS6 carries the unchanged
+external provider-table facts extension at discriminator **8** plus the appended
+typed selected-consumer companion at **9**, without changing these ordinals or
+the outer Protected Image ABI v1. Existing provider-only SPS6 bytes remain
+identical; the companion is not an edit to that record's wire grammar.
+
+The provider reader is a bounded facts reader, not a provider loader. After
+rejecting raw input larger than 8 MiB and before hashing or parsing, it copies
+the caller input once into a private snapshot. SHA-256 pin verification, the
+existing bounded `ElfParser` profile, `BoundedReader`, table bytes, provider
+identity, and file-size facts all use that same snapshot; no later byte
+observation uses caller-owned memory. A wrong hash returns
+`OutputIdentityMismatch` before ELF parsing. The profile requires exactly one
+`PT_DYNAMIC` and no `PT_INTERP` before expanded metadata traversal. Ordinary
+`ElfParser.Parse` behavior is unchanged; the provider-only strict program
+header rule does not become a global parser rule.
+
+The discriminator-8 extension still carries only provider-domain identity,
+symbol/range/permission, signed-relative entry and retained table-byte facts.
+Those facts alone authorize neither consumer publication nor runtime support.
+Managed `protect-image` / `rehydrate-image` additionally require the linked
+consumer companion, fresh host-pinned provider bytes, source-rederived exact
+proof/instructions/fixups and complete logical/physical output validation;
+ordinary unconfigured `protect`/analysis remains fail-closed. Provider paths and
+operator pin configuration are not serialized; derived SONAME/build ID/content
+hash are provider facts. The semantic reader is not a native loader, and a
+managed Native Image is not a transformed-runtime acceptance witness.
+
+Separately, layout-evidence schema v3 uses its own fixed JSON ownership mapping:
+`Ambiguous=0`, `SelectedFunctionPrivate=1`, `Shared=2`, `External=3`, and
+`RuntimeOwned=4`. This converter mapping is independent of the SPS6 semantic
+snapshot enum ordinals above; changing either mapping does not change the other
+or layout schema version. The independent shared-table evidence checker
+requires ownership to be an exact JSON integer token, rejecting booleans,
+floating-point values (including `2.0`), and strings even if numerically equal.
 
 ### 3. Contracts
 
@@ -804,7 +945,10 @@ semantic serializer.
   owner. It supports the declared `B`, `BL`, conditional/test branch,
   `ADR`/`ADRP`, literal-load, and matching relocation families. `BLR`,
   authenticated indirect calls, and other opaque targets remain explicit
-  indirect/runtime/unresolved states; the projector never guesses a destination.
+  indirect/runtime/unresolved states unless a separate typed owner proves the
+  exact call; the narrow static local callback mode adds such an owner only for
+  the bounded same-block ADRP/ADD/stack-spill/reload shape. The projector never
+  guesses a destination.
 - `RelocationBinding` preserves relocation kind, raw relocation type, raw
   `r_info`, addend, symbol index/name, PLT identity, relocation virtual
   address, and relocation-table address. A nonzero symbol index remains an
@@ -830,9 +974,73 @@ semantic serializer.
   passed to the instruction decoder and are validated by typed width/alignment/
   value-domain rules.
 - Snapshot extensions are typed and reserved for sibling domains:
-  indirect targets, TLS bindings, jump tables, and CFI effects. An extension
-  must have a unique identity and bounded payload; unknown extension kinds are
-  rejected rather than guessed.
+  indirect targets, typed static function-pointer call owners, typed
+  dynamic-import call owners, TLS bindings, jump tables, and CFI effects. A
+  static-call owner is distinct from `SemanticDynamicImportCall` and
+  `RuntimeResolved`: it carries the exact selected caller identity, BLR target
+  register, ordered ADRP/ADD/stack-store/stack-load producers, stack slot,
+  section-linked RELA table and row identities, full non-preemptible local or
+  hidden `STT_FUNC` symbol row, caller/target section facts, and an explicit
+  preserve-at-original-VA mapping. It is admitted only when the source CFG has
+  one bounded same-basic-block reaching chain, the exact ADRP/ADD relocation
+  pair agrees with the symbol value, and the target is file-backed executable
+  code in the same image. Local snapshot validation binds the owner to one
+  exact indirect-target extension and identity mapping; it rejects missing,
+  duplicate, inconsistent, or unsupported owner links.
+- Every dynamic-import call owner pairs uniquely with the existing runtime
+  indirect-target extension and exactly equal relocation binding; its
+  source/output address-map entries must cover the call, each producer, the
+  relocation site, and the GOT range. Local snapshot validation rejects
+  missing, duplicate, inconsistent, or unsupported owner links.
+- Before the non-TLS early return, rehydration independently checks each typed
+  import against parsed `RelaRelocations`, the exact `DynamicSymbols` row and
+  available symbol-version records, a unique writable file-backed `PT_LOAD`
+  GOT owner, the semantic call/producer instructions and source bytes, and the
+  decoded canonical source/output `AddressMap`. `ElfParser.ParseRelaRelocations`
+  owns only bounded dynamic `DT_RELA`/`DT_JMPREL` records and preserves exact
+  source VA plus `IsPlt`; the owner check binds a unique non-PLT row by that
+  source address, tuple, and `!IsPlt` without creating a second ELF table
+  parser. `DynamicSymbols`/`DynamicMetadata.StringTable` are sourced from
+  `DT_SYMTAB`/`DT_STRTAB`, not section symbol tables. Missing or changed links
+  fail before Native Image publication.
+- Every BLR in a selected Protected Image emit region must retain its exact
+  semantic instruction/address-map row and exactly one indirect-target
+  extension plus one complete owner class: typed static function-pointer,
+  typed dynamic GLOB_DAT import, or an explicitly recognized HostContext
+  runtime callback. Publication independently reanalyzes each carried static
+  caller against source instruction bytes and section-linked RELA/symtab facts,
+  then checks that output call/producers map inside one emitted function and
+  re-decodes the final rehydrated ADRP page plus low-12 ADD, same stack slot,
+  and returning BLR to the original callback VA. It also compares callback
+  bytes and symbol identity at that VA in the final image. It independently
+  derives the expected imported-call owner set from selected source instruction bytes and parsed non-PLT
+  `R_AARCH64_GLOB_DAT` GOT slots using bounded ADRP/LDR/register-provenance
+  scans; it compares `(BLR address, GOT relocation offset)` pairs with typed
+  snapshot owners. It must not use a snapshot-supplied runtime-binding string
+  as the classifier for whether a source call is an import. Removing a typed
+  owner while retaining or substituting a non-import-looking runtime binding
+  therefore fails closed. Any selected emit region requires exactly one
+  semantic-plan snapshot; the non-TLS no-snapshot fallback is removed.
+- A typed import's producer chain must be ordered before BLR. Publication
+  validation requires ADRP through BLR to fit one canonical basic block and
+  independently decodes every contiguous source instruction in that interval.
+  It tracks reaching page/pointer register definitions and fails on an omitted
+  producer, unresolved clobber, non-call control-flow edge while page/GOT
+  provenance is live (including during owner-set derivation when an owner is
+  absent), or alternate path. It bounds each scan to 256 instructions,
+  aggregate scans to 16,384 instructions, owners to 256, and producer-address
+  work to 4,096.
+- The dynamic-import, static function-pointer, provider-facts and linked external
+  consumer extensions use the current `URP-SPS6` canonical codec, schema version
+  6. Versions 1 through 5 are unsupported rather than dual-decoded; unknown
+  extension kinds continue to fail closed. There is no second codec or
+  historical dual track, and Protected Image ABI v1 is unchanged. Provider facts
+  alone do not imply consumer binding or executable publication; the managed
+  pinned path requires the companion and [source/final validation](./external-consumer-proof.md).
+  This does not imply native/runtime acceptance. Python evidence consumers
+  intentionally treat embedded snapshots as opaque bounded
+  bytes plus SHA-256; they validate the outer Protected Image ABI v1 but do not
+  parse the nested semantic-snapshot version.
 - A semantic plan with an error diagnostic, unresolved required fixup, invalid
   source/output map, duplicate identity, malformed extension, or failed
   post-encode validation cannot proceed to physical layout or publication.
@@ -850,19 +1058,42 @@ semantic serializer.
 | Unresolved target or missing target binding | `SemanticTargetUnresolved`; no publication |
 | Relocation raw metadata, width, alignment, or value mismatch | `SemanticFixupMalformed`/`SemanticFixupOutOfRange`; no ELF write |
 | Snapshot exceeds any count/byte/string limit | `SemanticPlanSnapshotLimitExceeded`; no decode/handoff |
+| Raw provider input exceeds 8 MiB | `SemanticPlanSnapshotLimitExceeded` before snapshot copy, memory access, or ELF parsing |
+| Provider SHA-256 pin differs from the private input snapshot | `OutputIdentityMismatch` before ELF parsing; no extension |
+| Provider input has malformed structure or a mismatched pinned SONAME/build ID | bounded parser or `OutputIdentityMismatch` diagnostic; no extension |
+| Provider candidate has zero/multiple valid table facts or invalid ranges/targets | stable provider/symbol/range diagnostic; no extension |
 | Snapshot magic/version/architecture/enum/UTF-8 invalid | `SemanticPlanSnapshotMalformed` or `SemanticPlanSnapshotUnsupported` |
 | Snapshot trailing digest mismatch | `SemanticPlanSnapshotIntegrityMismatch`; no semantic records accepted |
 | Final instruction re-decode or target mismatch | `SemanticFixupValidationFailed`; no publication |
+| Missing/duplicate dynamic-import call, producer, GOT, RELA, dynsym/version, or address-map owner | `SemanticDynamicImportOwnerMismatch`; no Native Image |
 
 ### 5. Good/Base/Bad Cases
+
+The provider-reader regression set in
+`SemanticExternalJumpTableProviderReaderTests` verifies the maximum-plus-one
+raw-size gate without touching caller bytes, a wrong hash before parsing, the
+one-snapshot mutation case with exact pinned hash/table/target facts, provider-
+profile rejection of missing `PT_DYNAMIC`, and unchanged ordinary-parser
+behavior for zero `PT_DYNAMIC`. These reader-only checks establish bounded
+provider facts. Separate accepted managed consumer/publication tests cover the
+pinned integration; neither suite establishes transformed native/runtime
+execution.
 
 - Good: a projected function has deterministic typed ranges, exact internal
   targets, preserved relocation metadata, a canonical snapshot digest, and a
   layout consumer can resolve every required fixup before final validation.
+  A provider-facts-only SPS6 extension is good only when one immutable bounded
+  input snapshot matches its SHA-256/SONAME/build-ID pins and all retained table
+  bytes and provider-local symbol/range facts derive from that same snapshot;
+  this does not establish consumer or runtime support.
 - Base: a plan contains a bounded jump-table target set, runtime PLT binding, or
   veneer-required branch; the snapshot preserves the state as deferred with
   its extension identity and does not claim a final encoding.
-- Bad: copy a raw instruction to a new address, infer a target from stale
+- Bad: parse caller-owned provider bytes after hashing a separate observation,
+  exceed the provider input bound, or treat provider facts as proof of a
+  consumer `GLOB_DAT`/GOT binding or runtime admission; any such input fails
+  before extension publication. Also, copy a raw instruction to a new address,
+  infer a target from stale
   immediate bits despite a symbolic relocation, collapse an ambiguous target
   set, accept a malformed snapshot after digest failure, or let a layout
   consumer import AsmStone types and recreate classification independently.
@@ -885,6 +1116,34 @@ semantic serializer.
 - Integration tests assert `Aarch64SemanticPlanFactory` rejects incomplete
   analysis, validates `LoadMap` agreement, maps functions/blocks/instructions/
   relocation sites, and passes one canonical plan to the future layout consumer.
+- A project-built GLOB_DAT indirect-call fixture must pass producer, canonical
+  snapshot, Protected Image, and rehydration. Checksum-refreshed call/GOT/RELA/
+  dynsym/address-map/ADRP-target/producer-order tampering, omission of the
+  intervening clobber instruction or all owner edges, replacing the import
+  owner and relocation with a forged non-import runtime target, and snapshot
+  removal must fail before Native Image publication. A multi-owner payload over
+  the aggregate validation-work bound must be rejected before per-owner scans.
+- One bounded native observation is retained under
+  `.artifacts/dynamic-import/recovery-glibc-20261018d/runtime.host-context.dynamic-import.glibc.host-context-entry`:
+  on AArch64 glibc 2.43, a project-built `urp_entry` calls `getpid` via its
+  non-PLT `R_AARCH64_GLOB_DAT` GOT slot, returns 97 only when that call yields a
+  positive PID (otherwise 96), and produces matching source/transformed
+  HostContext handoffs with entry/process status 97, successful release, and
+  byte-identical empty stdout/stderr. The evidence checker independently binds
+  the source and Native Image ELF symbol/RELA/GOT facts and validates producer,
+  successful GenericRehydrationEngine publication, retained streams/handoffs,
+  and an actual checksum-corrupted Protected Image failure before Native Image
+  or loader publication. `DynamicImportOwnerWorkflowTests` separately validates
+  the typed snapshot owner relation and refreshed-checksum semantic tampering.
+  The report is explicitly `scoped-observation-pending-independent-review`;
+  this row is not promotion of generic indirect calls, arbitrary function
+  pointers, other imports, TLS/CFI/jump tables, or musl/bionic behavior. Its
+  runtime identity gate is producer-runtime-only: the dynamic-import checker
+  must run on the native AArch64 producer runtime and call
+  `tls_runtime_identity.verify_identity(..., verify_current_process=True)` to
+  validate the retained libc/loader files and current mapped runtime. The
+  portable `verify_artifact_identity` check alone is insufficient for this row;
+  this does not change the TLS-matrix portable identity contract.
 - The current managed quality gate remains `dotnet build UrProtect.sln
   --configuration Release --no-restore` plus the full Core test project,
   fixture validation, regression matrix, and `git diff --check`. Runtime
@@ -1129,8 +1388,14 @@ urprotect protect-image INPUT --artifact PATH --role PATH --manifest PATH --stag
   (--pass control-flow-flattening | --pass register-permutation)+
   [--producer-id ID] [--producer-build-sha256 SHA256]
   [--rehydrator ID] [--source-sha256 SHA256] [--request-sha256 SHA256]
+  [--provider-file PATH --provider-soname SONAME
+   --provider-build-id HEX --provider-sha256 SHA256]
   [--json PATH|-]
 ```
+
+The provider group is host-only and all-or-none; it is not persisted in the
+artifact. See [external consumer publication](./external-consumer-proof.md)
+for the exact pins and admission boundary.
 
 The producer emits `protected-image.bin`, `protected-image.json`, `stage.json`, and a closed `SHA256SUMS` file. The stage record is schema v1 with `status`, command/environment/producer/source/request/artifact bindings, bounded diagnostics, transformation identity, and `publicationComplete`.
 
@@ -1161,8 +1426,13 @@ symlinks, digest mismatches, and malformed numeric facts fail closed.
 The result vocabulary is shared with the runtime matrix:
 `accepted-and-runs`, `environment-unavailable`, or `runtime-failure`.
 All three TLS runtime results require a completely published producer stage and
-retained transformed/artifact hashes. `accepted-and-runs` requires observed
-per-thread, zero-fill, and teardown facts with no first failure. An
+retained transformed/artifact hashes. `accepted-and-runs` requires measured per-thread/current-thread and image-release
+facts with no first failure. Zero-fill is `not-applicable` without a tail and
+`not-run` for an unobserved tail; `observed` requires a retained observing oracle.
+Accepted rows also bind the Native Image, explicit expected entry status, and
+measured runtime identity. See [TLS measured runtime evidence](./tls-evidence-oracle.md)
+for the explicit wrapper tuple, real baseline comparison, conditional execution
+inputs, and producer-local versus portable consumer identity validation. An
 `environment-unavailable` result requires `firstFailureStage=environment`,
 `lifecycle=not-run`, and no lifecycle observation. `runtime-failure` describes a
 failure after publication and requires a non-environment first-failure stage;
@@ -1235,7 +1505,9 @@ urprotect rehydrate-image SOURCE --artifact PROTECTED_IMAGE
   --unit ID --profile outer-execveat|host-context-entry
   --source-sha256 SHA256 --request-sha256 SHA256
   --producer-id ID --producer-build-sha256 SHA256
-  --consumer-id ID --consumer-build-sha256 SHA256 [--json PATH|-]
+  --consumer-id ID --consumer-build-sha256 SHA256
+  [--provider-file PATH --provider-soname SONAME
+   --provider-build-id HEX --provider-sha256 SHA256] [--json PATH|-]
 
 native-image-handoff IMAGE EXPECTED_SHA256 REHYDRATION_SHA256 EVIDENCE_JSON
   STDOUT_FILE STDERR_FILE OUTPUT_LIMIT -- ARG0 [ARG ...]
@@ -1331,3 +1603,288 @@ strict compatibility product chain described above.
 Compatibility tests must measure retained product behavior and exact evidence;
 they must not promote the 100 registered synthetic samples into a claim of
 100x real-world compatibility.
+
+## Scenario: External provider managed admission and scoped native evidence
+
+### 1. Scope / Trigger
+
+Use this contract when reporting or extending the bounded external-table
+provider path. **Managed Slice B and one scoped native AArch64/glibc
+source-versus-rehydrated-Native-Image observation are retained.** The row
+`runtime.host-context.external-table-provider` remains `unknown` and
+`scoped-observation-not-promoted` until the required hosted CI gate passes and
+any review/registry gates are complete. The local observation is one project-
+built dependency-free provider DSO and one consumer; it does not establish
+arbitrary provider, dependency-graph, table-family, indirect-call, musl, or
+Bionic support.
+
+### 2. Signatures
+
+Managed `protect-image` and `rehydrate-image` accept only the complete optional
+host group shown above: `--provider-file`, `--provider-soname`,
+`--provider-build-id`, `--provider-sha256`. Paths/configuration are not serialized
+into SPS6; publication requires independent provider/source validation. See
+[the executable managed contract](./external-consumer-proof.md).
+
+The native host supplies provider configuration explicitly:
+
+```c
+urp_status urp_host_adapter_init_with_provider(
+    urp_host_adapter_v1 *adapter,
+    const urp_host_provider_config_v1 *provider);
+```
+
+`urp_host_provider_config_v1` has `path`, `expected_soname`,
+`expected_build_id_hex`, `expected_sha256_hex` (`const char *`); initialization
+copies values. This is not a new HostContext ABI or payload-selected provider.
+The current controlled native contract fixes SONAME
+`liburprotect-jump-table-provider.so.1` and symbol `urp_external_jump_table`;
+its build-ID storage is 41 bytes (40 hex characters plus terminator), whereas
+managed CLI syntax allows 8–128 even hex characters. A managed pin accepted
+syntactically is not therefore native-contract acceptance.
+
+Existing native test/helper interfaces and evidence commands are:
+
+```text
+host-context-external-provider-self-test
+  provider consumer bad-size wrong-soname bad-dependencies conflict
+  symbol-conflict wrong-consumer versioned-libc
+
+host-context-external-provider-image-handoff
+  PROVIDER SONAME BUILD_ID SHA256 IMAGE ENTRY_SYMBOL INDEX RECORD_JSON
+
+scripts/run-external-provider-e2e.sh
+  --tier pr|nightly|release --artifact-root ROOT
+
+scripts/run-external-provider-rollback-oracle.sh --artifact-root ROOT
+```
+
+The unconfigured `host-context-image-handoff IMAGE ENTRY_SYMBOL RECORD_JSON`
+helper is not the provider-aware execution path.
+
+### 3. Contracts
+
+- SPS6/version 6 is the only nested schema; kinds **8** (unchanged provider
+  facts/wire bytes) and **9** (typed consumer companion) cross-validate against
+  exact source-derived owner/fixup and emitted output facts. Protected Image
+  ABI remains **v1**. No provider-domain VA becomes a local consumer mapping;
+  only the selected consumer is rewritten, with its GOT identity-preserved.
+- Managed input is one bounded private snapshot with SHA checked before parse,
+  read through the supported Linux safe-file adapter. Linux/AArch64 executed
+  tests versus Linux/x64/unsupported-host static review must be stated
+  separately. This host-helper support does not add an x64 ELF backend.
+- The native adapter uses a sealed provider and consumer in one isolated glibc
+  namespace, verifies the provider link map/table and consumer GOT binding before
+  handle publication, and keeps the provider alive through consumer release.
+  Provider bytes are host-pinned by exact SONAME, GNU build ID and SHA-256;
+  the dependency-free provider and its four-entry signed-relative table are
+  bounded by the independent 8 MiB parser-work limit. The native source-loader
+  self-test remains a separate observation from the managed Native Image run.
+- The retained scoped run executes **source and managed-rehydrated Native
+  Image**, selected `urp_entry` and unselected `urp_observer`, at indices 0, 1,
+  2, 3 with entry statuses `17, 103, -7, 91`, and safe-default index 4 with
+  status `-1`. Process/helper status and signed entry status are separate
+  evidence. For each source/transformed entry/observer/index handoff, the
+  checker binds exact stdout/stderr bytes and hashes, image/provider identities,
+  release status/order, and absence of a positive failure stage; a zero helper
+  exit alone is not target-selection evidence.
+- The source and transformed Native Image chain is retained with provider,
+  source, Protected Image and Native Image hashes; request/producer/consumer
+  build IDs; commands, stages, build provenance, runtime identity and a closed
+  SHA256SUMS inventory. The checker independently parses provider dynsym/table/
+  entries/targets and consumer dependency/dynsym/RELA/GOT facts, follows the
+  source entry stub to the complete emitted 92-byte live dispatcher, verifies
+  the observer's original provider-table binding, and relates measured load
+  biases, link maps, sealed mappings, read-only provider-table bytes, GOT value
+  and each target address back to the retained ELFs. It rejects partial,
+  duplicate, conflicting-permission and BSS-only `PT_LOAD` intersections over
+  the emitted code and entry stub; ASLR addresses or claim booleans alone are
+  insufficient.
+- Three failures remain distinct: the wrong-provider-SHA negative is rejected
+  during rehydration (`OutputIdentityMismatch`, no Native Image and no loader);
+  the separate source-loader rollback oracle injects a one-shot failure after
+  verified provider/consumer binding and proves cleanup plus a successful
+  reload/release; and the transformed Native Image rollback record proves the
+  same post-binding cleanup/retry boundary for the exact Native Image. Event
+  overflow, descriptors/references/mappings, statuses and retained streams are
+  checked. Tamper tests refresh the full closed manifest and dependent claims so
+  they fail on semantic inconsistency, not stale hashes.
+- No arbitrary/multiple provider, provider dependency, search path, external
+  target, alternate encoding, veneer or runtime-translation admission follows.
+  Existing libc singleton/pair rules remain unchanged; no musl/Bionic runtime
+  claim can be inferred from glibc or from managed tests.
+
+### 4. Validation & Error Matrix
+
+| Evidence / boundary | Required classification |
+|---|---|
+| Managed Slice B publication without the retained source/transformed oracle | managed evidence only; no runtime promotion |
+| Retained local source/transformed root and passing exact-root checker, but no hosted CI result | scoped glibc observation; feature remains `unknown` / not promoted |
+| Older native provider self-test or the separate provider-loaded rollback root | source-loader lifecycle evidence only; not selected/transformed positive behavior |
+| Missing host provider, mismatched pins/dependencies/owners, or wrong hash | fail closed before the applicable publication/loader boundary; preserve exact first failure and no-publication evidence |
+| Helper success without exact entry statuses for both symbols and all five indices | insufficient behavioral evidence |
+| Missing/invalid closed-root manifest, source/output owner proof, runtime identity, complete output map, or rollback record | evidence checker rejects; no acceptance promotion |
+| Partial, duplicate, conflicting or BSS-only `PT_LOAD` overlap with emitted code or live entry stub | evidence checker rejects the ambiguous physical mapping |
+| Refreshed-checksum dead chain, table/GOT/target/status/stream/identity forgery | evidence checker rejects semantic inconsistency |
+| No native AArch64/glibc toolchain or architecture | explicit environment failure; no emulator or other-runtime substitution |
+| No official hosted `build-and-test` result / branch-protection confirmation | local observation remains scoped and unpromoted |
+
+### 5. Good / Base / Bad Cases
+
+- Good: preserve the exact-root local source/transformed observation and
+  separate provider-loaded rollback record; independently rederive the selected
+  live output chain, observer binding, provider targets, hashes, mappings,
+  statuses, streams and release state. Keep the row unknown until the required
+  hosted gate is observed.
+- Base: managed publication and native source-loader checks pass, but no
+  transformed Native Image execution root or no official hosted result is
+  available; record the available scoped evidence without promoting the row.
+- Bad: run the source fixture twice and label one transformed, infer target
+  identity from a constant name array, trust absolute ASLR addresses or helper
+  exit 0, treat the source-loader rollback root as transformed execution, or
+  generalize the one glibc provider fixture to arbitrary providers or runtimes.
+
+### 6. Tests Required and Slice C execution inventory
+
+The following numbered inventory is the preserved pre-execution gap analysis;
+its statements that the runner/checker/evidence did not yet exist are historical,
+not the current status. The current implementation, retained evidence, CI
+wiring, tests, and remaining hosted/promotion gates follow it below.
+
+1. **Reusable native loader/harness:**
+   `host_context_external_provider_self_test.c` takes the consumer at `argv[2]`,
+   parses its dynamic metadata rather than a hardcoded source instruction
+   offset, calls `load_image`, resolves both `urp_entry` and `urp_observer`,
+   dispatches all five indices through `launch_args.argc`, checks runtime
+   GOT/table/provider mappings and release/unmapping. Thus it is structurally
+   capable of taking the produced Native Image as its consumer input, subject
+   to its existing fixture/profile predicates; that capability is **not yet
+   verified by a fresh transformed run**. The Makefile target currently supplies
+   the source consumer fixture and its eight companion inputs, not a managed
+   Native Image. It auto-derives provider pins from the supplied file for the
+   self-test, so a Slice C evidence chain must independently bind that identity
+   to the managed host pins.
+2. **Evidence capture gaps in that self-test:** its JSON uses
+   `sourceEntryStatuses` even for a caller-supplied image; it has no
+   source/Protected/Native Image or rehydration binding. `capture_dispatch`
+   combines selected and observer streams in one per-index capture. Target
+   addresses are computed from table displacements and checked provider-local,
+   but the printed target names are a fixed array, not exact independently
+   resolved symbol-row bindings. It emits mapped paths/addresses and release
+   facts, not a complete measured libc/loader identity, separate per-call process
+   records, retained stream files, stage chain or closed evidence root. These
+   omissions require an evidence owner/checker, not a support claim from JSON.
+3. **Generic handoff/runner gap:** `host_context_image_handoff.c` initializes an
+   unconfigured adapter and fixes `launch_args.argc = 1`; it has neither provider
+   pins nor an index argument. `scripts/run-host-context-rehydration-e2e.sh`
+   accepts neither provider flags nor provider-aware handoff inputs. Existing
+   static-callback/shared-table runners cannot execute this provider family
+   unchanged. Reuse the bounded owners; do not add an unverified path loader.
+4. **Provider runner/checker gap:** no provider-specific managed→rehydration→
+   native entry/observer E2E runner, exact-root provider evidence checker or
+   associated Python tamper suite exists under `scripts/` / `tests/test_*.py`.
+   Required assertions include source/output live entry chain and observer
+   bytes, exact table-entry↔target-symbol mapping, measured runtime bindings,
+   signed statuses/streams/release and observed failure stages/rollback. Include
+   coordinated checksum-refreshed dead-copy and metadata forgeries, not just
+   table hashes or successful compilation.
+5. **Registry/CI gap:** `fixtures/manifest.json`, `tests/regression-matrix.json`
+   and CI have ordinary/shared-table rows and the external-table fail-closed
+   negative, but no provider transformed positive or exact-root gate. Do not
+   mark a runtime row validated until Slice C evidence/review exists. Any future
+   fixture-registry edit must synchronize only the current evaluator retained
+   registry/protocol digests, leaving historical immutable baselines intact.
+   Full Python/evidence discovery and Slice C's managed/native/metadata gates
+   remain future execution work; the accepted review ran boundary Python tests,
+   not the full evidence suite.
+
+#### Current retained evidence, CI declaration, and remaining gates
+
+1. **Transformed managed/native positive:**
+   `scripts/run-external-provider-e2e.sh --tier pr --artifact-root ROOT` drives
+   source → `protect-image` → `rehydrate-image` → Native Image, then invokes
+   `host-context-external-provider-image-handoff` for source/transformed
+   `urp_entry` and `urp_observer`, indices 0–4. The retained current local root
+   is
+   `.artifacts/indirect-control/provider-rollback-native-image-implementation-20261020-4/runtime.indirect-control.external-provider.glibc.host-context-entry`.
+   It reports direct native AArch64/glibc 2.43 execution, no emulation, and
+   `acceptanceState=scoped-observation-not-promoted`. Provider identity is
+   SONAME `liburprotect-jump-table-provider.so.1`, GNU build ID
+   `a82d6ab982fab000f733cb631639b28f16f0bdb6`, SHA-256
+   `30efdbcd717c30a518bc7c83851ed3b43ba57a9e130064be04d176d0764e1746`.
+   The defined 16-byte read-only table is at VA/file offset `0x20000`, with
+   signed entries `-65536, -65528, -65520, -65512` reaching four provider-local
+   functions at VAs `0x10000, 0x10008, 0x10010, 0x10018`. Source/Protected/
+   Native Image SHA-256 values are `2dd8122e8a07aad02db477fc1928c61969785aa049a11c6c9b0a5300c46f41fa`,
+   `b1eb4bc73792e69e4bb306eb24f082dc88a8d136b6cc750061a409588beff73a`, and
+   `196dcb608ebcb1a87ae7280b2bee77a5e6f4c69c8135ac95e9476e5066cfc74a`.
+   Its closed SHA256SUMS is
+   `aa4a5725f2797b5b5115ac701ee0a2de7c9653fd02a2c025fffdc574f1bd5abb`.
+2. **Exact report/checker boundary:**
+   `external-provider-evidence.json` is schema version 1 and carries
+   `acceptanceState`, `artifacts`, `buildProvenance`, producer/consumer IDs and
+   build hashes, `execution`, `providerFacts`, `sourceElfFacts`,
+   `nativeElfFacts`, `observerSourceBinding`, `selectedFunction`, `handoffs`,
+   `rollbackNegative`, and `transformedNativeRollback`. Each source/transformed
+   lane has ten handoffs (both entry symbols × five indices) binding process and
+   signed entry status, byte-exact stdout/stderr and hashes, image/provider
+   identities, runtime mappings/target addresses, and release. The checker
+   follows the entry stub to the complete 92-byte emitted dispatcher and
+   requires one file-backed executable owner with no other PT_LOAD memory-range
+   intersection. Refreshed-root tests cover partial/duplicate/conflicting-
+   permission/BSS-only overlaps and semantic dispatch/metadata tampering without
+   executing a mutated image.
+3. **Distinct negatives and rollback:** the positive root's `rollbackNegative`
+   binds a wrong-provider-SHA failure at rehydration (`OutputIdentityMismatch`,
+   exit 5, no Native Image and no loader). Its transformed rollback record is
+   schema version 2 with a one-shot failure after actual provider acquisition,
+   consumer `dlmopen`, and verified GOT binding but before handle publication;
+   its checked trace has 21 events and proves cleanup, no failed handle, a
+   successful retry through entry/observer, and release. The separate native
+   source-loader oracle has its fresh root
+   `.artifacts/indirect-control/provider-loaded-rollback-ci-validation-20261020T153308Z-18193`,
+   schema version 1, 21 checked lifecycle events, successful cleanup/reload/
+   release, SHA256SUMS digest
+   `1e386bcd644adfb8e5024cb86504191fecccddd82f3a8902562488a2bb18c38e`, and
+   report digest
+   `fa3d2a2c6d1e5c9fbf03380f43ffd15b8122064aa02d49688bcafe88353be6b0`.
+   The older `20261020T152000Z` source-loader root has a current-checker hash
+   mismatch and remains historical; it was not rewritten or substituted.
+4. **Independent tests and local gates:** current root-bound transformed
+   provider tests passed 26/26, source-loader rollback tests 5/5, and focused
+   fixture/digest-chain/regression tests 3/3. The retained local gate reports
+   Release build 0 warnings/errors, managed tests 754/754, native runtime suite
+   exit 0, full Python discovery 458/458 with no skips, 39 evaluator tests,
+   13 fixtures, 27 regression cases, and 100 evaluator rows. The independent
+   integration review
+   `/root/.pi/agent/sessions/--root-urprotect--/subagent-artifacts/41606f2f-bbdf-4150-8757-2428ab7fc6cf_trellis-check_output.md`
+   (SHA-256 `04461a5761415abff30396ab7fcb036916abf102970336e7bf996bf1edca7a17`)
+   rechecked the exact current roots and reported a scoped integration pass.
+   These are local retained results, not a hosted Actions run.
+5. **CI and registry:** provider producer/checker gates are wired in the
+   mandatory `protection-and-tls` job on `ubuntu-24.04-arm`, timeout 40 minutes,
+   and use `if: always()` with run-keyed markers/logs/statuses. Exact `current` roots are
+   `.artifacts/indirect-control/external-provider/current` and
+   `.artifacts/indirect-control/provider-loaded-rollback/current`; upload runs
+   under `if: always()` with `include-hidden-files: true`. Both regression rows
+   are required on `native-arm64` at 1200 seconds. The evaluator digest chain is
+   current, but the fixture row remains `unknown`; no official hosted workflow
+   has exercised this uncommitted YAML, and branch-protection status mapping is
+   not inspectable here.
+6. **Remaining scope:** hosted CI/branch-protection confirmation, the final
+   general target-resolution/address-map report, owner policy for incomplete
+   table inventories, independent musl/Bionic rows, arbitrary providers/
+   dependencies, other table encodings/indirect-call families, and general
+   runtime promotion remain open. The historical Bionic staged-merge Python
+   failures recorded in the task gap audit are unexplained; a later green suite
+   does not erase them.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: local scoped provider E2E + source-loader rollback + green local suites
+       => runtime.host-context.external-table-provider validated everywhere.
+Correct: retain the scoped evidence as non-promoted; require the hosted native
+         CI/checker gate, preserve separate rollback provenance, and keep
+         musl/Bionic and general indirect-control acceptance open.
+```

@@ -25,6 +25,16 @@ public static class HostContextContract
     public const uint MinimumLaunchArgsSize = 32;
     public const uint CurrentLaunchArgsSize = 40;
     public const uint ThreadLifetimeContextSize = 72;
+    public const uint AbiVersionOffset = 0;
+    public const uint StructSizeOffset = 4;
+    public const uint CapabilitiesOffset = 8;
+    public const uint UserDataOffset = 16;
+    public const uint LoadImageCallbackOffset = 24;
+    public const uint LookupSymbolCallbackOffset = 32;
+    public const uint ReleaseImageCallbackOffset = 40;
+    public const uint EmitDiagnosticCallbackOffset = 48;
+    public const uint CreateImageThreadCallbackOffset = 56;
+    public const uint JoinImageThreadCallbackOffset = 64;
     public const string EntrySymbol = "urp_entry";
     public const int MaximumEntryNameBytes = 4096;
     public const uint LoadImageImmutable = 1;

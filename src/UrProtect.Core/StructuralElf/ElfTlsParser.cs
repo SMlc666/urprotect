@@ -19,7 +19,8 @@ internal static class ElfTlsParser
         ElfDynamicMetadata dynamicMetadata,
         IReadOnlyList<DynamicSymbol> dynamicSymbols,
         IReadOnlyList<RelaRelocation> relocations,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget = null)
     {
         ArgumentNullException.ThrowIfNull(programHeaders);
         ArgumentNullException.ThrowIfNull(sectionHeaders);
@@ -30,7 +31,7 @@ internal static class ElfTlsParser
         ArgumentNullException.ThrowIfNull(relocations);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
-        var segments = ParseSegments(bytes, programHeaders, diagnostics);
+        var segments = ParseSegments(bytes, programHeaders, diagnostics, workBudget);
         var descriptorPlt = ParseOptionalDynamicAddress(
             ElfConstants.DtTlsDescPlt,
             "DT_TLSDESC_PLT",
@@ -61,14 +62,16 @@ internal static class ElfTlsParser
             relocations,
             relocationTables,
             segments,
-            diagnostics);
+            diagnostics,
+            workBudget);
         var staticRelocations = ParseStaticRelocations(
             bytes,
             sectionHeaders,
             loadMap,
             segments,
             relocationTables,
-            diagnostics);
+            diagnostics,
+            workBudget);
         ValidateCrossTableRelocationOverlaps(
             tlsRelocations.Concat(staticRelocations.Relocations).ToArray(),
             diagnostics);
@@ -88,7 +91,8 @@ internal static class ElfTlsParser
     private static List<TlsSegmentFacts> ParseSegments(
         ReadOnlyMemory<byte> bytes,
         IReadOnlyList<ProgramHeader> programHeaders,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var result = new List<TlsSegmentFacts>();
         var reader = new BoundedReader(bytes);
@@ -206,6 +210,12 @@ internal static class ElfTlsParser
                 continue;
             }
 
+            if (workBudget is not null
+                && !workBudget.TryCharge(header.FileSize, "PT_TLS template allocation", diagnostics, header.Offset))
+            {
+                return result;
+            }
+
             var template = header.FileSize == 0
                 ? ReadOnlyMemory<byte>.Empty
                 : bytes.Slice(checked((int)header.Offset), checked((int)header.FileSize)).ToArray();
@@ -230,9 +240,39 @@ internal static class ElfTlsParser
         LoadMap loadMap,
         IReadOnlyList<TlsSegmentFacts> tlsSegments,
         IReadOnlyList<TlsRelocationTableFacts> dynamicTables,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         var reader = new BoundedReader(bytes);
+        if (workBudget is not null)
+        {
+            ulong totalRows = 0;
+            foreach (var section in sectionHeaders.Where(candidate => candidate.Type == ElfConstants.ShtRela))
+            {
+                var rows = section.Size / ElfConstants.RelaEntrySize64;
+                if (rows > (ulong)workBudget.Limits.MaximumSectionRelocationRows
+                    || rows > (ulong)workBudget.Limits.MaximumSectionRelocationRows - totalRows)
+                {
+                    workBudget.Fail(
+                        $"aggregate TLS section RELA rows exceed limit {workBudget.Limits.MaximumSectionRelocationRows} before traversal",
+                        diagnostics,
+                        section.Offset);
+                    return (new List<TlsRelocationSectionFacts>(), new List<TlsRelocationFacts>());
+                }
+
+                totalRows += rows;
+            }
+
+            if (!workBudget.TryReserveTable(
+                    totalRows,
+                    ElfConstants.RelaEntrySize64,
+                    workBudget.Limits.MaximumSectionRelocationRows,
+                    "TLS section-owned RELA rows",
+                    diagnostics))
+            {
+                return (new List<TlsRelocationSectionFacts>(), new List<TlsRelocationFacts>());
+            }
+        }
         var tables = new List<TlsRelocationSectionFacts>();
         var relocations = new List<TlsRelocationFacts>();
         for (var sectionIndex = 0; sectionIndex < sectionHeaders.Count; sectionIndex++)
@@ -308,7 +348,8 @@ internal static class ElfTlsParser
                         section,
                         sectionHeaders,
                         reader,
-                        diagnostics);
+                        diagnostics,
+                        workBudget);
                     if (symbols is null)
                     {
                         break;
@@ -323,6 +364,8 @@ internal static class ElfTlsParser
                             reader,
                             symbols,
                             symbolIndex,
+                            workBudget,
+                            diagnostics,
                             out symbol,
                             out var symbolFailure))
                     {
@@ -411,7 +454,8 @@ internal static class ElfTlsParser
         SectionHeader relocationSection,
         IReadOnlyList<SectionHeader> sectionHeaders,
         BoundedReader reader,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
         if (relocationSection.Link >= (uint)sectionHeaders.Count)
         {
@@ -455,6 +499,8 @@ internal static class ElfTlsParser
         BoundedReader reader,
         StaticSymbolSource source,
         uint symbolIndex,
+        ElfParserWorkBudget? workBudget,
+        DiagnosticBag diagnostics,
         out TlsRelocationSymbolIdentity? identity,
         out string failure)
     {
@@ -486,7 +532,14 @@ internal static class ElfTlsParser
             return false;
         }
 
-        if (!ElfParserUtilities.TryReadString(source.StringTable, nameOffset, out var name)
+        if (workBudget is not null
+            && !workBudget.TryCharge(ElfConstants.SymbolEntrySize64, "TLS section symbol row read", diagnostics, offset))
+        {
+            failure = "TLS section symbol-row work exceeds the bounded parser budget.";
+            return false;
+        }
+
+        if (!ElfParserUtilities.TryReadString(source.StringTable, nameOffset, out var name, workBudget, diagnostics)
             || string.IsNullOrWhiteSpace(name))
         {
             failure = $"TLS relocation symbol index {symbolIndex} has no bounded non-empty name.";
@@ -677,8 +730,20 @@ internal static class ElfTlsParser
         IReadOnlyList<RelaRelocation> relocations,
         IReadOnlyList<TlsRelocationTableFacts> relocationTables,
         IReadOnlyList<TlsSegmentFacts> tlsSegments,
-        DiagnosticBag diagnostics)
+        DiagnosticBag diagnostics,
+        ElfParserWorkBudget? workBudget)
     {
+        if (workBudget is not null
+            && !workBudget.TryReserveTable(
+                (ulong)relocations.Count,
+                ElfConstants.RelaEntrySize64,
+                workBudget.Limits.MaximumDynamicRelocationRows,
+                "TLS dynamic relocation projection",
+                diagnostics))
+        {
+            return new List<TlsRelocationFacts>();
+        }
+
         var result = new List<TlsRelocationFacts>();
         foreach (var relocation in relocations)
         {
@@ -719,7 +784,12 @@ internal static class ElfTlsParser
                             relocation.SourceAddress);
                     }
 
-                    if (!ElfParserUtilities.TryReadString(dynamicMetadata.StringTable, symbol.Name, out var symbolName)
+                    if (!ElfParserUtilities.TryReadString(
+                            dynamicMetadata.StringTable,
+                            symbol.Name,
+                            out var symbolName,
+                            workBudget,
+                            diagnostics)
                         || string.IsNullOrWhiteSpace(symbolName))
                     {
                         diagnostics.Error(

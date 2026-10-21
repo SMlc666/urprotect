@@ -45,7 +45,10 @@ public static class RehydrationCommandWorkflow
                 request.RecordPath,
             }.Concat(request.JsonPath is { Length: > 0 } and not "-"
                 ? new[] { request.JsonPath }
-                : Array.Empty<string>()),
+                : Array.Empty<string>())
+                .Concat(request.Options.ExternalJumpTableProviderInput is { } providerInput
+                    ? new[] { providerInput.Path }
+                    : Array.Empty<string>()),
             "Usage: rehydrate-image input and evidence output paths must be distinct.",
             "Usage: invalid rehydration output path");
         if (pathDiagnostics.Any(diagnostic => diagnostic.IsError))

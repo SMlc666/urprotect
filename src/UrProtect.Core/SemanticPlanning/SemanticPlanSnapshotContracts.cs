@@ -40,10 +40,21 @@ public static class SemanticPlanSnapshotLimits
     public const int MaximumRelocationsPerInstruction = 64;
     public const int MaximumRelaxationOptions = 8;
     public const int MaximumTargetsPerJumpTable = 65536;
+    public const int MaximumJumpTableReferenceProducers = 16;
+    public const int MaximumJumpTableOwnerReferences = 1024;
     public const int MaximumCfiRegisterEffects = 256;
     public const int MaximumTlsInstructions = 1024;
     public const int MaximumTlsRelocationSites = 64;
     public const int MaximumTlsRequirements = 16;
+    public const int MaximumProducerAddresses = 64;
+    public const int MaximumExternalProviderTables = 16;
+    public const int MaximumExternalProviderSymbols = 2048;
+    public const int MaximumExternalProviderSymbolsPerTable = 1024;
+    public const int MaximumExternalProviderTableEntries = 8192;
+    public const int MaximumExternalProviderTableEntriesPerTable = 4096;
+    public const int MaximumExternalProviderStringBytes = 256 * 1024;
+    public const int MaximumExternalProviderTableBytes = 16 * 1024;
+    public const int MaximumExternalProviderTableBytesPerTable = 16 * 1024;
 }
 
 /// <summary>

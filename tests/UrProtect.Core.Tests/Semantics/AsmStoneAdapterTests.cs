@@ -99,6 +99,150 @@ public sealed class AsmStoneAdapterTests
     }
 
     [Fact]
+    public void AdapterFailsClosedForImplicitMemoryEffectsWithoutInvalidatingKnownSystemReads()
+    {
+        const uint dcZvaX9 = 0xD50B7429u; // GNU as: DC ZVA, X9.
+        var dcZva = new AsmStoneAdapter().Decode(dcZvaX9, 0x1000);
+
+        Assert.True(dcZva.IsSuccess, dcZva.Diagnostic);
+        Assert.DoesNotContain(dcZva.Instruction!.Operands, operand => operand.Memory is not null);
+        Assert.True(dcZva.Instruction.Properties.HasFlag(Aarch64InstructionProperties.Load));
+        Assert.True(dcZva.Instruction.Properties.HasFlag(Aarch64InstructionProperties.Store));
+        Assert.True(dcZva.Instruction.Properties.HasFlag(Aarch64InstructionProperties.SideEffects));
+        Assert.Equal(Aarch64MemoryEffect.Unclassified, dcZva.Instruction.MemoryEffect);
+
+        var mrs = new AsmStoneAdapter().Decode(0xD53BD040u, 0x1000); // MRS X0, TPIDR_EL0.
+        Assert.True(mrs.IsSuccess, mrs.Diagnostic);
+        Assert.DoesNotContain(mrs.Instruction!.Operands, operand => operand.Memory is not null);
+        Assert.Equal(Aarch64MemoryEffect.None, mrs.Instruction.MemoryEffect);
+
+        var dmb = new AsmStoneAdapter().Decode(0xD5033F9Fu, 0x1000); // DMB ISH.
+        Assert.True(dmb.IsSuccess, dmb.Diagnostic);
+        Assert.DoesNotContain(dmb.Instruction!.Operands, operand => operand.Memory is not null);
+        Assert.True(dmb.Instruction.Properties.HasFlag(Aarch64InstructionProperties.SideEffects));
+        Assert.Equal(Aarch64MemoryEffect.None, dmb.Instruction.MemoryEffect);
+    }
+
+    [Fact]
+    public void AdapterProjectsGnuSwpFamilyAsBoundedAtomicReadModifyWrite()
+    {
+        var vectors = new[]
+        {
+            (0xF82A812Bu, "swp", 8),
+            (0xF8EA812Bu, "swpal", 8),
+            (0xF82A813Fu, "swp", 8),
+            (0xF8EA813Fu, "swpal", 8),
+            (0xB82A812Bu, "swp", 4),
+            (0xB8AA812Bu, "swpa", 4),
+            (0xB86A812Bu, "swpl", 4),
+            (0xB8EA812Bu, "swpal", 4),
+            (0x382A812Bu, "swpb", 1),
+            (0x38AA812Bu, "swpab", 1),
+            (0x386A812Bu, "swplb", 1),
+            (0x38EA812Bu, "swpalb", 1),
+            (0x782A812Bu, "swph", 2),
+            (0x78AA812Bu, "swpah", 2),
+            (0x786A812Bu, "swplh", 2),
+            (0x78EA812Bu, "swpalh", 2),
+        };
+
+        foreach (var (encoding, mnemonic, accessSize) in vectors)
+        {
+            var result = new AsmStoneAdapter().Decode(encoding, 0x1000);
+
+            Assert.True(result.IsSuccess, $"GNU as oracle 0x{encoding:X8}: {result.Diagnostic}");
+            Assert.Equal(mnemonic, result.Instruction!.Mnemonic);
+            Assert.Equal(Aarch64MemoryEffect.ReadModifyWrite, result.Instruction.MemoryEffect);
+            var memory = Assert.Single(result.Instruction.Operands, operand => operand.Memory is not null);
+            Assert.Equal(Aarch64OperandDirection.Input, memory.Direction);
+            Assert.Equal(accessSize, memory.Memory!.AccessSize);
+            var explicitRegisters = result.Instruction.Operands
+                .Where(operand => operand.Kind == Aarch64OperandKind.Register && !operand.IsImplicit)
+                .ToArray();
+            Assert.Contains(explicitRegisters, operand => operand.Direction == Aarch64OperandDirection.Input);
+            Assert.Contains(explicitRegisters, operand => operand.Direction == Aarch64OperandDirection.Output);
+        }
+    }
+
+    [Fact]
+    public void AdapterPreservesSwapSourceAndReturnedOldOperandRoles()
+    {
+        var adapter = new AsmStoneAdapter();
+        var storeUnknownAndDiscardOld = adapter.Decode(0xF8EA813Fu, 0x1000); // SWPAL X10, XZR, [X9].
+        Assert.True(storeUnknownAndDiscardOld.IsSuccess, storeUnknownAndDiscardOld.Diagnostic);
+        Assert.Contains(storeUnknownAndDiscardOld.Instruction!.Operands, operand =>
+            operand.Kind == Aarch64OperandKind.Register
+            && operand.Direction == Aarch64OperandDirection.Input
+            && operand.Register is { Class: Aarch64RegisterClass.General, Index: 10, Width: 64, Role: Aarch64RegisterRole.None });
+        Assert.Contains(storeUnknownAndDiscardOld.Instruction.Operands, operand =>
+            operand.Kind == Aarch64OperandKind.Register
+            && operand.Direction == Aarch64OperandDirection.Output
+            && operand.Register is { Class: Aarch64RegisterClass.General, Role: Aarch64RegisterRole.Zero });
+
+        var storeZeroAndReturnOld = adapter.Decode(0xF8FF812Au, 0x1000); // SWPAL XZR, X10, [X9].
+        Assert.True(storeZeroAndReturnOld.IsSuccess, storeZeroAndReturnOld.Diagnostic);
+        Assert.Contains(storeZeroAndReturnOld.Instruction!.Operands, operand =>
+            operand.Kind == Aarch64OperandKind.Register
+            && operand.Direction == Aarch64OperandDirection.Input
+            && operand.Register is { Class: Aarch64RegisterClass.General, Role: Aarch64RegisterRole.Zero });
+        Assert.Contains(storeZeroAndReturnOld.Instruction.Operands, operand =>
+            operand.Kind == Aarch64OperandKind.Register
+            && operand.Direction == Aarch64OperandDirection.Output
+            && operand.Register is { Class: Aarch64RegisterClass.General, Index: 10, Width: 64, Role: Aarch64RegisterRole.None });
+    }
+
+    [Fact]
+    public void AdapterDistinguishesPlainWritesConditionalWritesAndRmwControls()
+    {
+        var vectors = new[]
+        {
+            (0xC89FFD3Fu, Aarch64MemoryEffect.PlainWrite), // GNU as: STLR XZR, [X9]
+            (0xC80A7D3Fu, Aarch64MemoryEffect.ConditionalWrite), // GNU as: STXR W10, XZR, [X9]
+            (0xC80AFD3Fu, Aarch64MemoryEffect.ConditionalWrite), // GNU as: STLXR W10, XZR, [X9]
+            (0xC8AA7D2Bu, Aarch64MemoryEffect.ConditionalWrite), // GNU as: CAS X10, X11, [X9]
+            (0xC8EAFD2Bu, Aarch64MemoryEffect.ConditionalWrite), // GNU as: CASAL X10, X11, [X9]
+            (0xF82A012Bu, Aarch64MemoryEffect.ReadModifyWrite), // GNU as: LDADD X10, X11, [X9]
+            (0xF8EA012Bu, Aarch64MemoryEffect.ReadModifyWrite), // GNU as: LDADDAL X10, X11, [X9]
+            (0xF900012Au, Aarch64MemoryEffect.PlainWrite), // GNU as: STR X10, [X9]
+            (0xF9400020u, Aarch64MemoryEffect.Read), // ordinary LDR control
+        };
+
+        foreach (var (encoding, expectedEffect) in vectors)
+        {
+            var result = new AsmStoneAdapter().Decode(encoding, 0x1000);
+
+            Assert.True(result.IsSuccess, $"0x{encoding:X8}: {result.Diagnostic}");
+            Assert.True(
+                expectedEffect == result.Instruction!.MemoryEffect,
+                $"GNU as oracle 0x{encoding:X8} ({result.Instruction.Mnemonic}): expected {expectedEffect}, found {result.Instruction.MemoryEffect}.");
+        }
+    }
+
+    [Fact]
+    public void AdapterNormalizesAdrpTargetUsingTheSourcePage()
+    {
+        const ulong instructionAddress = 0x1B50;
+        var result = new AsmStoneAdapter().Decode(0xB0000000, instructionAddress);
+
+        Assert.True(result.IsSuccess, result.Diagnostic);
+        Assert.Equal(0x2000UL, result.Instruction!.DirectTarget);
+        var pageOperand = Assert.Single(result.Instruction.Operands, operand => operand.IsPageRelative);
+        Assert.Equal(Aarch64OperandKind.Target, pageOperand.Kind);
+        Assert.Equal(0x2000UL, pageOperand.Target);
+    }
+
+    [Fact]
+    public void AdapterRejectsAdrpTargetWhoseSourceDisplacementWrapsAddressSpace()
+    {
+        const ulong instructionAddress = 0xFFFFFFFFFFFFF800;
+        var result = new AsmStoneAdapter().Decode(0xB0000000, instructionAddress);
+
+        Assert.Equal(Aarch64DecodeStatus.UnknownEncoding, result.Status);
+        Assert.Null(result.Instruction);
+        Assert.Contains("checked source/displacement arithmetic", result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AsmStoneEncoderPermutesGeneralRegistersThroughTheProjectAdapter()
     {
         const uint addX9X10X9 = 0x8B090149;

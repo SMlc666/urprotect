@@ -404,13 +404,34 @@ public static class RehydrationPublisher
 
         foreach (var entry in evidence.AddressMap)
         {
+            var hasValidSourceRange = entry.SourceRange is not { } sourceRangeForValidation
+                || (sourceRangeForValidation.TryGetFileEnd(out _)
+                    && (!sourceRangeForValidation.HasVirtualAddress
+                        || sourceRangeForValidation.TryGetVirtualEnd(out _)));
+            var isPlacementMapping = placementByIdentity.TryGetValue(entry.Identity, out var placement)
+                && entry.OutputRange == placement.Range;
+            var isCloneMapping = evidence.JumpTableClones.Any(clone =>
+                string.Equals(clone.TableIdentity.Value, entry.Identity, StringComparison.Ordinal)
+                && string.Equals(clone.TableIdentity.Value, entry.SourceIdentity, StringComparison.Ordinal)
+                && entry.SourceRange is { } sourceRange
+                && sourceRange.FileOffset == clone.SourceTableRange.FileOffset
+                && sourceRange.VirtualAddress == clone.SourceTableRange.VirtualAddress
+                && sourceRange.Size == clone.SourceTableRange.Size
+                && entry.OutputRange == clone.OutputRange);
+            var isTargetMapping = entry.SourceRange is { } targetSourceRange
+                && entry.OutputRange.Size == sizeof(uint)
+                && IsContainedInPlacement(entry.OutputRange, evidence.Placements)
+                && evidence.JumpTableTargetBindings.Any(binding =>
+                    (string.Equals(binding.TargetIdentity.Value, entry.Identity, StringComparison.Ordinal)
+                        && targetSourceRange.VirtualAddress == binding.SourceTargetAddress
+                        && entry.OutputRange.VirtualAddress == binding.OutputTargetAddress)
+                    || (string.Equals(binding.TargetBaseIdentity.Value, entry.Identity, StringComparison.Ordinal)
+                        && targetSourceRange.VirtualAddress == binding.SourceTargetBaseAddress
+                        && entry.OutputRange.VirtualAddress == binding.OutputTargetBaseAddress));
             if (!IsLayoutIdentity(entry.Identity)
                 || !IsLayoutIdentity(entry.SourceIdentity)
-                || !placementByIdentity.TryGetValue(entry.Identity, out var placement)
-                || entry.OutputRange != placement.Range
-                || (entry.SourceRange is { } sourceRange
-                    && (!sourceRange.TryGetFileEnd(out _)
-                        || (sourceRange.HasVirtualAddress && !sourceRange.TryGetVirtualEnd(out _)))))
+                || !hasValidSourceRange
+                || !(isPlacementMapping || isCloneMapping || isTargetMapping))
             {
                 Invalid("Rehydration layout evidence contains an invalid address-map entry.");
             }
@@ -461,6 +482,25 @@ public static class RehydrationPublisher
     private static bool IsLayoutIdentity(string? value) =>
         value is { Length: > 0 and <= ElfLayoutLimits.MaximumIdentityBytes }
         && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_' or '/' or ':');
+
+    private static bool IsContainedInPlacement(
+        ElfLayoutRange range,
+        IReadOnlyList<ElfLayoutPlacement> placements)
+    {
+        if (range.Size == 0
+            || !range.HasVirtualAddress
+            || !range.TryGetFileEnd(out var rangeFileEnd)
+            || !range.TryGetVirtualEnd(out var rangeVirtualEnd))
+        {
+            return false;
+        }
+
+        return placements.Count(placement =>
+            range.FileOffset.Value >= placement.Range.FileOffset.Value
+            && rangeFileEnd.Value <= placement.Range.FileOffset.Value + placement.Range.Size
+            && range.VirtualAddress.Value >= placement.Range.VirtualAddress.Value
+            && rangeVirtualEnd.Value <= placement.Range.VirtualAddress.Value + placement.Range.Size) == 1;
+    }
 
     private static bool IsLayoutAlignment(ulong alignment) =>
         alignment is 0 or 1 || alignment <= ElfLayoutLimits.DefaultMaximumAlignment && (alignment & (alignment - 1)) == 0;

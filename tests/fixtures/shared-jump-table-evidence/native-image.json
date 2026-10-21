@@ -1,0 +1,12 @@
+{
+  "artifactRole": "native-image",
+  "entrySymbol": "urp_entry",
+  "nativeImageSha256": "908a454354be3f6dcd6614b06704e2d17ac04ead1fe0491b30a8f99446217a42",
+  "nativeImageSize": 73744,
+  "profile": "host-context-entry",
+  "schemaVersion": 1,
+  "sourceSha256": "138e96724ef11294ada8e96803ca45cd02d3d038708134ffff8e8aaacf9fd473",
+  "stage": "native-image",
+  "status": "passed",
+  "unitId": "runtime.indirect-control.shared-table.glibc.host-context-entry"
+}

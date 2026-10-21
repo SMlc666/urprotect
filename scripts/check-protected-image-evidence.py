@@ -25,6 +25,7 @@ TLS_EVIDENCE_FIELDS = frozenset({
     "profile",
     "runtime",
     "lifecycle",
+    "expectedEntryStatus",
     "result",
     "sourcePath",
     "sourceSha256",
@@ -32,6 +33,10 @@ TLS_EVIDENCE_FIELDS = frozenset({
     "transformedSha256",
     "artifactPath",
     "artifactSha256",
+    "nativeImagePath",
+    "nativeImageSha256",
+    "runtimeIdentity",
+    "runtimeIdentitySha256",
     "toolchainIdentity",
     "loaderIdentity",
     "ptTls",
@@ -175,6 +180,9 @@ def check_tls_evidence(root: Path, stage: dict, runtime: str | None) -> None:
     lifecycle = bounded_text(evidence["lifecycle"], "lifecycle", 32)
     if lifecycle not in TLS_LIFECYCLES:
         fail(f"tlsEvidence lifecycle is unsupported: {lifecycle!r}")
+    expected_entry_status = evidence["expectedEntryStatus"]
+    if type(expected_entry_status) is not int or not 0 <= expected_entry_status <= 255:
+        fail("tlsEvidence expectedEntryStatus is outside the native HostContext status range")
     result = bounded_text(evidence["result"], "result", 32)
     if result not in TLS_RESULTS:
         fail(f"tlsEvidence result is unsupported: {result!r}")
@@ -224,6 +232,40 @@ def check_tls_evidence(root: Path, stage: dict, runtime: str | None) -> None:
     if artifact_sha != stage_artifact_sha.lower():
         fail("tlsEvidence artifactSha256 does not match its enclosing stage")
 
+    from tls_runtime_identity import verify_artifact_identity
+
+    runtime_identity_value = evidence["runtimeIdentity"]
+    runtime_identity_sha_value = evidence["runtimeIdentitySha256"]
+    native_path_value = evidence["nativeImagePath"]
+    native_sha_value = evidence["nativeImageSha256"]
+    runtime_identity = None
+    runtime_identity_sha = None
+    native_path = None
+    native_sha = None
+    if runtime_identity_value is None:
+        if runtime_identity_sha_value is not None:
+            fail("tlsEvidence runtime identity digest has no retained runtime identity")
+    else:
+        runtime_identity = verify_artifact_identity(runtime_identity_value)
+        runtime_identity_sha = bounded_digest(runtime_identity_sha_value, "runtimeIdentitySha256")
+        if runtime_identity.get("runtime") != runtime or runtime_identity_sha != runtime_identity.get("identitySha256"):
+            fail("tlsEvidence runtime identity does not bind the selected runtime and actual glibc files")
+    if native_path_value is None:
+        if native_sha_value is not None:
+            fail("tlsEvidence Native Image digest has no retained Native Image path")
+    else:
+        native_path = resolve_under(
+            root,
+            bounded_text(native_path_value, "nativeImagePath"),
+            "tlsEvidence nativeImagePath",
+        )
+        if native_path.is_symlink() or not native_path.is_file():
+            fail("tlsEvidence nativeImagePath must identify a retained regular file")
+        native_sha = bounded_digest(native_sha_value, "nativeImageSha256")
+        if native_sha != digest(native_path):
+            fail("tlsEvidence nativeImageSha256 does not match retained Native Image")
+        if native_sha in {source_sha, artifact_sha}:
+            fail("tlsEvidence Native Image must not alias Source or Protected Image")
     bounded_text(evidence["toolchainIdentity"], "toolchainIdentity")
     bounded_text(evidence["loaderIdentity"], "loaderIdentity")
 
@@ -273,16 +315,28 @@ def check_tls_evidence(root: Path, stage: dict, runtime: str | None) -> None:
     rollback = bounded_text(evidence["rollbackResult"], "rollbackResult", 32)
 
     if result == "accepted-and-runs":
-        if lifecycle == "not-run" or any(evidence[field] != "observed" for field in ("perThread", "zeroFill", "teardown")):
-            fail("accepted-and-runs TLS evidence must retain per-thread, zero-fill, and teardown observations")
+        if runtime_identity is None or native_path is None or native_sha is None:
+            fail("accepted-and-runs TLS evidence requires measured runtime identity and retained Native Image bytes")
+        if lifecycle == "not-run" or evidence["perThread"] != "observed" or evidence["teardown"] != "observed":
+            fail("accepted-and-runs TLS evidence must retain per-thread and release observations")
+        if zero_fill_size == 0 and evidence["zeroFill"] != "not-applicable":
+            fail("zeroFill cannot be observed when PT_TLS has no zero-fill tail")
+        if zero_fill_size > 0 and evidence["zeroFill"] not in {"not-run", "observed"}:
+            fail("PT_TLS zero-fill tail must be observed or explicitly left unobserved")
+        if evidence["zeroFill"] == "observed":
+            fail("zeroFill observed requires a retained oracle that reads a non-empty zero-initialized TLS object")
         if first_failure is not None or publication != "published" or rollback != "not-applicable":
             fail("accepted-and-runs TLS evidence has an invalid outcome or rollback projection")
     elif result == "environment-unavailable":
+        if runtime_identity is not None or native_path is not None:
+            fail("environment-unavailable TLS evidence may not claim runtime or Native Image execution evidence")
         if lifecycle != "not-run" or any(evidence[field] not in {"not-run", "not-applicable"} for field in ("perThread", "zeroFill", "teardown")):
             fail("environment-unavailable TLS evidence must not claim lifecycle observations")
         if first_failure != "environment" or publication != "published" or rollback != "not-applicable":
             fail("environment-unavailable TLS evidence must remain an explicit environment result")
     else:
+        if first_failure == "target-loader" and (runtime_identity is None or native_path is None):
+            fail("target-loader TLS runtime failure requires measured runtime and Native Image inputs")
         if first_failure is None or first_failure == "environment" or publication != "published" or rollback != "not-applicable":
             fail("runtime-failure TLS evidence must retain a runtime failure after complete publication")
         if lifecycle == "not-run" and any(evidence[field] == "observed" for field in ("perThread", "zeroFill", "teardown")):

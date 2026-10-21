@@ -602,7 +602,17 @@ public static class Aarch64TlsSequenceRecognizer
     {
         var hasThreadPointer = instructions.Any(IsThreadPointerMrs);
         var adrpIndex = FindMnemonic(instructions, "adrp");
-        var addIndex = FindMnemonic(instructions, "add");
+        var firstAddIndex = FindMnemonic(instructions, "add");
+        var addIndex = model is TlsAccessModel.LocalDynamic or TlsAccessModel.GeneralDynamic
+            && adrpIndex >= 0
+            ? instructions
+                .Select((instruction, index) => (instruction, index))
+                .Where(item => item.index > adrpIndex
+                    && string.Equals(item.instruction.Mnemonic, "add", StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.index)
+                .DefaultIfEmpty(-1)
+                .First()
+            : firstAddIndex;
         var memoryIndices = instructions
             .Select((instruction, index) => (instruction, index))
             .Where(item => IsMemoryInstruction(item.instruction))
@@ -613,6 +623,9 @@ public static class Aarch64TlsSequenceRecognizer
             .Where(item => IsResolverInstruction(model, item.instruction))
             .Select(item => item.index)
             .ToArray();
+        var tlsAccessIndices = resolverIndex.Length == 1
+            ? memoryIndices.Where(index => index > resolverIndex[0]).ToArray()
+            : memoryIndices;
         var valid = model switch
         {
             TlsAccessModel.LocalExec => hasThreadPointer
@@ -637,7 +650,7 @@ public static class Aarch64TlsSequenceRecognizer
                 && resolverKind == TlsResolverKind.TlsGetAddr
                 && resolverIndex.Length == 1
                 && resolverIndex[0] > addIndex
-                && memoryIndices.Any(index => index > resolverIndex[0]),
+                && tlsAccessIndices.Length > 0,
             TlsAccessModel.TlsDesc => descriptorOwner is not null
                 && Aarch64TlsInstructionSemantics.IsSupportedTlsDescSequence(instructions, relocationSites, descriptorOwner),
             _ => false,
@@ -781,8 +794,8 @@ public static class Aarch64TlsSequenceRecognizer
         var candidates = instructions.Where(IsMemoryInstruction).ToArray();
         if (resolverKind != TlsResolverKind.None)
         {
-            // Resolver metadata loads are part of the call sequence. The final memory
-            // operand after the resolver is the TLS object's access.
+            // Stack-save/restore instructions may surround the access. The final
+            // memory operand after the resolver is the TLS object's access.
             var resolverIndex = Array.FindIndex(instructions.ToArray(), instruction =>
                 string.Equals(instruction.Mnemonic, "bl", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(instruction.Mnemonic, "blr", StringComparison.OrdinalIgnoreCase));
@@ -792,7 +805,9 @@ public static class Aarch64TlsSequenceRecognizer
             }
         }
 
-        return candidates.LastOrDefault();
+        return resolverKind != TlsResolverKind.None
+            ? candidates.FirstOrDefault()
+            : candidates.LastOrDefault();
     }
 
     private static bool TryGetAccessSize(SemanticInstruction instruction, out int accessSize)

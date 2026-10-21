@@ -322,6 +322,10 @@ def check_rehydration(
     return record, None
 
 
+def host_context_exit_status(entry_status: int) -> int:
+    return 1 if entry_status < 0 else 255 if entry_status > 255 else entry_status
+
+
 def check_handoff(root: Path, rehydration: dict[str, Any], native_hash: str | None) -> tuple[dict[str, Any], str | None]:
     record = read_json(require_file(root, "handoff.json"))
     if record.get("schemaVersion") == 1 and record.get("stage") == "host-context-handoff":
@@ -331,8 +335,15 @@ def check_handoff(root: Path, rehydration: dict[str, Any], native_hash: str | No
             fail("HostContext handoff used an unsupported loader identity")
         if record.get("nativeImageSha256") != native_hash:
             fail("HostContext handoff image hash does not match the Native Image")
-        if not isinstance(record.get("entryStatus"), int):
+        if type(record.get("entryStatus")) is not int:
             fail("HostContext handoff entry status is malformed")
+        if (
+            type(record.get("processStatus")) is not int
+            or not 0 <= record["processStatus"] <= 255
+            or record["processStatus"] != host_context_exit_status(record["entryStatus"])
+            or rehydration.get("processStatus") != record.get("processStatus")
+        ):
+            fail("HostContext handoff process status does not bind the observed entry status")
         if record.get("releaseStatus") != "passed" or record.get("releaseOrder") != "entry-dispatch-before-release-image":
             fail("HostContext handoff release order did not pass")
         if record.get("rehydrationRecordSha256") != rehydration.get("preHandoffRecordSha256"):
@@ -413,6 +424,8 @@ def check_target_loader(root: Path, handoff: dict[str, Any], handoff_hash: str |
         expected_target_status = handoff.get("targetStatus", handoff.get("entryStatus"))
         if record.get("targetStatus") != expected_target_status or record.get("targetSignal") != handoff.get("targetSignal"):
             fail("target loader target status differs from the handoff record")
+        if handoff.get("stage") == "host-context-handoff" and record.get("targetProcessStatus") != handoff.get("processStatus"):
+            fail("target loader process status differs from the observed HostContext process status")
         for stream_name, field in (("target.stdout", "stdoutSha256"), ("target.stderr", "stderrSha256")):
             if record.get(field) != digest(require_file(root, stream_name, allow_empty=True, max_bytes=MAX_STREAM_BYTES)):
                 fail(f"target loader {field} does not bind its retained stream")
@@ -430,20 +443,123 @@ def check_behavior(
     target_loader: dict[str, Any],
     source_hash: str | None,
     native_hash: str | None,
+    expected_entry_status: int | None = None,
 ) -> dict[str, Any]:
     oracle = read_json(require_file(root, "behavioral-oracle.json"))
     if oracle.get("schemaVersion") != 1 or oracle.get("stage") != "behavioral-oracle":
         fail("behavioral oracle record schema or identity is unsupported")
     if oracle.get("status") not in {"passed", "failed", "not-run"}:
         fail("behavioral oracle status is unsupported")
-    if oracle.get("status") == "passed":
-        if target_loader.get("status") != "passed" or native_hash is None:
+    if oracle.get("status") in {"passed", "failed"}:
+        if oracle.get("status") == "passed" and (target_loader.get("status") != "passed" or native_hash is None):
             fail("behavior oracle passed without a target loader pass")
         if oracle.get("oracleId") == "fixture.host-context-entry.v1":
+            if target_loader.get("status") != "passed" or source_hash is None or native_hash is None:
+                fail("HostContext behavior oracle passed without source and transformed execution")
+            source_handoff_path = require_file(root, "source-handoff.json", max_bytes=MAX_RECORD_BYTES)
+            target_handoff_path = require_file(root, "handoff.json", max_bytes=MAX_RECORD_BYTES)
+            comparison_path = require_file(root, "behavior-comparison.json", max_bytes=MAX_RECORD_BYTES)
+            source_handoff = read_json(source_handoff_path)
+            target_handoff = read_json(target_handoff_path)
+            comparison = read_json(comparison_path)
+            stream_values = {
+                name: require_file(root, name, allow_empty=True, max_bytes=MAX_STREAM_BYTES).read_bytes()
+                for name in ("baseline.stdout", "baseline.stderr", "target.stdout", "target.stderr")
+            }
+            for label, observed, expected_image in (
+                ("source", source_handoff, source_hash),
+                ("target", target_handoff, native_hash),
+            ):
+                if (
+                    observed.get("schemaVersion") != 1
+                    or observed.get("stage") != "host-context-handoff"
+                    or observed.get("status") != "passed"
+                    or observed.get("loaderId") != "host-context.sealed-memfd.dlopen"
+                    or observed.get("nativeImageSha256") != expected_image
+                    or observed.get("entrySymbol") != "urp_entry"
+                    or type(observed.get("entryStatus")) is not int
+                    or type(observed.get("processStatus")) is not int
+                    or not 0 <= observed["processStatus"] <= 255
+                    or observed["processStatus"] != host_context_exit_status(observed["entryStatus"])
+                    or observed.get("releaseStatus") != "passed"
+                    or observed.get("releaseOrder") != "entry-dispatch-before-release-image"
+                    or observed.get("firstFailureStage") is not None
+                ):
+                    fail(f"HostContext {label} handoff lacks observed process, entry, or release evidence")
+            observed_source_sha = digest(source_handoff_path)
+            observed_target_sha = digest(target_handoff_path)
+            source_process = source_handoff["processStatus"]
+            target_process = target_handoff["processStatus"]
+            source_entry = source_handoff["entryStatus"]
+            target_entry = target_handoff["entryStatus"]
+            expected_entry = oracle.get("expectedEntryStatus")
+            if (
+                type(expected_entry) is not int
+                or (expected_entry_status is not None and expected_entry != expected_entry_status)
+                or source_entry != expected_entry
+                or target_entry != expected_entry
+            ):
+                fail("HostContext baseline and transformed entry statuses do not match the explicit expected status")
+            source_stdout_sha = digest(require_file(root, "baseline.stdout", allow_empty=True, max_bytes=MAX_STREAM_BYTES))
+            source_stderr_sha = digest(require_file(root, "baseline.stderr", allow_empty=True, max_bytes=MAX_STREAM_BYTES))
+            target_stdout_sha = digest(require_file(root, "target.stdout", allow_empty=True, max_bytes=MAX_STREAM_BYTES))
+            target_stderr_sha = digest(require_file(root, "target.stderr", allow_empty=True, max_bytes=MAX_STREAM_BYTES))
+            status_equal = (
+                source_handoff["status"] == target_handoff["status"]
+                and source_process == target_process
+                and source_entry == target_entry
+                and source_handoff["releaseStatus"] == target_handoff["releaseStatus"]
+            )
+            stdout_equal = stream_values["baseline.stdout"] == stream_values["target.stdout"]
+            stderr_equal = stream_values["baseline.stderr"] == stream_values["target.stderr"]
+            observed_comparison = {
+                "schemaVersion": 1,
+                "unitId": record.get("unitId"),
+                "oracleId": "fixture.host-context-entry.v1",
+                "sourceSha256": source_hash,
+                "protectedSha256": record.get("protectedImageSha256"),
+                "nativeImageSha256": native_hash,
+                "sourceHandoffSha256": observed_source_sha,
+                "targetHandoffSha256": observed_target_sha,
+                "sourceProcessStatus": source_process,
+                "targetProcessStatus": target_process,
+                "sourceEntryStatus": source_entry,
+                "targetEntryStatus": target_entry,
+                "sourceReleaseStatus": source_handoff["releaseStatus"],
+                "targetReleaseStatus": target_handoff["releaseStatus"],
+                "baselineStdoutSha256": source_stdout_sha,
+                "baselineStderrSha256": source_stderr_sha,
+                "targetStdoutSha256": target_stdout_sha,
+                "targetStderrSha256": target_stderr_sha,
+                "statusEqual": status_equal,
+                "stdoutEqual": stdout_equal,
+                "stderrEqual": stderr_equal,
+            }
+            if comparison != observed_comparison:
+                fail("HostContext behavior comparison differs from recomputed source/transformed observations")
+            comparison_sha = digest(comparison_path)
+            all_equal = status_equal and stdout_equal and stderr_equal
+            expected_oracle = {
+                **observed_comparison,
+                "stage": "behavioral-oracle",
+                "status": "passed" if all_equal else "failed",
+                "comparisonSha256": comparison_sha,
+                "baselineStatus": source_process,
+                "targetStatus": target_process,
+                "entryStatus": target_entry,
+                "expectedEntryStatus": expected_entry,
+                "firstFailureStage": None if all_equal else "behavioral-oracle",
+            }
+            if oracle != expected_oracle:
+                fail("HostContext behavioral oracle claims do not match recomputed observations")
             if oracle.get("sourceSha256") != source_hash or oracle.get("nativeImageSha256") != native_hash:
                 fail("HostContext behavior oracle source or Native Image binding mismatch")
-            if oracle.get("entryStatus") != target_loader.get("targetStatus"):
-                fail("HostContext behavior oracle entry status differs from target loader")
+            if target_loader.get("targetStatus") != target_entry or target_loader.get("targetProcessStatus") != target_process:
+                fail("HostContext behavior oracle status differs from the measured target loader result")
+            return oracle
+        if oracle.get("status") != "passed":
+            if native_hash is not None and oracle.get("nativeImageSha256") not in {None, native_hash}:
+                fail("failed behavior oracle binds a different Native Image")
             return oracle
         if oracle.get("oracleId") != "fixture.process-oracle.v1":
             fail("behavior oracle identity differs from the frozen fixture oracle")
@@ -584,7 +700,16 @@ def main() -> None:
     handoff_hash = digest(root / "handoff.json") if handoff.get("status") == "passed" else None
     target_loader = check_target_loader(root, handoff, handoff_hash, native_hash if handoff.get("status") == "passed" else None)
     source_hash = role.get("sourceSha256") if role else rehydration.get("sourceSha256")
-    oracle = check_behavior(root, rehydration, target_loader, source_hash, native_hash if target_loader.get("status") == "passed" else None)
+    tls_evidence = producer_stage.get("tlsEvidence")
+    expected_tls_entry_status = tls_evidence.get("expectedEntryStatus") if isinstance(tls_evidence, dict) else None
+    oracle = check_behavior(
+        root,
+        rehydration,
+        target_loader,
+        source_hash,
+        native_hash if target_loader.get("status") == "passed" else None,
+        expected_tls_entry_status,
+    )
     if producer_stage.get("status") == "passed" and rehydration.get("status") == "passed":
         check_negative_witness(root, args.unit)
     first_failure = check_first_failure(producer_stage, rehydration, handoff, target_loader, oracle)

@@ -46,7 +46,100 @@ public sealed record Aarch64FunctionAnalysis(
     IReadOnlyList<Aarch64FunctionInstruction> Instructions,
     IReadOnlyList<Diagnostic> Diagnostics)
 {
+    public IReadOnlyList<Aarch64IndirectTargetResolution> IndirectTargetResolutions { get; init; } =
+        Array.Empty<Aarch64IndirectTargetResolution>();
+
+    public IReadOnlyList<Aarch64JumpTableResolution> JumpTableResolutions { get; init; } =
+        Array.Empty<Aarch64JumpTableResolution>();
+
+    public IReadOnlyList<Aarch64RuntimeIndirectCallResolution> RuntimeIndirectCallResolutions { get; init; } =
+        Array.Empty<Aarch64RuntimeIndirectCallResolution>();
+
+    public IReadOnlyList<Aarch64StaticFunctionPointerCallResolution> StaticFunctionPointerCallResolutions { get; init; } =
+        Array.Empty<Aarch64StaticFunctionPointerCallResolution>();
+
+    public IReadOnlyList<Aarch64ExternalJumpTableConsumerProof> ExternalJumpTableConsumerProofs { get; init; } =
+        Array.Empty<Aarch64ExternalJumpTableConsumerProof>();
+
+    public IReadOnlyList<Aarch64AddressReferenceResolution> AddressReferences { get; init; } =
+        Array.Empty<Aarch64AddressReferenceResolution>();
+
     public bool IsComplete => Status == Aarch64FunctionAnalysisStatus.Complete;
+}
+
+/// <summary>
+/// One runtime-owned indirect call whose ABI owner and fallthrough are proven.
+/// </summary>
+public sealed record Aarch64RuntimeIndirectCallResolution
+{
+    public Aarch64RuntimeIndirectCallResolution(
+        ulong sourceAddress,
+        Aarch64RegisterView targetRegister,
+        IEnumerable<ulong> producerAddresses,
+        string runtimeBinding,
+        string proof,
+        Aarch64RuntimeIndirectCallOwnerKind ownerKind = Aarch64RuntimeIndirectCallOwnerKind.HostContextCallback,
+        uint? hostContextFieldOffset = null,
+        Aarch64DynamicImportBinding? importBinding = null)
+    {
+        ArgumentNullException.ThrowIfNull(producerAddresses);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runtimeBinding);
+        ArgumentException.ThrowIfNullOrWhiteSpace(proof);
+        SourceAddress = sourceAddress;
+        TargetRegister = targetRegister;
+        ProducerAddresses = Array.AsReadOnly(producerAddresses.Distinct().OrderBy(address => address).ToArray());
+        RuntimeBinding = runtimeBinding;
+        Proof = proof;
+        OwnerKind = ownerKind;
+        HostContextFieldOffset = hostContextFieldOffset;
+        ImportBinding = importBinding;
+    }
+
+    public ulong SourceAddress { get; }
+
+    public Aarch64RegisterView TargetRegister { get; }
+
+    public IReadOnlyList<ulong> ProducerAddresses { get; }
+
+    public string RuntimeBinding { get; }
+
+    public string Proof { get; }
+
+    public Aarch64RuntimeIndirectCallOwnerKind OwnerKind { get; }
+
+    public uint? HostContextFieldOffset { get; }
+
+    public Aarch64DynamicImportBinding? ImportBinding { get; }
+}
+
+/// <summary>One exact indirect target proven from a selected function's bounded producer chain.</summary>
+public sealed record Aarch64IndirectTargetResolution
+{
+    public Aarch64IndirectTargetResolution(
+        ulong sourceAddress,
+        VirtualAddress targetAddress,
+        Aarch64RegisterView targetRegister,
+        IEnumerable<ulong> producerAddresses,
+        string proof)
+    {
+        ArgumentNullException.ThrowIfNull(producerAddresses);
+        ArgumentException.ThrowIfNullOrWhiteSpace(proof);
+        SourceAddress = sourceAddress;
+        TargetAddress = targetAddress;
+        TargetRegister = targetRegister;
+        ProducerAddresses = Array.AsReadOnly(producerAddresses.ToArray());
+        Proof = proof;
+    }
+
+    public ulong SourceAddress { get; }
+
+    public VirtualAddress TargetAddress { get; }
+
+    public Aarch64RegisterView TargetRegister { get; }
+
+    public IReadOnlyList<ulong> ProducerAddresses { get; }
+
+    public string Proof { get; }
 }
 
 public sealed record Aarch64RegisterResourcePlan(
@@ -139,7 +232,27 @@ public sealed class Aarch64FunctionAnalyzer
         this.decoder = decoder ?? new AsmStoneAdapter();
     }
 
-    public Aarch64FunctionAnalysis Analyze(ElfFile file, ElfFunctionSymbol function)
+    public Aarch64FunctionAnalysis Analyze(
+        ElfFile file,
+        ElfFunctionSymbol function,
+        Aarch64HostContextProofContext? proofContext = null) =>
+        AnalyzeCore(file, function, proofContext, externalProviderFacts: null);
+
+    internal Aarch64FunctionAnalysis AnalyzeWithExternalProvider(
+        ElfFile file,
+        ElfFunctionSymbol function,
+        Aarch64ExternalJumpTableProviderFacts externalProviderFacts,
+        Aarch64HostContextProofContext? proofContext = null)
+    {
+        ArgumentNullException.ThrowIfNull(externalProviderFacts);
+        return AnalyzeCore(file, function, proofContext, externalProviderFacts);
+    }
+
+    private Aarch64FunctionAnalysis AnalyzeCore(
+        ElfFile file,
+        ElfFunctionSymbol function,
+        Aarch64HostContextProofContext? proofContext,
+        Aarch64ExternalJumpTableProviderFacts? externalProviderFacts)
     {
         ArgumentNullException.ThrowIfNull(file);
         var diagnostics = new DiagnosticBag();
@@ -204,8 +317,26 @@ public sealed class Aarch64FunctionAnalyzer
 
         var byAddress = instructions.ToDictionary(instruction => instruction.Address);
         var starts = new SortedSet<ulong> { function.Value };
-        foreach (var instruction in instructions)
+        var indirectResolutions = new Dictionary<ulong, Aarch64IndirectTargetResolution>();
+        var jumpTableResolutions = new Dictionary<ulong, Aarch64JumpTableResolution>();
+        var runtimeIndirectCalls = new Dictionary<ulong, Aarch64RuntimeIndirectCallResolution>();
+        var staticFunctionPointerCalls = new Dictionary<ulong, Aarch64StaticFunctionPointerCallResolution>();
+        var externalJumpTableConsumers = new Dictionary<ulong, Aarch64ExternalJumpTableConsumerProof>();
+        var establishedProofContext = proofContext is not null
+            && proofContext.MatchesEntry(function)
+            && proofContext.MatchesSource(file)
+                ? proofContext
+                : null;
+        var indirectCallProof = Aarch64IndirectCallProofAnalyzer.Analyze(
+            file,
+            instructions,
+            function,
+            function.Value,
+            functionEnd,
+            establishedProofContext);
+        for (var instructionIndex = 0; instructionIndex < instructions.Count; instructionIndex++)
         {
+            var instruction = instructions[instructionIndex];
             var decoded = instruction.Decode.Instruction!;
             switch (decoded.ControlFlow)
             {
@@ -233,15 +364,98 @@ public sealed class Aarch64FunctionAnalyzer
                     AddFallthroughStart(starts, instruction.Address, functionEnd);
                     break;
                 case Aarch64ControlFlowKind.DirectCall:
-                    // Calls return to the next instruction. The callee itself is
-                    // not part of this symbol-bounded CFG.
                     AddFallthroughStart(starts, instruction.Address, functionEnd);
                     break;
+                case Aarch64ControlFlowKind.IndirectBranch when IsTlsDescCallMarker(
+                    file,
+                    instruction,
+                    function.Value,
+                    functionEnd):
+                    AddFallthroughStart(starts, instruction.Address, functionEnd);
+                    break;
+                case Aarch64ControlFlowKind.IndirectBranch
+                    when indirectCallProof.Resolutions.TryGetValue(instruction.Address, out var runtimeCall):
+                    runtimeIndirectCalls.Add(instruction.Address, runtimeCall);
+                    AddFallthroughStart(starts, instruction.Address, functionEnd);
+                    break;
+                case Aarch64ControlFlowKind.IndirectBranch
+                    when indirectCallProof.StaticFunctionPointerResolutions.TryGetValue(
+                        instruction.Address,
+                        out var staticFunctionPointerCall):
+                    staticFunctionPointerCalls.Add(instruction.Address, staticFunctionPointerCall);
+                    AddFallthroughStart(starts, instruction.Address, functionEnd);
+                    break;
+                case Aarch64ControlFlowKind.IndirectBranch
+                    when externalProviderFacts is not null
+                        && Aarch64JumpTableResolver.TryProveExternalProviderTableConsumer(
+                            instructions,
+                            instructionIndex,
+                            function,
+                            file,
+                            externalProviderFacts,
+                            out var externalConsumer,
+                            out _)
+                        && externalConsumer is not null:
+                    externalJumpTableConsumers.Add(instruction.Address, externalConsumer);
+                    break;
+                case Aarch64ControlFlowKind.IndirectBranch
+                    when decoded.Mnemonic.Equals("blr", StringComparison.OrdinalIgnoreCase):
+                    diagnostics.Error(
+                        DiagnosticCode.IndirectTargetUnresolved,
+                        indirectCallProof.Failures.TryGetValue(instruction.Address, out var proofFailure)
+                            ? proofFailure
+                            : "The indirect-call target has no complete register, stack, HostContext, or relocation-owner proof.",
+                        instruction.Address);
+                    return Failure(
+                        function,
+                        Aarch64FunctionAnalysisStatus.IncompleteControlFlow,
+                        diagnostics,
+                        instructions);
                 case Aarch64ControlFlowKind.IndirectBranch:
+                    if (!TryResolveBoundedIndirectBranch(
+                            instructions,
+                            instructionIndex,
+                            function.Value,
+                            functionEnd,
+                            byAddress,
+                            file,
+                            out var indirectResolution,
+                            out var jumpTableResolution,
+                            out var indirectFailure,
+                            out var unsupportedIndirect))
+                    {
+                        diagnostics.Error(
+                            unsupportedIndirect
+                                ? DiagnosticCode.IndirectTargetUnsupported
+                                : DiagnosticCode.IndirectTargetUnresolved,
+                            indirectFailure,
+                            instruction.Address);
+                        return Failure(
+                            function,
+                            Aarch64FunctionAnalysisStatus.IncompleteControlFlow,
+                            diagnostics,
+                            instructions);
+                    }
+
+                    if (indirectResolution is not null)
+                    {
+                        indirectResolutions.Add(instruction.Address, indirectResolution);
+                        starts.Add(indirectResolution.TargetAddress.Value);
+                    }
+
+                    if (jumpTableResolution is not null)
+                    {
+                        jumpTableResolutions.Add(instruction.Address, jumpTableResolution);
+                        foreach (var targetAddress in jumpTableResolution.TargetAddresses)
+                        {
+                            starts.Add(targetAddress.Value);
+                        }
+
+                        starts.Add(jumpTableResolution.DefaultTargetAddress.Value);
+                    }
+
+                    break;
                 case Aarch64ControlFlowKind.Return:
-                    // A boundary after a terminator lets us identify unreachable
-                    // trailing bytes instead of silently treating them as part of
-                    // the preceding block.
                     AddFallthroughStart(starts, instruction.Address, functionEnd);
                     break;
             }
@@ -274,21 +488,18 @@ public sealed class Aarch64FunctionAnalyzer
 
             var last = blockInstructions[^1];
             var isTlsDescCall = IsTlsDescCallMarker(file, last, function.Value, functionEnd);
-            var successors = GetSuccessors(last, functionEnd, isTlsDescCall);
-            if (successors.Any(edge => edge.Kind == Aarch64ControlFlowEdgeKind.Indirect)
-                && !isTlsDescCall)
-            {
-                diagnostics.Error(
-                    DiagnosticCode.FunctionAnalysisIncomplete,
-                    $"Function '{function.Name}' contains unresolved indirect control flow.",
-                    last.Address);
-                return Failure(
-                    function,
-                    Aarch64FunctionAnalysisStatus.IncompleteControlFlow,
-                    diagnostics,
-                    instructions,
-                    blocks);
-            }
+            indirectResolutions.TryGetValue(last.Address, out var indirectResolution);
+            jumpTableResolutions.TryGetValue(last.Address, out var jumpTableResolution);
+            var isRuntimeIndirectCall = runtimeIndirectCalls.ContainsKey(last.Address)
+                || staticFunctionPointerCalls.ContainsKey(last.Address);
+            var successors = GetSuccessors(
+                last,
+                functionEnd,
+                isTlsDescCall,
+                isRuntimeIndirectCall,
+                indirectResolution?.TargetAddress,
+                jumpTableResolution?.TargetAddresses,
+                jumpTableResolution?.DefaultTargetAddress);
 
             blocks.Add(new Aarch64BasicBlock(start, blockInstructions, successors));
         }
@@ -318,25 +529,75 @@ public sealed class Aarch64FunctionAnalyzer
 
         if (reachable.Count != blocks.Count)
         {
-            var unreachable = blocks.First(block => !reachable.Contains(block.StartAddress));
-            diagnostics.Error(
-                DiagnosticCode.FunctionAnalysisIncomplete,
-                $"Function '{function.Name}' contains unreachable or data-like bytes after a control-flow terminator.",
-                unreachable.StartAddress);
-            return Failure(
-                function,
-                Aarch64FunctionAnalysisStatus.IncompleteControlFlow,
-                diagnostics,
-                instructions,
-                blocks);
+            var unreachableBlocks = blocks
+                .Where(block => !reachable.Contains(block.StartAddress))
+                .ToArray();
+            var lastReachableInstruction = blocks
+                .Where(block => reachable.Contains(block.StartAddress))
+                .SelectMany(block => block.Instructions)
+                .Select(instruction => instruction.Address)
+                .DefaultIfEmpty(function.Value)
+                .Max();
+            var isTrailingAlignmentPadding = unreachableBlocks.Length > 0
+                && unreachableBlocks.All(block =>
+                    block.StartAddress > lastReachableInstruction
+                    && block.Instructions.All(instruction => instruction.Encoding == 0xD503201Fu));
+
+            if (!isTrailingAlignmentPadding)
+            {
+                var unreachable = unreachableBlocks[0];
+                diagnostics.Error(
+                    DiagnosticCode.FunctionAnalysisIncomplete,
+                    $"Function '{function.Name}' contains unreachable or data-like bytes after a control-flow terminator.",
+                    unreachable.StartAddress);
+                return Failure(
+                    function,
+                    Aarch64FunctionAnalysisStatus.IncompleteControlFlow,
+                    diagnostics,
+                    instructions,
+                    blocks);
+            }
         }
+
+        var externalProviderAddressReferences = externalJumpTableConsumers.Values
+            .Select(proof => new Aarch64AddressReferenceResolution(
+                proof.GotPageProducerAddress,
+                proof.GotLoadProducerAddress,
+                new VirtualAddress(proof.GotSlotAddress.Value & ~0xFFFUL),
+                proof.GotSlotAddress,
+                sizeof(ulong),
+                proof.ImportOwner.Relocation,
+                proof.ImportOwner,
+                "The selected external provider-table consumer uses the source consumer's pinned GLOB_DAT-owned GOT slot."));
 
         return new Aarch64FunctionAnalysis(
             function,
             Aarch64FunctionAnalysisStatus.Complete,
             blocks,
             instructions,
-            diagnostics.ToArray());
+            diagnostics.ToArray())
+        {
+            IndirectTargetResolutions = Array.AsReadOnly(indirectResolutions.Values
+                .OrderBy(resolution => resolution.SourceAddress)
+                .ToArray()),
+            JumpTableResolutions = Array.AsReadOnly(jumpTableResolutions.Values
+                .OrderBy(resolution => resolution.SourceAddress)
+                .ToArray()),
+            RuntimeIndirectCallResolutions = Array.AsReadOnly(runtimeIndirectCalls.Values
+                .OrderBy(resolution => resolution.SourceAddress)
+                .ToArray()),
+            StaticFunctionPointerCallResolutions = Array.AsReadOnly(staticFunctionPointerCalls.Values
+                .OrderBy(resolution => resolution.SourceAddress)
+                .ToArray()),
+            ExternalJumpTableConsumerProofs = Array.AsReadOnly(externalJumpTableConsumers.Values
+                .OrderBy(resolution => resolution.BranchAddress)
+                .ToArray()),
+            AddressReferences = Array.AsReadOnly(indirectCallProof.AddressReferences
+                .Concat(externalProviderAddressReferences)
+                .OrderBy(reference => reference.PageProducerAddress)
+                .ThenBy(reference => reference.LoadProducerAddress)
+                .ToArray()),
+        };
     }
 
     private static bool TryGetFunctionRange(
@@ -434,7 +695,11 @@ public sealed class Aarch64FunctionAnalyzer
     private static Aarch64ControlFlowEdge[] GetSuccessors(
         Aarch64FunctionInstruction instruction,
         ulong functionEnd,
-        bool isTlsDescCall)
+        bool isTlsDescCall,
+        bool isRuntimeIndirectCall,
+        VirtualAddress? indirectTarget,
+        IReadOnlyList<VirtualAddress>? indirectTargets,
+        VirtualAddress? defaultTarget)
     {
         var decoded = instruction.Decode.Instruction!;
         var next = instruction.Address + InstructionSize;
@@ -442,10 +707,28 @@ public sealed class Aarch64FunctionAnalyzer
         {
             Aarch64ControlFlowKind.Return =>
                 new[] { new Aarch64ControlFlowEdge(instruction.Address, null, Aarch64ControlFlowEdgeKind.Return) },
-            Aarch64ControlFlowKind.IndirectBranch when isTlsDescCall =>
+            Aarch64ControlFlowKind.IndirectBranch when isTlsDescCall || isRuntimeIndirectCall =>
                 next < functionEnd
                     ? new[] { new Aarch64ControlFlowEdge(instruction.Address, next, Aarch64ControlFlowEdgeKind.Fallthrough) }
                     : Array.Empty<Aarch64ControlFlowEdge>(),
+            Aarch64ControlFlowKind.IndirectBranch when indirectTargets is { Count: > 0 } targets =>
+                targets
+                    .Select(target => new Aarch64ControlFlowEdge(
+                        instruction.Address,
+                        target.Value,
+                        Aarch64ControlFlowEdgeKind.Indirect))
+                    .Concat(defaultTarget is { } fallback
+                        ? new[]
+                        {
+                            new Aarch64ControlFlowEdge(
+                                instruction.Address,
+                                fallback.Value,
+                                Aarch64ControlFlowEdgeKind.Indirect),
+                        }
+                        : Array.Empty<Aarch64ControlFlowEdge>())
+                    .ToArray(),
+            Aarch64ControlFlowKind.IndirectBranch when indirectTarget is { } target =>
+                new[] { new Aarch64ControlFlowEdge(instruction.Address, target.Value, Aarch64ControlFlowEdgeKind.Indirect) },
             Aarch64ControlFlowKind.IndirectBranch =>
                 new[] { new Aarch64ControlFlowEdge(instruction.Address, null, Aarch64ControlFlowEdgeKind.Indirect) },
             Aarch64ControlFlowKind.DirectCall =>
@@ -466,6 +749,172 @@ public sealed class Aarch64FunctionAnalyzer
                 new[] { new Aarch64ControlFlowEdge(instruction.Address, next, Aarch64ControlFlowEdgeKind.Fallthrough) },
             _ => Array.Empty<Aarch64ControlFlowEdge>(),
         };
+    }
+
+    private static bool TryResolveBoundedIndirectBranch(
+        IReadOnlyList<Aarch64FunctionInstruction> instructions,
+        int branchIndex,
+        ulong functionStart,
+        ulong functionEnd,
+        Dictionary<ulong, Aarch64FunctionInstruction> byAddress,
+        ElfFile file,
+        out Aarch64IndirectTargetResolution? resolution,
+        out Aarch64JumpTableResolution? jumpTableResolution,
+        out string failure,
+        out bool unsupported)
+    {
+        resolution = null;
+        jumpTableResolution = null;
+        failure = "The indirect target is not proven by an exact producer chain or bounded jump table.";
+        unsupported = false;
+        var branch = instructions[branchIndex].Decode.Instruction!;
+        if (!string.Equals(branch.Mnemonic, "br", StringComparison.OrdinalIgnoreCase))
+        {
+            failure = "Only an in-function BR target is supported; indirect calls retain runtime-owned return semantics.";
+            unsupported = true;
+            return false;
+        }
+
+        var branchRegisters = branch.Operands
+            .Where(operand => operand.Kind == Aarch64OperandKind.Register
+                && operand.Direction is Aarch64OperandDirection.Input or Aarch64OperandDirection.InputOutput
+                && operand.Register is
+                {
+                    Class: Aarch64RegisterClass.General,
+                    Width: 64,
+                    Role: Aarch64RegisterRole.None,
+                })
+            .Select(operand => operand.Register!.Value)
+            .ToArray();
+        if (branchRegisters.Length != 1 || branchIndex == 0)
+        {
+            return false;
+        }
+
+        var targetRegister = branchRegisters[0];
+        var maximumProducerCount = Math.Min(4, branchIndex);
+        for (var producerCount = 1; producerCount <= maximumProducerCount; producerCount++)
+        {
+            var firstIndex = branchIndex - producerCount;
+            var producers = instructions.Skip(firstIndex).Take(producerCount).ToArray();
+            if (!TryReadMoveWideProducerChain(producers, targetRegister, out var target))
+            {
+                continue;
+            }
+
+            if (target < functionStart
+                || target >= functionEnd
+                || target % InstructionSize != 0
+                || !byAddress.ContainsKey(target))
+            {
+                failure = "The exact move-wide indirect target is outside the selected function's aligned instruction range.";
+                return false;
+            }
+
+            resolution = new Aarch64IndirectTargetResolution(
+                instructions[branchIndex].Address,
+                new VirtualAddress(target),
+                targetRegister,
+                producers.Select(producer => producer.Address),
+                "exact target from a contiguous 64-bit MOVZ/MOVN and MOVK producer chain");
+            return true;
+        }
+
+        if (Aarch64JumpTableResolver.TryResolve(
+                instructions,
+                branchIndex,
+                functionStart,
+                functionEnd,
+                byAddress,
+                file,
+                out jumpTableResolution,
+                out failure,
+                out var recognized)
+            && recognized)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadMoveWideProducerChain(
+        IReadOnlyList<Aarch64FunctionInstruction> producers,
+        Aarch64RegisterView targetRegister,
+        out ulong value)
+    {
+        value = default;
+        if (producers.Count is < 1 or > 4)
+        {
+            return false;
+        }
+
+        var first = producers[0].Decode.Instruction!;
+        var firstIsMovz = first.Mnemonic.StartsWith("MOVZ", StringComparison.OrdinalIgnoreCase);
+        var firstIsMovn = first.Mnemonic.StartsWith("MOVN", StringComparison.OrdinalIgnoreCase);
+        if ((!firstIsMovz && !firstIsMovn)
+            || !TryGetMoveWideOperands(first, allowInputOutput: false, out var firstRegister, out var firstImmediate, out var firstShift)
+            || firstRegister != targetRegister)
+        {
+            return false;
+        }
+
+        value = firstIsMovn ? ~(firstImmediate << firstShift) : firstImmediate << firstShift;
+        for (var index = 1; index < producers.Count; index++)
+        {
+            var decoded = producers[index].Decode.Instruction!;
+            if (!decoded.Mnemonic.StartsWith("MOVK", StringComparison.OrdinalIgnoreCase)
+                || !TryGetMoveWideOperands(decoded, allowInputOutput: true, out var register, out var immediate, out var shift)
+                || register != targetRegister)
+            {
+                return false;
+            }
+
+            var mask = 0xFFFFUL << shift;
+            value = (value & ~mask) | (immediate << shift);
+        }
+
+        return true;
+    }
+
+    private static bool TryGetMoveWideOperands(
+        Aarch64Instruction instruction,
+        bool allowInputOutput,
+        out Aarch64RegisterView register,
+        out ulong immediate,
+        out int shift)
+    {
+        register = default;
+        immediate = default;
+        shift = default;
+        var registerOperands = instruction.Operands
+            .Where(operand => operand.Kind == Aarch64OperandKind.Register
+                && (operand.Direction == Aarch64OperandDirection.Output
+                    || (allowInputOutput && operand.Direction == Aarch64OperandDirection.InputOutput))
+                && operand.Register is
+                {
+                    Class: Aarch64RegisterClass.General,
+                    Width: 64,
+                    Role: Aarch64RegisterRole.None,
+                })
+            .Select(operand => operand.Register!.Value)
+            .ToArray();
+        var immediates = instruction.Operands
+            .Where(operand => operand.Kind == Aarch64OperandKind.Immediate)
+            .Select(operand => operand.Immediate)
+            .ToArray();
+        if (registerOperands.Length != 1
+            || immediates.Length != 2
+            || immediates.Any(item => item is null or < 0 or > ushort.MaxValue)
+            || immediates[1] is not (0 or 16 or 32 or 48))
+        {
+            return false;
+        }
+
+        register = registerOperands[0];
+        immediate = checked((ulong)immediates[0]!.Value);
+        shift = checked((int)immediates[1]!.Value);
+        return true;
     }
 
     private static Aarch64FunctionAnalysis Failure(

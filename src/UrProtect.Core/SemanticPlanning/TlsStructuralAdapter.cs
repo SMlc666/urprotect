@@ -724,29 +724,64 @@ public static class TlsStructuralAdapter
         }
 
         var stp = instructions[0].Instruction!;
+        var stpMemory = stp.Operands.Select(operand => operand.Memory).FirstOrDefault(memory => memory is not null);
+        var stackFrameValid = string.Equals(stp.Mnemonic, "stp", StringComparison.OrdinalIgnoreCase)
+            && stpMemory is { Base: { Role: Aarch64RegisterRole.StackPointer }, Offset: -16, WritesBack: true };
+
         var adrpResolver = instructions[1].Instruction!;
+        var resolverLoad = instructions[2].Instruction!;
+        var resolverAdd = instructions[3].Instruction!;
+        var resolverBranch = instructions[4].Instruction!;
+        var resolverLoadMemory = resolverLoad.Operands
+            .Select(operand => operand.Memory)
+            .FirstOrDefault(memory => memory is not null);
+        var resolverPage = adrpResolver.DirectTarget;
+        var resolverAddressValid = resolverPage.HasValue
+            && resolverLoadMemory is not null
+            && TryAddSigned(resolverPage.Value & ~0xFFFUL, resolverLoadMemory.Offset, out var resolvedGot)
+            && resolvedGot == resolverGotAddress;
+
+        var gnuStyle = stackFrameValid
+            && HasRegister(stp, Aarch64OperandDirection.Input, 16)
+            && HasRegister(stp, Aarch64OperandDirection.Input, 30)
+            && string.Equals(adrpResolver.Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(adrpResolver, Aarch64OperandDirection.Output, 16)
+            && string.Equals(resolverLoad.Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(resolverLoad, Aarch64OperandDirection.Output, 17)
+            && resolverLoadMemory is
+            {
+                Base: { Class: Aarch64RegisterClass.General, Index: 16, Width: 64 },
+                Index: null,
+                AccessSize: 8,
+                WritesBack: false,
+            }
+            && resolverAddressValid
+            && string.Equals(resolverAdd.Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
+            && HasRegister(resolverAdd, Aarch64OperandDirection.Input, 16)
+            && HasRegister(resolverAdd, Aarch64OperandDirection.Output, 16)
+            && resolverAdd.Operands.Select(operand => operand.Immediate).Any(value => value is >= 0)
+            && string.Equals(resolverBranch.Mnemonic, "br", StringComparison.OrdinalIgnoreCase)
+            && resolverBranch.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
+            && HasRegister(resolverBranch, Aarch64OperandDirection.Input, 17);
+
         var adrpPltGot = instructions[2].Instruction!;
         var load = instructions[3].Instruction!;
         var add = instructions[4].Instruction!;
         var branch = instructions[5].Instruction!;
-        var stpMemory = stp.Operands.Select(operand => operand.Memory).FirstOrDefault(memory => memory is not null);
         var loadMemory = load.Operands.Select(operand => operand.Memory).FirstOrDefault(memory => memory is not null);
         var addImmediate = add.Operands.Select(operand => operand.Immediate).FirstOrDefault(value => value.HasValue);
-        var resolverPage = adrpResolver.DirectTarget;
         var pltGotPage = adrpPltGot.DirectTarget;
-        var resolverAddressValid = resolverPage.HasValue
-            && loadMemory is not null
-            && TryAddSigned(resolverPage.Value & ~0xFFFUL, loadMemory.Offset, out var resolvedGot)
-            && resolvedGot == resolverGotAddress;
         var pltGotAddressValid = pltGotPage.HasValue
             && addImmediate.HasValue
             && TryAddSigned(pltGotPage.Value & ~0xFFFUL, addImmediate.Value, out var resolvedPltGot)
-            && resolvedPltGot == pltGotAddress;
-        var stpRegistersValid = HasRegister(stp, Aarch64OperandDirection.Input, 2)
-            && HasRegister(stp, Aarch64OperandDirection.Input, 3);
-        return string.Equals(stp.Mnemonic, "stp", StringComparison.OrdinalIgnoreCase)
-            && stpMemory is { Base: { Role: Aarch64RegisterRole.StackPointer }, Offset: -16, WritesBack: true }
-            && stpRegistersValid
+            && (resolvedPltGot == pltGotAddress || resolvedPltGot == resolverGotAddress);
+        var legacyResolverAddressValid = resolverPage.HasValue
+            && loadMemory is not null
+            && TryAddSigned(resolverPage.Value & ~0xFFFUL, loadMemory.Offset, out var legacyResolvedGot)
+            && legacyResolvedGot == resolverGotAddress;
+        var legacyStyle = stackFrameValid
+            && HasRegister(stp, Aarch64OperandDirection.Input, 2)
+            && HasRegister(stp, Aarch64OperandDirection.Input, 3)
             && string.Equals(adrpResolver.Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
             && HasRegister(adrpResolver, Aarch64OperandDirection.Output, 2)
             && string.Equals(adrpPltGot.Mnemonic, "adrp", StringComparison.OrdinalIgnoreCase)
@@ -754,7 +789,7 @@ public static class TlsStructuralAdapter
             && string.Equals(load.Mnemonic, "ldr", StringComparison.OrdinalIgnoreCase)
             && HasRegister(load, Aarch64OperandDirection.Output, 2)
             && loadMemory is { Base: { Class: Aarch64RegisterClass.General, Index: 2, Width: 64 }, Index: null, AccessSize: 8, WritesBack: false }
-            && resolverAddressValid
+            && legacyResolverAddressValid
             && string.Equals(add.Mnemonic, "add", StringComparison.OrdinalIgnoreCase)
             && HasRegister(add, Aarch64OperandDirection.Input, 3)
             && HasRegister(add, Aarch64OperandDirection.Output, 3)
@@ -764,6 +799,7 @@ public static class TlsStructuralAdapter
             && string.Equals(branch.Mnemonic, "br", StringComparison.OrdinalIgnoreCase)
             && branch.ControlFlow == Aarch64ControlFlowKind.IndirectBranch
             && HasRegister(branch, Aarch64OperandDirection.Input, 2);
+        return gnuStyle || legacyStyle;
     }
     public static TlsStructuralProjectionResult<TlsRelocationSite> ProjectRelocationSite(
         ElfFile file,
