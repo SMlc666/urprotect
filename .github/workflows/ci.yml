@@ -47,7 +47,73 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  # Skip heavy Push verification only if a matching open PR is proven.
+  # PR, schedule, release and manual validation always execute in full.
+  ci-event-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run_full: ${{ steps.decision.outputs.run_full }}
+    steps:
+      - name: Find an exact same-head open PR
+        id: pr-probe
+        if: github.event_name == 'push'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const { owner, repo } = context.repo;
+            if (!context.ref.startsWith('refs/heads/')) return 'run';
+            const branch = context.ref.slice('refs/heads/'.length);
+            // Never suppress verification of the repository default branch.
+            if (branch === context.payload.repository?.default_branch) return 'run';
+            const fullName = (owner + '/' + repo).toLowerCase();
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', head: owner + ':' + branch,
+              per_page: 100
+            });
+            const match = pulls.find(pr =>
+              pr.state === 'open' &&
+              pr.head.ref === branch &&
+              pr.head.sha === context.sha &&
+              pr.head.repo?.full_name?.toLowerCase() === fullName &&
+              pr.base.repo?.full_name?.toLowerCase() === fullName
+            );
+            if (match) {
+              core.info('Exact open PR #' + match.number + ' covers ' + context.sha);
+              return 'skip';
+            }
+            return 'run';
+      - name: Decide full verification (probe failure means full CI)
+        id: decision
+        if: always()
+        shell: bash
+        env:
+          PROBE_RESULT: ${{ steps.pr-probe.outputs.result }}
+          PROBE_OUTCOME: ${{ steps.pr-probe.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == push &&
+                "${PROBE_OUTCOME}" == success &&
+                "${PROBE_RESULT}" == skip ]]; then
+            echo 'run_full=false' >> "$GITHUB_OUTPUT"
+            echo 'Exact open PR: duplicate Push heavy checks omitted.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'run_full=true' >> "$GITHUB_OUTPUT"
+            if [[ "${GITHUB_EVENT_NAME}" == push && "${PROBE_OUTCOME}" != success ]]; then
+              echo 'PR API unavailable: full Push validation retained.' >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo 'Full validation is required.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
   build-and-test:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -57,6 +123,173 @@ jobs:
           mkdir -p .artifacts/environment
           ./.github/scripts/record-environment.sh \
             .artifacts/environment/build-and-test.txt \
+            aarch64 native-linux-glibc
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            tests/UrProtect.Fuzz/packages.lock.json
+            third_party/SharpFuzzCompat/SharpFuzz/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
+      - name: Run required bionic Node.js Python contracts
+        run: |
+          python3 tests/test_bionic_node_runner.py
+          python3 tests/test_bionic_node_runtime_lock.py
+          python3 tests/test_bionic_node_closure.py
+          python3 tests/test_real_sample_worker.py
+          tests/test_real_sample_worker_cleanup.sh
+      - name: Check explicit protection policy
+        run: python3 scripts/validate-protection-policy.py fixtures/real-samples/protection-policy.json
+      - name: Run required glibc protection smoke
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          PROTECTION_ARTIFACT_ROOT=".artifacts/protection/${tier}/glibc" \
+            ./scripts/run-protection-e2e.sh --tier "${tier}" --runtime glibc
+      - name: Check glibc protection evidence
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          python3 scripts/check-protection-evidence.py \
+            ".artifacts/protection/${tier}/glibc" --tier "${tier}" --runtime glibc
+      - name: Check compatibility matrix contract
+        run: python3 tests/test_fixture_matrix.py
+      - name: Check managed architecture boundaries
+        run: |
+          python3 scripts/check-architecture-boundaries.py --self-test
+          python3 scripts/check-aarch64-encoding-boundary.py
+          python3 tests/test_aarch64_encoding_boundary.py
+      - name: Check regression matrix contract
+        run: python3 tests/test_regression_matrix.py
+      - name: Check runtime covering matrix
+        run: |
+          python3 tests/test_runtime_matrix.py
+          python3 scripts/validate-runtime-matrix.py fixtures/runtime-matrix.json
+          python3 tests/test_runtime_closures.py
+          python3 scripts/validate-runtime-closures.py \
+            fixtures/real-samples/runtime-closures.json \
+            fixtures/real-samples/manifest.json
+      - name: Render PR regression matrix plan
+        run: |
+          mkdir -p .artifacts/regression-matrix/pr
+          python3 scripts/validate-regression-matrix.py tests/regression-matrix.json \
+            --tier pr --emit > .artifacts/regression-matrix/pr/plan.json
+      - name: Contract and stress smoke
+        run: |
+          ./scripts/run-regression-stress.sh --tier pr
+          make -C native/urprotect-runtime contract-check
+      - name: Render compatibility matrix
+        run: |
+          python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
+          python3 scripts/render-compatibility-matrix.py \
+            fixtures/manifest.json --output .artifacts/compatibility-matrix.md
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("fixtures/manifest.json").read_text())
+          feature = next(
+              item for item in manifest["features"]
+              if item["id"] == "runtime.host-context.bionic-handoff"
+          )
+          if feature["status"] != "validated":
+              raise SystemExit("bionic HostContext handoff must remain validated only with its dedicated oracle")
+          PY
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ github.run_id }}
+          path: |
+            .artifacts/stress/
+            .artifacts/regression-matrix/
+            .artifacts/environment/
+            .artifacts/compatibility-matrix.md
+            .artifacts/protection/
+          include-hidden-files: true
+          if-no-files-found: warn
+
+
+  # Native product evidence is still produced and checked on the target host,
+  # but does not block the managed test/fixture/fuzz lanes.
+  # Run all managed tests and the unchanged coverage collector/floor on
+  # an independent ARM64 runner. The local solution build avoids cross-job
+  # artifact dependencies, keeping the verification DAG flat.
+  managed-tests:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/environment
+          ./.github/scripts/record-environment.sh \
+            .artifacts/environment/managed-tests.txt \
+            aarch64 native-linux-glibc
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            tests/UrProtect.Fuzz/packages.lock.json
+            third_party/SharpFuzzCompat/SharpFuzz/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
+      - name: Test
+        run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
+      - name: Check coverage floor
+        run: python3 scripts/check-coverage.py
+      - name: Verify Push/PR dedup policy regressions
+        run: python3 tests/test_ci_push_pr_dedup.py
+      - name: Upload managed test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-test-evidence-${{ github.run_id }}
+          path: |
+            tests/**/TestResults/**
+            .artifacts/environment/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  protection-and-tls:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/environment
+          ./.github/scripts/record-environment.sh \
+            .artifacts/environment/protection-and-tls.txt \
             aarch64 native-linux-glibc
       - uses: actions/setup-dotnet@v4
         with:
@@ -231,24 +464,28 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-prerequisite-probes
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.tls-transformed-runtime-matrix
 
-      - name: Run transformed CFI unwind evidence
+      - name: Run transformed CFI/unwind native evidence
         run: |
+          set -euo pipefail
           case "${GITHUB_EVENT_NAME}" in
             schedule) tier=nightly ;;
             release) tier=release ;;
             *) tier=pr ;;
           esac
-          ./scripts/run-cfi-host-context-e2e.sh --tier "${tier}" \
-            --unit runtime.cfi.transformed-backtrace.glibc.host-context-entry \
-            --artifact-root .artifacts/cfi/current
+          if ! ./scripts/run-cfi-host-context-e2e.sh --tier "${tier}" \
+              --artifact-root .artifacts/cfi/current; then
+            echo 'CFI evidence producer failed; retained producer diagnostics:' >&2
+            find .artifacts/cfi/current -type f \
+              \( -name producer.json -o -name rehydration.stderr -o -name native-build.stderr -o -name transformed-unwind.txt -o -name transformed-unwind.stderr -o -name baseline-unwind.txt \) \
+              -print -exec cat -- {} \; >&2 || true
+            exit 1
+          fi
           python3 scripts/check-cfi-evidence.py \
-            .artifacts/cfi/current \
-            --tier "${tier}" \
-            --runtime glibc \
+            .artifacts/cfi/current --tier "${tier}" --runtime glibc \
             --unit runtime.cfi.transformed-backtrace.glibc.host-context-entry
-
-      - name: Run transformed indirect-control jump-table evidence
+      - name: Run transformed indirect-control Jump Table evidence
         run: |
+          set -euo pipefail
           case "${GITHUB_EVENT_NAME}" in
             schedule) tier=nightly ;;
             release) tier=release ;;
@@ -259,7 +496,6 @@ jobs:
             ".artifacts/indirect-control/${tier}" \
             --tier "${tier}" \
             --unit runtime.indirect-control.jump-table.glibc.host-context-entry
-
       - name: Run and check transformed shared jump-table evidence
         run: |
           case "${GITHUB_EVENT_NAME}" in
@@ -274,8 +510,12 @@ jobs:
           python3 scripts/check-rehydration-evidence.py "${shared_positive}" \
             --tier "${tier}" --runtime glibc \
             --unit runtime.indirect-control.shared-table.glibc.host-context-entry
+          shared_source=native/urprotect-runtime/build/host-context-shared-jump-table-fixture.so
+          selected_function="$(readelf -Ws "${shared_source}" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
+          [[ "${selected_function}" =~ ^dynsym:[0-9]+$ ]] || { echo 'shared fixture has no selected urp_entry dynsym' >&2; exit 1; }
           python3 scripts/check-shared-jump-table-evidence.py "${shared_positive}" \
-            --unit runtime.indirect-control.shared-table.glibc.host-context-entry
+            --unit runtime.indirect-control.shared-table.glibc.host-context-entry \
+            --selected-function "${selected_function}"
 
       - name: Run required transformed external-provider evidence
         if: always()
@@ -346,6 +586,12 @@ jobs:
             positive="${root}/runtime.indirect-control.external-provider.glibc.host-context-entry"
             [[ -d "${positive}" ]] || { echo "external-provider exact evidence root is missing: ${positive}" >&2; exit 1; }
             python3 scripts/check-external-provider-evidence.py "${positive}"
+            python_root=".artifacts/indirect-control/provider-python/${run_key}/positive"
+            [[ ! -e "${python_root}" && ! -L "${python_root}" ]] || { echo "provider Python root already exists: ${python_root}" >&2; exit 1; }
+            mkdir -p "$(dirname "${python_root}")"
+            cp -a "${positive}/." "${python_root}/"
+            URP_EXTERNAL_PROVIDER_EVIDENCE_ROOT="${python_root}" PYTHONDONTWRITEBYTECODE=1 \
+              python3 -m unittest -v tests.test_external_provider_evidence
           } 2>&1 | tee "${log_dir}/external-provider-check-${run_key}.log"
           statuses=("${PIPESTATUS[@]}")
           set -e
@@ -375,7 +621,11 @@ jobs:
               exit 1
             }
             python3 scripts/check-external-provider-rollback-evidence.py --root "${root}"
-            URP_PROVIDER_ROLLBACK_EVIDENCE_ROOT="${root}" PYTHONDONTWRITEBYTECODE=1 \
+            python_root=".artifacts/indirect-control/provider-python/${run_key}/rollback"
+            [[ ! -e "${python_root}" && ! -L "${python_root}" ]] || { echo "provider rollback Python root already exists: ${python_root}" >&2; exit 1; }
+            mkdir -p "$(dirname "${python_root}")"
+            cp -a "${root}/." "${python_root}/"
+            URP_PROVIDER_ROLLBACK_EVIDENCE_ROOT="${python_root}" PYTHONDONTWRITEBYTECODE=1 \
               python3 -m unittest -v tests.test_external_provider_rollback_evidence
           } 2>&1 | tee "${log_dir}/provider-loaded-rollback-check-${run_key}.log"
           statuses=("${PIPESTATUS[@]}")
@@ -386,9 +636,9 @@ jobs:
           if [[ "${checker_status}" != 0 ]]; then exit "${checker_status}"; fi
           exit "${checker_log_status}"
 
-      - name: Check transformed CFI and indirect-control feature declarations
-        if: always()
+      - name: Require full CFI and indirect-control evidence declarations
         run: |
+          set -euo pipefail
           case "${GITHUB_EVENT_NAME}" in
             schedule) tier=nightly ;;
             release) tier=release ;;
@@ -407,75 +657,56 @@ jobs:
             --feature runtime.indirect-control.shared-jump-table-copy.glibc.host-context-entry
           python3 scripts/check-evidence.py fixtures/manifest.json \
             --feature runtime.indirect-control.external-provider.glibc.host-context-entry
-
-      - name: Run strict compatibility corpus growth evidence
+      - name: Upload protection-tls evidence
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: protection-tls-evidence-${{ github.run_id }}
+          path: |
+            .artifacts/protected-image/
+            .artifacts/tls-prerequisites/
+            .artifacts/tls-runtime/
+            .artifacts/cfi/
+            .artifacts/indirect-control/
+            .artifacts/environment/
+            /tmp/urprotect-*.out
+            /tmp/urprotect-*.err
+          include-hidden-files: true
+          if-no-files-found: warn
+
+
+  # Fixtures and packed fixture handoff share the same runner by design.
+  # Their evidence must pass its original strict local gates.
+  fixture-and-pack:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner environment
         run: |
-          case "${GITHUB_EVENT_NAME}" in
-            schedule) tier=nightly ;;
-            release) tier=release ;;
-            *) tier=pr ;;
-          esac
-          ./scripts/run-strict-compatibility-corpus.sh --tier "${tier}" --runtime glibc
-      - name: Run required bionic Node.js Python contracts
-        run: |
-          python3 tests/test_bionic_node_runner.py
-          python3 tests/test_bionic_node_runtime_lock.py
-          python3 tests/test_bionic_node_closure.py
-          python3 tests/test_real_sample_worker.py
-          tests/test_real_sample_worker_cleanup.sh
-      - name: Check explicit protection policy
-        run: python3 scripts/validate-protection-policy.py fixtures/real-samples/protection-policy.json
-      - name: Run required glibc protection smoke
-        run: |
-          case "${GITHUB_EVENT_NAME}" in
-            schedule) tier=nightly ;;
-            release) tier=release ;;
-            *) tier=pr ;;
-          esac
-          PROTECTION_ARTIFACT_ROOT=".artifacts/protection/${tier}/glibc" \
-            ./scripts/run-protection-e2e.sh --tier "${tier}" --runtime glibc
-      - name: Check glibc protection evidence
-        run: |
-          case "${GITHUB_EVENT_NAME}" in
-            schedule) tier=nightly ;;
-            release) tier=release ;;
-            *) tier=pr ;;
-          esac
-          python3 scripts/check-protection-evidence.py \
-            ".artifacts/protection/${tier}/glibc" --tier "${tier}" --runtime glibc
-      - name: Test
-        run: dotnet test UrProtect.sln --configuration Release --no-build --logger trx --collect:"XPlat Code Coverage"
-      - name: Check coverage floor
-        run: python3 scripts/check-coverage.py
-      - name: Check compatibility matrix contract
-        run: python3 tests/test_fixture_matrix.py
-      - name: Check managed architecture boundaries
-        run: |
-          python3 scripts/check-architecture-boundaries.py --self-test
-          python3 scripts/check-aarch64-encoding-boundary.py
-          python3 tests/test_aarch64_encoding_boundary.py
-      - name: Check regression matrix contract
-        run: python3 tests/test_regression_matrix.py
-      - name: Check runtime covering matrix
-        run: |
-          python3 tests/test_runtime_matrix.py
-          python3 scripts/validate-runtime-matrix.py fixtures/runtime-matrix.json
-          python3 tests/test_runtime_closures.py
-          python3 scripts/validate-runtime-closures.py \
-            fixtures/real-samples/runtime-closures.json \
-            fixtures/real-samples/manifest.json
-      - name: Render PR regression matrix plan
-        run: |
-          mkdir -p .artifacts/regression-matrix/pr
-          python3 scripts/validate-regression-matrix.py tests/regression-matrix.json \
-            --tier pr --emit > .artifacts/regression-matrix/pr/plan.json
-      - name: Contract and stress smoke
-        run: |
-          ./scripts/run-regression-stress.sh --tier pr
-          make -C native/urprotect-runtime contract-check
-      - name: Coverage-guided fuzz smoke
-        run: ./scripts/run-coverage-fuzz.sh --tier pr
+          mkdir -p .artifacts/environment
+          ./.github/scripts/record-environment.sh \
+            .artifacts/environment/fixture-and-pack.txt \
+            aarch64 native-linux-glibc
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            tests/UrProtect.Fuzz/packages.lock.json
+            third_party/SharpFuzzCompat/SharpFuzz/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
       - name: Fixture smoke
         run: ./scripts/run-fixture-matrix.sh --tier pr
       - name: Check PR fixture evidence
@@ -494,6 +725,51 @@ jobs:
         run: |
           python3 scripts/check-evidence.py fixtures/manifest.json --feature handoff.no-executable-path
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.outer.dynamic-et-exec
+      - name: Upload fixture-pack evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixture-pack-evidence-${{ github.run_id }}
+          path: |
+            .artifacts/fixtures/pr/
+            .artifacts/packed/pr/
+            .artifacts/environment/
+          include-hidden-files: true
+          if-no-files-found: warn
+
+
+  # HostContext native tests and the managed packaging oracle remain adjacent:
+  # they share the same native make outputs but no other job's mutable state.
+  native-host-context:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/environment
+          ./.github/scripts/record-environment.sh \
+            .artifacts/environment/native-host-context.txt \
+            aarch64 native-linux-glibc
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            tests/UrProtect.Fuzz/packages.lock.json
+            third_party/SharpFuzzCompat/SharpFuzz/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
       - name: HostContext runtime contract smoke
         run: |
           set -o pipefail
@@ -503,7 +779,7 @@ jobs:
             .artifacts/host-context/pr/
           readelf -aW native/urprotect-runtime/build/host-context-dependency-fixture.so \
             > .artifacts/host-context/pr/dependency-fixture-readelf.txt
-          make -C native/urprotect-runtime test \
+          URP_HOST_VALIDATION_TRACE=1 make -C native/urprotect-runtime test \
             2>&1 | tee .artifacts/host-context/pr/self-test.log
       - name: Managed HostContext packaging oracle
         run: |
@@ -531,57 +807,119 @@ jobs:
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.relocation.aarch64-relative
           python3 scripts/check-evidence.py fixtures/manifest.json --feature runtime.host-context.production-pack
           python3 scripts/check-evidence.py fixtures/manifest.json --feature elf.symbol-version.requirements
-      - name: Render compatibility matrix
-        run: |
-          python3 scripts/validate-fixtures.py fixtures/manifest.json --tier pr
-          python3 scripts/render-compatibility-matrix.py \
-            fixtures/manifest.json --output .artifacts/compatibility-matrix.md
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          manifest = json.loads(Path("fixtures/manifest.json").read_text())
-          feature = next(
-              item for item in manifest["features"]
-              if item["id"] == "runtime.host-context.bionic-handoff"
-          )
-          if feature["status"] != "validated":
-              raise SystemExit("bionic HostContext handoff must remain validated only with its dedicated oracle")
-          PY
-      - name: Upload test evidence
+      - name: Upload native-host-context evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-evidence-${{ github.run_id }}
-          include-hidden-files: true
+          name: native-host-context-evidence-${{ github.run_id }}
           path: |
-            tests/**/TestResults/**
-            .artifacts/fixtures/pr/
-            .artifacts/packed/pr/
             .artifacts/host-context/
-            .artifacts/fuzz/
-            .artifacts/stress/
-            .artifacts/regression-matrix/
             .artifacts/environment/
-            .artifacts/compatibility-matrix.md
-            .artifacts/protection/
-            .artifacts/protected-image/
-            .artifacts/tls-prerequisites/
-            .artifacts/tls-runtime/
-            .artifacts/cfi/
-            .artifacts/indirect-control/
-            .artifacts/indirect-control/external-provider/
-            .artifacts/indirect-control/provider-loaded-rollback/
-            .artifacts/indirect-control/provider-ci-logs/
-            /tmp/urprotect-*.out
-            /tmp/urprotect-*.err
+          include-hidden-files: true
+          if-no-files-found: warn
+
+
+  # Fuzz instrumentation/publish has independent writable build products.
+  coverage-fuzz:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner environment
+        run: |
+          mkdir -p .artifacts/environment
+          ./.github/scripts/record-environment.sh \
+            .artifacts/environment/coverage-fuzz.txt \
+            aarch64 native-linux-glibc
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+            tests/UrProtect.Fuzz/packages.lock.json
+            third_party/SharpFuzzCompat/SharpFuzz/packages.lock.json
+            benchmarks/UrProtect.Benchmarks/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      # Additive producer evidence only: this stage is not a strict compatibility claim.
+      - name: Coverage-guided fuzz smoke
+        run: ./scripts/run-coverage-fuzz.sh --tier pr
+      - name: Upload coverage-fuzz evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-fuzz-evidence-${{ github.run_id }}
+          path: |
+            .artifacts/fuzz/
+            .artifacts/environment/
+          include-hidden-files: true
           if-no-files-found: warn
 
   # The current approved public real-sample slice is a required full-corpus gate on every PR.
   # Scheduled and release runs reuse the exact registry/orchestrator and only
   # change the tier's retention/repeat policy; they never select a subset.
+  # Shards run on independent native ARM64 runners. No test coverage is dropped:
+  # every registered unit is allocated exactly once and validated before evaluation.
+  strict-compatibility-shard:
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' }}
+    needs: ci-event-gate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            src/UrProtect.Core/packages.lock.json
+            src/UrProtect.Cli/packages.lock.json
+            tests/UrProtect.Core.Tests/packages.lock.json
+      - name: Restore
+        run: dotnet restore UrProtect.sln --locked-mode
+      - name: Build
+        run: dotnet build UrProtect.sln --configuration Release --no-restore
+      - name: Validate shard partition and worker orchestration contracts
+        run: |
+          python3 tests/test_strict_corpus_shards.py
+          python3 tests/test_strict_corpus_runner.py
+      - name: Execute strict compatibility shard
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          ./scripts/run-strict-compatibility-corpus.sh \
+            --tier "${tier}" --runtime glibc \
+            --shard-index "${{ matrix.shard }}" --shard-count 4 \
+            --workers 2
+      - name: Upload strict compatibility shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-compatibility-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: .artifacts/protected-image/
+          include-hidden-files: true
+          if-no-files-found: error
+
   real-sample-matrix:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     permissions:
@@ -719,8 +1057,8 @@ jobs:
           if-no-files-found: error
 
   runtime-matrix-native-arm64:
-    needs: bionic-native-arm64
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: [ci-event-gate, bionic-native-arm64]
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -794,7 +1132,8 @@ jobs:
           include-hidden-files: true
 
   bionic-native-arm64:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -862,11 +1201,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bionic-native-arm64-${{ github.run_id }}
-          path: .artifacts/bionic/
+          path: |
+            .artifacts/bionic/
+            !.artifacts/bionic/**/apt-archives/lock
+            !.artifacts/bionic/**/apt-indexes/lock
           if-no-files-found: warn
 
   android-container-probe:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     steps:
@@ -899,7 +1242,8 @@ jobs:
 
   # Scheduled/release runs exercise this slow path; manual runs opt in explicitly.
   android-arm64-native-bridge-on-x64:
-    if: github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_android_native_bridge == true)
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_android_native_bridge == true)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -974,7 +1318,8 @@ jobs:
           if-no-files-found: warn
 
   fixture-nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -1060,7 +1405,8 @@ jobs:
           if-no-files-found: warn
 
   musl-container-smoke:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     container:
@@ -1123,7 +1469,8 @@ jobs:
           if-no-files-found: warn
 
   benchmark:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'release') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
@@ -1162,7 +1509,8 @@ jobs:
           if-no-files-found: warn
 
   release-package:
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_release_rehearsal == true)
+    needs: ci-event-gate
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.run_release_rehearsal == true)) }}
     permissions:
       contents: write
     runs-on: ubuntu-24.04-arm
@@ -1223,117 +1571,133 @@ jobs:
           path: .artifacts/release/
           if-no-files-found: warn
 
-  # Independent evaluator control plane. It is additive: existing product,
-  # fixture, runtime, benchmark, and fuzz jobs remain unchanged.
+  # Keep the job ID for required status checks, but only verify real
+  # compatibility evidence. Artificial attack-cost scoring is retired.
   independent-evaluator:
-    if: always()
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (!cancelled()) }}
     needs:
+      - ci-event-gate
+      - strict-compatibility-shard
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download strict compatibility shard evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: strict-compatibility-shard-*-${{ github.run_id }}
+          path: .artifacts/shards/
+      - name: Select compatibility evidence tier
+        shell: bash
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) echo 'EVIDENCE_TIER=nightly' >> "$GITHUB_ENV" ;;
+            release) echo 'EVIDENCE_TIER=release' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${{ inputs.run_release_rehearsal }}" == true ]]; then
+                echo 'EVIDENCE_TIER=release' >> "$GITHUB_ENV"
+              elif [[ "${{ inputs.run_nightly_rehearsal }}" == true ]]; then
+                echo 'EVIDENCE_TIER=nightly' >> "$GITHUB_ENV"
+              else
+                echo 'EVIDENCE_TIER=pr' >> "$GITHUB_ENV"
+              fi
+              ;;
+            *) echo 'EVIDENCE_TIER=pr' >> "$GITHUB_ENV" ;;
+          esac
+      - name: Merge strict shard evidence without losing provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination=".artifacts/strict-corpus-merge/${EVIDENCE_TIER}/glibc"
+          mkdir -p "$destination"
+          for shard in 0 1 2 3; do
+            root=".artifacts/shards/strict-compatibility-shard-${shard}-${GITHUB_RUN_ID}/${EVIDENCE_TIER}/glibc"
+            [[ -d "$root" && ! -L "$root" ]] || { echo "missing strict shard $shard" >&2; exit 1; }
+            cp -a -- "$root/." "$destination/"
+          done
+      - name: Validate compatibility-only checker and workflow contracts
+        run: |
+          python3 -m unittest discover -s tests -p test_strict_product_corpus.py -v
+          python3 -m unittest discover -s tests -p test_protected_image_workflow.py -v
+      - name: Independently verify 100 strict products and four shard summaries
+        run: |
+          python3 scripts/check-strict-product-corpus.py \
+            --tier "${EVIDENCE_TIER}" --runtime glibc --shard-count 4 \
+            --evidence-root ".artifacts/strict-corpus-merge/${EVIDENCE_TIER}/glibc" \
+            --output ".artifacts/compatibility-verification/${EVIDENCE_TIER}/report.json"
+      - name: Upload independent compatibility verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-verification-${{ env.EVIDENCE_TIER }}-${{ github.run_id }}
+          path: .artifacts/compatibility-verification/
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  # A lightweight terminal barrier, not an evaluator. Every required producer and
+  # evaluator remains a hard gate. Platform jobs remain conditional on event.
+  ci-quality-gate:
+    # Still enforce fail-closed results on failed jobs; never prolong a
+    # workflow explicitly cancelled by a superseding revision.
+    if: ${{ needs['ci-event-gate'].outputs.run_full == 'true' && (!cancelled()) }}
+    needs:
+      - ci-event-gate
       - build-and-test
+      - managed-tests
+      - protection-and-tls
+      - fixture-and-pack
+      - native-host-context
+      - coverage-fuzz
+      - strict-compatibility-shard
+      - independent-evaluator
       - real-sample-matrix
       - runtime-matrix-native-arm64
       - bionic-native-arm64
       - musl-container-smoke
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
-      EVALUATOR_BUILD_RESULT: ${{ needs['build-and-test'].result }}
-      EVALUATOR_REAL_SAMPLE_RESULT: ${{ needs['real-sample-matrix'].result }}
-      EVALUATOR_RUNTIME_RESULT: ${{ needs['runtime-matrix-native-arm64'].result }}
-      EVALUATOR_BIONIC_RESULT: ${{ needs['bionic-native-arm64'].result }}
-      EVALUATOR_MUSL_RESULT: ${{ needs['musl-container-smoke'].result }}
-      EVALUATOR_CI_ISOLATION: "1"
+      BUILD_RESULT: ${{ needs['build-and-test'].result }}
+      MANAGED_RESULT: ${{ needs['managed-tests'].result }}
+      PROTECTION_RESULT: ${{ needs['protection-and-tls'].result }}
+      FIXTURE_RESULT: ${{ needs['fixture-and-pack'].result }}
+      HOST_CONTEXT_RESULT: ${{ needs['native-host-context'].result }}
+      FUZZ_RESULT: ${{ needs['coverage-fuzz'].result }}
+      SHARDS_RESULT: ${{ needs['strict-compatibility-shard'].result }}
+      EVALUATOR_RESULT: ${{ needs['independent-evaluator'].result }}
+      REAL_SAMPLE_RESULT: ${{ needs['real-sample-matrix'].result }}
+      RUNTIME_RESULT: ${{ needs['runtime-matrix-native-arm64'].result }}
+      BIONIC_RESULT: ${{ needs['bionic-native-arm64'].result }}
+      MUSL_RESULT: ${{ needs['musl-container-smoke'].result }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Install evaluator sandbox runtime
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap util-linux
-      # The evaluator records the pinned SDK identity in its environment evidence.
-      # Do not rely on an image-global dotnet installation in this independent job.
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-      - name: Download build-and-test Protected Image evidence
-        if: always()
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: test-evidence-${{ github.run_id }}
-          path: .
-      - name: Normalize downloaded evidence paths
-        if: always()
+      - name: Require every mandatory validation result
+        shell: bash
         run: |
           set -euo pipefail
-          checkout_root="${GITHUB_WORKSPACE}"
-          destination="${checkout_root}/.artifacts/protected-image"
-          while IFS= read -r -d '' source; do
-            [[ "${source}" == "${destination}" ]] && continue
-            mkdir -p "${destination}"
-            cp -a -- "${source}/." "${destination}/"
-          done < <(find "${checkout_root}" -type d -path '*/.artifacts/protected-image' -print0)
-          if [[ ! -d "${destination}" ]]; then
-            echo "No downloaded Protected Image evidence path found; evaluator will retain unavailable evidence."
-          fi
-      - name: Select evaluator tier
-        run: |
-          case "${GITHUB_EVENT_NAME}" in
-            schedule) echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV" ;;
-            release) echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV" ;;
-            workflow_dispatch)
-              if [[ "${{ inputs.run_release_rehearsal }}" == true ]]; then
-                echo 'EVALUATOR_TIER=release' >> "$GITHUB_ENV"
-              elif [[ "${{ inputs.run_nightly_rehearsal }}" == true ]]; then
-                echo 'EVALUATOR_TIER=nightly' >> "$GITHUB_ENV"
-              else
-                echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV"
-              fi
-              ;;
-            *) echo 'EVALUATOR_TIER=pr' >> "$GITHUB_ENV" ;;
-          esac
-      - name: Validate historical and positive evaluator manifests
-        run: |
-          python3 scripts/validate-evaluator-manifests.py
-          python3 scripts/validate-evaluator-manifests.py \
-            --scheme-a fixtures/evaluator/scheme-a-manifest-v2.json \
-            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
-      - name: Check immutable Scheme-A baseline-v2
-        run: python3 scripts/check-scheme-a-baseline-v2.py
-      - name: Run independent evaluator against immutable positive baseline-v2
-        run: |
-          ./scripts/run-independent-evaluator.sh \
-            --tier "${EVALUATOR_TIER}" \
-            --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
-            --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
-      - name: Check independent evaluator evidence
-        if: always()
-        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
-      - name: Check strict compatibility growth gate
-        if: always()
-        run: python3 scripts/check-strict-compatibility-growth.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json
-      - name: Preserve existing required evidence gates
-        if: always()
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == pull_request || "${GITHUB_EVENT_NAME}" == schedule || "${GITHUB_EVENT_NAME}" == release || "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+          for result in \
+            "${BUILD_RESULT}" \
+            "${MANAGED_RESULT}" \
+            "${PROTECTION_RESULT}" \
+            "${FIXTURE_RESULT}" \
+            "${HOST_CONTEXT_RESULT}" \
+            "${FUZZ_RESULT}" \
+            "${SHARDS_RESULT}" \
+            "${EVALUATOR_RESULT}"; do
+            if [[ "${result}" != success ]]; then
+              echo "FAIL mandatory CI lane: observed ${result}" >&2
+              exit 1
+            fi
+          done
+          if [[ "${GITHUB_EVENT_NAME}" != push ]]; then
             for result in \
-              "${EVALUATOR_BUILD_RESULT}" \
-              "${EVALUATOR_REAL_SAMPLE_RESULT}" \
-              "${EVALUATOR_RUNTIME_RESULT}" \
-              "${EVALUATOR_BIONIC_RESULT}" \
-              "${EVALUATOR_MUSL_RESULT}"; do
+              "${REAL_SAMPLE_RESULT}" \
+              "${RUNTIME_RESULT}" \
+              "${BIONIC_RESULT}" \
+              "${MUSL_RESULT}"; do
               if [[ "${result}" != success ]]; then
-                echo "an existing required evidence job did not pass: ${result}" >&2
+                echo "FAIL required platform CI lane: observed ${result}" >&2
                 exit 1
               fi
             done
           fi
-      - name: Enforce independent evaluator claim gate after positive baseline
-        if: always()
-        run: python3 scripts/check-independent-evaluator.py ".artifacts/evaluator/${EVALUATOR_TIER}" --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json --require-claimable-if-baseline-positive
-      - name: Upload independent evaluator evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: independent-evaluator-${{ env.EVALUATOR_TIER }}-${{ github.run_id }}
-          path: .artifacts/evaluator/
-          if-no-files-found: warn
-          include-hidden-files: true
+          echo 'PASS: all mandatory verification lanes and independent evaluator succeeded'

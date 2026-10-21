@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER_PATH = ROOT / "scripts/check-external-provider-rollback-evidence.py"
@@ -15,6 +16,61 @@ if SPEC is None or SPEC.loader is None:
     raise RuntimeError("could not load provider-loaded rollback evidence checker")
 CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
+
+
+class ProviderRollbackRootResourceBoundsTests(unittest.TestCase):
+    @staticmethod
+    def _empty_exact_root(parent: Path) -> Path:
+        root = parent / "bounded-root"
+        root.mkdir()
+        for relative in CHECKER.ROOT_FILES:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"")
+        return root
+
+    def test_rollback_root_count_limits_accept_exact_empty_files_and_fail_plus_one_before_payload_open(self) -> None:
+        original_open = os.open
+        opened_flags: list[int] = []
+
+        def tracked_open(path, flags, *args, **kwargs):
+            opened_flags.append(flags)
+            return original_open(path, flags, *args, **kwargs)
+
+        expected_directories = CHECKER._expected_directories(CHECKER.ROOT_FILES)
+        with tempfile.TemporaryDirectory(prefix="rollback-root-count-bounds-") as directory:
+            root = self._empty_exact_root(Path(directory))
+            with (
+                mock.patch.object(CHECKER, "MAX_ROOT_FILE_COUNT", len(CHECKER.ROOT_FILES)),
+                mock.patch.object(CHECKER, "MAX_ROOT_DIRECTORY_COUNT", len(expected_directories) + 1),
+                mock.patch.object(CHECKER, "MAX_TOTAL_BYTES", 0),
+                mock.patch.object(CHECKER.os, "open", side_effect=tracked_open),
+            ):
+                exact = CHECKER._safe_closed_tree(root, CHECKER.ALL_FILES, sealing=True)
+            self.assertEqual(CHECKER.ROOT_FILES, exact.file_paths)
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for flags in opened_flags))
+
+            opened_flags.clear()
+            with (
+                mock.patch.object(CHECKER, "MAX_ROOT_FILE_COUNT", len(CHECKER.ROOT_FILES) - 1),
+                mock.patch.object(CHECKER, "MAX_ROOT_DIRECTORY_COUNT", len(expected_directories) + 1),
+                mock.patch.object(CHECKER, "MAX_TOTAL_BYTES", 0),
+                mock.patch.object(CHECKER.os, "open", side_effect=tracked_open),
+            ):
+                with self.assertRaisesRegex(SystemExit, "file-count bound"):
+                    CHECKER._safe_closed_tree(root, CHECKER.ALL_FILES, sealing=True)
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for flags in opened_flags))
+
+            opened_flags.clear()
+            with (
+                mock.patch.object(CHECKER, "MAX_ROOT_FILE_COUNT", len(CHECKER.ROOT_FILES)),
+                mock.patch.object(CHECKER, "MAX_ROOT_DIRECTORY_COUNT", len(expected_directories)),
+                mock.patch.object(CHECKER, "MAX_TOTAL_BYTES", 0),
+                mock.patch.object(CHECKER.os, "open", side_effect=tracked_open),
+            ):
+                with self.assertRaisesRegex(SystemExit, "directory-count bound"):
+                    CHECKER._safe_closed_tree(root, CHECKER.ALL_FILES, sealing=True)
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for flags in opened_flags))
 
 
 class ProviderLoadedRollbackEvidenceTests(unittest.TestCase):
@@ -46,6 +102,15 @@ class ProviderLoadedRollbackEvidenceTests(unittest.TestCase):
             "".join(f"{entries[relative]}  {relative}\n" for relative in sorted(entries)),
             encoding="ascii",
         )
+
+    @staticmethod
+    def _write_closed_manifest(root: Path) -> None:
+        entries = [
+            f"{CHECKER.sha(path.read_bytes())}  {path.relative_to(root).as_posix()}\n"
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and path.name != "SHA256SUMS"
+        ]
+        (root / "SHA256SUMS").write_text("".join(entries), encoding="ascii")
 
     @staticmethod
     def _rewrite_record(root: Path, mutate) -> None:
@@ -97,6 +162,25 @@ class ProviderLoadedRollbackEvidenceTests(unittest.TestCase):
             root = self._copy(temporary)
             self._rewrite_record(root, lambda record: record.__setitem__("schemaVersion", True))
             with self.assertRaisesRegex(SystemExit, "schemaVersion must be an exact JSON integer"):
+                CHECKER.validate(root, seal=False)
+
+    def test_range_helper_is_required_and_bound_by_retained_source_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self._copy(temporary)
+            build_path = root / "native-build.json"
+            build = json.loads(build_path.read_text(encoding="utf-8"))
+            build["evidenceTools"].pop("evidenceLoadRangeHelperSha256")
+            build_path.write_text(json.dumps(build, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+            self._write_closed_manifest(root)
+            with self.assertRaisesRegex(SystemExit, "evidence tool identity has an unsupported property set.*evidenceLoadRangeHelperSha256"):
+                CHECKER.validate(root, seal=False)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self._copy(temporary)
+            helper = root / "scripts/evidence_load_range.py"
+            helper.write_bytes(helper.read_bytes() + b"\\n# tampered helper\\n")
+            self._refresh_manifest(root)
+            with self.assertRaisesRegex(SystemExit, "retained evidence tool digest mismatch for scripts/evidence_load_range.py"):
                 CHECKER.validate(root, seal=False)
 
 

@@ -4,6 +4,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -70,6 +71,39 @@ def refresh_manifest(root: Path) -> None:
     (root / "SHA256SUMS").write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
+def synthetic_aarch64_elf(loads: list[tuple[int, int, int, int, int]] | None = None) -> bytes:
+    """Minimal ELF64 image with explicit, test-owned PT_LOAD ranges.
+
+    Each load is (flags, virtual address, file offset, file size, memory size).
+    The checker must derive unique executable/file-backed ownership from these
+    source and Native Image bytes rather than trusting the JSON claim.
+    """
+    if loads is None:
+        loads = [(5, 0x1000, 0, 512, 512)]
+    image = bytearray(max(1024, 64 + 56 * len(loads)))
+    image[:7] = b"\x7fELF\x02\x01\x01"
+    struct.pack_into("<HHI", image, 16, 3, 183, 1)
+    struct.pack_into("<Q", image, 32, 64)
+    struct.pack_into("<HHH", image, 52, 64, 56, len(loads))
+    for index, (flags, vaddr, file_offset, file_size, memory_size) in enumerate(loads):
+        struct.pack_into(
+            "<IIQQQQQQ",
+            image,
+            64 + index * 56,
+            1,
+            flags,
+            file_offset,
+            vaddr,
+            vaddr,
+            file_size,
+            memory_size,
+            0x1000,
+        )
+        if file_offset + file_size > len(image):
+            image.extend(b"\0" * (file_offset + file_size - len(image)))
+    return bytes(image)
+
+
 def valid_observation(transformed: bool) -> dict[str, object]:
     image_bias = 0x710000000000 if transformed else 0x700000000000
     mapped_vaddr = 0x4000 if transformed else 0x1000
@@ -126,9 +160,9 @@ class CfiEvidenceTests(unittest.TestCase):
     def create_valid_tree(self, root: Path) -> None:
         positive = root / "positive" / UNIT
         positive.mkdir(parents=True)
-        source = b"synthetic retained source ELF"
+        source = synthetic_aarch64_elf([(5, 0x1000, 0, 512, 512)])
         protected = b"synthetic protected image"
-        native = b"synthetic mapped native image"
+        native = synthetic_aarch64_elf([(5, 0x4000, 0, 512, 512)])
         (positive / "source-image.bin").write_bytes(source)
         (positive / "protected-image.bin").write_bytes(protected)
         (positive / "native-image.bin").write_bytes(native)
@@ -152,6 +186,7 @@ class CfiEvidenceTests(unittest.TestCase):
         (positive / "transformed-unwind.txt").write_text(render_observation(transformed), encoding="utf-8")
         (positive / "source-unwind-readelf.txt").write_text(".eh_frame\nFDE cie=00000000 pc=1000..1054\n", encoding="utf-8")
         (positive / "native-unwind-readelf.txt").write_text(".eh_frame\nFDE cie=00000000 pc=4000..4054\n", encoding="utf-8")
+        (positive / "transformed-fde-range.txt").write_text("mappedFdeVaddr=0x4000 mappedFdeSize=84\n", encoding="utf-8")
         (root / "cpp-harness-unwind-readelf.txt").write_text(
             ".eh_frame\n"
             "FDE cie=00000000 pc=0000000000002f60..0000000000003034\n"
@@ -219,6 +254,7 @@ class CfiEvidenceTests(unittest.TestCase):
             "protectedImageSha256": hashlib.sha256(protected).hexdigest(),
             "nativeImageSha256": hashlib.sha256(native).hexdigest(),
             "targetAddressMap": {"sourceVirtualAddress": 0x1000, "outputVirtualAddress": 0x4000, "size": 84},
+            "relocatedFde": {"virtualAddress": 0x4000, "size": 84},
             "registerCallUnwindWitness": {
                 "functionSymbol": "urp_cfi_invoke_with_registers",
                 "callReturnPcSymbol": "urp_cfi_invoke_with_registers_call_return",
@@ -252,8 +288,23 @@ class CfiEvidenceTests(unittest.TestCase):
         }
         write_json(positive / "cfi-behavior.json", behavior)
         (root / "cfi-fixture-dynamic-readelf.txt").write_text("Dynamic section at offset 0x0 contains 1 entry:\\n  NEEDED Shared library: [libc.so.6]\\n", encoding="utf-8")
+        negative = root / "negative-malformed-eh-frame"
+        negative.mkdir(parents=True)
+        negative_source = synthetic_aarch64_elf([(5, 0x1000, 0, 512, 512)])
+        (negative / "source-image.bin").write_bytes(negative_source)
+        negative_stage = {
+            "schemaVersion": 1,
+            "status": "failed",
+            "firstFailureStage": "protected-image-producer",
+            "publicationComplete": False,
+            "unitId": f"{UNIT}.negative",
+            "sourceSha256": hashlib.sha256(negative_source).hexdigest(),
+            "diagnostics": [{"severity": "Error", "code": "UnwindMetadataMalformed"}],
+        }
+        write_json(negative / "stage.json", negative_stage)
+        write_json(negative / "producer.stdout", {"success": False, "stage": negative_stage})
         write_json(
-            root / "negative-malformed-eh-frame" / "negative-result.json",
+            negative / "negative-result.json",
             {
                 "status": "passed",
                 "producerExitStatus": 4,
@@ -445,7 +496,60 @@ class CfiEvidenceTests(unittest.TestCase):
             refresh_manifest(root)
             result = self.checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("mapped transformed target", result.stderr)
+            self.assertIn("relocated transformed target FDE", result.stderr)
+
+    def test_malformed_metadata_negative_requires_actual_diagnostic_after_manifest_refresh(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cfi-cpp-evidence-unrelated-negative-") as directory:
+            source = Path(directory) / "source"
+            self.create_valid_tree(source)
+            root = self.copy_tree(source, Path(directory))
+            negative = root / "negative-malformed-eh-frame"
+            stage_path = negative / "stage.json"
+            producer_path = negative / "producer.stdout"
+            stage = json.loads(stage_path.read_text(encoding="utf-8"))
+            stage["diagnostics"][0]["code"] = "OutputIoFailure"
+            write_json(stage_path, stage)
+            write_json(producer_path, {"success": False, "stage": stage})
+            refresh_manifest(root)
+            result = self.checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("actual UnwindMetadataMalformed producer failure", result.stderr)
+
+    def test_relocated_fde_must_be_file_backed_by_executable_load(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cfi-cpp-evidence-no-exec-load-") as directory:
+            source = Path(directory) / "source"
+            self.create_valid_tree(source)
+            root = self.copy_tree(source, Path(directory))
+            positive = root / "positive" / UNIT
+            native_path = positive / "native-image.bin"
+            native_path.write_bytes(synthetic_aarch64_elf([(5, 0x3000, 0, 512, 512)]))
+            behavior_path = positive / "cfi-behavior.json"
+            behavior = json.loads(behavior_path.read_text(encoding="utf-8"))
+            behavior["nativeImageSha256"] = hashlib.sha256(native_path.read_bytes()).hexdigest()
+            write_json(behavior_path, behavior)
+            refresh_manifest(root)
+            result = self.checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("file-backed executable PT_LOAD", result.stderr)
+
+    def test_partially_overlapping_pt_load_is_rejected_after_manifest_refresh(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cfi-cpp-evidence-overlapping-load-") as directory:
+            source = Path(directory) / "source"
+            self.create_valid_tree(source)
+            root = self.copy_tree(source, Path(directory))
+            positive = root / "positive" / UNIT
+            native_path = positive / "native-image.bin"
+            native_path.write_bytes(
+                synthetic_aarch64_elf([(5, 0x4000, 0, 512, 512), (4, 0x4050, 512, 256, 256)])
+            )
+            behavior_path = positive / "cfi-behavior.json"
+            behavior = json.loads(behavior_path.read_text(encoding="utf-8"))
+            behavior["nativeImageSha256"] = hashlib.sha256(native_path.read_bytes()).hexdigest()
+            write_json(behavior_path, behavior)
+            refresh_manifest(root)
+            result = self.checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("overlapping PT_LOAD memory ranges", result.stderr)
 
     def test_cpp_runtime_identity_digest_mismatch_is_rejected_after_manifest_refresh(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cfi-cpp-evidence-runtime-identity-") as directory:

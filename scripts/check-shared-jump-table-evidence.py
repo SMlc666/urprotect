@@ -10,6 +10,8 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from evidence_load_range import resolve_isolated_evidence_root, unique_file_backed_pt_load
+
 PF_X = 1
 PF_W = 2
 PF_R = 4
@@ -395,7 +397,10 @@ def main() -> None:
     parser.add_argument("--unit", required=True)
     parser.add_argument("--selected-function", required=True)
     args = parser.parse_args()
-    root = args.artifact_root.resolve()
+    try:
+        root = resolve_isolated_evidence_root(args.artifact_root, "shared-table evidence root")
+    except ValueError as error:
+        fail(str(error))
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", args.unit):
         parser.error("unit id is malformed")
     if not re.fullmatch(r"dynsym:[0-9]+", args.selected_function):
@@ -411,16 +416,61 @@ def main() -> None:
     native_sha256 = digest(native_path)
     source_phdrs, source_sections = parse_elf(source, "source image")
     native_phdrs, native_sections = parse_elf(native, "Native Image")
-    unit = read_json(root, "stage.json").get("unitId")
-    if unit != args.unit:
-        fail("stage unit does not match the requested shared-table evidence unit")
+    stage = read_json(root, "stage.json")
+    unit = stage.get("unitId")
+    native_metadata = read_json(root, "native-image.json")
+    rehydration = read_json(root, "rehydration.json")
+    if (
+        unit != args.unit
+        or stage.get("profile") != "host-context-entry"
+        or stage.get("status") != "passed"
+        or stage.get("sourceSha256") != source_sha256
+        or rehydration.get("unitId") != args.unit
+        or rehydration.get("status") != "passed"
+        or rehydration.get("sourceSha256") != source_sha256
+        or rehydration.get("nativeImageSha256") != native_sha256
+        or struct.unpack_from("<H", source, 16)[0] != 3
+        or struct.unpack_from("<H", native, 16)[0] != 3
+        or rehydration.get("profile") != "host-context-entry"
+        or rehydration.get("entrySymbol") != "urp_entry"
+        or native_metadata.get("unitId") != args.unit
+        or native_metadata.get("artifactRole") != "native-image"
+        or native_metadata.get("profile") != "host-context-entry"
+        or native_metadata.get("entrySymbol") != "urp_entry"
+        or native_metadata.get("sourceSha256") != source_sha256
+        or native_metadata.get("nativeImageSha256") != native_sha256
+        or native_metadata.get("nativeImageSize") != len(native)
+    ):
+        fail("stage/rehydration/Native Image identity does not bind the selected entry and host-context-entry profile")
 
     entry_symbol_index, entry_va, entry_size = symbol(source, source_sections, "urp_entry", "source image")
     observer_symbol_index, observer_va, observer_size = symbol(source, source_sections, "urp_observer", "source image")
     if args.selected_function != f"dynsym:{entry_symbol_index}" or entry_size == 0 or observer_size == 0:
         fail("the selected dynsym selector or fixture function ranges do not match")
 
-    rehydration = read_json(root, "rehydration.json")
+    def selected_dynsym(image: bytes, sections: list[dict[str, int]], index: int, label: str) -> dict[str, Any]:
+        rows = [record for record in symbol_records(image, sections, label)
+            if record["table_index"] < len(sections)
+            and sections[record["table_index"]]["type"] == SHT_DYNSYM
+            and record["index"] == index]
+        if len(rows) != 1:
+            fail(f"{label} does not contain one exact selected dynsym row")
+        return rows[0]
+
+    source_entry = selected_dynsym(source, source_sections, entry_symbol_index, "source image")
+    native_entry = selected_dynsym(native, native_sections, entry_symbol_index, "Native Image")
+    if (
+        native_entry != source_entry
+        or source_entry.get("name") != "urp_entry"
+        or source_entry.get("type") != 2
+        or source_entry.get("binding") != 1
+        or source_entry.get("visibility") != 0
+        or source_entry.get("section_index") == 0
+        or source_entry.get("value") != entry_va
+        or source_entry.get("size") != entry_size
+    ):
+        fail("selected Native Image dynsym identity does not exactly match source urp_entry")
+
     layout = rehydration.get("layoutEvidence")
     if not isinstance(layout, dict) or layout.get("schemaVersion") != 3:
         fail("rehydration evidence does not retain the version-3 shared-copy layout contract")
@@ -451,23 +501,71 @@ def main() -> None:
         or clone.get("ownerInventoryComplete") is not False):
         fail("the clone does not satisfy the distinct read-only shared signed-32 policy")
 
-    source_table_offset = file_offset_for_va(source_phdrs, source_va, source_size, "source table")
+    source_loads = [segment for segment in source_phdrs if segment["type"] == PT_LOAD]
+    native_loads = [segment for segment in native_phdrs if segment["type"] == PT_LOAD]
+    try:
+        source_entry_file_offset, source_entry_segment = unique_file_backed_pt_load(
+            source, source_loads, entry_va, entry_size, "selected source urp_entry function",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if source_entry_segment["flags"] & 0x7 != (PF_R | PF_X) or source_entry_file_offset < 0:
+        fail("selected source urp_entry is not a read-only executable function range")
+    try:
+        source_table_offset, _ = unique_file_backed_pt_load(
+            source, source_loads, source_va, source_size, "source shared jump table",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
     if source_table_offset != source_offset:
         fail("the retained source table range is not the ELF structural file mapping")
     if source_offset + source_size > len(source) or output_offset + output_size > len(native):
         fail("the source or clone byte range exceeds its retained image")
     source_table = source[source_offset:source_offset + source_size]
-    if native[source_offset:source_offset + source_size] != source_table:
-        fail("copy-and-retarget changed the original shared table bytes")
-    read_only_segments = [segment for segment in native_phdrs
-        if segment["type"] == PT_LOAD
-        and segment["flags"] == PF_R
-        and output_va >= segment["vaddr"]
-        and output_va - segment["vaddr"] <= segment["filesz"]
-        and output_size <= segment["filesz"] - (output_va - segment["vaddr"])
-        and output_offset == segment["offset"] + output_va - segment["vaddr"]]
-    if len(read_only_segments) != 1:
+    try:
+        native_original_table_offset, _ = unique_file_backed_pt_load(
+            native, native_loads, source_va, source_size, "preserved original Native Image shared table",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if native_original_table_offset != source_offset or native[native_original_table_offset:native_original_table_offset + source_size] != source_table:
+        fail("copy-and-retarget changed the original shared table bytes or mapping")
+    try:
+        clone_offset, clone_segment = unique_file_backed_pt_load(
+            native, native_loads, output_va, output_size, "Native Image cloned shared jump table",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if clone_offset != output_offset or clone_segment["flags"] != PF_R:
         fail("the cloned table is not uniquely file-backed by a read-only, non-writable, non-executable PT_LOAD")
+
+    early_region_rows = [entry for entry in layout.get("addressMap", [])
+        if isinstance(entry, dict)
+        and entry.get("identity", "").startswith("region:")
+        and isinstance(entry.get("sourceRange"), dict)
+        and value(entry["sourceRange"], "virtualAddress") == entry_va
+        and require_int(entry["sourceRange"], "size") == entry_size]
+    if len(early_region_rows) != 1:
+        fail("the selected function has no unique generated code-region mapping")
+    early_code_range = early_region_rows[0]["outputRange"]
+    early_code_offset = value(early_code_range, "fileOffset")
+    early_code_va = value(early_code_range, "virtualAddress")
+    early_code_size = require_int(early_code_range, "size")
+    if early_code_size % 4:
+        fail("the generated selected-function code range is malformed")
+    try:
+        early_mapped_code_offset, early_code_segment = unique_file_backed_pt_load(
+            native, native_loads, early_code_va, early_code_size, "selected emitted shared-table code range",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if early_mapped_code_offset != early_code_offset or early_code_segment["flags"] & 0x7 != (PF_R | PF_X):
+        fail("the complete selected emitted function is not mapped to read-only executable Native Image bytes")
 
     owners = clone.get("ownerReferences")
     if (not isinstance(owners, list) or len(owners) != 4
@@ -543,14 +641,15 @@ def main() -> None:
         if value(binding.get("sourceEntryRange", {}), "fileOffset") != source_offset + index * 4:
             fail("the source entry bindings are not contiguous within the shared table")
         encoded_entries.append(encoded)
-        target_file_offset = file_offset_for_va(native_phdrs, target, 4, "mapped table target")
-        target_segments = [segment for segment in native_phdrs
-            if segment["type"] == PT_LOAD and segment["flags"] & PF_X
-            and target >= segment["vaddr"]
-            and target - segment["vaddr"] <= segment["filesz"]
-            and 4 <= segment["filesz"] - (target - segment["vaddr"])]
-        if len(target_segments) != 1 or target_file_offset + 4 > len(native):
-            fail("a retargeted table entry does not point into one executable file-backed output mapping")
+        try:
+            target_file_offset, target_segment = unique_file_backed_pt_load(
+                native, native_loads, target, 4, "mapped shared-table target",
+                virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+            )
+        except ValueError as error:
+            fail(str(error))
+        if target_segment["flags"] & PF_X == 0 or target_file_offset + 4 > len(native):
+            fail("a retargeted table entry does not point into executable file-backed output")
     clone_entries = list(struct.unpack("<4i", native[output_offset:output_offset + output_size]))
     if clone_entries != encoded_entries:
         fail("the physical clone bytes do not match the planner-retained output target bindings")
@@ -571,20 +670,37 @@ def main() -> None:
         or value(map_rows[0].get("outputRange", {}), "virtualAddress") != output_va):
         fail("the layout address map does not bind the source table identity to its physical clone")
 
-    region_rows = [entry for entry in layout.get("addressMap", [])
-        if isinstance(entry, dict)
-        and entry.get("identity", "").startswith("region:")
-        and isinstance(entry.get("sourceRange"), dict)
-        and value(entry["sourceRange"], "virtualAddress") == entry_va
-        and require_int(entry["sourceRange"], "size") == entry_size]
-    if len(region_rows) != 1:
-        fail("the selected function has no unique generated code-region mapping")
-    code_range = region_rows[0]["outputRange"]
-    code_offset = value(code_range, "fileOffset")
-    code_va = value(code_range, "virtualAddress")
-    code_size = require_int(code_range, "size")
-    if code_offset + code_size > len(native) or code_size % 4:
-        fail("the generated selected-function code range is malformed")
+    code_offset = early_code_offset
+    code_va = early_code_va
+    code_size = early_code_size
+    code_segment = early_code_segment
+    try:
+        entry_file_offset, entry_segment = unique_file_backed_pt_load(
+            native, native_loads, entry_va, 4, "Native Image urp_entry entry B stub",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if entry_segment["flags"] & 0x7 != (PF_R | PF_X):
+        fail("Native Image urp_entry entry B stub is not read-only executable")
+    branch_word = struct.unpack_from("<I", native, entry_file_offset)[0]
+    if branch_word & 0xFC000000 != 0x14000000:
+        fail("Native Image urp_entry entry stub does not begin with a live unconditional B")
+    branch_immediate = branch_word & 0x03FFFFFF
+    if branch_immediate & (1 << 25):
+        branch_immediate -= 1 << 26
+    branch_target = entry_va + branch_immediate * 4
+    if branch_target < 0 or branch_target > MAX_U64 - 3 or branch_target != code_va:
+        fail("Native Image urp_entry entry B target bypasses the exact selected output-function entry")
+    try:
+        branch_target_file_offset, branch_target_segment = unique_file_backed_pt_load(
+            native, native_loads, branch_target, 4, "Native Image urp_entry entry B target",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if branch_target_file_offset != code_offset or branch_target_segment != code_segment:
+        fail("Native Image urp_entry entry B target is not the mapped selected output function")
     words = list(struct.unpack(f"<{code_size // 4}I", native[code_offset:code_offset + code_size]))
     clone_page = output_va & ~0xFFF
     producer_pairs: list[tuple[int, int, int]] = []
@@ -609,8 +725,24 @@ def main() -> None:
     if adr is None or adr[0] != output_target_base or adr[1] != 3:
         fail("selected computed target base does not point at the mapped case-block base")
 
-    observer_offset = file_offset_for_va(source_phdrs, observer_va, observer_size, "source observer")
-    native_observer_offset = file_offset_for_va(native_phdrs, observer_va, observer_size, "Native Image observer")
+    try:
+        observer_offset, source_observer_segment = unique_file_backed_pt_load(
+            source, source_loads, observer_va, observer_size, "source observer function",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if source_observer_segment["flags"] & 0x7 != (PF_R | PF_X):
+        fail("source observer function is not read-only executable")
+    try:
+        native_observer_offset, native_observer_segment = unique_file_backed_pt_load(
+            native, native_loads, observer_va, observer_size, "preserved Native Image observer",
+            virtual_address_key="vaddr", file_offset_key="offset", file_size_key="filesz", memory_size_key="memsz",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if native_observer_segment["flags"] & 0x7 != (PF_R | PF_X):
+        fail("preserved Native Image observer function is not read-only executable")
     if source[observer_offset:observer_offset + observer_size] != native[native_observer_offset:native_observer_offset + observer_size]:
         fail("the unselected observer code or its original table-base producer chain was modified")
     source_handoff = read_json(root, "source-handoff.json")

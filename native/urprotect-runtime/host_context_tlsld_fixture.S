@@ -21,14 +21,14 @@ urp_entry:
 .section .tdata,"awT",%progbits
 .align 3
 .word 0xaabbccdd
-.type tls_ld_value, %object
+.type tls_ld_value, %tls_object
 tls_ld_value:
     .word 43
 .size tls_ld_value, .-tls_ld_value
 
 .section .tbss,"awT",%nobits
 .align 3
-.type tls_ld_zero, %object
+.type tls_ld_zero, %tls_object
 tls_ld_zero:
     .zero 16
 .size tls_ld_zero, .-tls_ld_zero

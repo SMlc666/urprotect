@@ -224,6 +224,142 @@ public sealed class FunctionProtectionTests
 
     [Fact]
     [Trait("Category", "Protect")]
+    public void FlatteningPreservesFallthroughLastInstructionAndMapsRewrittenDirectBranch()
+    {
+        // The selected relative jump table supplies case0/case1. Make case0's
+        // RET a direct B to case1's RET, splitting case1 after its ordinary
+        // MOV. A plain block-final MOV must not be silently discarded while
+        // its successor becomes a dispatcher state transition.
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + (9 * sizeof(uint)), sizeof(uint)),
+            0x14000002u); // B +8 from VA 0x1224 to 0x122C
+
+        var result = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var plan = Assert.IsType<ProtectionPlan>(result.Plan);
+        var region = Assert.Single(plan.Regions);
+        var map = Assert.IsType<SemanticPlanSnapshot>(plan.SemanticSnapshot)
+            .AddressMap;
+        Assert.NotNull(map);
+
+        var ordinary = Assert.Single(map.Entries, entry =>
+            entry.Identity.Kind == SemanticEntityKind.Instruction
+            && entry.SourceAddress.Value == 0x1228);
+        var branch = Assert.Single(map.Entries, entry =>
+            entry.Identity.Kind == SemanticEntityKind.Instruction
+            && entry.SourceAddress.Value == 0x1224);
+
+        var ordinaryOffset = checked((int)(ordinary.OutputAddress.Value - 0x1200));
+        var branchOffset = checked((int)(branch.OutputAddress.Value - 0x1200));
+        Assert.InRange(ordinaryOffset, 0, region.CodeBytes.Length - sizeof(uint));
+        Assert.InRange(branchOffset, 0, region.CodeBytes.Length - sizeof(uint));
+        // The synthetic case1 instruction must really be present in the
+        // output, not merely represented by an invented semantic binding.
+        Assert.Equal(
+            0x52800CE0u,
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                region.CodeBytes.AsSpan(ordinaryOffset, sizeof(uint))));
+        // The direct source branch is intentionally rewritten to a real
+        // dispatcher state instruction rather than copied as an old PC-relative B.
+        Assert.NotEqual(
+            0x14000002u,
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                region.CodeBytes.AsSpan(branchOffset, sizeof(uint))));
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
+    public void JumpTableWhoseIndexIsClobberedThroughXRegisterFailsClosed()
+    {
+        // The bounds check proves W0 in [0,3], but ADRP/ADD now write X0
+        // before LDRSW indexes the table using W0. W0 and X0 alias.
+        // Without the cross-width clobber guard this source may be wrongly
+        // promoted as a bounded jump table.
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + 8, sizeof(uint)), 0x90000000u); // ADRP X0
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + 12, sizeof(uint)), 0x91092000u); // ADD X0,X0,#0x248
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            source.AsSpan(0x200 + 16, sizeof(uint)), 0xB8A05802u); // LDRSW X2,[X0,W0,UXTW#2]
+
+        var result = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+            && diagnostic.Message.Contains("overwritten", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("ldrsw-index-alias")]
+    [InlineData("target-add-index-alias")]
+    [InlineData("adr-overwrites-displacement")]
+    [Trait("Category", "Protect")]
+    public void RelativeJumpTableRejectsPostLoadArchitecturalRegisterAliases(string mutation)
+    {
+        var source = ElfFixture.RelativeJumpTableFunctionPie();
+        switch (mutation)
+        {
+            case "ldrsw-index-alias":
+            {
+                var offset = 0x200 + (4 * sizeof(uint));
+                var encoding = BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(offset, sizeof(uint)));
+                BinaryPrimitives.WriteUInt32LittleEndian(source.AsSpan(offset, sizeof(uint)), encoding & ~0x1Fu);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    source.AsSpan(0x200 + (6 * sizeof(uint)), sizeof(uint)),
+                    0x8B000061u); // ADD X1, X3, X0 keeps the recognized chain while aliasing W0.
+                break;
+            }
+            case "target-add-index-alias":
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    source.AsSpan(0x200 + (6 * sizeof(uint)), sizeof(uint)),
+                    0x8B020060u); // ADD X0, X3, X2
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    source.AsSpan(0x200 + (7 * sizeof(uint)), sizeof(uint)),
+                    0xD61F0000u); // BR X0
+                break;
+            case "adr-overwrites-displacement":
+            {
+                var offset = 0x200 + (5 * sizeof(uint));
+                var encoding = BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(offset, sizeof(uint)));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    source.AsSpan(offset, sizeof(uint)),
+                    (encoding & ~0x1Fu) | 2u); // ADR X2 aliases the LDRSW destination.
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    source.AsSpan(0x200 + (6 * sizeof(uint)), sizeof(uint)),
+                    0x8B020041u); // ADD X1, X2, X2 keeps the recognized chain.
+                break;
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+
+        var result = new FunctionProtectionService().Plan(
+            source,
+            new FunctionProtectionOptions(
+                new[] { FunctionSelector.ByAddress(0x1200) },
+                new[] { ProtectionPass.ControlFlowFlattening }));
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.Plan);
+        Assert.Contains(result.Diagnostics, diagnostic =>
+            diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+            && diagnostic.Message.Contains("overwrit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    [Trait("Category", "Protect")]
     public void RelativeJumpTableWithOutOfClosureEntryFailsClosed()
     {
         var source = ElfFixture.RelativeJumpTableFunctionPie(malformedTableEntry: true);
@@ -350,6 +486,38 @@ public sealed class FunctionProtectionTests
         Assert.True(command.IsSuccess, string.Join(Environment.NewLine, command.Diagnostics));
         Assert.True(command.Published);
         Assert.True(File.Exists(artifactPath));
+    }
+
+    [Theory]
+    [InlineData(0, true)] // B.EQ skips the call for null; fallthrough proves non-null.
+    [InlineData(1, false)] // B.NE skips the call for non-null; fallthrough is unsafe.
+    [Trait("Category", "Protect")]
+    public void HostContextCallbackCompareBranchGuardUsesTheNonNullEdge(int conditionCode, bool expectedSuccess)
+    {
+        var source = ElfFixture.HostContextJoinCallbackCmpBranchPie(conditionCode);
+        var parse = ElfParser.Parse(source);
+        Assert.NotNull(parse.File);
+        var entry = HostContextEntryFunction(parse.File!, 18 * sizeof(uint));
+
+        var analysis = new Aarch64FunctionAnalyzer().Analyze(
+            parse.File!,
+            entry,
+            CreateHostContextProofContext(parse.File!));
+
+        Assert.Equal(expectedSuccess, analysis.Status == Aarch64FunctionAnalysisStatus.Complete);
+        if (expectedSuccess)
+        {
+            var callback = Assert.Single(analysis.RuntimeIndirectCallResolutions);
+            Assert.Equal(Aarch64RuntimeIndirectCallOwnerKind.HostContextCallback, callback.OwnerKind);
+            Assert.Equal(HostContextContract.JoinImageThreadCallbackOffset, callback.HostContextFieldOffset);
+        }
+        else
+        {
+            Assert.Empty(analysis.RuntimeIndirectCallResolutions);
+            Assert.Contains(analysis.Diagnostics, diagnostic =>
+                diagnostic.Code == DiagnosticCode.IndirectTargetUnresolved
+                && diagnostic.Message.Contains("non-null", StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     [Fact]

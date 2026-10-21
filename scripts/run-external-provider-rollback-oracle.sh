@@ -61,7 +61,9 @@ install -m 0644 "$repo_root/native/urprotect-launcher/sha256.h" "$artifact_root/
 install -m 0644 "$repo_root/scripts/check-external-provider-evidence.py" "$artifact_root/scripts/check-external-provider-evidence.py"
 install -m 0644 "$repo_root/scripts/check-dynamic-import-evidence.py" "$artifact_root/scripts/check-dynamic-import-evidence.py"
 install -m 0644 "$repo_root/scripts/check-indirect-control-evidence.py" "$artifact_root/scripts/check-indirect-control-evidence.py"
+install -m 0644 "$repo_root/scripts/evidence_load_range.py" "$artifact_root/scripts/evidence_load_range.py"
 install -m 0644 "$repo_root/scripts/tls_runtime_identity.py" "$artifact_root/scripts/tls_runtime_identity.py"
+install -m 0644 "$repo_root/scripts/run-external-provider-rollback-oracle.sh" "$artifact_root/evidence-tools/run-external-provider-rollback-oracle.sh"
 install -m 0644 "$repo_root/scripts/check-external-provider-rollback-evidence.py" "$artifact_root/evidence-tools/check-external-provider-rollback-evidence.py"
 copy_build_output host-context-external-provider-fixture.S.o provider-fixture.o
 copy_build_output host-context-external-provider-consumer-fixture.S.o consumer-fixture.o
@@ -158,7 +160,9 @@ record = {
         "providerElfParserSha256": root_sha("scripts/check-external-provider-evidence.py"),
         "dynamicImportParserSha256": root_sha("scripts/check-dynamic-import-evidence.py"),
         "indirectControlParserSha256": root_sha("scripts/check-indirect-control-evidence.py"),
+        "evidenceLoadRangeHelperSha256": root_sha("scripts/evidence_load_range.py"),
         "runtimeIdentityVerifierSha256": root_sha("scripts/tls_runtime_identity.py"),
+        "rollbackProducerSha256": root_sha("evidence-tools/run-external-provider-rollback-oracle.sh"),
         "rollbackCheckerSha256": root_sha("evidence-tools/check-external-provider-rollback-evidence.py"),
     },
 }

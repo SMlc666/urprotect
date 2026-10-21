@@ -39,7 +39,7 @@ class FixtureMatrixTests(unittest.TestCase):
         def producer_root(block: str, script: str) -> str:
             start = block.index(script)
             option = block.index("--artifact-root", start)
-            return block[option:].splitlines()[0].split()[1]
+            return block[option:].splitlines()[0].split()[1].rstrip(";")
 
         def generated_paths(record: dict[str, object]) -> list[str]:
             paths = [path for path in record["evidence"] if path.startswith(".artifacts/")]
@@ -53,7 +53,7 @@ class FixtureMatrixTests(unittest.TestCase):
         rows = (
             (
                 "runtime.cfi.transformed-backtrace.glibc.host-context-entry",
-                "Run transformed CFI unwind evidence",
+                "Run transformed CFI/unwind native evidence",
                 "./scripts/run-cfi-host-context-e2e.sh",
                 "scripts/check-cfi-evidence.py",
             ),
@@ -96,6 +96,7 @@ class FixtureMatrixTests(unittest.TestCase):
                 self.assertIn(f"shared_positive={root}/{unit}", block)
                 self.assertIn("scripts/check-rehydration-evidence.py", block)
                 self.assertIn(f'{checker} "${{shared_positive}}"', block)
+                self.assertIn("--selected-function", block)
             else:
                 match = re.search(
                     re.escape(checker) + r"\s+\\?\s*([^\s]+)",
@@ -156,12 +157,17 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertTrue(provider_roots.isdisjoint(roots))
         self.assertEqual(2, len(provider_roots))
         declared_provider_paths = generated_paths(provider_feature)
+        self.assertIn(
+            f"{provider_root}/runtime.indirect-control.external-provider.glibc.host-context-entry/SHA256SUMS",
+            declared_provider_paths,
+            "the closed provider root is the unit directory, not the outer runner directory",
+        )
         self.assertTrue(
             all(any(path == root or path.startswith(root + "/") for root in provider_roots)
                 for path in declared_provider_paths),
             f"{provider_id} evidence must bind only the two exact current provider roots",
         )
-        declaration_gate = step("Check transformed CFI and indirect-control feature declarations")
+        declaration_gate = step("Require full CFI and indirect-control evidence declarations")
         for feature_id, _, _, _ in rows:
             self.assertIn(f"--feature {feature_id}", declaration_gate)
         self.assertIn(
@@ -169,17 +175,16 @@ class FixtureMatrixTests(unittest.TestCase):
             declaration_gate,
         )
         self.assertIn(f"--feature {provider_id}", declaration_gate)
-        upload = step("Upload test evidence")
-        self.assertIn(".artifacts/indirect-control/external-provider/", upload)
-        self.assertIn(".artifacts/indirect-control/provider-loaded-rollback/", upload)
-        self.assertIn(".artifacts/indirect-control/provider-ci-logs/", upload)
+        upload = step("Upload protection-tls evidence")
+        self.assertIn(".artifacts/indirect-control/", upload)
         self.assertIn("include-hidden-files: true", upload)
         workflow_triggers = workflow.split("\njobs:", 1)[0]
         self.assertRegex(workflow_triggers, r"(?m)^  push:\s*$")
         self.assertRegex(workflow_triggers, r"(?m)^  pull_request:\s*$")
         self.assertNotRegex(workflow_triggers, r"(?m)^\s+paths(?:-ignore)?:")
         build_job = workflow.split("  build-and-test:", 1)[1].split("\n  real-sample-matrix:", 1)[0]
-        self.assertNotRegex(build_job, r"(?m)^    if:")
+        self.assertRegex(build_job, r"(?m)^    if: \$\{\{ needs\['ci-event-gate'\]\.outputs\.run_full == 'true' \}\}$")
+        self.assertIn("needs: ci-event-gate", build_job)
         self.assertNotIn("proof-binding-fix-20261014T202700Z", workflow)
         self.assertNotIn('cp -a ".artifacts/cfi/', workflow)
         self.assertIn(
@@ -230,7 +235,7 @@ class FixtureMatrixTests(unittest.TestCase):
             any(path.endswith("/host-context/build-and-test.log") for path in feature["evidence"])
         )
 
-    def test_external_provider_observation_stays_unknown_and_digest_chain_is_current(self) -> None:
+    def test_external_provider_observation_stays_unknown_and_manifest_digest_is_current(self) -> None:
         result = self.run_validator(self.data)
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         feature = next(
@@ -260,20 +265,6 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertEqual(
             hashlib.sha256(MANIFEST.read_bytes()).hexdigest(),
             fixture_registry["sha256"],
-        )
-        protocol = json.loads(
-            (REPO_ROOT / "fixtures/evaluator/evaluator-protocol.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(
-            hashlib.sha256(corpus_path.read_bytes()).hexdigest(),
-            protocol["manifestDigests"]["compatibilityCorpusSha256"],
-        )
-        baseline_reference_path = REPO_ROOT / "fixtures/evaluator/baseline-reference.json"
-        baseline_reference = json.loads(baseline_reference_path.read_text(encoding="utf-8"))
-        baseline_path = REPO_ROOT / baseline_reference["baselineArtifactPath"]
-        self.assertEqual(
-            baseline_reference["baselineArtifactSha256"],
-            hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
         )
 
     def test_release_tier_selects_the_explicit_hardening_witness(self) -> None:

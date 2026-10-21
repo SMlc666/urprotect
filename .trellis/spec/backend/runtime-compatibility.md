@@ -1340,146 +1340,37 @@ attempt the required tier oracle
 ```
 
 
-## Scenario: Independent compatibility and Scheme-A evaluator
+## Scenario: Independent compatibility-only product evidence verification
 
-### 1. Scope / Trigger
+The active compatibility evidence contract is defined by
+`docs/compatibility-evidence-policy.md`. The Scheme-A synthetic six-family
+attack evaluator, artificial attack-cost factors and frozen strength baselines
+are retired. No numeric reverse-engineering resistance claim can be inferred
+from any of these compatibility rows.
 
-This contract applies when CI measures the parent 100x goal. The evaluator is a read-only control plane under `scripts/`, `fixtures/evaluator/`, `tests/`, and `.artifacts/evaluator/<tier>/`; it binds product evidence but does not implement a Protected Image, rehydrator, loader, protection pass, or attack tool. Existing fixture, real-sample, runtime, benchmark, test, and fuzz jobs remain separate required evidence.
+- Four native ARM64 shards must collectively retain all 100 required registered units in
+  `fixtures/evaluator/compatibility-corpus.json`. Missing, duplicated or
+  symlinked product evidence fails the independent gate.
+- Run `scripts/check-strict-product-corpus.py --tier pr --runtime glibc
+  --shard-count 4 --evidence-root .artifacts/strict-corpus-merge/pr/glibc` to independently
+  validate all four exact shard summaries and every registered unit using the existing hash-bound six-stage
+  `check-rehydration-evidence.py` verifier. The producer summary is a
+  prerequisite, never a substitute for verifying the raw product chain.
+- The independent report records each unit's actual product-manifest digest,
+  and `securityStrengthClaim` must always be `null`.
+- Real-sample, glibc/musl/bionic, HostContext, TLS, fixture, fuzz and runtime
+  evidence gates remain distinct and must not be represented as proof of
+  quantified attack cost.
+- CI retains the `independent-evaluator` job ID solely for compatibility
+  with existing required status checks; the job's scope is now limited to
+  independently verifying actual compatibility product evidence.
 
-### 2. Signatures
+### Regressions
 
-```sh
-python3 scripts/validate-evaluator-manifests.py
-./scripts/run-independent-evaluator.sh --tier pr|nightly|release
-python3 scripts/check-independent-evaluator.py .artifacts/evaluator/<tier>
-python3 scripts/check-independent-evaluator.py .artifacts/evaluator/<tier> \
-  --require-claimable-if-baseline-positive
-```
-
-The runner writes only `.artifacts/evaluator/<tier>/`. The checker accepts only an artifact root below `.artifacts/evaluator/` and verifies `gate.json`, `analysis-input.json`, closed `SHA256SUMS`, per-unit records, and six-family Scheme-A attempts.
-
-### 3. Contracts
-
-The strict compatibility chain is:
-
-```text
-Protector -> Protected Image -> rehydration -> Native Image
-          -> target native loader -> behavioral oracle
-```
-
-A complete unit requires all six stages to pass for the same registered `unitId`, source digest, profile, runtime cell, target loader, oracle, and run. `fixed view` contains immutable baseline rows; `growth view` is append-only and rejects duplicate identity keys. The exact growth condition is `candidateGrowthCompleteUnits >= 100 * baselineCompleteUnits`; a zero baseline produces `baseline-zero` with a null factor and never becomes claimable.
-
-The Scheme-A vector is the conjunction of six required families: `runtime_dump_reassembly`, `patch_repack`, `function_logic_recovery`, `static_decomposition`, `dynamic_instrumentation`, and `integrity_handoff`. Each family has three baseline and three candidate replicas, equal frozen budgets/tools/recipes, zero manual steps, and independent `factorLowerBound >= 100`. Missing attack tools or finite baseline successes are `baseline-not-calibrated`/`environment-unavailable`, never a pass.
-
-The evaluator evidence tree contains `environment.json`, copied protocol/corpus/oracle/scheme/baseline manifests, compatibility unit records, raw `SHA256SUMS`, Scheme-A attempts, `scheme-a-gate.json`, `gate.json`, `analysis-input.json`, and a closed top-level `SHA256SUMS`. `gate.json` is normative; `analysis-input.json` is the analysis-agent handoff. Baselines are content-addressed, immutable, and never overwritten. Stage records require stage-specific hashes and metadata; a generic shared hash cannot satisfy a passed stage.
-
-### Additive Scheme-A v2 calibration and restricted-runner fallback
-
-#### 1. Scope / Trigger
-
-This contract applies when CI explicitly selects `fixtures/evaluator/scheme-a-manifest-v2.json`. The historical `scheme-a-manifest.json` remains the default and remains `baseline-not-calibrated`; the additive selection must not mutate the v1 manifest or the compatibility baseline references.
-
-#### 2. Signatures
-
-```sh
-python3 scripts/validate-evaluator-manifests.py \
-  --scheme-a fixtures/evaluator/scheme-a-manifest-v2.json \
-  --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
-./scripts/run-independent-evaluator.sh --tier pr \
-  --scheme-a-manifest fixtures/evaluator/scheme-a-manifest-v2.json \
-  --baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json
-python3 scripts/check-scheme-a-baseline-v2.py
-```
-
-#### 3. Contracts
-
-- v2 binds `scheme-a-baseline-v2` through a separate immutable reference/artifact pair. The reference records the selected manifest digest, six family IDs in frozen order, three finite baseline replicas per family, and never-overwrite/content-addressed markers.
-- `scheme-a-gate.json` binds the Scheme-A baseline ID/digest, not the compatibility baseline ID. Candidate factors use the frozen maximum baseline replica cost from the Scheme-A baseline artifact; they never use a newly measured candidate-run baseline as the denominator.
-- Each family wrapper validates the retained Protected Image, Native Image, target-loader, behavioral-oracle, and integrity negative-witness records before emitting a scorer result. It records its recipe/tool identity, CPU cost, recovered artifact, blue-oracle binding, resource record, command log, and raw checksum manifest.
-- A process-limited evaluator may run the same checked-in wrapper in-process only after a child start returns `EAGAIN`; arguments, wrapper identity, output, and bounded budget remain unchanged. Missing evidence, tool drift, malformed output, or other startup failures remain `environment-unavailable`.
-- `EVALUATOR_TOOL_<NAME>_PATH/VERSION` is captured before seccomp/staged fallback and used only as an exact executable/version handoff; it cannot create a missing capability or override digest validation.
-
-#### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|---|---|
-| v2 Scheme-A reference/artifact digest, family order, or parent v1 digest mismatch | manifest/evidence gate fails closed |
-| Missing baseline family or fewer than three finite replicas | `baseline-not-calibrated`; no factor |
-| Candidate family below 100x or mixed replica result | Scheme-A not pass; overall claim remains false |
-| Missing strict product/blue oracle/negative integrity witness | scorer fails closed; no attack success |
-| `EAGAIN` child start under the frozen process limit | exact checked-in wrapper runs in-process; evidence remains bounded and hash-bound |
-| Any other wrapper start failure | `environment-unavailable`; no fabricated ratio |
-
-#### 5. Good / Base / Bad Cases
-
-- Good: explicit v2 selection validates the immutable six-family baseline, runs three baseline and candidate replicas, recomputes all factors from raw records, and exposes `schemeA.status=pass` only when every family is at least 100x.
-- Base: default v1 selection retains `baseline-not-calibrated` and does not require v2 baseline files.
-- Bad: using compatibility baseline-v2 as the Scheme-A denominator, assigning nominal cost without a measured scorer record, or turning an unavailable child process into an attack pass.
-
-#### 6. Tests Required
-
-- Validate both default v1 and explicit v2 manifest paths; assert copied Scheme-A reference/artifact closure and distinct baseline IDs.
-- Run all six family wrappers with missing product/blue evidence and tool drift; assert fail-closed results.
-- Run the evaluator under a deliberately low `RLIMIT_NPROC`; assert the in-process wrapper fallback still emits six complete replica sets and factors from the frozen baseline.
-- Run the full Python suite, manifest/evidence checkers, native CI evaluator, strict compatibility growth gate, and all pre-existing product/runtime/sample/fuzz/benchmark jobs.
-
-#### 7. Wrong vs Correct
-
-**Wrong:** calculate a 100x factor from the current evaluator's own baseline replicas, or mark all six families successful after a subprocess `EAGAIN`.
-
-**Correct:** validate the immutable Scheme-A v2 reference first, use its frozen per-family maximum costs, then score each checked-in recipe against the retained blue oracle and preserve explicit unavailable evidence on any other failure.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|---|---|
-| Missing Protected Image or rehydration product stage | compatibility `baseline-zero`/`not-ready`; no strict unit |
-| Zero compatibility baseline | null factor; claim gate remains non-claimable |
-| Missing required corpus row, duplicate identity, changed frozen metadata | protocol failure |
-| Non-passed stage or missing stage-specific binding | unit incomplete with first-failure layer |
-| Missing attack tool or fewer than three finite baseline successes | Scheme-A `baseline-not-calibrated` |
-| Mixed candidate replica outcomes | `unknown`; no favorable averaging |
-| Missing raw evidence, unsafe path, symlink, checksum mismatch, duplicate JSON key, or self-referential manifest | evidence gate fails closed |
-| Required prior CI evidence job fails | evaluator preserves the result and CI fails the required evidence gate |
-| Positive strict baseline exists but compatibility or any Scheme-A family is below 100x | claim gate fails |
-
-### 5. Good / Base / Bad Cases
-
-- Good: native CI retains every evaluator row, rejects forged stage/gate fields by recomputation, and reports a positive claim only when compatibility and all six Scheme-A families independently pass.
-- Base: the current checkout produces `baseline-zero`, `baseline-not-calibrated`, complete raw unavailable evidence, and `claimable=false` without inventing native or attack results.
-- Bad: relabeling a compressed complete ELF as Protected Image, removing an inconvenient sample, weakening an oracle, treating missing tools as attack failure/pass, or accepting a hard-coded `claimable` marker.
-
-### 6. Tests Required
-
-- Manifest tests mutate duplicate keys, non-finite values, digests, frozen rows, unsafe paths, tool availability, budgets, and ABI/oracle fields and require rejection.
-- Compatibility tests assert six-stage completeness, stage-specific bindings, fixed/growth counting, baseline identity preservation, first-failure classification, and zero-denominator handling.
-- Scheme-A tests assert three replicas, equal budgets/tool/recipe identity, finite baseline requirements, censored lower bounds, mixed-result rejection, and per-family conjunction.
-- Evidence tests assert closed checksum coverage, raw-manifest ownership, symlink/root rejection, recomputed anti-gaming fields, read-only checkout behavior, and deferred claimability before a positive baseline.
-- CI tests parse the workflow and assert additive evaluator dependencies, existing evidence-job preservation, always-upload behavior, and conditional positive-baseline claim enforcement.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```text
-if wrapper_decodes_to_elf:
-    count_compatibility_unit()
-if attack_tool_missing:
-    mark_attack_failed_and_continue()
-if gate.claimable:
-    trust_gate()
-```
-
-#### Correct
-
-```text
-validate frozen manifests and baseline digests
--> require Protected Image + rehydration + Native Image + loader + oracle
--> recompute stage/growth evidence from immutable records
--> require every Scheme-A family and replica policy
--> retain environment-unavailable/not-ready evidence
--> derive claimable only from both independent gates
-```
+Fail closed on missing required units, bad summary counts, duplicate registry
+identities, altered `SHA256SUMS`, failed loader/oracle evidence, or a failed
+upstream required platform job. No Scheme-A strength score, attacker-effort
+multiplier, or automatic attack-success declaration is emitted.
 
 ## Scenario: Protected Image v1 producer evidence
 
@@ -1701,80 +1592,17 @@ authenticate Protected Image -> materialize -> parse/hash Native Image
 -> baseline/target behavior oracle -> complete strict unit only then
 ```
 
-## Scenario: Content-addressed positive compatibility baseline-v2 and explicit evaluator selection
+## Historical compatibility baseline and Scheme-A retirement
 
-### 1. Scope / Trigger
+The previous baseline-zero/v2 strength and compatibility-ratio protocols were
+control-plane experiments and are no longer active. They cannot establish
+quantified resistance to reverse engineering. Their source and change history
+remain recoverable through Git history, but the live CI contract is the
+strict compatibility product chain described above.
 
-This contract applies when a strictly measured positive compatibility denominator is frozen after the independent evaluator has produced a complete six-stage unit. It keeps historical `compatibility-1x-baseline-zero` immutable and makes baseline selection explicit; it does not upgrade Scheme-A or the overall claim.
-
-### 2. Signatures
-
-```sh
-./scripts/run-independent-evaluator.sh --tier pr|nightly|release \
-  [--baseline-reference fixtures/evaluator/baselines/compatibility-1x-v2-reference.json]
-python3 scripts/check-positive-immutable-baseline-v2.py \
-  --evaluator-root .artifacts/evaluator/<tier> \
-  --product-root .artifacts/protected-image/<tier>/<runtime>/<unit> \
-  --previous-baseline fixtures/evaluator/baselines/compatibility-1x-baseline-zero.json \
-  [--check-only]
-```
-
-The baseline-v2 payload and external reference are content-addressed and immutable. A denominator of one sets a future integer growth target of 100; it is not itself a 100x result.
-
-### 3. Contracts
-
-- Omitting `--baseline-reference` preserves the historical baseline-zero default. Selecting v2 requires its content hash, immutable flags, corpus/protocol identity, and one complete unit to validate before compatibility scoring.
-- The selected reference and payload are copied into the evaluator evidence tree; the gate and analysis input bind the selected baseline ID/hash. The previous zero baseline and reference remain byte-identical.
-- The append-only corpus may add reviewed growth rows without rewriting the v2 denominator. The current protocol ledger binds the current corpus digest, while the v2 payload retains its historical corpus/protocol snapshot; the frozen fixed row is checked by a content-addressed row digest.
-- The baseline-v2 checker requires exact commit freshness, closed evaluator/unit/product manifests, native compatibility environment, one complete six-stage fixed row, distinct Protected/Native Image hashes, exact loader and behavior-oracle evidence, and a nearest-negative rollback witness. Any unmet condition writes only a blocked local gate and publishes no payload/reference.
-- Evaluator environment schema v2 records runner identity, host/runtime identity, namespace/mount/security facts, resource limits, pinned SDK/tool hashes, product source hashes, and strict-unit bindings. Availability is recomputed from those observations; caller-provided compatibility flags cannot make it available.
-- Scheme-A remains the frozen six-family conjunction. Baseline-v2 records `baseline-not-calibrated`, null family factors, and no Scheme-A claim. Overall claimability remains false until compatibility growth and every Scheme-A family independently pass.
-- `calculate_claimable` is derived from environment availability, measured fixed/growth compatibility, Scheme-A pass, and all anti-gaming checks; a complete-looking stage projection in an unavailable environment cannot make the result claimable.
-- Compatibility and Scheme-A are separate dimensions. The baseline freeze does not mutate the evaluator protocol rules, Scheme-A policy, or 100x math.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|---|---|
-| Explicit v2 reference does not match payload bytes/identity | evaluator/local gate fails; no claim |
-| Checkout, gate, and environment commits differ | local gate blocks baseline publication |
-| Root manifest digest differs from either gate field | evidence checker/local gate fails closed |
-| Any stage/hash/oracle/negative witness is missing or inconsistent | no baseline-v2 publication; retain blocked evidence |
-| Historical zero-baseline bytes/reference drift | hard failure; no overwrite or repair |
-| One-unit v2 candidate with no further growth | measured factor 1.0, target 100, growthViewPass=false, claimable=false |
-| 100 distinct complete growth units with unavailable declared runtime | retain measured compatibility counts but local/overall claim remains unavailable until the CI runtime evidence is available |
-| Scheme-A remains uncalibrated | six families retained, factors null, claimable=false |
-| Evaluator environment unavailable | claimable=false even if stage records are complete |
-
-### 5. Good / Base / Bad Cases
-
-- Good: a fresh evidence package binds one strict unit to a new immutable v2 payload/reference; explicit evaluator selection reports measured factor 1.0 and preserves non-claimability.
-- Base: no reference is specified; the historical baseline-zero behavior remains unchanged.
-- Bad: silently changing the default reference, overwriting the zero baseline, treating denominator publication as 100x success, or marking Scheme-A pass from compatibility evidence.
-
-### 6. Tests Required
-
-- Evaluator tests cover explicit v2 selection, default zero fallback, stale reference/payload, fixed/growth values, historical baseline immutability, and Scheme-A non-claimability.
-- Local-gate tests cover commit freshness, root/nested manifest closure, all-six-stage hashes, negative rollback witness, environment unavailability, and no publication after any failed precondition.
-- Workflow tests assert the independent evaluator job provisions its pinned SDK, validates both references, explicitly selects v2, retains artifacts, and preserves the positive-baseline claim gate.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```text
-compatibilityComplete = true
-baselineZero = 0
-factor = infinity
-claimable = true
-```
-
-#### Correct
-
-```text
-explicit immutable baseline-v2 -> candidate=1, baseline=1, factor=1.0
--> future growth target=100 -> Scheme-A still independent -> claimable=false
-```
+Compatibility tests must measure retained product behavior and exact evidence;
+they must not promote the 100 registered synthetic samples into a claim of
+100x real-world compatibility.
 
 ## Scenario: External provider managed admission and scoped native evidence
 
@@ -2033,9 +1861,9 @@ wiring, tests, and remaining hosted/promotion gates follow it below.
    (SHA-256 `04461a5761415abff30396ab7fcb036916abf102970336e7bf996bf1edca7a17`)
    rechecked the exact current roots and reported a scoped integration pass.
    These are local retained results, not a hosted Actions run.
-5. **CI and registry:** four producer/checker steps are wired in unfiltered
-   `build-and-test` on `ubuntu-24.04-arm`, timeout 40 minutes, and use
-   `if: always()` with run-keyed markers/logs/statuses. Exact `current` roots are
+5. **CI and registry:** provider producer/checker gates are wired in the
+   mandatory `protection-and-tls` job on `ubuntu-24.04-arm`, timeout 40 minutes,
+   and use `if: always()` with run-keyed markers/logs/statuses. Exact `current` roots are
    `.artifacts/indirect-control/external-provider/current` and
    `.artifacts/indirect-control/provider-loaded-rollback/current`; upload runs
    under `if: always()` with `include-hidden-files: true`. Both regression rows

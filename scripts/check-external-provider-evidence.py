@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -16,9 +15,11 @@ import stat
 import struct
 import sys
 import tarfile
+import types
 import zlib
+from contextlib import contextmanager
 from pathlib import Path, PureWindowsPath
-from typing import Any
+from typing import Any, Iterator
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,10 +38,27 @@ MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 MAX_TREE_BYTES = 512 * 1024 * 1024
 MAX_REPORT_BYTES = 8 * 1024 * 1024
 MAX_STREAM_BYTES = 1024 * 1024
+MAX_PROVIDER_ROOT_FILES = 256
+MAX_PROVIDER_ROOT_DIRECTORIES = 32  # Includes the evidence root itself.
+MAX_PROVIDER_MANIFEST_BYTES = 2 * 1024 * 1024
+MAX_PROVIDER_MANIFEST_ENTRIES = MAX_PROVIDER_ROOT_FILES
+MAX_PRIVATE_HELPER_SOURCE_BYTES = 16 * 1024 * 1024
+_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY = "_urprotect_active_evidence_root_snapshot"
+_ACTIVE_ROOT_SNAPSHOT: Any | None = None
 NATIVE_BUILD_COMMAND = ["make", "-C", "native/urprotect-runtime", "-B", "external-provider-image-handoff"]
 MANAGED_BUILD_COMMAND = ["dotnet", "build", "UrProtect.sln", "--configuration", "Release", "--no-restore"]
 CPP_FLAGS = ["-Iinclude", "-I../urprotect-launcher", "-I../../third_party/miniz"]
 C_FLAGS = ["-std=c11", "-O2", "-g0", "-Wall", "-Wextra", "-Werror", "-Wshadow", "-Wconversion", "-pthread"]
+EVIDENCE_TOOL_FILES = {
+    "providerProducerSha256": "build-inputs/evidence-tools/scripts/run-external-provider-e2e.sh",
+    "providerCheckerSha256": "build-inputs/evidence-tools/scripts/check-external-provider-evidence.py",
+    "dynamicImportParserSha256": "build-inputs/evidence-tools/scripts/check-dynamic-import-evidence.py",
+    "indirectControlParserSha256": "build-inputs/evidence-tools/scripts/check-indirect-control-evidence.py",
+    "evidenceLoadRangeHelperSha256": "build-inputs/evidence-tools/scripts/evidence_load_range.py",
+    "runtimeIdentityVerifierSha256": "build-inputs/evidence-tools/scripts/tls_runtime_identity.py",
+    "rollbackProducerSha256": "build-inputs/evidence-tools/scripts/run-external-provider-rollback-oracle.sh",
+    "rollbackCheckerSha256": "build-inputs/evidence-tools/scripts/check-external-provider-rollback-evidence.py",
+}
 BUILD_PROVENANCE_FILES = {
     "native-build.stdout", "native-build.stderr", "managed-build.stdout", "managed-build.stderr",
     "host-adapter.o", "rollback-host-adapter.o", "host-image-validation.o",
@@ -56,6 +74,7 @@ BUILD_PROVENANCE_FILES = {
     "toolchain/cc-driver", "toolchain/cc1", "toolchain/as", "toolchain/ld",
     "toolchain/cc-version.txt", "toolchain/as-version.txt", "toolchain/ld-version.txt", "toolchain/target-triple.txt",
     "managed-build/urprotect.dll", "managed-build/UrProtect.Core.dll", "managed-build/dotnet-version.txt",
+    *EVIDENCE_TOOL_FILES.values(),
 }
 # Compressed input and its expanded tar are independently bounded. The accepted
 # retained bundle expands to 41,164,800 bytes; 64 MiB leaves room for that
@@ -77,19 +96,6 @@ def fail(message: str) -> None:
     raise SystemExit(f"external-provider evidence: {message}")
 
 
-def load_python_module(name: str, path: Path) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        fail(f"cannot load retained helper module {path.name}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_DYNAMIC = load_python_module("urp_external_provider_dynamic_import", ROOT / "scripts/check-dynamic-import-evidence.py")
-_INDIRECT = load_python_module("urp_external_provider_indirect_control", ROOT / "scripts/check-indirect-control-evidence.py")
-_IDENTITY = load_python_module("urp_external_provider_runtime_identity", ROOT / "scripts/tls_runtime_identity.py")
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -105,8 +111,21 @@ def same_json(left: Any, right: Any) -> bool:
     return canonical(left) == canonical(right)
 
 
+def _metadata_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (metadata.st_size, metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+
 def read_file(root: Path, relative: str, *, allow_empty: bool = False, limit: int = MAX_FILE_BYTES) -> bytes:
+    if type(limit) is not int or limit < 0:
+        fail("evidence file byte limit is invalid")
     parts = safe_relative(relative, "evidence file path").parts
+    active = _ACTIVE_ROOT_SNAPSHOT or sys.modules.get(_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY)
+    if active is not None and Path(os.path.abspath(active.root)) == Path(os.path.abspath(root)):
+        data = active.read(relative, limit=limit)
+        if not allow_empty and not data:
+            fail(f"evidence file is not a bounded regular file: {relative}")
+        return data
+
     root_fd = -1
     directory_fd = -1
     file_fd = -1
@@ -114,27 +133,35 @@ def read_file(root: Path, relative: str, *, allow_empty: bool = False, limit: in
         root_fd = os.open(root, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW)
         directory_fd = root_fd
         for part in parts[:-1]:
-            next_fd = os.open(part, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
+            next_fd = os.open(
+                part, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=directory_fd,
+            )
             if directory_fd != root_fd:
                 os.close(directory_fd)
             directory_fd = next_fd
-        file_fd = os.open(parts[-1], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=directory_fd)
-        metadata = os.fstat(file_fd)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > limit or (not allow_empty and metadata.st_size == 0):
+        file_fd = os.open(
+            parts[-1], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=directory_fd,
+        )
+        before = os.fstat(file_fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > limit or (not allow_empty and before.st_size == 0):
             fail(f"evidence file is not a bounded regular file: {relative}")
-        chunks: list[bytes] = []
-        remaining = limit + 1
-        while remaining > 0:
-            chunk = os.read(file_fd, min(1024 * 1024, remaining))
+        result = bytearray(before.st_size)
+        position = 0
+        while position < before.st_size:
+            chunk = os.read(file_fd, min(1024 * 1024, before.st_size - position))
             if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        data = b"".join(chunks)
-        if len(data) > limit or len(data) != metadata.st_size or (not allow_empty and not data):
+                fail(f"evidence file changed size or exceeds its byte bound: {relative}")
+            result[position : position + len(chunk)] = chunk
+            position += len(chunk)
+        growth_probe = os.read(file_fd, 1)
+        after = os.fstat(file_fd)
+        if growth_probe or _metadata_identity(after) != _metadata_identity(before) or not stat.S_ISREG(after.st_mode):
             fail(f"evidence file changed size or exceeds its byte bound: {relative}")
-        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
-            fail(f"evidence file changed type while being read: {relative}")
+        data = bytes(result)
+        if not allow_empty and not data:
+            fail(f"evidence file is not a bounded regular file: {relative}")
         return data
     except OSError as error:
         fail(f"cannot safely read evidence file {relative}: {error}")
@@ -175,32 +202,180 @@ def safe_relative(value: str, label: str) -> Path:
     return candidate
 
 
-def write_closed_manifest(root: Path) -> None:
-    rows: list[str] = []
-    paths = sorted((item for item in root.rglob("*") if item.is_file() and item.name != "SHA256SUMS"), key=lambda item: item.relative_to(root).as_posix())
-    for path in paths:
-        relative = path.relative_to(root).as_posix()
-        if path.is_symlink():
-            fail(f"cannot manifest symlink {relative}")
-        file_limit = (
-            MAX_PROVIDER_BYTES if relative == "provider-image.so"
-            else 256 * 1024 * 1024 if relative in {"runtime-files/libc.so.6", "runtime-files/ld-linux-aarch64.so.1"}
-            else MAX_FILE_BYTES
-        )
-        rows.append(f"{sha256_bytes(read_file(root, relative, allow_empty=True, limit=file_limit))}  {relative}")
-    (root / "SHA256SUMS").write_text("\n".join(rows) + "\n", encoding="utf-8")
-
-
-def check_closed_manifest(root: Path) -> dict[str, str]:
-    manifest_path = root / "SHA256SUMS"
-    if manifest_path.is_symlink() or not manifest_path.is_file() or manifest_path.stat().st_size > 16 * 1024 * 1024:
-        fail("SHA256SUMS is missing, unsafe, or too large")
-    entries: dict[str, str] = {}
-    total = 0
+def load_python_module(name: str, path: Path) -> Any:
     try:
-        lines = read_file(root, "SHA256SUMS", limit=16 * 1024 * 1024).decode("utf-8", errors="strict").splitlines()
-    except (OSError, UnicodeDecodeError) as error:
-        fail(f"cannot read SHA256SUMS: {error}")
+        relative = path.relative_to(ROOT).as_posix()
+    except ValueError:
+        fail(f"retained helper module escapes its source root: {path.name}")
+    source = read_file(ROOT, relative, limit=MAX_PRIVATE_HELPER_SOURCE_BYTES)
+    module = types.ModuleType(name)
+    namespace = types.ModuleType.__getattribute__(module, "__dict__")
+    namespace.update({"__file__": str(path), "__package__": ""})
+    sys.modules[name] = module
+    try:
+        exec(compile(source, str(path), "exec"), namespace)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+_DYNAMIC = load_python_module("urp_external_provider_dynamic_import", ROOT / "scripts/check-dynamic-import-evidence.py")
+_INDIRECT = load_python_module("urp_external_provider_indirect_control", ROOT / "scripts/check-indirect-control-evidence.py")
+_IDENTITY = load_python_module("urp_external_provider_runtime_identity", ROOT / "scripts/tls_runtime_identity.py")
+
+
+def _provider_file_limit(relative: str) -> int:
+    if relative == "SHA256SUMS":
+        return MAX_PROVIDER_MANIFEST_BYTES
+    if relative == "provider-image.so":
+        return MAX_PROVIDER_BYTES
+    if relative in {"runtime-files/libc.so.6", "runtime-files/ld-linux-aarch64.so.1"}:
+        return MAX_RUNTIME_IMAGE_BYTES
+    if relative == "build-provenance.tar.gz":
+        return MAX_PROVENANCE_BYTES
+    if relative in BUILD_PROVENANCE_FILES:
+        return MAX_PROVENANCE_MEMBER_BYTES
+    if relative.endswith((".stdout", ".stderr")):
+        return MAX_STREAM_BYTES
+    if relative.endswith(".json") or relative.endswith(".txt"):
+        return MAX_REPORT_BYTES
+    return MAX_FILE_BYTES
+
+
+def _expected_root_directories(files: set[str]) -> set[str]:
+    directories: set[str] = set()
+    for relative in files:
+        parent = Path(relative).parent
+        while parent != Path("."):
+            directories.add(parent.as_posix())
+            parent = parent.parent
+    return directories
+
+
+def _new_root_snapshot(
+    root: Path,
+    *,
+    exact_inventory: bool = False,
+    optional_report: bool = True,
+    optional_manifest: bool = True,
+):
+    expected_files = None
+    optional_files: set[str] = set()
+    expected_directories = None
+    if exact_inventory:
+        expected_files = _exact_root_files()
+        if optional_report:
+            expected_files.remove("external-provider-evidence.json")
+            optional_files.add("external-provider-evidence.json")
+        if optional_manifest:
+            optional_files.add("SHA256SUMS")
+        else:
+            expected_files.add("SHA256SUMS")
+        expected_directories = _expected_root_directories(_exact_root_files())
+    return _INDIRECT.EvidenceRootSnapshot(
+        root,
+        max_files=MAX_PROVIDER_ROOT_FILES,
+        max_directories=MAX_PROVIDER_ROOT_DIRECTORIES,
+        max_total_bytes=MAX_TREE_BYTES,
+        expected_files=expected_files,
+        optional_files=optional_files,
+        expected_directories=expected_directories,
+        file_limit_resolver=_provider_file_limit,
+    )
+
+
+@contextmanager
+def _using_root_snapshot(snapshot: Any) -> Iterator[None]:
+    global _ACTIVE_ROOT_SNAPSHOT
+    previous_active = _ACTIVE_ROOT_SNAPSHOT
+    previous_module = sys.modules.get(_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY)
+    had_module = _ACTIVE_ROOT_SNAPSHOT_MODULE_KEY in sys.modules
+    _ACTIVE_ROOT_SNAPSHOT = snapshot
+    sys.modules[_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY] = snapshot
+    try:
+        yield
+    finally:
+        _ACTIVE_ROOT_SNAPSHOT = previous_active
+        if had_module:
+            sys.modules[_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY] = previous_module
+        else:
+            sys.modules.pop(_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY, None)
+
+
+def _write_root_file(root: Path, relative: str, data: bytes) -> None:
+    parts = safe_relative(relative, "evidence output path").parts
+    root_fd = -1
+    directory_fd = -1
+    file_fd = -1
+    try:
+        root_fd = os.open(root, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW)
+        directory_fd = root_fd
+        for part in parts[:-1]:
+            next_fd = os.open(
+                part, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=directory_fd,
+            )
+            if directory_fd != root_fd:
+                os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(
+            parts[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC
+            | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
+        metadata = os.fstat(file_fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            fail(f"evidence output is not a regular file: {relative}")
+        position = 0
+        while position < len(data):
+            written = os.write(file_fd, data[position : position + 1024 * 1024])
+            if written <= 0:
+                fail(f"evidence output write made no progress: {relative}")
+            position += written
+        os.fsync(file_fd)
+    except OSError as error:
+        fail(f"cannot safely write evidence output {relative}: {error}")
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if directory_fd >= 0 and directory_fd != root_fd:
+            os.close(directory_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
+def write_closed_manifest(root: Path) -> None:
+    snapshot = _new_root_snapshot(root)
+    snapshot.preflight()
+    with _using_root_snapshot(snapshot):
+        paths = sorted(snapshot.file_paths - {"SHA256SUMS"})
+        rows = [
+            f"{sha256_bytes(snapshot.read(relative, limit=_provider_file_limit(relative)))}  {relative}"
+            for relative in paths
+        ]
+        if len(rows) > MAX_PROVIDER_MANIFEST_ENTRIES:
+            fail("evidence root exceeds its manifest-entry bound")
+        snapshot.verify_tree_unchanged()
+        manifest = ("\n".join(rows) + "\n").encode("utf-8")
+        if len(manifest) > MAX_PROVIDER_MANIFEST_BYTES:
+            fail("SHA256SUMS exceeds its byte bound")
+        _write_root_file(root, "SHA256SUMS", manifest)
+
+
+def _check_closed_manifest(root: Path, snapshot: Any) -> dict[str, str]:
+    try:
+        manifest_data = snapshot.read("SHA256SUMS", limit=MAX_PROVIDER_MANIFEST_BYTES)
+        text = manifest_data.decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, SystemExit) as error:
+        fail(f"cannot read SHA256SUMS safely: {error}")
+    if manifest_data.count(b"\n") > MAX_PROVIDER_MANIFEST_ENTRIES:
+        fail("SHA256SUMS exceeds its manifest-entry bound")
+    lines = text.splitlines()
+    if len(lines) > MAX_PROVIDER_MANIFEST_ENTRIES:
+        fail("SHA256SUMS exceeds its manifest-entry bound")
+    entries: dict[str, str] = {}
     for number, line in enumerate(lines, 1):
         fields = line.split("  ", 1)
         if len(fields) != 2 or not DIGEST.fullmatch(fields[0]):
@@ -208,36 +383,23 @@ def check_closed_manifest(root: Path) -> dict[str, str]:
         relative = safe_relative(fields[1], f"SHA256SUMS row {number}").as_posix()
         if relative in entries or relative == "SHA256SUMS":
             fail(f"duplicate or self-referential manifest path: {relative}")
-        path = root / relative
-        if path.is_symlink() or not path.is_file():
-            fail(f"manifest path is missing or unsafe: {relative}")
-        try:
-            path.resolve(strict=True).relative_to(root.resolve(strict=True))
-        except (OSError, ValueError):
-            fail(f"manifest path escapes the evidence root: {relative}")
-        size = path.stat().st_size
-        total += size
-        if relative == "provider-image.so" and size > MAX_PROVIDER_BYTES:
-            fail("provider-image.so exceeds the exact 8 MiB provider input bound")
-        if size > MAX_FILE_BYTES or total > MAX_TREE_BYTES:
-            fail("evidence tree exceeds the configured byte bound")
-        file_limit = MAX_PROVIDER_BYTES if relative == "provider-image.so" else MAX_FILE_BYTES
-        actual = sha256_bytes(read_file(root, relative, allow_empty=True, limit=file_limit))
+        actual = sha256_bytes(snapshot.read(relative, limit=_provider_file_limit(relative)))
         if actual != fields[0]:
             fail(f"SHA256SUMS digest mismatch: {relative}")
         entries[relative] = actual
-    actual_files: set[str] = set()
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            fail(f"evidence tree contains a symlink: {path.relative_to(root).as_posix()}")
-        if path.is_file() and path != manifest_path:
-            relative = path.relative_to(root).as_posix()
-            if relative.endswith(".tmp") or ".tmp." in relative:
-                fail(f"evidence tree retains a temporary file: {relative}")
-            actual_files.add(relative)
+    actual_files = snapshot.file_paths - {"SHA256SUMS"}
     if actual_files != set(entries):
         fail(f"SHA256SUMS is not closed (unlisted={sorted(actual_files - set(entries))}, missing={sorted(set(entries) - actual_files)})")
+    snapshot.verify_tree_unchanged()
     return entries
+
+
+def check_closed_manifest(root: Path, *, snapshot: Any | None = None) -> dict[str, str]:
+    current = snapshot or _new_root_snapshot(root)
+    if not current._preflighted:
+        current.preflight()
+    with _using_root_snapshot(current):
+        return _check_closed_manifest(root, current)
 
 
 def require_int(value: Any, label: str) -> int:
@@ -2192,6 +2354,12 @@ def _check_build_provenance(root: Path, build_record: dict[str, Any], commands: 
         actual = sha256_bytes(data)
         if build_record.get(field) != actual:
             fail(f"native build {field} does not bind retained bytes for {relative}")
+    evidence_tools = build_record.get("evidenceTools")
+    if not isinstance(evidence_tools, dict) or set(evidence_tools) != set(EVIDENCE_TOOL_FILES):
+        fail("native build record does not bind the exact provider/rollback evidence tool inventory")
+    for field, relative in EVIDENCE_TOOL_FILES.items():
+        if evidence_tools.get(field) != sha256_bytes(retained[relative]):
+            fail(f"native build {field} does not bind retained evidence tool source {relative}")
     if build_record.get("providerImageSha256") != provider["sha256"] or build_record.get("sourceConsumerSha256") != source_sha:
         fail("native build record does not bind measured provider/source ELF outputs")
     if build_record.get("providerImageSha256") != provider["sha256"]:
@@ -2346,27 +2514,36 @@ def _check_build_provenance(root: Path, build_record: dict[str, Any], commands: 
         "targetTriple": target_triple,
         "cFlags": C_FLAGS,
         "cppFlags": CPP_FLAGS,
+        "evidenceTools": {
+            field: sha256_bytes(retained[relative])
+            for field, relative in EVIDENCE_TOOL_FILES.items()
+        },
         "managedCliAssemblySha256": cli_sha,
         "managedCoreAssemblySha256": core_sha,
         "provenanceTrustBoundary": "retained-byte hashes bind recorded identities; they are not a cryptographic build attestation",
     }
 
 
-def build_report(root: Path) -> dict[str, Any]:
+def _matching_root_snapshot(root: Path) -> Any | None:
+    snapshot = _ACTIVE_ROOT_SNAPSHOT or sys.modules.get(_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY)
+    if snapshot is not None and Path(os.path.abspath(snapshot.root)) == Path(os.path.abspath(root)):
+        return snapshot
+    return None
+
+
+def _build_report_from_snapshot(root: Path) -> dict[str, Any]:
     if root.name != UNIT_ID:
         fail(f"evidence root basename must be exact unit id {UNIT_ID}")
-    if any(path.is_symlink() for path in root.rglob("*")):
-        fail("evidence root contains a symlink")
-    actual_files = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file() and path.name != "SHA256SUMS"}
+    snapshot = _matching_root_snapshot(root)
+    if snapshot is None or not snapshot._preflighted:
+        fail("external-provider report requires a bounded root snapshot")
+    actual_files = snapshot.file_paths - {"SHA256SUMS", "external-provider-evidence.json"}
     required = _exact_root_files()
-    if not (root / "external-provider-evidence.json").exists():
-        required.remove("external-provider-evidence.json")
-    expected_directories = {"handoffs", "runtime-files"}
-    for lane in ("source", "transformed"):
-        expected_directories.add(f"handoffs/{lane}")
-        for symbol in ENTRY_SYMBOLS:
-            expected_directories.add(f"handoffs/{lane}/{symbol}")
-    actual_directories = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    # The report is an output of this recomputation and is excluded from the
+    # semantic input comparison whether absent (sealing) or already retained.
+    required.remove("external-provider-evidence.json")
+    expected_directories = _expected_root_directories(_exact_root_files())
+    actual_directories = snapshot.directory_paths
     if actual_directories != expected_directories:
         fail(f"evidence directory set is not exact (missing={sorted(expected_directories - actual_directories)}, extra={sorted(actual_directories - expected_directories)})")
     if actual_files != required:
@@ -2576,52 +2753,39 @@ def build_report(root: Path) -> dict[str, Any]:
     }
 
 
-def _precheck_tree_bounds(root: Path) -> None:
-    total = 0
-    files = 0
-    try:
-        root_resolved = root.resolve(strict=True)
-        nodes = 0
-        for path in root.rglob("*"):
-            nodes += 1
-            if nodes > 256:
-                fail("evidence root contains more nodes than the closed evidence contract permits")
-            if path.is_symlink():
-                fail(f"evidence tree contains a symlink: {path.relative_to(root).as_posix()}")
-            if not path.is_file():
-                continue
-            files += 1
-            if files > 128:
-                fail("evidence root contains more files than the closed evidence contract permits")
-            try:
-                path.resolve(strict=True).relative_to(root_resolved)
-            except (OSError, ValueError):
-                fail(f"evidence path escapes its root: {path.relative_to(root).as_posix()}")
-            size = path.stat().st_size
-            per_file_limit = 256 * 1024 * 1024 if path.name in {"libc.so.6", "ld-linux-aarch64.so.1"} else MAX_FILE_BYTES
-            if size > per_file_limit:
-                fail(f"evidence file exceeds its byte bound: {path.relative_to(root).as_posix()}")
-            total += size
-            if total > MAX_TREE_BYTES:
-                fail("evidence tree exceeds the configured aggregate byte bound")
-    except OSError as error:
-        fail(f"cannot inspect bounded evidence root: {error}")
+def build_report(root: Path) -> dict[str, Any]:
+    snapshot = _matching_root_snapshot(root)
+    if snapshot is not None:
+        return _build_report_from_snapshot(root)
+    snapshot = _precheck_tree_bounds(root)
+    with _using_root_snapshot(snapshot):
+        return _build_report_from_snapshot(root)
+
+
+def _precheck_tree_bounds(root: Path):
+    snapshot = _new_root_snapshot(root, exact_inventory=True)
+    snapshot.preflight()
+    return snapshot
 
 
 def validate_root(root: Path, *, write_report: bool) -> dict[str, Any]:
     if root.is_symlink() or not root.is_dir():
         fail("evidence root is missing, unsafe, or not a directory")
-    _precheck_tree_bounds(root)
-    report = build_report(root)
-    report_path = root / "external-provider-evidence.json"
-    if write_report:
-        report_path.write_text(json.dumps(report, sort_keys=True, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        write_closed_manifest(root)
-    else:
-        check_closed_manifest(root)
-        claim = read_json(root, "external-provider-evidence.json")
-        if not same_json(claim, report):
-            fail("external-provider-evidence.json differs from independently recomputed facts")
+    snapshot = _precheck_tree_bounds(root)
+    with _using_root_snapshot(snapshot):
+        report = build_report(root)
+        if write_report:
+            snapshot.verify_tree_unchanged()
+            report_bytes = (json.dumps(report, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+            if len(report_bytes) > MAX_REPORT_BYTES:
+                fail("external-provider report exceeds its byte bound")
+            _write_root_file(root, "external-provider-evidence.json", report_bytes)
+            write_closed_manifest(root)
+        else:
+            check_closed_manifest(root, snapshot=snapshot)
+            claim = read_json(root, "external-provider-evidence.json")
+            if not same_json(claim, report):
+                fail("external-provider-evidence.json differs from independently recomputed facts")
     return report
 
 

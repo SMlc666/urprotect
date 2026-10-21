@@ -19,7 +19,7 @@ urp_entry:
 .section .tdata,"awT",%progbits
 .align 3
 .global tls_gd_value
-.type tls_gd_value, %object
+.type tls_gd_value, %tls_object
 tls_gd_value:
     .word 43
 .size tls_gd_value, .-tls_gd_value

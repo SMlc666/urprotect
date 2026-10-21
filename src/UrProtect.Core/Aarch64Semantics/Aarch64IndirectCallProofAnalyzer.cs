@@ -1551,7 +1551,58 @@ internal static class Aarch64IndirectCallProofAnalyzer
             {
                 outgoing.Guards.Add(ProofGuard.ThreadLifetimeTableSize);
             }
+            else if (TryGetCallbackNonNullGuard(
+                         instruction,
+                         condition,
+                         edge,
+                         before.ProofContext,
+                         out var callbackGuard))
+            {
+                outgoing.Guards.Add(callbackGuard);
+            }
         }
+    }
+
+    private static bool TryGetCallbackNonNullGuard(
+        Aarch64Instruction instruction,
+        FlowCondition condition,
+        FlowEdge edge,
+        Aarch64HostContextProofContext? proofContext,
+        out ProofGuard guard)
+    {
+        guard = default;
+        if (proofContext is null
+            || condition.Left.Kind != FlowValueKind.HostCallback
+            || condition.Left.Width != sizeof(ulong)
+            || condition.Right.Kind != FlowValueKind.Constant
+            || condition.Right.ConstantValue != 0
+            || edge.Kind is not (FlowEdgeKind.BranchTaken or FlowEdgeKind.BranchNotTaken))
+        {
+            return false;
+        }
+
+        // CMP Xn, #0 followed by B.EQ proves non-null on fallthrough; B.NE
+        // proves non-null on the taken edge. Never infer a callback guard from
+        // an unrelated condition or the null branch itself.
+        var conditionCode = GetConditionCode(instruction);
+        var nonNullEdge = conditionCode == 0 && edge.Kind == FlowEdgeKind.BranchNotTaken
+            || conditionCode == 1 && edge.Kind == FlowEdgeKind.BranchTaken;
+        if (!nonNullEdge)
+        {
+            return false;
+        }
+
+        var callbackOffset = checked((uint)condition.Left.Offset);
+        guard = callbackOffset switch
+        {
+            var offset when offset == proofContext.EmitDiagnosticCallbackOffset => ProofGuard.EmitDiagnosticNonNull,
+            var offset when offset == proofContext.CreateImageThreadCallbackOffset => ProofGuard.CreateImageThreadNonNull,
+            var offset when offset == proofContext.JoinImageThreadCallbackOffset => ProofGuard.JoinImageThreadNonNull,
+            _ => default,
+        };
+        return callbackOffset == proofContext.EmitDiagnosticCallbackOffset
+            || callbackOffset == proofContext.CreateImageThreadCallbackOffset
+            || callbackOffset == proofContext.JoinImageThreadCallbackOffset;
     }
 
     private static bool IsThreadLifetimeSizeSuccessEdge(

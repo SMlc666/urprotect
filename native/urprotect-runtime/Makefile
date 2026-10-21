@@ -259,9 +259,12 @@ $(HOST_IMAGE_VALIDATION_PROBE): host_image_validation_probe.c host_image_validat
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) host_image_validation_probe.c $(BUILD_DIR)/host_image_validation.o -o "$@"
 
-$(TLS_VALIDATION_TEST): host_context_tls_validation_test.c host_image_validation.h $(BUILD_DIR)/host_image_validation.o
+# The TLS bounds oracle uses the identical validation code built with
+# test-only diagnostics, so CI can distinguish malformed ELF from a
+# semantically unsupported relocation without changing production acceptance.
+$(TLS_VALIDATION_TEST): host_context_tls_validation_test.c host_image_validation.h $(HOST_IMAGE_VALIDATION_TEST_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) host_context_tls_validation_test.c $(BUILD_DIR)/host_image_validation.o -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) host_context_tls_validation_test.c $(HOST_IMAGE_VALIDATION_TEST_OBJECT) -o "$@"
 
 $(SELF_TEST): $(SELF_TEST_OBJECT) $(RUNTIME_OBJECTS) $(ENTRY_FIXTURE)
 	@mkdir -p "$(BUILD_DIR)"
@@ -359,7 +362,7 @@ $(TLSLE_FIXTURE_OBJECT): host_context_tlsle_fixture.S
 
 $(TLSLD_FIXTURE): $(TLSLD_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
 
 $(TLSLD_FIXTURE_OBJECT): host_context_tlsld_fixture.S
 	@mkdir -p "$(BUILD_DIR)"
@@ -367,7 +370,10 @@ $(TLSLD_FIXTURE_OBJECT): host_context_tlsld_fixture.S
 
 $(TLSGD_FIXTURE): $(TLSGD_FIXTURE_OBJECT)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
+	# The strict runtime parser deliberately does not accept DT_HASH alongside
+	# glibc version requirements. Build this legitimate TLSGD test DSO with
+	# GNU hash, like the runtime's approved glibc versioned-dependency subset.
+	$(LD) -shared --hash-style=gnu --build-id=none -z now --no-as-needed --emit-relocs "$<" -lc -o "$@"
 
 $(TLSGD_FIXTURE_OBJECT): host_context_tlsgd_fixture.S
 	@mkdir -p "$(BUILD_DIR)"

@@ -87,8 +87,8 @@ typedef struct urp_fd_image {
 
 static pthread_mutex_t urp_image_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 static urp_fd_image *urp_image_registry;
-static urp_loaded_provider *urp_active_provider;
 #if defined(__GLIBC__)
+static urp_loaded_provider *urp_active_provider;
 static urp_image_thread_handle urp_next_thread_handle = 1U;
 #endif
 static urp_image_handle urp_next_image_handle = 1U;
@@ -197,6 +197,7 @@ static int urp_create_sealed_memfd(
     return fd;
 }
 
+#if defined(__GLIBC__)
 static int urp_read_provider_file(
     const char *path,
     uint8_t **bytes_out,
@@ -262,6 +263,8 @@ static void urp_sha256_hex(const uint8_t *bytes, size_t size, char output[65])
     output[64] = '\0';
 }
 
+#endif /* __GLIBC__: provider file acquisition and digest */
+
 static int urp_is_hex_string(const char *value, size_t expected_length)
 {
     if (value == NULL || strlen(value) != expected_length) return 0;
@@ -273,6 +276,7 @@ static int urp_is_hex_string(const char *value, size_t expected_length)
     return 1;
 }
 
+#if defined(__GLIBC__)
 static int urp_hex_equal(const char *left, const char *right, size_t length)
 {
     if (left == NULL || right == NULL) return 0;
@@ -285,6 +289,8 @@ static int urp_hex_equal(const char *left, const char *right, size_t length)
     }
     return 1;
 }
+
+#endif /* __GLIBC__: provider digest comparison */
 
 #if defined(__GLIBC__)
 typedef struct urp_soname_search {

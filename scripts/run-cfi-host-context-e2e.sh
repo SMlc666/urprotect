@@ -117,30 +117,87 @@ PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-r
 set +e
 "$harness" "$positive/source-image.bin" >"$positive/baseline-unwind.txt" 2>"$positive/baseline-unwind.stderr"
 baseline_status=$?
-target_vaddr="$(python3 - "$positive/rehydration.json" "$target_source_vaddr" <<'PYMAP'
+read -r target_vaddr target_size < <(python3 - "$positive/rehydration.json" "$target_source_vaddr" <<'PYMAP'
 import json,sys
 record=json.load(open(sys.argv[1]))
 entries=record["layoutEvidence"]["addressMap"]
 source_vaddr=int(sys.argv[2], 0)
-region=next(entry for entry in entries if entry["sourceRange"]["virtualAddress"]["value"] == source_vaddr)
-print(region["outputRange"]["virtualAddress"]["value"])
+def address_value(value):
+    if isinstance(value, bool):
+        raise SystemExit("CFI address map contains a Boolean address")
+    return value if isinstance(value, int) else int(value, 0)
+regions=[entry for entry in entries if address_value(entry["sourceRange"]["virtualAddress"]["value"]) == source_vaddr]
+if len(regions) != 1:
+    raise SystemExit("CFI source function is not uniquely mapped")
+region=regions[0]["outputRange"]
+print(region["virtualAddress"]["value"], region["size"])
 PYMAP
-)"
-target_size="$(python3 - "$positive/rehydration.json" "$target_source_vaddr" <<'PYMAP'
-import json,sys
-record=json.load(open(sys.argv[1]))
-entries=record["layoutEvidence"]["addressMap"]
-source_vaddr=int(sys.argv[2], 0)
-region=next(entry for entry in entries if entry["sourceRange"]["virtualAddress"]["value"] == source_vaddr)
-print(region["outputRange"]["size"])
-PYMAP
-)"
-"$harness" "$positive/native-image.bin" --expect-transformed --target-vaddr "$target_vaddr" --target-size "$target_size" >"$positive/transformed-unwind.txt" 2>"$positive/transformed-unwind.stderr"
+)
+# urp_entry remains the public stub; the protected CFI body is a relocated
+# address-map range. Pass the actual emitted FDE interval to the harness so its
+# frame checks follow code that can really unwind rather than the stub.
+read -r emitted_frame_vaddr emitted_frame_size < <(python3 - "$positive/source-image.bin" "$positive/native-image.bin" "$target_vaddr" "$target_size" <<'PYFDE'
+import re, struct, subprocess, sys
+
+def fdes(path):
+    dump = subprocess.check_output(["readelf", "--debug-dump=frames", path], text=True)
+    return [(int(a, 16), int(b, 16)) for a, b in re.findall(
+        r"\bFDE cie=[0-9a-fA-F]+\s+pc=([0-9a-fA-F]+)\.\.([0-9a-fA-F]+)", dump
+    )]
+
+source_ranges = fdes(sys.argv[1])
+emitted_ranges = fdes(sys.argv[2])
+map_start, map_size = int(sys.argv[3], 0), int(sys.argv[4], 0)
+if len(source_ranges) == 0 or len(emitted_ranges) == 0:
+    raise SystemExit("CFI fixture lacks source or emitted FDE records")
+output_fdes = [item for item in emitted_ranges if map_start <= item[0] < item[1] <= map_start + map_size]
+if len(output_fdes) != 1:
+    raise SystemExit("CFI mapped target must contain exactly one emitted FDE")
+start, end = output_fdes[0]
+if start <= 0 or end <= start:
+    raise SystemExit("CFI relocated FDE must have a nonzero extent")
+image = open(sys.argv[2], "rb").read()
+if image[:7] != b"\x7fELF\x02\x01\x01" or struct.unpack_from("<HH", image, 16) != (3, 183):
+    raise SystemExit("CFI transformed image must be AArch64 ELF64 little-endian ET_DYN")
+phoff = struct.unpack_from("<Q", image, 32)[0]
+ehsize, phentsize, phnum = struct.unpack_from("<HHH", image, 52)
+if ehsize != 64 or phentsize < 56 or phnum == 0 or phoff + phentsize * phnum > len(image):
+    raise SystemExit("invalid CFI program-header table")
+loads = []
+owners = []
+for index in range(phnum):
+    off = phoff + phentsize * index
+    kind, flags, file_offset, vaddr, _paddr, filesz, memsz, _align = struct.unpack_from("<IIQQQQQQ", image, off)
+    if kind != 1:
+        continue
+    if file_offset + filesz > len(image) or filesz > memsz or vaddr + memsz > 1 << 64:
+        raise SystemExit("invalid CFI PT_LOAD bounds")
+    loads.append((file_offset, file_offset + filesz, vaddr, vaddr + memsz))
+    if flags & 1 and vaddr <= start < end <= vaddr + filesz:
+        owners.append((file_offset, vaddr, filesz))
+for index, (file_start, file_end, va_start, va_end) in enumerate(loads):
+    for other_file_start, other_file_end, other_va_start, other_va_end in loads[index + 1:]:
+        if va_start < other_va_end and other_va_start < va_end:
+            raise SystemExit("overlapping CFI PT_LOAD virtual ranges")
+        if file_start < file_end and other_file_start < other_file_end and file_start < other_file_end and other_file_start < file_end:
+            raise SystemExit("overlapping CFI PT_LOAD file ranges")
+if len(owners) != 1:
+    raise SystemExit("relocated FDE does not lie uniquely inside a file-backed executable LOAD")
+print(hex(start), end - start)
+PYFDE
+)
+if [[ -z "$target_vaddr" || -z "$target_size" || -z "$emitted_frame_vaddr" || -z "$emitted_frame_size" ]]; then
+  echo 'CFI mapped target or relocated FDE proof absent' >&2
+  exit 1
+fi
+printf 'mappedFdeVaddr=%s mappedFdeSize=%s\n' \
+  "$emitted_frame_vaddr" "$emitted_frame_size" >"$positive/transformed-fde-range.txt"
+"$harness" "$positive/native-image.bin" --expect-transformed --target-vaddr "$emitted_frame_vaddr" --target-size "$emitted_frame_size" >"$positive/transformed-unwind.txt" 2>"$positive/transformed-unwind.stderr"
 transformed_status=$?
 set -e
 [ "$baseline_status" -eq 0 ] && [ "$transformed_status" -eq 0 ] || exit 1
 
-python3 - "$positive" "$function_id" "$source_file" "$baseline_status" "$transformed_status" "$artifact_root/cpp-runtime-identity.json" "$target_source_vaddr" "$target_vaddr" "$target_size" <<'PY'
+python3 - "$positive" "$function_id" "$source_file" "$baseline_status" "$transformed_status" "$artifact_root/cpp-runtime-identity.json" "$target_source_vaddr" "$target_vaddr" "$target_size" "$emitted_frame_vaddr" "$emitted_frame_size" <<'PY'
 import hashlib, json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 def parse(path):
@@ -185,6 +242,8 @@ def address_value(value):
 source_vaddr = int(sys.argv[7], 0)
 output_vaddr = int(sys.argv[8], 0)
 target_size = int(sys.argv[9], 0)
+relocated_fde_vaddr = int(sys.argv[10], 0)
+relocated_fde_size = int(sys.argv[11], 0)
 address_entries = rehydration["layoutEvidence"]["addressMap"]
 address_region = next(
     item for item in address_entries
@@ -203,6 +262,10 @@ record = {
         "sourceVirtualAddress": source_vaddr,
         "outputVirtualAddress": output_vaddr,
         "size": target_size,
+    },
+    "relocatedFde": {
+        "virtualAddress": relocated_fde_vaddr,
+        "size": relocated_fde_size,
     },
     "registerCallUnwindWitness": {
         "functionSymbol": "urp_cfi_invoke_with_registers",

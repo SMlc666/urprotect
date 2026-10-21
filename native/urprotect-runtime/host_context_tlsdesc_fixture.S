@@ -21,7 +21,7 @@ urp_entry:
 .section .tdata,"awT",%progbits
 .align 3
 .global tls_desc_value
-.type tls_desc_value, %object
+.type tls_desc_value, %tls_object
 tls_desc_value:
     .word 43
 .size tls_desc_value, .-tls_desc_value

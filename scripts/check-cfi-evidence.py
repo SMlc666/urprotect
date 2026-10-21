@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+import struct
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +138,79 @@ def readelf_fde_ranges(output: str) -> list[tuple[int, int]]:
     ]
 
 
+def parse_pt_load_segments(root: Path, relative: str, label: str) -> tuple[bytes, list[dict[str, int]]]:
+    data = evidence_file(root, relative).read_bytes()
+    if len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01":
+        fail(f"CFI {label} is not a bounded little-endian ELF64 image")
+    elf_type, machine, version = struct.unpack_from("<HHI", data, 16)
+    if elf_type not in (2, 3) or machine != 183 or version != 1:
+        fail(f"CFI {label} ELF class/type/machine is unsupported")
+    phoff = struct.unpack_from("<Q", data, 32)[0]
+    ehsize, phentsize, phnum = struct.unpack_from("<HHH", data, 52)
+    if ehsize != 64 or phentsize < 56 or phnum == 0 or phnum > 4096:
+        fail(f"CFI {label} ELF program-header table is malformed or excessive")
+    table_size = phentsize * phnum
+    if phoff > len(data) or table_size > len(data) - phoff:
+        fail(f"CFI {label} ELF program-header table is outside the file")
+
+    segments: list[dict[str, int]] = []
+    for index in range(phnum):
+        offset = phoff + index * phentsize
+        p_type, flags, file_offset, virtual_address, _, file_size, memory_size, _ = struct.unpack_from(
+            "<IIQQQQQQ", data, offset
+        )
+        if p_type != 1:
+            continue
+        if file_size > memory_size or file_offset > len(data) or file_size > len(data) - file_offset:
+            fail(f"CFI {label} PT_LOAD file range is malformed")
+        if virtual_address > 0xFFFFFFFFFFFFFFFF - memory_size:
+            fail(f"CFI {label} PT_LOAD virtual range overflows")
+        segments.append({
+            "flags": flags,
+            "fileOffset": file_offset,
+            "virtualAddress": virtual_address,
+            "fileSize": file_size,
+            "memorySize": memory_size,
+        })
+    if not segments:
+        fail(f"CFI {label} ELF has no PT_LOAD segments")
+
+    for index, left in enumerate(segments):
+        left_start = left["virtualAddress"]
+        left_end = left_start + left["memorySize"]
+        left_file_start = left["fileOffset"]
+        left_file_end = left_file_start + left["fileSize"]
+        for right in segments[index + 1:]:
+            right_start = right["virtualAddress"]
+            right_end = right_start + right["memorySize"]
+            right_file_start = right["fileOffset"]
+            right_file_end = right_file_start + right["fileSize"]
+            if left["memorySize"] and right["memorySize"] and left_start < right_end and right_start < left_end:
+                fail(f"CFI {label} ELF has overlapping PT_LOAD memory ranges")
+            if left["fileSize"] and right["fileSize"] and left_file_start < right_file_end and right_file_start < left_file_end:
+                fail(f"CFI {label} ELF has overlapping PT_LOAD file ranges")
+    return data, segments
+
+
+def validate_fde_pt_load_mapping(root: Path, relative: str, label: str, start: int, size: int) -> None:
+    if size <= 0:
+        fail(f"CFI {label} FDE extent is empty")
+    end = checked_address_add(start, size, f"{label} FDE end")
+    data, segments = parse_pt_load_segments(root, relative, label)
+    owners = [
+        segment for segment in segments
+        if segment["flags"] & 1
+        and segment["virtualAddress"] <= start
+        and end <= segment["virtualAddress"] + segment["fileSize"]
+    ]
+    if len(owners) != 1:
+        fail(f"CFI {label} FDE is not uniquely mapped to a file-backed executable PT_LOAD")
+    owner = owners[0]
+    file_start = owner["fileOffset"] + (start - owner["virtualAddress"])
+    if file_start > len(data) or size > len(data) - file_start:
+        fail(f"CFI {label} FDE file-backed executable PT_LOAD mapping exceeds the image")
+
+
 def integer_or_hex(value: Any) -> int:
     if isinstance(value, bool):
         fail("CFI address map contains a Boolean integer")
@@ -156,9 +230,11 @@ def validate_target_map(root: Path, record: dict[str, Any], baseline: dict[str, 
         fail("CFI transformed target address-map binding is missing")
     source_vaddr = mapping.get("sourceVirtualAddress")
     output_vaddr = mapping.get("outputVirtualAddress")
-    size = mapping.get("size")
-    if not all(integer(value) for value in (source_vaddr, output_vaddr, size)) or size <= 0:
+    mapped_size = mapping.get("size")
+    if not all(integer(value) for value in (source_vaddr, output_vaddr, mapped_size)) or mapped_size <= 0:
         fail("CFI transformed target address-map binding is malformed")
+    output_map_end = checked_address_add(output_vaddr, mapped_size, "output mapped target end")
+
     rehydration = read_json(root / "positive" / record["unitId"], "rehydration.json")
     entries = rehydration.get("layoutEvidence", {}).get("addressMap")
     if not isinstance(entries, list):
@@ -173,26 +249,50 @@ def validate_target_map(root: Path, record: dict[str, Any], baseline: dict[str, 
     if len(matches) != 1:
         fail("CFI source target is not uniquely bound in the rehydration address map")
     output = matches[0].get("outputRange", {})
-    if integer_or_hex(output.get("virtualAddress", {}).get("value")) != output_vaddr or integer_or_hex(output.get("size")) != size:
+    if integer_or_hex(output.get("virtualAddress", {}).get("value")) != output_vaddr or integer_or_hex(output.get("size")) != mapped_size:
         fail("CFI transformed invocation range differs from the rehydration address map")
     if baseline.get("targetInvocationMode") != "direct-symbol":
         fail("CFI baseline target must use its source symbol")
     if transformed.get("targetInvocationMode") != "address-map":
         fail("CFI transformed target was not invoked through the rehydration address map")
-    if transformed.get("targetSymbolSize") != size:
-        fail("CFI transformed target size differs from its mapped range")
-    source_size = baseline.get("targetSymbolSize")
+    if not integer(baseline.get("targetSymbolSize")):
+        fail("CFI source target symbol extent is malformed")
+    source_size = baseline["targetSymbolSize"]
     source_mapped_size = integer_or_hex(matches[0].get("sourceRange", {}).get("size"))
-    if not integer(source_size) or source_size <= 0 or source_size != source_mapped_size:
+    if source_size <= 0 or source_size != source_mapped_size:
         fail("CFI source target extent differs from its rehydration source range")
+    source_target_end = checked_address_add(source_vaddr, source_size, "source target end")
+
+    relocated_fde = record.get("relocatedFde")
+    if not isinstance(relocated_fde, dict):
+        fail("CFI relocated transformed target FDE record is missing")
+    fde_vaddr = relocated_fde.get("virtualAddress")
+    fde_size = relocated_fde.get("size")
+    if not integer(fde_vaddr) or not integer(fde_size) or fde_size <= 0:
+        fail("CFI relocated transformed target FDE record is malformed")
+    fde_end = checked_address_add(fde_vaddr, fde_size, "relocated FDE end")
+    if fde_vaddr < output_vaddr or fde_end > output_map_end:
+        fail("relocated transformed target FDE is outside the rehydration output address map")
+    if transformed.get("targetSymbolSize") != fde_size:
+        fail("CFI transformed target size differs from the relocated FDE extent")
+
+    range_text = evidence_file(root, f"positive/{record['unitId']}/transformed-fde-range.txt").read_text(encoding="utf-8", errors="strict").strip()
+    range_match = re.fullmatch(r"mappedFdeVaddr=(0x[0-9a-fA-F]+|[0-9]+) mappedFdeSize=(0x[0-9a-fA-F]+|[0-9]+)", range_text)
+    if range_match is None or (int(range_match.group(1), 0), int(range_match.group(2), 0)) != (fde_vaddr, fde_size):
+        fail("CFI relocated FDE record differs from the retained emitted FDE range")
+
+    source_relative = f"positive/{record['unitId']}/source-image.bin"
+    native_relative = f"positive/{record['unitId']}/native-image.bin"
+    validate_fde_pt_load_mapping(root, source_relative, "source", source_vaddr, source_size)
+    validate_fde_pt_load_mapping(root, native_relative, "relocated", fde_vaddr, fde_size)
     source_readelf = evidence_file(root, f"positive/{record['unitId']}/source-unwind-readelf.txt").read_text(encoding="utf-8", errors="replace")
     native_readelf = evidence_file(root, f"positive/{record['unitId']}/native-unwind-readelf.txt").read_text(encoding="utf-8", errors="replace")
     source_fdes = readelf_fde_ranges(source_readelf)
     native_fdes = readelf_fde_ranges(native_readelf)
-    if not any(start <= source_vaddr and end >= source_vaddr + source_size for start, end in source_fdes):
+    if not any(start <= source_vaddr and end >= source_target_end for start, end in source_fdes):
         fail("CFI source target is not covered by a complete readelf FDE")
-    if not any(start <= output_vaddr and end >= output_vaddr + size for start, end in native_fdes):
-        fail("mapped transformed target range is not covered by a complete readelf FDE")
+    if native_fdes.count((fde_vaddr, fde_end)) != 1:
+        fail("relocated transformed target FDE is not uniquely present in native readelf evidence")
 
 
 def checked_address(value: Any, label: str) -> int:
@@ -214,14 +314,17 @@ def validate_runtime_address_observations(
     if not isinstance(mapping, dict):
         fail("CFI runtime target map is missing")
     source_vaddr = checked_address(mapping.get("sourceVirtualAddress"), "sourceVirtualAddress")
-    output_vaddr = checked_address(mapping.get("outputVirtualAddress"), "outputVirtualAddress")
-    output_size = checked_address(mapping.get("size"), "mapped size")
-    if output_size == 0:
-        fail("CFI runtime mapped target extent is empty")
+    relocated_fde = record.get("relocatedFde")
+    if not isinstance(relocated_fde, dict):
+        fail("CFI runtime relocated FDE binding is missing")
+    output_fde_vaddr = checked_address(relocated_fde.get("virtualAddress"), "relocated FDE virtualAddress")
+    output_fde_size = checked_address(relocated_fde.get("size"), "relocated FDE size")
+    if output_fde_size == 0:
+        fail("CFI runtime relocated FDE extent is empty")
 
     for label, observed, expected_vaddr, expected_size in (
         ("baseline", baseline, source_vaddr, baseline.get("targetSymbolSize")),
-        ("transformed", transformed, output_vaddr, output_size),
+        ("transformed", transformed, output_fde_vaddr, output_fde_size),
     ):
         expected_size = checked_address(expected_size, f"{label} target extent")
         if expected_size == 0:
@@ -464,6 +567,27 @@ def main() -> None:
             fail(f"CFI transformed-image observation invalid for {label}")
 
     validate_runtime_outputs(root, unit, record)
+    actual_negative = read_json(root, "negative-malformed-eh-frame/producer.stdout")
+    observed_stage = read_json(root, "negative-malformed-eh-frame/stage.json")
+    negative_source = evidence_file(root, "negative-malformed-eh-frame/source-image.bin")
+    diagnostics = observed_stage.get("diagnostics")
+    if (
+        actual_negative.get("success") is not False
+        or actual_negative.get("stage") != observed_stage
+        or observed_stage.get("status") != "failed"
+        or observed_stage.get("firstFailureStage") != "protected-image-producer"
+        or observed_stage.get("publicationComplete") is not False
+        or observed_stage.get("unitId") != f"{unit}.negative"
+        or observed_stage.get("sourceSha256") != digest(negative_source)
+        or not isinstance(diagnostics, list)
+        or not any(
+            isinstance(item, dict)
+            and item.get("severity") == "Error"
+            and item.get("code") == "UnwindMetadataMalformed"
+            for item in diagnostics
+        )
+    ):
+        fail("CFI malformed-metadata negative lacks an actual UnwindMetadataMalformed producer failure")
     negative = read_json(root, "negative-malformed-eh-frame/negative-result.json")
     if (
         negative.get("status") != "passed"

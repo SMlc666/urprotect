@@ -85,6 +85,20 @@ cp -- "$repo_root/native/urprotect-launcher/sha256.c" "$positive/build-inputs/sh
 cp -- "$repo_root/native/urprotect-launcher/sha256.h" "$positive/build-inputs/sha256.h"
 cp -- "$provider_source" "$positive/build-inputs/host_context_external_provider_fixture.S"
 cp -- "$consumer_source" "$positive/build-inputs/host_context_external_provider_consumer_fixture.S"
+evidence_tool_sources=(
+  scripts/run-external-provider-e2e.sh
+  scripts/check-external-provider-evidence.py
+  scripts/check-dynamic-import-evidence.py
+  scripts/check-indirect-control-evidence.py
+  scripts/evidence_load_range.py
+  scripts/tls_runtime_identity.py
+  scripts/run-external-provider-rollback-oracle.sh
+  scripts/check-external-provider-rollback-evidence.py
+)
+mkdir -p "$positive/build-inputs/evidence-tools/scripts"
+for relative in "${evidence_tool_sources[@]}"; do
+  cp -- "$repo_root/$relative" "$positive/build-inputs/evidence-tools/$relative"
+done
 
 source_sha="$(sha256sum "$positive/source-image.bin" | cut -d' ' -f1)"
 provider_sha="$(sha256sum "$positive/provider-image.so" | cut -d' ' -f1)"
@@ -395,6 +409,16 @@ build_record = {
     "sha256HeaderSha256": sha(root / "build-inputs/sha256.h"),
     "hostAdapterObjectSha256": sha(root / "host-adapter.o"),
     "rollbackAdapterObjectSha256": sha(root / "rollback-host-adapter.o"),
+    "evidenceTools": {
+        "providerProducerSha256": sha(root / "build-inputs/evidence-tools/scripts/run-external-provider-e2e.sh"),
+        "providerCheckerSha256": sha(root / "build-inputs/evidence-tools/scripts/check-external-provider-evidence.py"),
+        "dynamicImportParserSha256": sha(root / "build-inputs/evidence-tools/scripts/check-dynamic-import-evidence.py"),
+        "indirectControlParserSha256": sha(root / "build-inputs/evidence-tools/scripts/check-indirect-control-evidence.py"),
+        "evidenceLoadRangeHelperSha256": sha(root / "build-inputs/evidence-tools/scripts/evidence_load_range.py"),
+        "runtimeIdentityVerifierSha256": sha(root / "build-inputs/evidence-tools/scripts/tls_runtime_identity.py"),
+        "rollbackProducerSha256": sha(root / "build-inputs/evidence-tools/scripts/run-external-provider-rollback-oracle.sh"),
+        "rollbackCheckerSha256": sha(root / "build-inputs/evidence-tools/scripts/check-external-provider-rollback-evidence.py"),
+    },
     "hostImageValidationObjectSha256": sha(root / "host-image-validation.o"),
     "rollbackHostImageValidationTestObjectSha256": sha(root / "rollback-host-image-validation-test.o"),
     "rollbackHelperSourceSha256": sha(root / "build-inputs/host_context_external_provider_self_test.c"),
@@ -447,6 +471,16 @@ files = [
     "build-inputs/include/urp/host_context.h", "build-inputs/sha256.c", "build-inputs/sha256.h",
     "build-inputs/host_context_external_provider_fixture.S",
     "build-inputs/host_context_external_provider_consumer_fixture.S",
+    *[f"build-inputs/evidence-tools/{relative}" for relative in (
+        "scripts/run-external-provider-e2e.sh",
+        "scripts/check-external-provider-evidence.py",
+        "scripts/check-dynamic-import-evidence.py",
+        "scripts/check-indirect-control-evidence.py",
+        "scripts/evidence_load_range.py",
+        "scripts/tls_runtime_identity.py",
+        "scripts/run-external-provider-rollback-oracle.sh",
+        "scripts/check-external-provider-rollback-evidence.py",
+    )],
     "toolchain/cc-driver", "toolchain/cc1", "toolchain/as", "toolchain/ld",
     "toolchain/cc-version.txt", "toolchain/as-version.txt", "toolchain/ld-version.txt", "toolchain/target-triple.txt",
     "managed-build/urprotect.dll", "managed-build/UrProtect.Core.dll", "managed-build/dotnet-version.txt",
@@ -460,7 +494,7 @@ for relative in files:
     if path.is_dir():
         continue
     path.unlink()
-for relative in ("build-inputs/include/urp", "build-inputs/include", "build-inputs", "toolchain", "managed-build"):
+for relative in ("build-inputs/evidence-tools/scripts", "build-inputs/evidence-tools", "build-inputs/include/urp", "build-inputs/include", "build-inputs", "toolchain", "managed-build"):
     (root / relative).rmdir()
 PY
 

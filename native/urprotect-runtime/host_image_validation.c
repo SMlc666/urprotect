@@ -864,15 +864,34 @@ static int urp_validate_defined_tls_symbol(
             &tls_memory_size,
             dynamic->candidate_work)
         || !urp_tls_symbol_value_in_bounds(symbol_value, symbol_size, tls_memory_size)) {
+#if defined(URP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS)
+        if (getenv("URP_HOST_VALIDATION_TRACE") != NULL) {
+            (void)fprintf(stderr,
+                "TLS symbol rejected type=%u binding=%u section=%u "
+                "value=%llu size=%llu memorySize=%llu symindex=%llu\\n",
+                (unsigned)symbol_type, (unsigned)symbol_binding, (unsigned)section_index,
+                (unsigned long long)symbol_value, (unsigned long long)symbol_size,
+                (unsigned long long)tls_memory_size, (unsigned long long)symbol);
+        }
+#endif
         return 0;
     }
 
     uint64_t addend_bits = urp_read_u64_le(relocation + 16U);
-    if ((addend_bits >> 63U) == 0U) {
-        return addend_bits <= tls_memory_size - symbol_value;
+    int addend_valid = ((addend_bits >> 63U) == 0U)
+        ? addend_bits <= tls_memory_size - symbol_value
+        : ((~addend_bits) + 1U) <= symbol_value;
+#if defined(URP_HOST_IMAGE_VALIDATION_TEST_DIAGNOSTICS)
+    if (!addend_valid && getenv("URP_HOST_VALIDATION_TRACE") != NULL) {
+        (void)fprintf(stderr,
+            "TLS relocation addend rejected symbol=%llu value=%llu size=%llu "
+            "memorySize=%llu addend=0x%llx\\n",
+            (unsigned long long)symbol, (unsigned long long)symbol_value,
+            (unsigned long long)symbol_size, (unsigned long long)tls_memory_size,
+            (unsigned long long)addend_bits);
     }
-    uint64_t magnitude = (~addend_bits) + 1U;
-    return magnitude <= symbol_value;
+#endif
+    return addend_valid;
 }
 
 static int urp_dynamic_string(

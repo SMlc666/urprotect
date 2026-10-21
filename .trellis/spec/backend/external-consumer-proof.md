@@ -266,6 +266,21 @@ new public diagnostic API. See the error spec for safe-file and codec errors.
   provider-path redaction and no artifacts on failure. `LinuxSafeFileInputTests`
   owns FIFO, final symlink, descriptor replacement and deterministic growth /
   truncation negatives; see the safe-input spec for assertion points.
+- The indirect-control independent checker preflights the complete closed root
+  before reading, hashing, or parsing any evidence bytes. It rejects symlink and
+  special-file entries, applies explicit per-file and aggregate byte/count
+  bounds, opens root-relative files with no-follow descriptors, and verifies
+  truncation/growth and snapshot identity while reading. Its PT_LOAD owner
+  contract comes from the sibling `evidence_load_range.py` loaded by explicit
+  file path, not ambient `PYTHONPATH`. The private module key is scoped to the
+  checker instance, and any pre-existing `sys.modules` entry must be the exact
+  module object owned by that checker; foreign-origin and same-origin entries
+  with forged source-digest markers are rejected before reuse. Positive-provider
+  and rollback roots
+  retain and hash the exact producer/checker/parser inventory, including this
+  shared range helper; refreshed manifests do not replace those source-hash
+  checks. These hashes pin retained source within the evidence contract, not a
+  cryptographic build attestation, and do not promote the runtime row.
 - Accepted managed gate logs are under `.artifacts/managed-provider-review/`:
   64 publication, 9 original-regression/legacy/safe-file, 340 focused,
   **754 full with no skips**, Release 0 warnings/errors, architecture/encoder

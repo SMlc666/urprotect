@@ -39,6 +39,32 @@ def _refresh_manifest(root: Path) -> None:
     (root / "SHA256SUMS").write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
+def _dynsym_records(image: bytes) -> dict[int, tuple[str, int, int, int, int, int, int]]:
+    shoff = struct.unpack_from("<Q", image, 40)[0]
+    shentsize, shnum = struct.unpack_from("<HH", image, 58)
+    records: dict[int, tuple[str, int, int, int, int, int, int]] = {}
+    for section_index in range(shnum):
+        section_offset = shoff + section_index * shentsize
+        _name, section_type = struct.unpack_from("<II", image, section_offset)
+        if section_type != 11:
+            continue
+        header = struct.unpack_from("<IIQQQQIIQQ", image, section_offset)
+        table_offset, table_size, link, entry_size = header[4], header[5], header[6], header[9]
+        string_header = shoff + link * shentsize
+        string_data = struct.unpack_from("<IIQQQQ", image, string_header)
+        strings = image[string_data[4]:string_data[4] + string_data[5]]
+        if entry_size != 24 or table_size % entry_size:
+            raise AssertionError("shared-table ELF has malformed dynsym")
+        for index in range(table_size // entry_size):
+            offset = table_offset + index * entry_size
+            name_offset, info, other, section, value, size = struct.unpack_from("<IBBHQQ", image, offset)
+            end = strings.find(b"\0", name_offset)
+            if end < 0:
+                raise AssertionError("shared-table ELF has malformed dynsym name")
+            records[index] = (strings[name_offset:end].decode(), value, size, info & 0xF, info >> 4, other & 0x3, section)
+    return records
+
+
 def _dynsym_selector(image: bytes) -> str:
     shoff = struct.unpack_from("<Q", image, 40)[0]
     shentsize, shnum = struct.unpack_from("<HH", image, 58)
@@ -64,6 +90,22 @@ def _dynsym_selector(image: bytes) -> str:
     raise AssertionError("shared-table source fixture has no dynamic urp_entry")
 
 
+def _file_offset_for_va(image: bytes, address: int, size: int) -> int:
+    phoff = struct.unpack_from("<Q", image, 32)[0]
+    phentsize, phnum = struct.unpack_from("<HH", image, 54)
+    matches = []
+    for index in range(phnum):
+        offset = phoff + index * phentsize
+        p_type, _flags, p_offset, p_vaddr, _paddr, p_filesz, _p_memsz, _align = struct.unpack_from(
+            "<IIQQQQQQ", image, offset
+        )
+        if p_type == 1 and address >= p_vaddr and address - p_vaddr <= p_filesz and size <= p_filesz - (address - p_vaddr):
+            matches.append(p_offset + address - p_vaddr)
+    if len(matches) != 1:
+        raise AssertionError("address is not uniquely file-backed in the test ELF")
+    return matches[0]
+
+
 class SharedJumpTableEvidenceTests(unittest.TestCase):
     def setUp(self) -> None:
         if not FIXTURE.is_dir():
@@ -75,12 +117,12 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
         self.source = (self.root / "source-image.bin").read_bytes()
         self.selector = _dynsym_selector(self.source)
 
-    def run_checker(self) -> subprocess.CompletedProcess[str]:
+    def run_checker(self, root: Path | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 sys.executable,
                 str(CHECKER),
-                str(self.root),
+                str(root or self.root),
                 "--unit",
                 UNIT,
                 "--selected-function",
@@ -96,8 +138,179 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
         behavior[behavior_field] = _sha((self.root / handoff_name).read_bytes())
         return behavior
 
+    def refresh_native_bindings(self) -> None:
+        native_path = self.root / "native-image.bin"
+        native = native_path.read_bytes()
+        native_hash = _sha(native)
+        rehydration_path = self.root / "rehydration.json"
+        rehydration = _read_json(rehydration_path)
+        rehydration["nativeImageSha256"] = native_hash
+        rehydration["nativeImageSize"] = len(native)
+        rehydration["layoutEvidence"]["outputSha256"] = native_hash
+        _write_json(rehydration_path, rehydration)
+        metadata = _read_json(self.root / "native-image.json")
+        metadata["nativeImageSha256"] = native_hash
+        metadata["nativeImageSize"] = len(native)
+        _write_json(self.root / "native-image.json", metadata)
+        for name in ("handoff.json", "observer-transformed-handoff.json"):
+            path = self.root / name
+            record = _read_json(path)
+            record["nativeImageSha256"] = native_hash
+            _write_json(path, record)
+        behavior_path = self.root / "shared-table-behavior.json"
+        behavior = _read_json(behavior_path)
+        behavior["observerTransformedNativeImageSha256"] = native_hash
+        behavior["selectedTransformedHandoffSha256"] = _sha((self.root / "handoff.json").read_bytes())
+        behavior["observerTransformedHandoffSha256"] = _sha((self.root / "observer-transformed-handoff.json").read_bytes())
+        _write_json(behavior_path, behavior)
+
+    def add_native_load_alias(
+        self,
+        virtual_address: int,
+        file_offset: int,
+        size: int,
+        flags: int,
+        *,
+        partial: bool,
+    ) -> None:
+        if partial:
+            virtual_address += size - 1
+            file_offset += size - 1
+            size = 1
+        native_path = self.root / "native-image.bin"
+        image = bytearray(native_path.read_bytes())
+        phoff = struct.unpack_from("<Q", image, 32)[0]
+        phentsize, phnum = struct.unpack_from("<HH", image, 54)
+        if phentsize != 56:
+            raise AssertionError("unexpected native ELF program-header size")
+        previous_headers = bytes(image[phoff:phoff + phentsize * phnum])
+        relocated_phoff = len(image)
+        image.extend(previous_headers)
+        image.extend(struct.pack(
+            "<IIQQQQQQ", 1, flags, file_offset, virtual_address, virtual_address, size, size, 1
+        ))
+        struct.pack_into("<Q", image, 32, relocated_phoff)
+        struct.pack_into("<H", image, 56, phnum + 1)
+        native_path.write_bytes(image)
+
+    def _selected_ranges(self) -> dict[str, tuple[int, int, int, int]]:
+        source = (self.root / "source-image.bin").read_bytes()
+        native = (self.root / "native-image.bin").read_bytes()
+        index = int(self.selector.split(":", 1)[1])
+        entry = _dynsym_records(source)[index]
+        layout = _read_json(self.root / "rehydration.json")["layoutEvidence"]
+        rows = [row for row in layout["addressMap"]
+            if row.get("identity", "").startswith("region:")
+            and row["sourceRange"]["virtualAddress"]["value"] == entry[1]
+            and row["sourceRange"]["size"] == entry[2]]
+        if len(rows) != 1:
+            raise AssertionError("missing selected generated-code address map")
+        code = rows[0]["outputRange"]
+        clone = layout["jumpTableClones"][0]["outputRange"]
+        return {
+            "entry-stub": (entry[1], _file_offset_for_va(native, entry[1], 4), 4, 5),
+            "emitted-code": (code["virtualAddress"]["value"], code["fileOffset"]["value"], code["size"], 5),
+            "table-clone": (clone["virtualAddress"]["value"], clone["fileOffset"]["value"], clone["size"], 4),
+        }
+
     def test_checked_in_evidence_fixture_is_accepted(self) -> None:
         result = self.run_checker()
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_artifact_root_rejects_symlink_alias_and_nested_symlink(self) -> None:
+        alias = self.root.parent / "evidence-root-alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        result = self.run_checker(alias)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("must be an isolated non-symlink directory", result.stderr.lower())
+
+        nested = self.root / "unlisted-link"
+        nested.symlink_to(self.root, target_is_directory=True)
+        result = self.run_checker()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("contains a symlink", result.stderr.lower())
+
+    def test_live_entry_b_stub_must_target_the_mapped_output_function_not_dead_default(self) -> None:
+        ranges = self._selected_ranges()
+        code_va, code_offset, code_size, _flags = ranges["emitted-code"]
+        native_path = self.root / "native-image.bin"
+        native = bytearray(native_path.read_bytes())
+        words = struct.unpack_from(f"<{code_size // 4}I", native, code_offset)
+        defaults = [index for index in range(len(words) - 1)
+            if words[index:index + 2] == (0x12800000, 0xD65F03C0)]
+        self.assertEqual(1, len(defaults), "expected the emitted safe-default MOV/RET pair")
+        target_va = code_va + defaults[0] * 4
+        entry_va, _entry_offset, _stub_size, _stub_flags = ranges["entry-stub"]
+        delta = target_va - entry_va
+        self.assertEqual(0, delta % 4)
+        immediate = delta // 4
+        self.assertGreaterEqual(immediate, -(1 << 25))
+        self.assertLess(immediate, 1 << 25)
+        struct.pack_into("<I", native, _file_offset_for_va(native, entry_va, 4), 0x14000000 | (immediate & 0x03FFFFFF))
+        native_path.write_bytes(native)
+        self.refresh_native_bindings()
+        _refresh_manifest(self.root)
+
+        result = self.run_checker()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("entry b target bypasses the exact selected output-function entry", result.stderr.lower())
+        self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
+    def test_partial_pt_load_intersections_reject_stub_code_and_clone(self) -> None:
+        cases = (
+            ("entry-stub", "native image urp_entry entry b stub"),
+            ("emitted-code", "selected emitted shared-table code range"),
+            ("table-clone", "native image cloned shared jump table"),
+        )
+        for mapping, label in cases:
+            with self.subTest(mapping=mapping):
+                shutil.rmtree(self.root)
+                shutil.copytree(FIXTURE, self.root)
+                ranges = self._selected_ranges()
+                va, offset, size, flags = ranges[mapping]
+                self.add_native_load_alias(va, offset, size, flags, partial=True)
+                self.refresh_native_bindings()
+                _refresh_manifest(self.root)
+
+                result = self.run_checker()
+
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(label, result.stderr.lower())
+                self.assertIn("partially intersects another pt_load memory interval", result.stderr.lower())
+                self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
+    def test_duplicate_fully_containing_pt_load_owners_reject_stub_code_and_clone(self) -> None:
+        cases = (
+            ("entry-stub", "native image urp_entry entry b stub"),
+            ("emitted-code", "selected emitted shared-table code range"),
+            ("table-clone", "native image cloned shared jump table"),
+        )
+        for mapping, label in cases:
+            with self.subTest(mapping=mapping):
+                shutil.rmtree(self.root)
+                shutil.copytree(FIXTURE, self.root)
+                ranges = self._selected_ranges()
+                va, offset, size, flags = ranges[mapping]
+                self.add_native_load_alias(va, offset, size, flags, partial=False)
+                self.refresh_native_bindings()
+                _refresh_manifest(self.root)
+
+                result = self.run_checker()
+
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(label, result.stderr.lower())
+                self.assertIn("exactly one fully containing file-backed pt_load owner", result.stderr.lower())
+                self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
+    def test_half_open_adjacent_load_ranges_remain_accepted(self) -> None:
+        for va, offset, size, flags in self._selected_ranges().values():
+            self.add_native_load_alias(va + size, offset + size, 1, flags, partial=False)
+        self.refresh_native_bindings()
+        _refresh_manifest(self.root)
+
+        result = self.run_checker()
+
         self.assertEqual(0, result.returncode, result.stderr)
 
     def test_layout_clone_ownership_requires_exact_integer_json_token(self) -> None:
@@ -236,6 +449,10 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
         _write_json(stage_path, stage)
         rehydration["sourceSha256"] = source_sha
         _write_json(rehydration_path, rehydration)
+        native_metadata_path = self.root / "native-image.json"
+        native_metadata = _read_json(native_metadata_path)
+        native_metadata["sourceSha256"] = source_sha
+        _write_json(native_metadata_path, native_metadata)
         source_handoff_path = self.root / "source-handoff.json"
         source_handoff = _read_json(source_handoff_path)
         source_handoff["nativeImageSha256"] = source_sha

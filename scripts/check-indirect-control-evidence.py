@@ -5,10 +5,156 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
+import stat
 import struct
+import sys
+import types
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY = "_urprotect_active_evidence_root_snapshot"
+_RANGE_MODULE_SOURCE_DIGEST = "_urprotect_range_module_source_sha256"
+MAX_PRIVATE_HELPER_SOURCE_BYTES = 16 * 1024 * 1024
+
+
+def _read_bounded_root_relative_source(root: Path, relative: str, limit: int) -> bytes:
+    """Read one fixed checker dependency through no-follow descriptors."""
+    path = Path(relative)
+    if (
+        not relative or "\\" in relative or path.is_absolute()
+        or path.as_posix() != relative or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ImportError("checker helper source path is unsafe")
+    root_path = Path(os.path.abspath(root))
+    try:
+        if root_path.resolve(strict=True) != root_path:
+            raise ImportError("checker helper root is not an isolated directory")
+    except (OSError, RuntimeError) as error:
+        raise ImportError("checker helper root cannot be resolved safely") from error
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    if nofollow is None or directory_flag is None:
+        raise ImportError("checker helper reads require no-follow directory flags")
+    root_fd = -1
+    directory_fd = -1
+    file_fd = -1
+    try:
+        root_fd = os.open(root_path, os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow)
+        directory_metadata = os.fstat(root_fd)
+        directory_fd = root_fd
+        for part in path.parts[:-1]:
+            next_fd = os.open(
+                part, os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+                dir_fd=directory_fd,
+            )
+            next_metadata = os.fstat(next_fd)
+            if not stat.S_ISDIR(next_metadata.st_mode):
+                os.close(next_fd)
+                raise ImportError("checker helper path contains a non-directory")
+            if directory_fd != root_fd:
+                os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(
+            path.parts[-1], os.O_RDONLY | os.O_CLOEXEC | nofollow | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=directory_fd,
+        )
+        before = os.fstat(file_fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > limit:
+            raise ImportError("checker helper source exceeds its bounded regular-file contract")
+        result = bytearray(before.st_size)
+        position = 0
+        while position < before.st_size:
+            chunk = os.read(file_fd, min(1024 * 1024, before.st_size - position))
+            if not chunk:
+                raise ImportError("checker helper source was truncated while reading")
+            result[position : position + len(chunk)] = chunk
+            position += len(chunk)
+        growth_probe = os.read(file_fd, 1)
+        after = os.fstat(file_fd)
+        identity = lambda metadata: (
+            metadata.st_size, metadata.st_dev, metadata.st_ino,
+            metadata.st_mtime_ns, metadata.st_ctime_ns,
+        )
+        if growth_probe or identity(after) != identity(before) or not stat.S_ISREG(after.st_mode):
+            raise ImportError("checker helper source grew or changed while reading")
+        if not stat.S_ISDIR(directory_metadata.st_mode):
+            raise ImportError("checker helper root is not a directory")
+        return bytes(result)
+    except OSError as error:
+        raise ImportError("checker helper source cannot be read safely") from error
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if directory_fd >= 0 and directory_fd != root_fd:
+            os.close(directory_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
+def _read_sibling_helper_source(helper_path: Path) -> bytes:
+    root = helper_path.parent
+    relative = helper_path.name
+    snapshot = sys.modules.get(_ACTIVE_ROOT_SNAPSHOT_MODULE_KEY)
+    if (
+        snapshot is not None
+        and Path(os.path.abspath(snapshot.root)) == Path(os.path.abspath(root.parent))
+    ):
+        return snapshot.read(f"scripts/{relative}", limit=MAX_PRIVATE_HELPER_SOURCE_BYTES)
+    return _read_bounded_root_relative_source(root, relative, MAX_PRIVATE_HELPER_SOURCE_BYTES)
+
+
+def _range_helper_module_name(helper_path: Path) -> str:
+    """Separate this checker instance's cache namespace from path collisions."""
+    owner_nonce = f"{id(globals()):x}"
+    module_key = hashlib.sha256(f"{helper_path}\0{owner_nonce}".encode("utf-8")).hexdigest()[:16]
+    return f"_urprotect_evidence_load_range_{module_key}"
+
+
+def _load_sibling_evidence_range_helper() -> Any:
+    """Load the range owner from this checker directory, never ambient sys.path."""
+    helper_path = Path(__file__).resolve().with_name("evidence_load_range.py")
+    module_name = _range_helper_module_name(helper_path)
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if existing is not globals().get("_RANGE_HELPER"):
+            raise ImportError("preloaded evidence range cache entry is not checker-owned")
+        if not isinstance(existing, types.ModuleType):
+            raise ImportError("preloaded evidence range cache entry is not a module")
+        namespace = types.ModuleType.__getattribute__(existing, "__dict__")
+        source_file = namespace.get("__file__")
+        if not isinstance(source_file, str):
+            raise ImportError("preloaded evidence range module has no owned source file")
+        try:
+            existing_path = Path(source_file).resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise ImportError("preloaded evidence range module has no owned source file")
+        if existing_path != helper_path:
+            raise ImportError("preloaded evidence range module is not the checker sibling")
+        source = _read_sibling_helper_source(helper_path)
+        if namespace.get(_RANGE_MODULE_SOURCE_DIGEST) != hashlib.sha256(source).hexdigest():
+            raise ImportError("preloaded evidence range cache does not bind the checker sibling source")
+        return existing
+
+    source = _read_sibling_helper_source(helper_path)
+    module = types.ModuleType(module_name)
+    namespace = types.ModuleType.__getattribute__(module, "__dict__")
+    namespace["__file__"] = str(helper_path)
+    namespace["__package__"] = ""
+    namespace[_RANGE_MODULE_SOURCE_DIGEST] = hashlib.sha256(source).hexdigest()
+    sys.modules[module_name] = module
+    try:
+        exec(compile(source, str(helper_path), "exec"), namespace)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+_RANGE_HELPER = _load_sibling_evidence_range_helper()
+resolve_isolated_evidence_root = _RANGE_HELPER.resolve_isolated_evidence_root
+unique_file_backed_pt_load = _RANGE_HELPER.unique_file_backed_pt_load
 
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 EXPECTED_CASE_INDICES = [0, 1, 2, 3]
@@ -46,17 +192,440 @@ TRACE_OBSERVATION = (
     "urp_entry returns 91 only after the in-function 0,1,2,3 table walk "
     "matches all four exact result bytes"
 )
+MAX_EVIDENCE_TOTAL_BYTES = 512 * 1024 * 1024
+MAX_EVIDENCE_IMAGE_BYTES = 128 * 1024 * 1024
+MAX_EVIDENCE_JSON_BYTES = 16 * 1024 * 1024
+MAX_EVIDENCE_MANIFEST_BYTES = 8 * 1024 * 1024
+MAX_EVIDENCE_STREAM_BYTES = 1024 * 1024
+MAX_EVIDENCE_LOG_BYTES = 16 * 1024 * 1024
+MAX_EVIDENCE_TEXT_BYTES = 16 * 1024 * 1024
+MAX_EVIDENCE_OTHER_BYTES = 16 * 1024 * 1024
+MAX_EVIDENCE_FILES = 4096
+MAX_EVIDENCE_DIRECTORIES = 512
+EVIDENCE_IMAGE_NAMES = {
+    "source-image.bin", "native-image.bin", "protected-image.bin",
+    "input-image.bin", "provider-image.so",
+}
+EVIDENCE_STREAM_NAMES = {
+    "baseline.stdout", "baseline.stderr", "target.stdout", "target.stderr",
+}
+_ACTIVE_EVIDENCE_SNAPSHOT: EvidenceRootSnapshot | None = None
 
 
 def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+def _safe_relative(relative: str) -> tuple[str, ...]:
+    path = Path(relative)
+    if (
+        not relative or "\\" in relative or path.is_absolute()
+        or path.as_posix() != relative or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        fail("indirect-control evidence path is not a safe relative path")
+    return path.parts
+
+
+def _file_limit(relative: str) -> int:
+    name = Path(relative).name
+    if relative == "SHA256SUMS":
+        return MAX_EVIDENCE_MANIFEST_BYTES
+    if name in EVIDENCE_IMAGE_NAMES or name.endswith(".elf"):
+        return MAX_EVIDENCE_IMAGE_BYTES
+    if name in EVIDENCE_STREAM_NAMES:
+        return MAX_EVIDENCE_STREAM_BYTES
+    if name.endswith((".stdout", ".stderr", ".log")):
+        return MAX_EVIDENCE_LOG_BYTES
+    if name.endswith(".json"):
+        return MAX_EVIDENCE_JSON_BYTES
+    if name.endswith(".txt"):
+        return MAX_EVIDENCE_TEXT_BYTES
+    return MAX_EVIDENCE_OTHER_BYTES
+
+
+class EvidenceRootSnapshot:
+    """Metadata-gated, no-follow bounded snapshot of a closed evidence tree."""
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        max_files: int | None = None,
+        max_directories: int | None = None,
+        max_total_bytes: int | None = None,
+        expected_files: set[str] | None = None,
+        optional_files: set[str] | None = None,
+        expected_directories: set[str] | None = None,
+        file_limit_resolver: Callable[[str], int] | None = None,
+    ) -> None:
+        self.root = Path(root)
+        self._root_path = Path(os.path.abspath(self.root))
+        self._max_files = MAX_EVIDENCE_FILES if max_files is None else max_files
+        self._max_directories = MAX_EVIDENCE_DIRECTORIES if max_directories is None else max_directories
+        self._max_total_bytes = MAX_EVIDENCE_TOTAL_BYTES if max_total_bytes is None else max_total_bytes
+        self._expected_files = None if expected_files is None else frozenset(expected_files)
+        self._optional_files = frozenset(optional_files or ())
+        self._expected_directories = None if expected_directories is None else frozenset(expected_directories)
+        self._file_limit_resolver = file_limit_resolver or _file_limit
+        if (
+            type(self._max_files) is not int or self._max_files < 0
+            or type(self._max_directories) is not int or self._max_directories < 1
+            or type(self._max_total_bytes) is not int or self._max_total_bytes < 0
+        ):
+            raise ValueError("evidence root limits must be nonnegative exact integers")
+        if self._expected_files is None and self._optional_files:
+            raise ValueError("optional evidence paths require an expected-file contract")
+        self._allowed_files = (
+            None if self._expected_files is None
+            else self._expected_files | self._optional_files
+        )
+        self._facts: dict[str, tuple[int, int, int, int, int]] = {}
+        self._directory_facts: dict[str, tuple[int, int, int, int]] = {}
+        self._root_identity: tuple[int, int, int, int] | None = None
+        self._bytes: dict[str, bytes] = {}
+        self._preflighted = False
+        self._manifest_verified = False
+
+    @staticmethod
+    def _directory_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+        return (metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+    @staticmethod
+    def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+        return (
+            metadata.st_size,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+
+    def _scan_tree(
+        self,
+    ) -> tuple[
+        dict[str, tuple[int, int, int, int, int]],
+        dict[str, tuple[int, int, int, int]],
+        tuple[int, int, int, int],
+    ]:
+        facts: dict[str, tuple[int, int, int, int, int]] = {}
+        directory_facts: dict[str, tuple[int, int, int, int]] = {}
+        total = 0
+        files_seen = 0
+        directories_seen = 1  # The evidence root itself counts toward the cap.
+        pending: list[tuple[tuple[str, ...], str, tuple[int, int, int, int] | None]] = [((), "", None)]
+        root_fd = -1
+        directory_flag = getattr(os, "O_DIRECTORY", None)
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if directory_flag is None or nofollow is None:
+            fail("indirect-control evidence scans require no-follow directory flags")
+        allowed_nodes = None
+        if self._allowed_files is not None:
+            allowed_nodes = set(self._allowed_files) | set(self._expected_directories or ())
+        try:
+            try:
+                resolved_root = self._root_path.resolve(strict=True)
+            except (OSError, RuntimeError) as error:
+                fail(f"indirect-control evidence root cannot be resolved safely: {error}")
+            if resolved_root != self._root_path:
+                fail("indirect-control evidence root must be an isolated non-symlink directory")
+            root_fd = os.open(
+                self._root_path,
+                os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+            )
+            root_metadata = os.fstat(root_fd)
+            if not stat.S_ISDIR(root_metadata.st_mode):
+                fail("indirect-control evidence root must be a non-symlink directory")
+            root_identity = self._directory_identity(root_metadata)
+            if self._root_identity is not None and root_identity != self._root_identity:
+                fail("indirect-control evidence root changed after bounded tree preflight")
+
+            while pending:
+                parts, relative_directory, expected_directory_identity = pending.pop()
+                directory_fd = os.dup(root_fd)
+                opened_relative = ""
+                try:
+                    for part in parts:
+                        next_fd = os.open(
+                            part,
+                            os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+                            dir_fd=directory_fd,
+                        )
+                        os.close(directory_fd)
+                        directory_fd = next_fd
+                        opened_relative = f"{opened_relative}/{part}".lstrip("/")
+                        opened_metadata = os.fstat(directory_fd)
+                        opened_identity = self._directory_identity(opened_metadata)
+                        if (
+                            not stat.S_ISDIR(opened_metadata.st_mode)
+                            or opened_identity != directory_facts.get(opened_relative)
+                        ):
+                            fail("indirect-control evidence directory changed during bounded tree scan")
+                    if relative_directory and expected_directory_identity != directory_facts.get(relative_directory):
+                        fail("indirect-control evidence directory changed during bounded tree scan")
+                    with os.scandir(directory_fd) as entries:
+                        for entry in entries:
+                            name = entry.name
+                            relative = f"{relative_directory}/{name}".lstrip("/")
+                            _safe_relative(relative)
+                            if allowed_nodes is not None and relative not in allowed_nodes:
+                                fail(f"indirect-control evidence root contains an unexpected path: {relative}")
+                            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                            if stat.S_ISLNK(metadata.st_mode):
+                                fail(f"indirect-control evidence tree contains a symlink: {relative}")
+                            if stat.S_ISDIR(metadata.st_mode):
+                                if self._expected_directories is not None and relative not in self._expected_directories:
+                                    fail(f"indirect-control evidence root contains an unexpected directory: {relative}")
+                                if directories_seen >= self._max_directories:
+                                    fail("indirect-control evidence root exceeds its directory-count bound")
+                                directories_seen += 1
+                                identity = self._directory_identity(metadata)
+                                child_fd = os.open(
+                                    name,
+                                    os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+                                    dir_fd=directory_fd,
+                                )
+                                try:
+                                    child_metadata = os.fstat(child_fd)
+                                    if (
+                                        not stat.S_ISDIR(child_metadata.st_mode)
+                                        or self._directory_identity(child_metadata) != identity
+                                    ):
+                                        fail("indirect-control evidence directory changed during bounded tree scan")
+                                finally:
+                                    os.close(child_fd)
+                                directory_facts[relative] = identity
+                                pending.append(((*parts, name), relative, identity))
+                                continue
+                            if not stat.S_ISREG(metadata.st_mode):
+                                fail(f"indirect-control evidence tree contains a non-regular evidence file: {relative}")
+                            if self._allowed_files is not None and relative not in self._allowed_files:
+                                fail(f"indirect-control evidence root contains an unexpected path: {relative}")
+                            if files_seen >= self._max_files:
+                                fail("indirect-control evidence root exceeds its file-count bound")
+                            files_seen += 1
+                            limit = self._file_limit_resolver(relative)
+                            if type(limit) is not int or limit < 0:
+                                fail("indirect-control evidence file-limit policy is invalid")
+                            if metadata.st_size < 0 or metadata.st_size > limit:
+                                fail(f"indirect-control evidence file exceeds its per-file byte limit: {relative}")
+                            total += metadata.st_size
+                            if total > self._max_total_bytes:
+                                fail("indirect-control evidence root exceeds its aggregate byte limit")
+                            facts[relative] = self._file_identity(metadata)
+                finally:
+                    os.close(directory_fd)
+
+            if self._expected_files is not None:
+                missing_files = self._expected_files - facts.keys()
+                if missing_files:
+                    fail(f"indirect-control evidence root is missing required file: {min(missing_files)}")
+            if self._expected_directories is not None:
+                missing_directories = self._expected_directories - directory_facts.keys()
+                if missing_directories:
+                    fail(f"indirect-control evidence root is missing required directory: {min(missing_directories)}")
+            if self._directory_identity(os.fstat(root_fd)) != root_identity:
+                fail("indirect-control evidence root changed during bounded tree scan")
+            return facts, directory_facts, root_identity
+        except OSError as error:
+            fail(f"indirect-control evidence tree cannot be inspected safely: {error}")
+        finally:
+            if root_fd >= 0:
+                os.close(root_fd)
+
+    def preflight(self) -> None:
+        self._facts, self._directory_facts, self._root_identity = self._scan_tree()
+        self._preflighted = True
+
+    def _open_relative(self, relative: str) -> int:
+        parts = _safe_relative(relative)
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        directory_flag = getattr(os, "O_DIRECTORY", None)
+        if nofollow is None or directory_flag is None:
+            fail("indirect-control evidence reads require audited no-follow directory flags")
+        root_fd = -1
+        directory_fd = -1
+        try:
+            root_fd = os.open(
+                self._root_path,
+                os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+            )
+            root_metadata = os.fstat(root_fd)
+            if self._root_identity != self._directory_identity(root_metadata):
+                fail("indirect-control evidence root changed after bounded tree preflight")
+            directory_fd = root_fd
+            parent = ""
+            for part in parts[:-1]:
+                next_fd = os.open(
+                    part,
+                    os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+                    dir_fd=directory_fd,
+                )
+                next_relative = f"{parent}/{part}".lstrip("/")
+                next_metadata = os.fstat(next_fd)
+                if (
+                    not stat.S_ISDIR(next_metadata.st_mode)
+                    or self._directory_identity(next_metadata) != self._directory_facts.get(next_relative)
+                ):
+                    os.close(next_fd)
+                    fail(f"indirect-control evidence directory changed after bounded tree preflight: {next_relative}")
+                if directory_fd != root_fd:
+                    os.close(directory_fd)
+                directory_fd = next_fd
+                parent = next_relative
+            file_fd = os.open(
+                parts[-1],
+                os.O_RDONLY | os.O_CLOEXEC | nofollow | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=directory_fd,
+            )
+            return file_fd
+        except OSError as error:
+            fail(f"indirect-control evidence file cannot be opened safely: {relative}: {error}")
+        finally:
+            if directory_fd >= 0 and directory_fd != root_fd:
+                os.close(directory_fd)
+            if root_fd >= 0:
+                os.close(root_fd)
+
+    def read(
+        self,
+        relative: str,
+        *,
+        limit: int | None = None,
+        after_initial_size_validation: Callable[[], None] | None = None,
+    ) -> bytes:
+        if not self._preflighted:
+            fail("indirect-control evidence root was not byte-budgeted before reads")
+        _safe_relative(relative)
+        fact = self._facts.get(relative)
+        if fact is None:
+            fail(f"indirect-control evidence file is not in the preflighted tree: {relative}")
+        expected_size, expected_device, expected_inode, expected_mtime, expected_ctime = fact
+        effective_limit = self._file_limit_resolver(relative)
+        if limit is not None:
+            if type(limit) is not int or limit < 0:
+                fail("indirect-control evidence read limit is invalid")
+            effective_limit = min(effective_limit, limit)
+        if expected_size > effective_limit:
+            fail(f"indirect-control evidence file exceeds its per-file byte limit: {relative}")
+        cached = self._bytes.get(relative)
+        if cached is not None:
+            return cached
+        file_fd = self._open_relative(relative)
+        try:
+            before = os.fstat(file_fd)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_size != expected_size
+                or before.st_size > effective_limit
+                or self._file_identity(before) != fact
+            ):
+                fail(f"indirect-control evidence file changed after bounded tree preflight: {relative}")
+            if after_initial_size_validation is not None:
+                after_initial_size_validation()
+
+            # Allocate only after the aggregate preflight and the same open
+            # descriptor's type, identity, size and per-file limit are checked.
+            result = bytearray(expected_size)
+            position = 0
+            while position < expected_size:
+                chunk = os.read(file_fd, min(1024 * 1024, expected_size - position))
+                if not chunk:
+                    fail(f"indirect-control evidence file was truncated while reading: {relative}")
+                result[position : position + len(chunk)] = chunk
+                position += len(chunk)
+            growth_probe = os.read(file_fd, 1)
+            after = os.fstat(file_fd)
+            if growth_probe or self._file_identity(after) != fact or not stat.S_ISREG(after.st_mode):
+                fail(f"indirect-control evidence file grew or changed while reading: {relative}")
+            data = bytes(result)
+            self._bytes[relative] = data
+            return data
+        except OSError as error:
+            fail(f"indirect-control evidence file read failed: {relative}: {error}")
+        finally:
+            os.close(file_fd)
+
+    def read_path(self, path: Path) -> bytes:
+        try:
+            relative = path.relative_to(self.root).as_posix()
+        except ValueError:
+            fail("indirect-control evidence read escaped the active root")
+        return self.read(relative)
+
+    @property
+    def file_paths(self) -> set[str]:
+        if not self._preflighted:
+            fail("indirect-control evidence paths were requested before bounded tree preflight")
+        return set(self._facts)
+
+    @property
+    def directory_paths(self) -> set[str]:
+        if not self._preflighted:
+            fail("indirect-control evidence directories were requested before bounded tree preflight")
+        return set(self._directory_facts)
+
+    def verify_tree_unchanged(self) -> None:
+        facts, directory_facts, root_identity = self._scan_tree()
+        if (
+            self._root_identity != root_identity
+            or facts != self._facts
+            or directory_facts != self._directory_facts
+        ):
+            fail("indirect-control evidence tree changed after bounded snapshot validation")
+
+    def verify_manifest(self) -> None:
+        manifest_data = self.read("SHA256SUMS")
+        try:
+            lines = manifest_data.decode("utf-8", errors="strict").splitlines()
+        except UnicodeDecodeError as error:
+            fail(f"indirect-control SHA256SUMS is not UTF-8: {error}")
+        entries: dict[str, str] = {}
+        for line_number, line in enumerate(lines, 1):
+            parts = line.split("  ", 1)
+            if len(parts) != 2:
+                fail(f"indirect-control SHA256SUMS line {line_number} is malformed")
+            expected, relative = parts
+            require_digest(expected, f"indirect-control SHA256SUMS line {line_number}")
+            _safe_relative(relative)
+            if relative == "SHA256SUMS" or relative in entries:
+                fail("indirect-control SHA256SUMS contains a duplicate or self-referential path")
+            data = self.read(relative)
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != expected:
+                fail(f"indirect-control SHA256SUMS hash mismatch: {relative}")
+            entries[relative] = expected
+        # A nested positive child owns its own SHA256SUMS; like the outer
+        # runner, the outer manifest closes all payload files while each
+        # directory-level manifest remains an independent closure boundary.
+        actual_files = {
+            relative for relative in self._facts
+            if Path(relative).name != "SHA256SUMS"
+        }
+        if actual_files != set(entries):
+            fail("indirect-control SHA256SUMS is not closed")
+        self.verify_tree_unchanged()
+        self._manifest_verified = True
+
+
+def _active_snapshot(root: Path) -> EvidenceRootSnapshot:
+    snapshot = _ACTIVE_EVIDENCE_SNAPSHOT
+    if snapshot is None or snapshot.root != root or not snapshot._manifest_verified:
+        fail("indirect-control evidence bytes were requested before closed-root validation")
+    return snapshot
+
+
+def read_evidence_file(root: Path, relative: str) -> bytes:
+    return _active_snapshot(root).read(relative)
+
+
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    if _ACTIVE_EVIDENCE_SNAPSHOT is None:
+        fail("indirect-control evidence digest requested outside a validated root")
+    return hashlib.sha256(_ACTIVE_EVIDENCE_SNAPSHOT.read_path(path)).hexdigest()
 
 
 def require_file(root: Path, relative: str) -> Path:
+    _safe_relative(relative)
     candidate = root / relative
     if candidate.is_symlink() or not candidate.is_file():
         fail(f"missing indirect-control evidence: {relative}")
@@ -70,7 +639,7 @@ def require_file(root: Path, relative: str) -> Path:
 
 def read_json(root: Path, relative: str) -> dict[str, Any]:
     try:
-        value = json.loads(require_file(root, relative).read_text(encoding="utf-8"))
+        value = json.loads(read_evidence_file(root, relative).decode("utf-8", errors="strict"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         fail(f"invalid JSON evidence {relative}: {error}")
     if not isinstance(value, dict):
@@ -773,7 +1342,18 @@ def parse_fixture_symbols(
     )
     readelf_symbols: dict[int, tuple[str, int, int, str, str, str, str]] = {}
     in_dynamic_symbols = False
-    for line in path.read_text(encoding="utf-8").splitlines():
+    snapshot = _ACTIVE_EVIDENCE_SNAPSHOT
+    if snapshot is None:
+        fail("source readelf evidence was requested outside a validated root")
+    try:
+        relative_path = path.relative_to(snapshot.root).as_posix()
+    except ValueError:
+        fail("source readelf evidence path escaped the validated root")
+    try:
+        text = read_evidence_file(snapshot.root, relative_path).decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        fail(f"source readelf evidence is not UTF-8: {error}")
+    for line in text.splitlines():
         table_match = table_pattern.match(line)
         if table_match:
             in_dynamic_symbols = table_match.group(1) == ".dynsym"
@@ -983,8 +1563,10 @@ def semantic_address(value: object, label: str) -> int:
 
 def validate_source_output_map(
     layout: dict[str, Any],
+    source_bytes: bytes,
     source_segments: list[dict[str, int]],
     native_segments: list[dict[str, int]],
+    native_bytes: bytes,
     source_entry: int,
     source_entry_size: int,
     source_targets: list[int],
@@ -1008,16 +1590,38 @@ def validate_source_output_map(
             or any(target < source_va or target + 4 > source_va + source_size for target in source_targets)
         ):
             continue
-        mapped_source_offset, _ = mapped_file_offset(
-            source_segments, source_va, source_size, "address-map source range"
-        )
-        if mapped_source_offset != source_file_offset:
-            fail("address-map source file/virtual ranges disagree with the source PT_LOAD mapping")
-        mapped_output_offset, output_segment = mapped_file_offset(
-            native_segments, output_va, output_size, "address-map output range"
-        )
-        if mapped_output_offset != output_file_offset or output_segment["flags"] & 1 == 0:
-            fail("address-map output range does not bind to file-backed executable Native Image bytes")
+        try:
+            mapped_source_offset, source_segment = unique_file_backed_pt_load(
+                source_bytes,
+                source_segments,
+                source_va,
+                source_size,
+                "selected source address-map complete function range",
+                virtual_address_key="virtualAddress",
+                file_offset_key="fileOffset",
+                file_size_key="fileSize",
+                memory_size_key="memorySize",
+            )
+        except ValueError as error:
+            fail(str(error))
+        if mapped_source_offset != source_file_offset or source_segment["flags"] & 0x7 != 0x5:
+            fail("address-map source range is not complete read-only executable source bytes")
+        try:
+            mapped_output_offset, output_segment = unique_file_backed_pt_load(
+                native_bytes,
+                native_segments,
+                output_va,
+                output_size,
+                "selected address-map complete Native Image output range",
+                virtual_address_key="virtualAddress",
+                file_offset_key="fileOffset",
+                file_size_key="fileSize",
+                memory_size_key="memorySize",
+            )
+        except ValueError as error:
+            fail(str(error))
+        if mapped_output_offset != output_file_offset or output_segment["flags"] & 0x7 != 0x5:
+            fail("address-map output range does not bind to complete read-only executable Native Image bytes")
         identity = binding.get("identity")
         source_identity = binding.get("sourceIdentity")
         placements = layout.get("placements")
@@ -1155,26 +1759,59 @@ def validate_jump_table_clone(
     ):
         fail("jump-table clone does not retain the current ambiguous-owner PF_R copy-and-retarget policy")
 
-    parsed_source_offset, _ = mapped_file_offset(
-        source_segments, source_table_address, table_size, "source jump-table symbol range"
-    )
+    try:
+        parsed_source_offset, _ = unique_file_backed_pt_load(
+            source_bytes,
+            source_segments,
+            source_table_address,
+            table_size,
+            "source jump-table symbol range",
+            virtual_address_key="virtualAddress",
+            file_offset_key="fileOffset",
+            file_size_key="fileSize",
+            memory_size_key="memorySize",
+        )
+    except ValueError as error:
+        fail(str(error))
     if parsed_source_offset != source_table_file_offset:
         fail("source table symbol range differs from its independent PT_LOAD file mapping")
     source_table = source_bytes[source_table_file_offset:source_table_file_offset + table_size]
     if len(source_table) != table_size:
         fail("source jump-table bytes are truncated")
 
-    clone_file_offset, clone_segment = mapped_file_offset(
-        native_segments, output_range[1], table_size, "Native Image jump-table clone"
-    )
+    try:
+        clone_file_offset, clone_segment = unique_file_backed_pt_load(
+            native_bytes,
+            native_segments,
+            output_range[1],
+            table_size,
+            "Native Image jump-table clone",
+            virtual_address_key="virtualAddress",
+            file_offset_key="fileOffset",
+            file_size_key="fileSize",
+            memory_size_key="memorySize",
+        )
+    except ValueError as error:
+        fail(str(error))
     if clone_file_offset != output_range[0] or clone_segment["flags"] != LAYOUT_PERMISSION_READ:
         fail("jump-table clone is not uniquely file-backed by a PF_R-only PT_LOAD range")
     if output_range[1] < source_table_address + table_size and source_table_address < output_range[1] + table_size:
         fail("jump-table output clone overlaps the preserved source-table virtual range")
 
-    original_file_offset, _ = mapped_file_offset(
-        native_segments, source_table_address, table_size, "Native Image original jump table"
-    )
+    try:
+        original_file_offset, _ = unique_file_backed_pt_load(
+            native_bytes,
+            native_segments,
+            source_table_address,
+            table_size,
+            "Native Image preserved original jump table",
+            virtual_address_key="virtualAddress",
+            file_offset_key="fileOffset",
+            file_size_key="fileSize",
+            memory_size_key="memorySize",
+        )
+    except ValueError as error:
+        fail(str(error))
     if (
         original_file_offset < clone_file_offset + table_size
         and clone_file_offset < original_file_offset + table_size
@@ -1234,6 +1871,64 @@ def decode_adr(word: int, address: int) -> tuple[int, int] | None:
     return target, word & 0x1F
 
 
+def validate_live_entry_b_stub(
+    image: bytes,
+    segments: list[dict[str, int]],
+    entry_address: int,
+    output_file_offset: int,
+    output_address: int,
+    output_size: int,
+) -> None:
+    label = "Native Image urp_entry entry B stub"
+    try:
+        stub_file_offset, stub_segment = unique_file_backed_pt_load(
+            image,
+            segments,
+            entry_address,
+            4,
+            label,
+            virtual_address_key="virtualAddress",
+            file_offset_key="fileOffset",
+            file_size_key="fileSize",
+            memory_size_key="memorySize",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if stub_segment["flags"] & 0x7 != 0x5:
+        fail(f"{label} is not file-backed read-only executable output")
+    branch_word = struct.unpack_from("<I", image, stub_file_offset)[0]
+    if branch_word & 0xFC000000 != 0x14000000:
+        fail(f"{label} does not begin with one live unconditional B instruction")
+    immediate = branch_word & 0x03FFFFFF
+    if immediate & (1 << 25):
+        immediate -= 1 << 26
+    target = entry_address + immediate * 4
+    if target < 0 or target >= (1 << 64) - 3:
+        fail(f"{label} branch target overflows ELF64")
+    if target < output_address or target + 4 > output_address + output_size:
+        fail(f"{label} branch target leaves the complete mapped selected-function output range")
+    try:
+        target_file_offset, target_segment = unique_file_backed_pt_load(
+            image,
+            segments,
+            target,
+            4,
+            "Native Image urp_entry entry B target",
+            virtual_address_key="virtualAddress",
+            file_offset_key="fileOffset",
+            file_size_key="fileSize",
+            memory_size_key="memorySize",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if (
+        target != output_address
+        or target_file_offset != output_file_offset
+        or target_segment["flags"] & 0x7 != 0x5
+    ):
+        fail("Native Image urp_entry entry B target bypasses the exact mapped output function entry")
+
+
 def validate_relative_table_reference_chain(
     image: bytes,
     segments: list[dict[str, int]],
@@ -1243,9 +1938,22 @@ def validate_relative_table_reference_chain(
     target_base_address: int,
     label: str,
 ) -> tuple[int, int]:
-    code_file_offset, code_segment = mapped_file_offset(segments, code_address, code_size, label)
-    if code_segment["flags"] & 1 == 0 or code_size % 4 != 0:
-        fail(f"{label} is not an aligned executable instruction range")
+    try:
+        code_file_offset, code_segment = unique_file_backed_pt_load(
+            image,
+            segments,
+            code_address,
+            code_size,
+            f"{label} complete code range",
+            virtual_address_key="virtualAddress",
+            file_offset_key="fileOffset",
+            file_size_key="fileSize",
+            memory_size_key="memorySize",
+        )
+    except ValueError as error:
+        fail(str(error))
+    if code_segment["flags"] & 0x7 != 0x5 or code_size % 4 != 0:
+        fail(f"{label} is not an aligned read-only executable instruction range")
     if code_file_offset > len(image) or code_size > len(image) - code_file_offset:
         fail(f"{label} exceeds its retained image bytes")
     words = struct.unpack_from(f"<{code_size // 4}I", image, code_file_offset)
@@ -1284,6 +1992,7 @@ def map_layout_source_address(
     layout: dict[str, Any],
     source_segments: list[dict[str, int]],
     native_segments: list[dict[str, int]],
+    native_bytes: bytes,
     source_address: int,
     size: int,
     label: str,
@@ -1331,11 +2040,22 @@ def map_layout_source_address(
         source_file, _ = mapped_file_offset(source_segments, source_va, source_size, f"{label} source map")
         if source_file != source_file_offset:
             fail(f"{label} address-map source range disagrees with its source PT_LOAD mapping")
-        mapped_output_file, output_segment = mapped_file_offset(
-            native_segments, output_va, output_size, f"{label} output map"
-        )
-        if mapped_output_file != output_file_offset or output_segment["flags"] & 1 == 0:
-            fail(f"{label} address-map range is not file-backed executable output")
+        try:
+            mapped_output_file, output_segment = unique_file_backed_pt_load(
+                native_bytes,
+                native_segments,
+                output_va,
+                output_size,
+                f"{label} complete Native Image output map",
+                virtual_address_key="virtualAddress",
+                file_offset_key="fileOffset",
+                file_size_key="fileSize",
+                memory_size_key="memorySize",
+            )
+        except ValueError as error:
+            fail(str(error))
+        if mapped_output_file != output_file_offset or output_segment["flags"] & 0x7 != 0x5:
+            fail(f"{label} address-map range is not complete read-only executable output")
 
         validate_mapping_placement(
             layout,
@@ -1349,14 +2069,22 @@ def map_layout_source_address(
         if delta >= output_size or output_va + delta + size > (1 << 64):
             fail(f"{label} output address is outside the retained layout placement")
         output_address = output_va + delta
-        output_file, output_segment = mapped_file_offset(
-            native_segments, output_address, size, f"{label} output target"
-        )
-        if (
-            output_file != output_file_offset + delta
-            or output_segment["flags"] & 1 == 0
-        ):
-            fail(f"{label} output target is not file-backed by an executable PT_LOAD")
+        try:
+            output_file, output_segment = unique_file_backed_pt_load(
+                native_bytes,
+                native_segments,
+                output_address,
+                size,
+                f"{label} Native Image output target",
+                virtual_address_key="virtualAddress",
+                file_offset_key="fileOffset",
+                file_size_key="fileSize",
+                memory_size_key="memorySize",
+            )
+        except ValueError as error:
+            fail(str(error))
+        if output_file != output_file_offset + delta or output_segment["flags"] & 0x7 != 0x5:
+            fail(f"{label} output target is not read-only executable file-backed output")
         matches.append(output_address)
 
     if len(matches) != 1:
@@ -1463,10 +2191,10 @@ def validate_jump_table_target_bindings(
             fail("jump-table target binding does not reproduce the signed source table target/base facts")
 
         mapped_target = map_layout_source_address(
-            layout, source_segments, native_segments, source_target, 4, f"jump-table target {index}"
+            layout, source_segments, native_segments, native_bytes, source_target, 4, f"jump-table target {index}"
         )
         mapped_base = map_layout_source_address(
-            layout, source_segments, native_segments, source_base, 4, "jump-table target base"
+            layout, source_segments, native_segments, native_bytes, source_base, 4, "jump-table target base"
         )
         if output_target != mapped_target or output_base != mapped_base:
             fail("jump-table output target/base VA differs from the retained layout address-map decision")
@@ -1572,10 +2300,23 @@ def check_positive(root: Path, unit: str) -> None:
     ):
         fail("jump-table behavior identity is invalid")
 
+    stage = read_json(root, f"{unit}/stage.json")
+    native_metadata = read_json(root, f"{unit}/native-image.json")
+    if (
+        stage.get("unitId") != unit
+        or stage.get("profile") != "host-context-entry"
+        or stage.get("status") != "passed"
+        or native_metadata.get("unitId") != unit
+        or native_metadata.get("artifactRole") != "native-image"
+        or native_metadata.get("profile") != "host-context-entry"
+        or native_metadata.get("entrySymbol") != "urp_entry"
+    ):
+        fail("jump-table stage/native-image metadata does not bind the selected entry and host-context-entry profile")
+
     source_path = require_file(root, f"{unit}/source-image.bin")
     native_path = require_file(root, f"{unit}/native-image.bin")
-    source_bytes = source_path.read_bytes()
-    native_bytes = native_path.read_bytes()
+    source_bytes = read_evidence_file(root, f"{unit}/source-image.bin")
+    native_bytes = read_evidence_file(root, f"{unit}/native-image.bin")
     source_hash = hashlib.sha256(source_bytes).hexdigest()
     protected_hash = digest(require_file(root, f"{unit}/protected-image.bin"))
     native_hash = hashlib.sha256(native_bytes).hexdigest()
@@ -1612,9 +2353,17 @@ def check_positive(root: Path, unit: str) -> None:
         or rehydration.get("sourceSha256") != source_hash
         or rehydration.get("protectedImageSha256") != protected_hash
         or rehydration.get("nativeImageSha256") != native_hash
+        or rehydration.get("profile") != "host-context-entry"
+        or rehydration.get("entrySymbol") != "urp_entry"
         or not isinstance(layout, dict)
     ):
-        fail("jump-table rehydration record does not bind the retained images")
+        fail("jump-table rehydration record does not bind the retained images/profile/selected entry")
+    if (
+        native_metadata.get("sourceSha256") != source_hash
+        or native_metadata.get("nativeImageSha256") != native_hash
+        or native_metadata.get("nativeImageSize") != len(native_bytes)
+    ):
+        fail("Native Image metadata does not bind the exact retained Source/Native bytes")
     if (
         not is_int(layout.get("schemaVersion"))
         or layout.get("schemaVersion") != ELF_LAYOUT_EVIDENCE_SCHEMA_VERSION
@@ -1641,6 +2390,21 @@ def check_positive(root: Path, unit: str) -> None:
     source_symbols, source_table_address, source_entry_address, source_entry_size = parse_fixture_symbols(
         require_file(root, f"{unit}/source-readelf.txt"), behavior["selectedFunction"], source_bytes
     )
+    selected_index = int(behavior["selectedFunction"].split(":", 1)[1])
+    source_entry_record = parse_dynamic_symbols(source_bytes, "source-image.bin").get(selected_index)
+    native_entry_record = parse_dynamic_symbols(native_bytes, "native-image.bin").get(selected_index)
+    if (
+        source_entry_record is None
+        or native_entry_record != source_entry_record
+        or source_entry_record[0] != "urp_entry"
+        or source_entry_record[1] != source_entry_address
+        or source_entry_record[2] != source_entry_size
+        or source_entry_record[3] != 2
+        or source_entry_record[4] != 1
+        or source_entry_record[5] != 0
+        or source_entry_record[6] == 0
+    ):
+        fail("selected Native Image dynsym identity does not exactly match source urp_entry and requested profile")
     source_target_addresses = [source_symbols[name] for name in EXPECTED_CASE_SYMBOLS]
     if (
         source_entry_size <= 0
@@ -1709,6 +2473,16 @@ def check_positive(root: Path, unit: str) -> None:
     ] != [(source_producers[0], 1), (source_producers[1], 2)]:
         fail("jump-table clone producer facts differ from the independently decoded source reference chain")
 
+    output_code_file_offset, output_code_address, output_code_size = validate_source_output_map(
+        layout,
+        source_bytes,
+        source_segments,
+        native_segments,
+        native_bytes,
+        source_entry_address,
+        source_entry_size,
+        source_target_addresses,
+    )
     output_target_base = validate_jump_table_target_bindings(
         layout,
         source_bytes,
@@ -1722,16 +2496,16 @@ def check_positive(root: Path, unit: str) -> None:
         source_target_addresses,
         source_table_values,
     )
-    output_code_file_offset, output_code_address, output_code_size = validate_source_output_map(
-        layout,
-        source_segments,
-        native_segments,
-        source_entry_address,
-        source_entry_size,
-        source_target_addresses,
-    )
     if output_code_file_offset > len(native_bytes) or output_code_size > len(native_bytes) - output_code_file_offset:
         fail("selected generated code range exceeds its Native Image bytes")
+    validate_live_entry_b_stub(
+        native_bytes,
+        native_segments,
+        source_entry_address,
+        output_code_file_offset,
+        output_code_address,
+        output_code_size,
+    )
     validate_relative_table_reference_chain(
         native_bytes,
         native_segments,
@@ -1761,7 +2535,7 @@ def check_positive(root: Path, unit: str) -> None:
         fail("jump-table clone edits do not bind every declared target index")
 
     streams = {
-        name: require_file(root, f"{unit}/{name}").read_bytes()
+        name: read_evidence_file(root, f"{unit}/{name}")
         for name in ("baseline.stdout", "baseline.stderr", "target.stdout", "target.stderr")
     }
     if max(map(len, streams.values())) > 1024 * 1024:
@@ -1832,8 +2606,8 @@ def validate_relative_table_negative(root: Path, negative_name: str) -> dict[str
     input_path = require_file(root, f"{negative_name}/input-image.bin")
     source_path = require_file(root, f"{negative_name}/source-image.bin")
     mutation_path = require_file(root, f"{negative_name}/mutation.json")
-    input_bytes = input_path.read_bytes()
-    source_bytes = source_path.read_bytes()
+    input_bytes = read_evidence_file(root, f"{negative_name}/input-image.bin")
+    source_bytes = read_evidence_file(root, f"{negative_name}/source-image.bin")
     mutation = read_json(root, f"{negative_name}/mutation.json")
     input_segments = parse_load_segments(input_bytes, f"{negative_name}/input-image.bin")
     source_segments = parse_load_segments(source_bytes, f"{negative_name}/source-image.bin")
@@ -1956,14 +2730,14 @@ def check_positive_reuse(root: Path, unit: str) -> None:
     ):
         fail("positive reuse record does not identify a non-rerun accepted schema-2 evidence copy")
     require_digest(reuse.get("sourceEvidenceManifestSha256"), "positive reuse source manifest digest")
-    positive_dir = root / unit
     claimed_files = reuse.get("positiveFiles")
     if not isinstance(claimed_files, dict):
         fail("positive reuse record has no copied-file hash inventory")
+    prefix = f"{unit}/"
     actual_files = {
-        path.relative_to(positive_dir).as_posix()
-        for path in positive_dir.rglob("*")
-        if path.is_file()
+        relative[len(prefix):]
+        for relative in _active_snapshot(root).file_paths
+        if relative.startswith(prefix)
     }
     if actual_files != set(claimed_files):
         fail("positive reuse inventory does not match the copied schema-2 positive evidence")
@@ -1976,7 +2750,7 @@ def check_positive_reuse(root: Path, unit: str) -> None:
 def validate_producer_command(root: Path, negative_name: str, negative_unit: str, source_path: Path) -> str:
     command_path = require_file(root, f"{negative_name}/producer-command.json")
     command = read_json(root, f"{negative_name}/producer-command.json")
-    source_bytes = source_path.read_bytes()
+    source_bytes = read_evidence_file(root, f"{negative_name}/source-image.bin")
     if negative_name == "negative-external-table":
         claimed_selection = command.get("selectedFunction")
         if not isinstance(claimed_selection, str):
@@ -2099,7 +2873,7 @@ def check_negative(root: Path, negative_name: str, parent_unit: str) -> None:
         fail(f"{negative_name} producer did not emit its declared stable diagnostic family and message")
 
     try:
-        exit_text = require_file(root, f"{negative_name}/producer-exit-status.txt").read_text(encoding="ascii").strip()
+        exit_text = read_evidence_file(root, f"{negative_name}/producer-exit-status.txt").decode("ascii", errors="strict").strip()
         exit_status = int(exit_text, 10)
     except (UnicodeDecodeError, ValueError):
         fail(f"{negative_name} producer exit status is malformed")
@@ -2130,7 +2904,7 @@ def check_negative(root: Path, negative_name: str, parent_unit: str) -> None:
         selected_function = command.get("selectedFunction")
         if not isinstance(selected_function, str):
             fail("negative-external-table producer command has no selected function")
-        expected_facts = inspect_external_table_image(source_path.read_bytes(), selected_function)
+        expected_facts = inspect_external_table_image(read_evidence_file(root, f"{negative_name}/source-image.bin"), selected_function)
         facts_path = require_file(root, f"{negative_name}/external-table-facts.json")
         if read_json(root, f"{negative_name}/external-table-facts.json") != expected_facts:
             fail("negative-external-table ELF owner/link facts differ from independent retained-source parsing")
@@ -2160,28 +2934,48 @@ def check_negative(root: Path, negative_name: str, parent_unit: str) -> None:
 
 
 def check_closed_manifest(root: Path) -> None:
-    manifest = require_file(root, "SHA256SUMS")
-    entries: dict[str, str] = {}
-    for line_number, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
-        parts = line.split("  ", 1)
-        if len(parts) != 2:
-            fail(f"indirect-control SHA256SUMS line {line_number} is malformed")
-        expected, relative = parts
-        require_digest(expected, f"indirect-control SHA256SUMS line {line_number}")
-        candidate_path = Path(relative)
-        if candidate_path.is_absolute() or ".." in candidate_path.parts or relative in entries:
-            fail("indirect-control SHA256SUMS contains an unsafe or duplicate path")
-        entry = require_file(root, relative)
-        if digest(entry) != expected:
-            fail(f"indirect-control SHA256SUMS hash mismatch: {relative}")
-        entries[relative] = expected
-    actual = {
-        path.relative_to(root.resolve()).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.name != "SHA256SUMS"
-    }
-    if actual != set(entries):
-        fail("indirect-control SHA256SUMS is not closed")
+    global _ACTIVE_EVIDENCE_SNAPSHOT
+    snapshot = EvidenceRootSnapshot(root)
+    # Account for every file and reject special entries before reading the
+    # manifest, hashing a file, allocating image bytes, or parsing evidence.
+    snapshot.preflight()
+    snapshot.verify_manifest()
+    _ACTIVE_EVIDENCE_SNAPSHOT = snapshot
+
+
+def read_bounded_external_file(path: Path, limit: int, label: str) -> bytes:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        fail(f"{label} requires an audited no-follow file open")
+    descriptor = -1
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | nofollow | getattr(os, "O_NONBLOCK", 0))
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > limit:
+            fail(f"{label} is not a bounded regular file")
+        data = bytearray(before.st_size)
+        position = 0
+        while position < before.st_size:
+            chunk = os.read(descriptor, min(1024 * 1024, before.st_size - position))
+            if not chunk:
+                fail(f"{label} was truncated while reading")
+            data[position : position + len(chunk)] = chunk
+            position += len(chunk)
+        growth_probe = os.read(descriptor, 1)
+        after = os.fstat(descriptor)
+        if (
+            growth_probe or not stat.S_ISREG(after.st_mode)
+            or after.st_size != before.st_size or after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+        ):
+            fail(f"{label} grew or changed while reading")
+        return bytes(data)
+    except OSError as error:
+        fail(f"{label} cannot be read safely: {error}")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def main() -> None:
@@ -2195,22 +2989,27 @@ def main() -> None:
     if args.inspect_external_table is not None:
         if args.root is not None or args.tier is not None or args.unit is not None or not args.selected_function:
             parser.error("--inspect-external-table requires only --selected-function and no evidence-root arguments")
-        try:
-            source = args.inspect_external_table.read_bytes()
-        except OSError as error:
-            fail(f"cannot read external-table source ELF: {error}")
+        source = read_bounded_external_file(
+            args.inspect_external_table,
+            MAX_EVIDENCE_IMAGE_BYTES,
+            "external-table source ELF",
+        )
         facts = inspect_external_table_image(source, args.selected_function)
         print(json.dumps(facts, sort_keys=True, indent=2))
         return
     if args.root is None or args.tier is None or not args.unit:
         parser.error("evidence checking requires ROOT --tier TIER --unit UNIT")
-    root = args.root.resolve()
+    try:
+        root = resolve_isolated_evidence_root(args.root, "indirect-control evidence root")
+    except ValueError as error:
+        fail(str(error))
+    check_closed_manifest(root)
     check_positive(root, args.unit)
     if (root / "positive-reuse.json").exists():
         check_positive_reuse(root, args.unit)
     for negative_name in EXPECTED_NEGATIVES:
         check_negative(root, negative_name, args.unit)
-    check_closed_manifest(root)
+    _active_snapshot(root).verify_tree_unchanged()
     print("Indirect-control evidence valid: all table cases, measured handoff/streams, and four fail-closed negatives")
 
 

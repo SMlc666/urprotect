@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.util
 import json
+import os
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +31,13 @@ INDIRECT_NEGATIVES = {
     "negative-index-clobber": "The checked jump-table index register W0/X0 is overwritten between B.HI and the indexed LDRSW.",
     "negative-external-table": "The selected instruction does not match the promoted relative jump-table family.",
 }
+INDIRECT_CHECKER_SPEC = importlib.util.spec_from_file_location(
+    "rehydration_test_indirect_checker", INDIRECT_CHECKER
+)
+if INDIRECT_CHECKER_SPEC is None or INDIRECT_CHECKER_SPEC.loader is None:
+    raise RuntimeError("could not import indirect-control checker by explicit file path")
+INDIRECT_PRIVATE_CHECKER = importlib.util.module_from_spec(INDIRECT_CHECKER_SPEC)
+INDIRECT_CHECKER_SPEC.loader.exec_module(INDIRECT_PRIVATE_CHECKER)
 
 
 def _sha(data: bytes) -> str:
@@ -153,6 +164,10 @@ def _jump_table_elf(*, transformed: bool) -> bytes:
     if transformed:
         struct.pack_into("<6I", image, 0x610, *output_dispatch)
         struct.pack_into("<iiii", image, 0x700, 0, 8, 16, 24)
+        # The live Native Image entry starts with B to the mapped generated body.
+        struct.pack_into("<I", image, 0x200, 0x14000800)
+        # Keep a valid but dead safe-default chain in emitted bytes for stub-target tampering tests.
+        struct.pack_into("<II", image, 0x640, 0x12800000, 0xD65F03C0)
     struct.pack_into("<I", image, 0x238, 0xD65F03C0)
     return bytes(image)
 
@@ -271,7 +286,7 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         build = self.workflow.index("- name: Build\n")
         run = self.workflow.index("Run Generic Rehydration and Native Image handoff")
         check = self.workflow.index("Check retained Generic Rehydration and Native Image evidence", run)
-        upload = self.workflow.index("- name: Upload test evidence", check)
+        upload = self.workflow.index("- name: Upload protection-tls evidence", check)
         self.assertLess(build, run)
         self.assertLess(run, check)
         self.assertLess(check, upload)
@@ -486,9 +501,13 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "schemaVersion": 1,
                 "stage": "rehydration",
                 "status": "passed",
+                "unitId": INDIRECT_UNIT,
+                "profile": "host-context-entry",
+                "entrySymbol": "urp_entry",
                 "sourceSha256": source_hash,
                 "protectedImageSha256": protected_hash,
                 "nativeImageSha256": native_hash,
+                "nativeImageSize": len(native),
                 "layoutEvidence": layout,
             },
         )
@@ -548,6 +567,31 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             "firstFailureStage": None,
         }
         _write_json(positive / "jump-table-behavior.json", behavior)
+        _write_json(
+            positive / "stage.json",
+            {
+                "schemaVersion": 1,
+                "stage": "protected-image-producer",
+                "status": "passed",
+                "unitId": INDIRECT_UNIT,
+                "profile": "host-context-entry",
+            },
+        )
+        _write_json(
+            positive / "native-image.json",
+            {
+                "schemaVersion": 1,
+                "stage": "native-image",
+                "status": "passed",
+                "unitId": INDIRECT_UNIT,
+                "artifactRole": "native-image",
+                "profile": "host-context-entry",
+                "entrySymbol": "urp_entry",
+                "sourceSha256": source_hash,
+                "nativeImageSha256": native_hash,
+                "nativeImageSize": len(native),
+            },
+        )
 
         for negative_name, message in INDIRECT_NEGATIVES.items():
             negative = root / negative_name
@@ -690,6 +734,61 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             _write_json(negative / "negative-result.json", result_record)
         _refresh_indirect_manifest(root)
 
+    def refresh_native_image_bindings(self, positive: Path) -> None:
+        native_path = positive / "native-image.bin"
+        native = native_path.read_bytes()
+        native_hash = _sha(native)
+        rehydration_path = positive / "rehydration.json"
+        rehydration = json.loads(rehydration_path.read_text(encoding="utf-8"))
+        rehydration["nativeImageSha256"] = native_hash
+        rehydration["nativeImageSize"] = len(native)
+        rehydration["layoutEvidence"]["outputSha256"] = native_hash
+        _write_json(rehydration_path, rehydration)
+        handoff_path = positive / "handoff.json"
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+        handoff["nativeImageSha256"] = native_hash
+        _write_json(handoff_path, handoff)
+        native_metadata_path = positive / "native-image.json"
+        native_metadata = json.loads(native_metadata_path.read_text(encoding="utf-8"))
+        native_metadata["nativeImageSha256"] = native_hash
+        native_metadata["nativeImageSize"] = len(native)
+        _write_json(native_metadata_path, native_metadata)
+        behavior_path = positive / "jump-table-behavior.json"
+        behavior = json.loads(behavior_path.read_text(encoding="utf-8"))
+        behavior["nativeSha256"] = native_hash
+        behavior["targetHandoffSha256"] = _sha(handoff_path.read_bytes())
+        _write_json(behavior_path, behavior)
+
+    def add_native_load_alias(
+        self,
+        positive: Path,
+        virtual_address: int,
+        file_offset: int,
+        size: int,
+        flags: int,
+        *,
+        partial: bool,
+    ) -> None:
+        if partial:
+            virtual_address += size - 1
+            file_offset += size - 1
+            size = 1
+        image_path = positive / "native-image.bin"
+        image = bytearray(image_path.read_bytes())
+        phoff = struct.unpack_from("<Q", image, 32)[0]
+        phentsize, phnum = struct.unpack_from("<HH", image, 54)
+        if phentsize != 56:
+            raise AssertionError("unexpected synthetic ELF program-header size")
+        previous_headers = bytes(image[phoff:phoff + phentsize * phnum])
+        relocated_phoff = len(image)
+        image.extend(previous_headers)
+        image.extend(struct.pack(
+            "<IIQQQQQQ", 1, flags, file_offset, virtual_address, virtual_address, size, size, 1
+        ))
+        struct.pack_into("<Q", image, 32, relocated_phoff)
+        struct.pack_into("<H", image, 56, phnum + 1)
+        image_path.write_bytes(image)
+
     def run_checker(self, root: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(INDIRECT_CHECKER), str(root), "--tier", "pr", "--unit", INDIRECT_UNIT],
@@ -745,6 +844,341 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             _write_json(result_path, result)
             _refresh_indirect_manifest(root)
             return self.run_checker(root)
+
+    def _single_file_snapshot(self, root: Path, data: bytes, relative: str = "source-image.bin"):
+        root.mkdir()
+        (root / relative).write_bytes(data)
+        (root / "SHA256SUMS").write_text(
+            f"{_sha(data)}  {relative}\n", encoding="ascii"
+        )
+        return INDIRECT_PRIVATE_CHECKER.EvidenceRootSnapshot(root)
+
+    def test_private_checker_count_bounds_accept_exact_empty_entries_and_reject_plus_one_before_file_open(self) -> None:
+        open_calls: list[tuple[object, int]] = []
+        original_open = os.open
+
+        def tracked_open(path, flags, *args, **kwargs):
+            open_calls.append((path, flags))
+            return original_open(path, flags, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory(prefix="indirect-control-empty-count-bounds-") as directory:
+            exact_root = Path(directory) / "exact"
+            exact_root.mkdir()
+            (exact_root / "empty-a").write_bytes(b"")
+            (exact_root / "empty-b").write_bytes(b"")
+            (exact_root / "one-dir").mkdir()
+            with mock.patch.object(INDIRECT_PRIVATE_CHECKER.os, "open", side_effect=tracked_open):
+                exact = INDIRECT_PRIVATE_CHECKER.EvidenceRootSnapshot(
+                    exact_root, max_files=2, max_directories=2, max_total_bytes=0
+                )
+                exact.preflight()
+            self.assertEqual({"empty-a", "empty-b"}, exact.file_paths)
+            self.assertEqual({"one-dir"}, exact.directory_paths)
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for _path, flags in open_calls))
+
+            open_calls.clear()
+            over_file_root = Path(directory) / "over-file"
+            over_file_root.mkdir()
+            for name in ("empty-a", "empty-b", "empty-c"):
+                (over_file_root / name).write_bytes(b"")
+            with mock.patch.object(INDIRECT_PRIVATE_CHECKER.os, "open", side_effect=tracked_open):
+                over_files = INDIRECT_PRIVATE_CHECKER.EvidenceRootSnapshot(
+                    over_file_root, max_files=2, max_directories=2, max_total_bytes=0
+                )
+                with self.assertRaisesRegex(SystemExit, "file-count bound"):
+                    over_files.preflight()
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for _path, flags in open_calls))
+            self.assertEqual({}, over_files._bytes)
+
+            open_calls.clear()
+            over_directory_root = Path(directory) / "over-directory"
+            over_directory_root.mkdir()
+            for name in ("dir-a", "dir-b"):
+                (over_directory_root / name).mkdir()
+            with mock.patch.object(INDIRECT_PRIVATE_CHECKER.os, "open", side_effect=tracked_open):
+                over_directories = INDIRECT_PRIVATE_CHECKER.EvidenceRootSnapshot(
+                    over_directory_root, max_files=2, max_directories=2, max_total_bytes=0
+                )
+                with self.assertRaisesRegex(SystemExit, "directory-count bound"):
+                    over_directories.preflight()
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for _path, flags in open_calls))
+            self.assertEqual({}, over_directories._bytes)
+
+    def test_preloaded_range_module_with_foreign_origin_is_rejected_without_module_code_execution(self) -> None:
+        helper_path = Path(INDIRECT_PRIVATE_CHECKER.__file__).resolve().with_name("evidence_load_range.py")
+        module_name = INDIRECT_PRIVATE_CHECKER._range_helper_module_name(helper_path)
+        with tempfile.TemporaryDirectory(prefix="indirect-control-foreign-module-") as directory:
+            foreign_path = Path(directory) / "foreign.py"
+            foreign_path.write_text("# foreign module origin\n", encoding="utf-8")
+            code_runs: list[str] = []
+
+            class ForeignModule(types.ModuleType):
+                def __getattribute__(self, name: str):
+                    if name not in {"__class__", "__dict__"}:
+                        code_runs.append(name)
+                    return super().__getattribute__(name)
+
+            foreign = ForeignModule(module_name)
+            types.ModuleType.__getattribute__(foreign, "__dict__")["__file__"] = str(foreign_path)
+            previous = sys.modules.get(module_name)
+            sys.modules[module_name] = foreign
+            try:
+                with mock.patch.object(
+                    INDIRECT_PRIVATE_CHECKER,
+                    "_read_sibling_helper_source",
+                    side_effect=AssertionError("foreign module must be rejected before opening helper source"),
+                ):
+                    with self.assertRaisesRegex(ImportError, "is not checker-owned"):
+                        INDIRECT_PRIVATE_CHECKER._load_sibling_evidence_range_helper()
+            finally:
+                if previous is None:
+                    sys.modules.pop(module_name, None)
+                else:
+                    sys.modules[module_name] = previous
+            self.assertEqual([], code_runs)
+
+    def test_preloaded_range_module_with_matching_origin_and_digest_is_not_trusted(self) -> None:
+        helper_path = Path(INDIRECT_PRIVATE_CHECKER.__file__).resolve().with_name("evidence_load_range.py")
+        module_name = INDIRECT_PRIVATE_CHECKER._range_helper_module_name(helper_path)
+        code_runs: list[str] = []
+
+        class ForgedModule(types.ModuleType):
+            def __getattribute__(self, name: str):
+                if name not in {"__class__", "__dict__"}:
+                    code_runs.append(name)
+                return super().__getattribute__(name)
+
+        forged = ForgedModule(module_name)
+        namespace = types.ModuleType.__getattribute__(forged, "__dict__")
+        namespace["__file__"] = str(helper_path)
+        namespace[INDIRECT_PRIVATE_CHECKER._RANGE_MODULE_SOURCE_DIGEST] = (
+            types.ModuleType.__getattribute__(INDIRECT_PRIVATE_CHECKER._RANGE_HELPER, "__dict__")[
+                INDIRECT_PRIVATE_CHECKER._RANGE_MODULE_SOURCE_DIGEST
+            ]
+        )
+        namespace["resolve_isolated_evidence_root"] = lambda *_args, **_kwargs: "forged"
+        previous = sys.modules.get(module_name)
+        sys.modules[module_name] = forged
+        try:
+            with mock.patch.object(
+                INDIRECT_PRIVATE_CHECKER,
+                "_read_sibling_helper_source",
+                side_effect=AssertionError("unowned cache entry must be rejected before source reuse"),
+            ):
+                with self.assertRaisesRegex(ImportError, "is not checker-owned"):
+                    INDIRECT_PRIVATE_CHECKER._load_sibling_evidence_range_helper()
+        finally:
+            if previous is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous
+        self.assertEqual([], code_runs)
+
+    def test_private_checker_file_and_aggregate_bounds_accept_exact_max_and_reject_plus_one_pre_read(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-bounded-read-") as directory:
+            root = Path(directory) / "exact"
+            data = b"x" * 16
+            with (
+                mock.patch.object(INDIRECT_PRIVATE_CHECKER, "MAX_EVIDENCE_IMAGE_BYTES", 16),
+                mock.patch.object(INDIRECT_PRIVATE_CHECKER, "MAX_EVIDENCE_TOTAL_BYTES", 4096),
+            ):
+                exact = self._single_file_snapshot(root, data)
+                exact.preflight()
+                exact.verify_manifest()
+                self.assertEqual(data, exact.read("source-image.bin"))
+                actual_total = sum(path.stat().st_size for path in root.iterdir())
+
+                with mock.patch.object(INDIRECT_PRIVATE_CHECKER, "MAX_EVIDENCE_TOTAL_BYTES", actual_total):
+                    at_total_limit = INDIRECT_PRIVATE_CHECKER.EvidenceRootSnapshot(root)
+                    at_total_limit.preflight()
+                with mock.patch.object(INDIRECT_PRIVATE_CHECKER, "MAX_EVIDENCE_TOTAL_BYTES", actual_total - 1):
+                    over_total = INDIRECT_PRIVATE_CHECKER.EvidenceRootSnapshot(root)
+                    with mock.patch.object(over_total, "_open_relative", side_effect=AssertionError("file read before aggregate gate")):
+                        with self.assertRaisesRegex(SystemExit, "aggregate byte limit"):
+                            over_total.preflight()
+
+            with tempfile.TemporaryDirectory(prefix="indirect-control-file-plus-one-") as nested:
+                over_root = Path(nested) / "over"
+                with (
+                    mock.patch.object(INDIRECT_PRIVATE_CHECKER, "MAX_EVIDENCE_IMAGE_BYTES", 16),
+                    mock.patch.object(INDIRECT_PRIVATE_CHECKER, "MAX_EVIDENCE_TOTAL_BYTES", 4096),
+                ):
+                    over_file = self._single_file_snapshot(over_root, b"x" * 17)
+                    with mock.patch.object(over_file, "_open_relative", side_effect=AssertionError("file read before per-file gate")):
+                        with self.assertRaisesRegex(SystemExit, "per-file byte limit"):
+                            over_file.preflight()
+
+    def test_private_checker_external_image_reader_observes_exact_limit_and_rejects_plus_one_before_read(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-external-bounded-read-") as directory:
+            image = Path(directory) / "source.elf"
+            image.write_bytes(b"x" * 16)
+            with mock.patch.object(INDIRECT_PRIVATE_CHECKER, "MAX_EVIDENCE_IMAGE_BYTES", 16):
+                self.assertEqual(b"x" * 16, INDIRECT_PRIVATE_CHECKER.read_bounded_external_file(image, 16, "test ELF"))
+                image.write_bytes(b"x" * 17)
+                with mock.patch.object(INDIRECT_PRIVATE_CHECKER.os, "read", side_effect=AssertionError("read before size gate")):
+                    with self.assertRaisesRegex(SystemExit, "not a bounded regular file"):
+                        INDIRECT_PRIVATE_CHECKER.read_bounded_external_file(image, 16, "test ELF")
+
+    def test_private_checker_detects_truncation_and_growth_during_bounded_read(self) -> None:
+        for mutation, diagnostic in (
+            (lambda path: path.write_bytes(b"x"), "truncated while reading"),
+            (lambda path: path.write_bytes(b"data-plus-growth"), "grew or changed while reading"),
+        ):
+            with self.subTest(diagnostic=diagnostic), tempfile.TemporaryDirectory(prefix="indirect-control-race-") as directory:
+                root = Path(directory) / "evidence"
+                snapshot = self._single_file_snapshot(root, b"data", relative="evidence.bin")
+                snapshot.preflight()
+                with self.assertRaisesRegex(SystemExit, diagnostic):
+                    snapshot.read(
+                        "evidence.bin",
+                        after_initial_size_validation=lambda: mutation(root / "evidence.bin"),
+                    )
+
+    def test_private_checker_rejects_unlisted_special_files_before_open(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-special-file-") as directory:
+            root = Path(directory) / "evidence"
+            snapshot = self._single_file_snapshot(root, b"safe")
+            os.mkfifo(root / "unlisted-fifo")
+            with mock.patch.object(snapshot, "_open_relative", side_effect=AssertionError("opened special file")):
+                with self.assertRaisesRegex(SystemExit, "non-regular evidence file"):
+                    snapshot.preflight()
+
+    def test_private_checker_rejects_final_symlink_replacement_without_reading_target(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-final-symlink-race-") as directory:
+            parent = Path(directory)
+            root = parent / "evidence"
+            snapshot = self._single_file_snapshot(root, b"safe", relative="evidence.bin")
+            outside = parent / "outside"
+            outside.write_bytes(b"secret")
+            snapshot.preflight()
+            path = root / "evidence.bin"
+            path.unlink()
+            path.symlink_to(outside)
+            with mock.patch.object(INDIRECT_PRIVATE_CHECKER.os, "read", side_effect=AssertionError("read followed final symlink")):
+                with self.assertRaisesRegex(SystemExit, "cannot be opened safely"):
+                    snapshot.read("evidence.bin")
+
+    def test_private_checker_detects_final_symlink_replacement_after_same_handle_read(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-final-symlink-postread-") as directory:
+            parent = Path(directory)
+            root = parent / "evidence"
+            snapshot = self._single_file_snapshot(root, b"safe", relative="evidence.bin")
+            outside = parent / "outside"
+            outside.write_bytes(b"secret")
+            snapshot.preflight()
+            path = root / "evidence.bin"
+
+            def replace_after_open() -> None:
+                path.unlink()
+                path.symlink_to(outside)
+
+            # Depending on filesystem timestamp granularity, unlinking the
+            # open inode may either be detected by the same-handle metadata
+            # check immediately or leave the original safe bytes readable.
+            # It must never follow the replacement symlink, and the final tree
+            # verification must reject the changed pathname in either case.
+            try:
+                data = snapshot.read("evidence.bin", after_initial_size_validation=replace_after_open)
+            except SystemExit as error:
+                self.assertIn("grew or changed while reading", str(error))
+            else:
+                self.assertEqual(b"safe", data)
+            with self.assertRaises(SystemExit) as changed_tree:
+                snapshot.verify_tree_unchanged()
+            self.assertRegex(
+                str(changed_tree.exception),
+                r"(?:contains a symlink: evidence\.bin|root changed after bounded tree preflight|tree changed after bounded snapshot validation)",
+            )
+
+    def test_private_checker_fifo_replacement_after_preflight_does_not_block(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-fifo-race-") as directory:
+            root = Path(directory) / "evidence"
+            snapshot = self._single_file_snapshot(root, b"safe", relative="evidence.bin")
+            snapshot.preflight()
+            path = root / "evidence.bin"
+            path.unlink()
+            os.mkfifo(path)
+            with self.assertRaisesRegex(SystemExit, "changed after bounded tree preflight"):
+                snapshot.read("evidence.bin")
+
+    def test_artifact_root_rejects_symlink_alias_and_nested_symlink(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-root-isolation-") as directory:
+            parent = Path(directory)
+            root = parent / "evidence"
+            self.create_evidence(root)
+            alias = parent / "evidence-alias"
+            alias.symlink_to(root, target_is_directory=True)
+            result = self.run_checker(alias)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("must be an isolated non-symlink directory", result.stderr.lower())
+
+            (root / "unlisted-link").symlink_to(root, target_is_directory=True)
+            result = self.run_checker(root)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("contains a symlink", result.stderr.lower())
+
+    def test_live_entry_b_stub_must_target_the_mapped_output_function_not_dead_default(self) -> None:
+        def retarget_entry_to_default(positive: Path) -> None:
+            native_path = positive / "native-image.bin"
+            image = bytearray(native_path.read_bytes())
+            # B from source dynsym VA 0x1000 to retained emitted MOV W0,#-1; RET at 0x3040.
+            struct.pack_into("<I", image, 0x200, 0x14000810)
+            native_path.write_bytes(image)
+            self.refresh_native_image_bindings(positive)
+
+        result = self.reject_refreshed_mutation(retarget_entry_to_default)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("entry b target bypasses the exact mapped output function entry", result.stderr.lower())
+        self.assertNotIn("sha256sum", result.stderr.lower())
+
+    def test_partial_pt_load_intersections_reject_stub_code_and_clone_ranges(self) -> None:
+        cases = (
+            ("entry-stub", 0x1000, 0x200, 4, 5, "native image urp_entry entry b stub"),
+            ("emitted-code", 0x3000, 0x600, 0x100, 5, "selected address-map complete native image output range"),
+            ("table-clone", 0x4000, 0x700, 16, 4, "native image jump-table clone"),
+        )
+        for name, va, offset, size, flags, label in cases:
+            with self.subTest(name=name):
+                def add_partial(positive: Path) -> None:
+                    self.add_native_load_alias(positive, va, offset, size, flags, partial=True)
+                    self.refresh_native_image_bindings(positive)
+
+                result = self.reject_refreshed_mutation(add_partial)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(label, result.stderr.lower())
+                self.assertIn("partially intersects another pt_load memory interval", result.stderr.lower())
+                self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
+    def test_duplicate_fully_containing_pt_load_owners_reject_stub_code_and_clone(self) -> None:
+        cases = (
+            ("entry-stub", 0x1000, 0x200, 4, 5, "native image urp_entry entry b stub"),
+            ("emitted-code", 0x3000, 0x600, 0x100, 5, "selected address-map complete native image output range"),
+            ("table-clone", 0x4000, 0x700, 16, 4, "native image jump-table clone"),
+        )
+        for name, va, offset, size, flags, label in cases:
+            with self.subTest(name=name):
+                def add_duplicate_owner(positive: Path) -> None:
+                    self.add_native_load_alias(positive, va, offset, size, flags, partial=False)
+                    self.refresh_native_image_bindings(positive)
+
+                result = self.reject_refreshed_mutation(add_duplicate_owner)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(label, result.stderr.lower())
+                self.assertIn("exactly one fully containing file-backed pt_load owner", result.stderr.lower())
+                self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
+    def test_half_open_adjacent_load_ranges_remain_accepted(self) -> None:
+        def add_adjacent_loads(positive: Path) -> None:
+            for va, offset, flags in (
+                (0x1004, 0x204, 5),
+                (0x3100, 0x700, 5),
+                (0x4010, 0x710, 4),
+            ):
+                self.add_native_load_alias(positive, va, offset, 1, flags, partial=False)
+            self.refresh_native_image_bindings(positive)
+
+        result = self.reject_refreshed_mutation(add_adjacent_loads)
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_measured_four_case_evidence_and_four_negatives_are_accepted(self) -> None:
         with tempfile.TemporaryDirectory(prefix="indirect-control-valid-") as directory:
@@ -988,7 +1422,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             _refresh_indirect_manifest(root)
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("no unique retained source-to-output address-map decision", result.stderr)
+            self.assertIn("source function and all target symbols are not bound by one unique address-map range", result.stderr)
 
     def test_layout_evidence_requires_schema_v3_clone_preserving_contract(self) -> None:
         def mutate(positive: Path) -> None:
@@ -1063,6 +1497,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                     record["nativeImageSha256"] = native_hash
                     record["layoutEvidence"]["outputSha256"] = native_hash
                     _write_json(path, record)
+                    self.refresh_native_image_bindings(positive)
                 result = self.reject_refreshed_mutation(mutate)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertIn(message, result.stderr)
@@ -1130,7 +1565,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
 
         result = self.reject_refreshed_mutation(mutate)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not uniquely backed by a file range in one PT_LOAD", result.stderr)
+        self.assertIn("does not have exactly one fully containing file-backed PT_LOAD owner", result.stderr)
 
     def test_missing_or_duplicate_target_binding_is_rejected_after_hash_refresh(self) -> None:
         for duplicate in (False, True):
@@ -1175,6 +1610,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             rehydration["nativeImageSha256"] = native_hash
             rehydration["layoutEvidence"]["outputSha256"] = native_hash
             _write_json(rehydration_path, rehydration)
+            self.refresh_native_image_bindings(positive)
             _refresh_indirect_manifest(root)
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)

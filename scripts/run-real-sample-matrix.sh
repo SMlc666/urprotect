@@ -1708,7 +1708,50 @@ export repo_root manifest candidates runtime_closures artifact_root requested_ti
   bionic_timeout_seconds bionic_output_limit bionic_memory_bytes bionic_process_limit \
   bionic_outer_mode bionic_path_policy bionic_runpath bionic_image bionic_image_id bionic_loader
 
-project_batch=()
+# Refill on the first completed child, not on completion of an entire batch.
+# The per-worker supervisor and cleanup/registry proofs remain mandatory.
+reap_next_project_worker() {
+  local finished_pid='' status=0 index=-1 candidate running
+  (( ${#active_pids[@]} > 0 )) || { echo 'empty real-sample worker pool' >&2; return 2; }
+  wait -n -p finished_pid "${active_pids[@]}" || status=$?
+  if [[ -z "${finished_pid}" ]]; then
+    # Bash wait -n may ignore a child that finished before this wait began.
+    running="$(jobs -rp)"
+    for candidate in "${active_pids[@]}"; do
+      if ! grep -Fxq -- "${candidate}" <<< "${running}"; then
+        finished_pid="${candidate}"
+        status=0
+        wait "${candidate}" || status=$?
+        break
+      fi
+    done
+    if [[ -z "${finished_pid}" ]]; then
+      finished_pid="${active_pids[0]}"
+      status=0
+      wait "${finished_pid}" || status=$?
+    fi
+  fi
+  for candidate in "${!active_pids[@]}"; do
+    if [[ "${active_pids[candidate]}" == "${finished_pid}" ]]; then
+      index="$candidate"
+      break
+    fi
+  done
+  (( index >= 0 )) || { echo 'unregistered completed worker' >&2; return 2; }
+  (( status == 0 )) || overall_status=1
+  if ! urp_stop_worker_group "${active_pids[index]}" "${active_pgids[index]}" 1 \
+      "${active_pid_registries[index]}" "${active_container_registries[index]}"; then
+    printf 'worker descendants or named containers remain after pid %s\n' "${finished_pid}" >&2
+    return 1
+  fi
+  unset 'active_pids[index]' 'active_pgids[index]' \
+        'active_pid_registries[index]' 'active_container_registries[index]'
+  active_pids=("${active_pids[@]}")
+  active_pgids=("${active_pgids[@]}")
+  active_pid_registries=("${active_pid_registries[@]}")
+  active_container_registries=("${active_container_registries[@]}")
+}
+
 worker_registry_index=0
 while IFS= read -r project_json; do
   [[ -z "${project_json}" ]] && continue
@@ -1782,41 +1825,17 @@ while IFS= read -r project_json; do
     fi
     sleep 0.01
   done
-  project_batch+=("${project_pid}")
   active_pids+=("${project_pid}")
   active_pgids+=("${project_pgid}")
   active_pid_registries+=("${pid_registry}")
   active_container_registries+=("${container_registry}")
-  if [[ "${#project_batch[@]}" -ge "${parallelism}" ]]; then
-    for index in "${!project_batch[@]}"; do
-      pid="${project_batch[${index}]}"
-      if wait "${pid}"; then :; else overall_status=1; fi
-      if ! urp_stop_worker_group "${pid}" "${active_pgids[${index}]}" 1 \
-        "${active_pid_registries[${index}]}" "${active_container_registries[${index}]}"; then
-        printf 'worker descendants or named containers remain after project %s\n' "${pid}" >&2
-        exit 1
-      fi
-    done
-    project_batch=()
-    active_pids=()
-    active_pgids=()
-    active_pid_registries=()
-    active_container_registries=()
-  fi
+  while (( ${#active_pids[@]} >= parallelism )); do
+    reap_next_project_worker
+  done
 done < <(python3 "${repo_root}/scripts/validate-real-samples.py" "${manifest}" --candidates "${candidates}" --tier "${requested_tier}" --emit | tail -n +2)
-for index in "${!project_batch[@]}"; do
-  pid="${project_batch[${index}]}"
-  if wait "${pid}"; then :; else overall_status=1; fi
-  if ! urp_stop_worker_group "${pid}" "${active_pgids[${index}]}" 1 \
-    "${active_pid_registries[${index}]}" "${active_container_registries[${index}]}"; then
-    printf 'worker descendants or named containers remain after project %s\n' "${pid}" >&2
-    exit 1
-  fi
+while (( ${#active_pids[@]} > 0 )); do
+  reap_next_project_worker
 done
-active_pids=()
-active_pgids=()
-active_pid_registries=()
-active_container_registries=()
 
 if ! sanitize_evidence; then
   overall_status=1

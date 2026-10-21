@@ -5,20 +5,27 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import platform
 import shlex
 import stat
 import sys
+import types
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_TOTAL_BYTES = 256 * 1024 * 1024
+MAX_ROOT_FILE_COUNT = 128
+MAX_ROOT_DIRECTORY_COUNT = 64  # Includes the evidence root itself.
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_MANIFEST_ENTRIES = MAX_ROOT_FILE_COUNT
+MAX_PRIVATE_HELPER_SOURCE_BYTES = 16 * 1024 * 1024
+ACTIVE_ROOT_SNAPSHOT_MODULE_KEY = "_urprotect_active_evidence_root_snapshot"
 BUILD_COMMAND = ["make", "-C", "native/urprotect-runtime", "-B", "external-provider-provider-loaded-rollback-test"]
 CPP_FLAGS = ["-Iinclude", "-I../urprotect-launcher", "-I../../third_party/miniz"]
 C_FLAGS = ["-std=c11", "-O2", "-g0", "-Wall", "-Wextra", "-Werror", "-Wshadow", "-Wconversion", "-pthread"]
@@ -73,9 +80,11 @@ BUILD_OUTPUT_FILES = {
 }
 EVIDENCE_TOOL_FILES = {
     "evidence-tools/check-external-provider-rollback-evidence.py",
+    "evidence-tools/run-external-provider-rollback-oracle.sh",
     "scripts/check-external-provider-evidence.py",
     "scripts/check-dynamic-import-evidence.py",
     "scripts/check-indirect-control-evidence.py",
+    "scripts/evidence_load_range.py",
     "scripts/tls_runtime_identity.py",
 }
 TOOLCHAIN_FILES = {
@@ -104,31 +113,111 @@ def fail(message: str) -> None:
     raise SystemExit(f"provider-loaded rollback evidence: {message}")
 
 
+def _metadata_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (metadata.st_size, metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+
+def read_file(
+    root: Path,
+    relative: str,
+    *,
+    allow_empty: bool = False,
+    limit: int = MAX_FILE_BYTES,
+) -> bytes:
+    if type(limit) is not int or limit < 0:
+        fail("evidence file byte limit is invalid")
+    path = Path(relative)
+    if (
+        not relative or "\\" in relative or path.is_absolute()
+        or path.as_posix() != relative or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        fail("evidence file path is unsafe")
+    snapshot = sys.modules.get(ACTIVE_ROOT_SNAPSHOT_MODULE_KEY)
+    if snapshot is not None and Path(os.path.abspath(snapshot.root)) == Path(os.path.abspath(root)):
+        data = snapshot.read(relative, limit=limit)
+        if not allow_empty and not data:
+            fail(f"evidence input is not a bounded regular file: {relative}")
+        return data
+
+    root_fd = -1
+    directory_fd = -1
+    file_fd = -1
+    try:
+        root_fd = os.open(root, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW)
+        directory_fd = root_fd
+        for part in path.parts[:-1]:
+            next_fd = os.open(
+                part, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=directory_fd,
+            )
+            if directory_fd != root_fd:
+                os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(
+            path.parts[-1], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=directory_fd,
+        )
+        before = os.fstat(file_fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > limit or (not allow_empty and before.st_size == 0):
+            fail(f"evidence input is not a bounded regular file: {relative}")
+        result = bytearray(before.st_size)
+        position = 0
+        while position < before.st_size:
+            chunk = os.read(file_fd, min(1024 * 1024, before.st_size - position))
+            if not chunk:
+                fail(f"evidence input changed size or exceeds its bound: {relative}")
+            result[position : position + len(chunk)] = chunk
+            position += len(chunk)
+        growth_probe = os.read(file_fd, 1)
+        after = os.fstat(file_fd)
+        if growth_probe or _metadata_identity(after) != _metadata_identity(before) or not stat.S_ISREG(after.st_mode):
+            fail(f"evidence input changed size or exceeds its bound: {relative}")
+        data = bytes(result)
+        if not allow_empty and not data:
+            fail(f"evidence input is not a bounded regular file: {relative}")
+        return data
+    except OSError as error:
+        fail(f"cannot safely read evidence file {relative}: {error}")
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if directory_fd >= 0 and directory_fd != root_fd:
+            os.close(directory_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
 def load_module(name: str, path: Path) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        fail("cannot load the independent external-provider ELF parser")
-    module = importlib.util.module_from_spec(spec)
+    snapshot = sys.modules.get(ACTIVE_ROOT_SNAPSHOT_MODULE_KEY)
+    candidate = Path(os.path.abspath(path))
+    if snapshot is not None:
+        active_root = Path(os.path.abspath(snapshot.root))
+        try:
+            relative = candidate.relative_to(active_root).as_posix()
+            source_root = active_root
+        except ValueError:
+            source_root = ROOT
+            try:
+                relative = candidate.relative_to(ROOT).as_posix()
+            except ValueError:
+                fail("retained checker module escapes its owned source root")
+    else:
+        source_root = ROOT
+        try:
+            relative = candidate.relative_to(ROOT).as_posix()
+        except ValueError:
+            fail("retained checker module escapes its owned source root")
+    source = read_file(source_root, relative, limit=MAX_PRIVATE_HELPER_SOURCE_BYTES)
+    module = types.ModuleType(name)
+    namespace = types.ModuleType.__getattribute__(module, "__dict__")
+    namespace.update({"__file__": str(path), "__package__": ""})
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    try:
+        exec(compile(source, str(path), "exec"), namespace)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
     return module
-
-
-def read_file(root: Path, relative: str, *, allow_empty: bool = False) -> bytes:
-    path = root / relative
-    try:
-        metadata = path.lstat()
-    except OSError as error:
-        fail(f"cannot stat evidence file {relative}: {error}")
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_FILE_BYTES or (not allow_empty and metadata.st_size == 0):
-        fail(f"evidence input is not a bounded regular file: {relative}")
-    try:
-        data = path.read_bytes()
-    except OSError as error:
-        fail(f"cannot read evidence file {relative}: {error}")
-    if len(data) != metadata.st_size or len(data) > MAX_FILE_BYTES or (not allow_empty and not data):
-        fail(f"evidence input changed size or exceeds its bound: {relative}")
-    return data
 
 
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -155,6 +244,9 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+_INDIRECT = load_module("urp_provider_rollback_indirect_control", ROOT / "scripts/check-indirect-control-evidence.py")
+
+
 def exact_int(value: Any, label: str) -> int:
     if type(value) is not int:
         fail(f"{label} must be an exact JSON integer")
@@ -174,56 +266,140 @@ def require(value: bool, message: str) -> None:
         fail(message)
 
 
-def _safe_closed_tree(root: Path, expected: set[str], *, sealing: bool) -> None:
-    actual: set[str] = set()
-    total = 0
-    for path in root.rglob("*"):
-        relative = path.relative_to(root).as_posix()
-        if path.is_symlink():
-            fail(f"evidence tree contains a symlink: {relative}")
-        if path.is_file():
-            actual.add(relative)
-            total += path.stat().st_size
-            if total > MAX_TOTAL_BYTES:
-                fail("evidence tree exceeds its aggregate byte bound")
-    if sealing:
-        required = ROOT_FILES
-        if actual != required:
-            fail(f"unsealed evidence tree has unexpected file set (missing={sorted(required - actual)}, extra={sorted(actual - required)})")
-    elif actual != expected:
-        fail(f"evidence tree is not closed (missing={sorted(expected - actual)}, extra={sorted(actual - expected)})")
+def _rollback_file_limit(relative: str) -> int:
+    return MAX_MANIFEST_BYTES if relative == "SHA256SUMS" else MAX_FILE_BYTES
+
+
+def _expected_directories(files: set[str]) -> set[str]:
+    directories: set[str] = set()
+    for relative in files:
+        parent = Path(relative).parent
+        while parent != Path("."):
+            directories.add(parent.as_posix())
+            parent = parent.parent
+    return directories
+
+
+def _safe_closed_tree(root: Path, expected: set[str], *, sealing: bool):
+    required = ROOT_FILES if sealing else expected
+    snapshot = _INDIRECT.EvidenceRootSnapshot(
+        root,
+        max_files=MAX_ROOT_FILE_COUNT,
+        max_directories=MAX_ROOT_DIRECTORY_COUNT,
+        max_total_bytes=MAX_TOTAL_BYTES,
+        expected_files=required,
+        expected_directories=_expected_directories(required),
+        file_limit_resolver=_rollback_file_limit,
+    )
+    snapshot.preflight()
+    return snapshot
+
+
+@contextmanager
+def _using_root_snapshot(snapshot: Any) -> Iterator[None]:
+    previous = sys.modules.get(ACTIVE_ROOT_SNAPSHOT_MODULE_KEY)
+    had_previous = ACTIVE_ROOT_SNAPSHOT_MODULE_KEY in sys.modules
+    sys.modules[ACTIVE_ROOT_SNAPSHOT_MODULE_KEY] = snapshot
+    try:
+        yield
+    finally:
+        if had_previous:
+            sys.modules[ACTIVE_ROOT_SNAPSHOT_MODULE_KEY] = previous
+        else:
+            sys.modules.pop(ACTIVE_ROOT_SNAPSHOT_MODULE_KEY, None)
+
+
+def _write_root_file(root: Path, relative: str, data: bytes) -> None:
+    parts = Path(relative).parts
+    root_fd = -1
+    directory_fd = -1
+    file_fd = -1
+    try:
+        root_fd = os.open(root, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW)
+        directory_fd = root_fd
+        for part in parts[:-1]:
+            next_fd = os.open(
+                part, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=directory_fd,
+            )
+            if directory_fd != root_fd:
+                os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(
+            parts[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC
+            | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
+        if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+            fail(f"evidence output is not a regular file: {relative}")
+        position = 0
+        while position < len(data):
+            written = os.write(file_fd, data[position : position + 1024 * 1024])
+            if written <= 0:
+                fail(f"evidence output write made no progress: {relative}")
+            position += written
+        os.fsync(file_fd)
+    except OSError as error:
+        fail(f"cannot safely write evidence output {relative}: {error}")
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if directory_fd >= 0 and directory_fd != root_fd:
+            os.close(directory_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
 
 
 def _write_manifest(root: Path) -> None:
-    rows: list[str] = []
-    for relative in sorted(ALL_FILES - {"SHA256SUMS"}):
-        data = read_file(root, relative, allow_empty=True)
-        rows.append(f"{sha(data)}  {relative}\n")
-    (root / "SHA256SUMS").write_text("".join(rows), encoding="ascii")
+    files = ALL_FILES - {"SHA256SUMS"}
+    snapshot = _safe_closed_tree(root, files, sealing=False)
+    with _using_root_snapshot(snapshot):
+        if len(files) > MAX_MANIFEST_ENTRIES:
+            fail("rollback evidence exceeds its manifest-entry bound")
+        rows = [f"{sha(snapshot.read(relative, limit=_rollback_file_limit(relative)))}  {relative}\n" for relative in sorted(files)]
+        data = "".join(rows).encode("ascii")
+        if len(data) > MAX_MANIFEST_BYTES:
+            fail("rollback SHA256SUMS exceeds its byte bound")
+        snapshot.verify_tree_unchanged()
+        _write_root_file(root, "SHA256SUMS", data)
 
 
-def _verify_manifest(root: Path) -> None:
-    data = read_file(root, "SHA256SUMS")
-    try:
-        rows = data.decode("ascii", errors="strict").splitlines()
-    except UnicodeDecodeError:
-        fail("SHA256SUMS is not ASCII")
-    parsed: dict[str, str] = {}
-    for row in rows:
-        if len(row) < 67 or row[64:66] != "  ":
-            fail("SHA256SUMS contains a malformed row")
-        digest, relative = row[:64], row[66:]
-        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
-            fail("SHA256SUMS contains a malformed digest")
-        if relative in parsed or relative.startswith("/") or ".." in Path(relative).parts or "\\" in relative:
-            fail("SHA256SUMS contains an unsafe or duplicate path")
-        parsed[relative] = digest
-    expected = ALL_FILES - {"SHA256SUMS"}
-    if set(parsed) != expected:
-        fail(f"SHA256SUMS is not closed (missing={sorted(expected - set(parsed))}, extra={sorted(set(parsed) - expected)})")
-    for relative, expected_digest in parsed.items():
-        if sha(read_file(root, relative, allow_empty=True)) != expected_digest:
-            fail(f"SHA256SUMS digest mismatch: {relative}")
+def _verify_manifest(root: Path, *, snapshot: Any | None = None) -> None:
+    current = snapshot or _safe_closed_tree(root, ALL_FILES, sealing=False)
+    with _using_root_snapshot(current):
+        data = current.read("SHA256SUMS", limit=MAX_MANIFEST_BYTES)
+        if data.count(b"\n") > MAX_MANIFEST_ENTRIES:
+            fail("SHA256SUMS exceeds its manifest-entry bound")
+        try:
+            rows = data.decode("ascii", errors="strict").splitlines()
+        except UnicodeDecodeError:
+            fail("SHA256SUMS is not ASCII")
+        if len(rows) > MAX_MANIFEST_ENTRIES:
+            fail("SHA256SUMS exceeds its manifest-entry bound")
+        parsed: dict[str, str] = {}
+        for row in rows:
+            if len(row) < 67 or row[64:66] != "  ":
+                fail("SHA256SUMS contains a malformed row")
+            digest, relative = row[:64], row[66:]
+            relative_path = Path(relative)
+            if (
+                len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest)
+                or not relative or "\\" in relative or relative_path.is_absolute()
+                or relative_path.as_posix() != relative
+                or any(part in {"", ".", ".."} for part in relative_path.parts)
+            ):
+                fail("SHA256SUMS contains an unsafe or malformed path/digest")
+            if relative in parsed:
+                fail("SHA256SUMS contains an unsafe or duplicate path")
+            parsed[relative] = digest
+        expected = ALL_FILES - {"SHA256SUMS"}
+        if set(parsed) != expected:
+            fail(f"SHA256SUMS is not closed (missing={sorted(expected - set(parsed))}, extra={sorted(set(parsed) - expected)})")
+        for relative, expected_digest in parsed.items():
+            if sha(current.read(relative, limit=_rollback_file_limit(relative))) != expected_digest:
+                fail(f"SHA256SUMS digest mismatch: {relative}")
+        current.verify_tree_unchanged()
 
 
 def _verify_build(root: Path, build: dict[str, Any]) -> dict[str, bytes]:
@@ -286,22 +462,32 @@ def _verify_build(root: Path, build: dict[str, Any]) -> dict[str, bytes]:
     for field, relative in toolchain_bindings.items():
         require(toolchain.get(field) == sha(read_file(root, relative)), f"toolchain {field} does not bind {relative}")
     evidence_tools = exact_keys(build.get("evidenceTools"), {
-        "providerElfParserSha256", "rollbackCheckerSha256", "dynamicImportParserSha256",
-        "indirectControlParserSha256", "runtimeIdentityVerifierSha256",
+        "providerElfParserSha256", "rollbackCheckerSha256", "rollbackProducerSha256",
+        "dynamicImportParserSha256", "indirectControlParserSha256",
+        "evidenceLoadRangeHelperSha256", "runtimeIdentityVerifierSha256",
     }, "evidence tool identity")
+    producer_source = read_file(root, "evidence-tools/run-external-provider-rollback-oracle.sh")
+    require(evidence_tools.get("rollbackProducerSha256") == sha(producer_source), "retained rollback producer source digest mismatch")
     checker_source = read_file(root, "evidence-tools/check-external-provider-rollback-evidence.py")
     require(evidence_tools.get("rollbackCheckerSha256") == sha(checker_source), "retained rollback checker source digest mismatch")
-    require(sha(checker_source) == sha(Path(__file__).resolve().read_bytes()), "running rollback checker differs from retained checker source")
+    require(
+        sha(checker_source) == sha(read_file(Path(__file__).resolve().parent, Path(__file__).name, limit=MAX_PRIVATE_HELPER_SOURCE_BYTES)),
+        "running rollback checker differs from retained checker source",
+    )
     tool_bindings = {
         "providerElfParserSha256": "scripts/check-external-provider-evidence.py",
         "dynamicImportParserSha256": "scripts/check-dynamic-import-evidence.py",
         "indirectControlParserSha256": "scripts/check-indirect-control-evidence.py",
+        "evidenceLoadRangeHelperSha256": "scripts/evidence_load_range.py",
         "runtimeIdentityVerifierSha256": "scripts/tls_runtime_identity.py",
     }
     for field, relative in tool_bindings.items():
         retained = read_file(root, relative)
         require(evidence_tools.get(field) == sha(retained), f"retained evidence tool digest mismatch for {relative}")
-        require(sha(retained) == sha((ROOT / relative).read_bytes()), f"running evidence tool differs from retained source: {relative}")
+        require(
+            sha(retained) == sha(read_file(ROOT, relative, limit=MAX_PRIVATE_HELPER_SOURCE_BYTES)),
+            f"running evidence tool differs from retained source: {relative}",
+        )
     target = read_file(root, "toolchain/target-triple.txt").decode("ascii", errors="strict").strip()
     require(target == "aarch64-linux-gnu", "native C compiler target is not aarch64-linux-gnu")
     cc_version = read_file(root, "toolchain/cc-version.txt").decode("utf-8", errors="strict").splitlines()
@@ -514,25 +700,31 @@ def _validate_record(root: Path, build: dict[str, Any], external_parser: Any) ->
 def validate(root: Path, *, seal: bool) -> dict[str, Any]:
     if root.is_symlink() or not root.is_dir():
         fail("evidence root must be a real directory")
-    _safe_closed_tree(root, ALL_FILES, sealing=seal)
-    if not seal:
-        _verify_manifest(root)
-    build = read_json(root, "native-build.json")
-    _verify_build(root, build)
-    external_parser = load_module(
-        "urp_provider_rollback_retained_external_evidence",
-        root / "scripts/check-external-provider-evidence.py",
-    )
-    report = _validate_record(root, build, external_parser)
-    if seal:
-        (root / "report.json").write_text(json.dumps(report, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-        _write_manifest(root)
-        _safe_closed_tree(root, ALL_FILES, sealing=False)
-        _verify_manifest(root)
-    else:
-        existing = read_json(root, "report.json")
-        if existing != report:
-            fail("retained report does not equal independently recomputed rollback acceptance")
+    snapshot = _safe_closed_tree(root, ALL_FILES, sealing=seal)
+    with _using_root_snapshot(snapshot):
+        if not seal:
+            _verify_manifest(root, snapshot=snapshot)
+        build = read_json(root, "native-build.json")
+        _verify_build(root, build)
+        external_parser = load_module(
+            "urp_provider_rollback_retained_external_evidence",
+            root / "scripts/check-external-provider-evidence.py",
+        )
+        report = _validate_record(root, build, external_parser)
+        if seal:
+            snapshot.verify_tree_unchanged()
+            report_bytes = (json.dumps(report, sort_keys=True, indent=2) + "\n").encode("utf-8")
+            if len(report_bytes) > MAX_FILE_BYTES:
+                fail("rollback report exceeds its byte bound")
+            _write_root_file(root, "report.json", report_bytes)
+            _write_manifest(root)
+            final_snapshot = _safe_closed_tree(root, ALL_FILES, sealing=False)
+            with _using_root_snapshot(final_snapshot):
+                _verify_manifest(root, snapshot=final_snapshot)
+        else:
+            existing = read_json(root, "report.json")
+            if existing != report:
+                fail("retained report does not equal independently recomputed rollback acceptance")
     return report
 
 

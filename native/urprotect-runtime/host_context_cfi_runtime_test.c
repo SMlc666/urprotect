@@ -516,7 +516,11 @@ int main(int argc, char **argv)
         return 3;
     }
 
-    memcpy(&target, &state.target_address, sizeof(target));
+    /* Call the public entry stub, but verify unwinding against the actual
+     * protected function's mapped FDE range. Flattening relocates the function
+     * to a new executable segment while urp_entry remains an ABI-visible stub.
+     * Those are distinct addresses and must not be conflated in this oracle. */
+    memcpy(&target, &entry_address, sizeof(target));
     args.abi_version = URP_HOST_ABI_VERSION;
     args.struct_size = URP_LAUNCH_ARGS_CURRENT_SIZE;
     args.argc = 1U;

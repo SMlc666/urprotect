@@ -228,6 +228,23 @@ public static class Aarch64JumpTableResolver
         }
 
         recognized = true;
+        // The CMP/B.HI proof remains valid only while its architectural GPR survives
+        // every producer through BR. Wn and Xn are aliases, and the flattened
+        // dispatcher consumes the live index at BR rather than the stale CMP value.
+        if (loadedOutputRegister.Index == indexRegister.Index
+            || targetBaseRegister.Index == indexRegister.Index
+            || addTargetRegister.Index == indexRegister.Index)
+        {
+            failure = "The bounded jump-table index is overwritten between CMP/B.HI and BR.";
+            return false;
+        }
+
+        if (loadedOutputRegister.Index == targetBaseRegister.Index)
+        {
+            failure = "The relative jump-table target-base ADR overwrites the loaded signed displacement.";
+            return false;
+        }
+
         var dispatchStart = branchIndex - 5;
         if (!TryGetBoundedUnsignedSwitch(
                 instructions,
@@ -455,6 +472,24 @@ public static class Aarch64JumpTableResolver
             || targetRegister != branchRegister)
         {
             failure = "The selected BR does not have the exact ordered ADRP/GOT-LDR/indexed-LDRSW/table-base-ADD register-flow chain.";
+            return false;
+        }
+
+        // The signed load and final ADD must preserve the checked index used by
+        // the flattened dispatcher. Also reject an LDRSW destination that aliases
+        // the table pointer: the ADD still needs that pointer as its base.
+        if (gotPageRegister.Index == indexRegister.Index
+            || gotPointerRegister.Index == indexRegister.Index
+            || loadedDisplacementRegister.Index == indexRegister.Index
+            || targetRegister.Index == indexRegister.Index)
+        {
+            failure = "The bounded external-table index is overwritten between CMP/B.HI and BR.";
+            return false;
+        }
+
+        if (loadedDisplacementRegister.Index == tableBaseRegister.Index)
+        {
+            failure = "The external-table LDRSW overwrites the table-base register before the target ADD.";
             return false;
         }
 

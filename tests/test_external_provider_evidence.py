@@ -25,6 +25,64 @@ CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
 
 
+class ExternalProviderRootResourceBoundsTests(unittest.TestCase):
+    def test_manifest_writer_accepts_exact_empty_count_limits_and_rejects_plus_one_before_file_open(self) -> None:
+        original_open = os.open
+        opened_flags: list[int] = []
+
+        def tracked_open(path, flags, *args, **kwargs):
+            opened_flags.append(flags)
+            return original_open(path, flags, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory(prefix="provider-root-count-bounds-") as directory:
+            parent = Path(directory)
+            exact = parent / "exact"
+            exact.mkdir()
+            (exact / "empty-a").write_bytes(b"")
+            (exact / "empty-b").write_bytes(b"")
+            (exact / "one-dir").mkdir()
+            with (
+                mock.patch.object(CHECKER, "MAX_PROVIDER_ROOT_FILES", 2),
+                mock.patch.object(CHECKER, "MAX_PROVIDER_ROOT_DIRECTORIES", 2),
+                mock.patch.object(CHECKER.os, "open", side_effect=tracked_open),
+            ):
+                CHECKER.write_closed_manifest(exact)
+            self.assertEqual(2, len((exact / "SHA256SUMS").read_text(encoding="utf-8").splitlines()))
+
+            opened_flags.clear()
+            over_files = parent / "over-files"
+            over_files.mkdir()
+            for name in ("empty-a", "empty-b", "empty-c"):
+                (over_files / name).write_bytes(b"")
+            with (
+                mock.patch.object(CHECKER, "MAX_PROVIDER_ROOT_FILES", 2),
+                mock.patch.object(CHECKER.os, "open", side_effect=tracked_open),
+            ):
+                with self.assertRaisesRegex(SystemExit, "file-count bound"):
+                    CHECKER.write_closed_manifest(over_files)
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for flags in opened_flags))
+
+            opened_flags.clear()
+            over_directories = parent / "over-directories"
+            over_directories.mkdir()
+            (over_directories / "dir-a").mkdir()
+            (over_directories / "dir-b").mkdir()
+            with (
+                mock.patch.object(CHECKER, "MAX_PROVIDER_ROOT_DIRECTORIES", 2),
+                mock.patch.object(CHECKER.os, "open", side_effect=tracked_open),
+            ):
+                with self.assertRaisesRegex(SystemExit, "directory-count bound"):
+                    CHECKER.write_closed_manifest(over_directories)
+            self.assertTrue(all(flags & getattr(os, "O_DIRECTORY", 0) for flags in opened_flags))
+
+    def test_manifest_line_count_is_checked_before_splitlines(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="provider-manifest-entry-bound-") as directory:
+            root = Path(directory)
+            (root / "SHA256SUMS").write_bytes(b"\n" * (CHECKER.MAX_PROVIDER_MANIFEST_ENTRIES + 1))
+            with self.assertRaisesRegex(SystemExit, "manifest-entry bound"):
+                CHECKER.check_closed_manifest(root)
+
+
 class ExternalProviderElfEvidenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -526,7 +584,7 @@ class ExternalProviderClosedRootTamperingTests(unittest.TestCase):
             oversized = exact_limit_data + b"\0"
             self.assertEqual(CHECKER.MAX_PROVIDER_BYTES + 1, len(oversized))
             provider_path.write_bytes(oversized)
-            with self.assertRaisesRegex(SystemExit, "not a bounded regular file: provider-image.so"):
+            with self.assertRaisesRegex(SystemExit, "per-file byte limit: provider-image.so"):
                 CHECKER.validate_root(root, write_report=False)
 
     def test_forged_retained_build_and_managed_executable_hashes_are_rejected(self) -> None:
@@ -597,7 +655,7 @@ class ExternalProviderClosedRootTamperingTests(unittest.TestCase):
             root = self._copy(temporary)
             (root / "negative-native-image.bin").write_bytes(b"unexpected publication")
             CHECKER.write_closed_manifest(root)
-            with self.assertRaisesRegex(SystemExit, "file set is not exact"):
+            with self.assertRaisesRegex(SystemExit, "unexpected path: negative-native-image.bin"):
                 CHECKER.validate_root(root, write_report=False)
 
     def test_refreshed_runtime_identity_with_forged_version_is_rejected(self) -> None:
@@ -895,6 +953,35 @@ class ExternalProviderClosedRootTamperingTests(unittest.TestCase):
 
     def _write_provenance_stream(self, root: Path, compressed: bytes) -> None:
         (root / "build-provenance.tar.gz").write_bytes(compressed)
+
+    def test_positive_provider_provenance_pins_sibling_range_helper_source(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="external-provider-range-helper-tamper-") as temporary:
+            root = self._copy(temporary)
+            compressed = (root / "build-provenance.tar.gz").read_bytes()
+            expanded = bytearray(CHECKER._decompress_provenance_gzip(compressed))
+            target = "build-inputs/evidence-tools/scripts/evidence_load_range.py"
+            offset = 0
+            found = False
+            while offset + 512 <= len(expanded):
+                header = bytes(expanded[offset : offset + 512])
+                if header == bytes(512):
+                    break
+                name = header[:100].split(b"\0", 1)[0].decode("utf-8", errors="strict")
+                size_text = header[124:136].strip(b"\0 ")
+                size = int(size_text or b"0", 8)
+                payload_start = offset + 512
+                if name == target:
+                    if size == 0:
+                        self.fail("retained evidence helper unexpectedly has no source bytes")
+                    expanded[payload_start] ^= 1
+                    found = True
+                    break
+                offset = payload_start + ((size + 511) // 512) * 512
+            self.assertTrue(found, "provider provenance archive omits the range helper")
+            (root / "build-provenance.tar.gz").write_bytes(gzip.compress(bytes(expanded)))
+            CHECKER.write_closed_manifest(root)
+            with self.assertRaisesRegex(SystemExit, "evidenceLoadRangeHelperSha256 does not bind retained evidence tool source"):
+                CHECKER.validate_root(root, write_report=False)
 
     def test_compressed_small_expanded_over_limit_pax_is_rejected_before_tarfile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

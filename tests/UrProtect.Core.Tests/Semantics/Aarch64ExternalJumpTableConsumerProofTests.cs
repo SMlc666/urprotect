@@ -249,6 +249,9 @@ public sealed class Aarch64ExternalJumpTableConsumerProofTests
     [InlineData("rpath")]
     [InlineData("index-clobber")]
     [InlineData("base-clobber")]
+    [InlineData("loaded-index-clobber")]
+    [InlineData("target-index-clobber")]
+    [InlineData("loaded-tablebase-clobber")]
     [InlineData("bad-load-width")]
     [InlineData("bad-load-scale")]
     [InlineData("out-of-range-bounds")]
@@ -277,6 +280,15 @@ public sealed class Aarch64ExternalJumpTableConsumerProofTests
         Assert.False(success, mutation);
         Assert.Null(proof);
         Assert.False(string.IsNullOrWhiteSpace(failure));
+        if (mutation is "loaded-index-clobber" or "target-index-clobber")
+        {
+            Assert.Contains("overwritten", failure, StringComparison.Ordinal);
+        }
+        else if (mutation == "loaded-tablebase-clobber")
+        {
+            Assert.Contains("overwrites the table-base", failure, StringComparison.Ordinal);
+        }
+
         var expectedFailure = mutation switch
         {
             "duplicate-rela" => "The external provider GOT slot does not have one exact non-PLT R_AARCH64_GLOB_DAT owner.",
@@ -339,6 +351,12 @@ public sealed class Aarch64ExternalJumpTableConsumerProofTests
             FunctionAddress + (4 * sizeof(uint)),
             new Dictionary<byte, byte>
             {
+                [2] = mutation switch
+                {
+                    "loaded-index-clobber" => 0,
+                    "loaded-tablebase-clobber" => 9,
+                    _ => 2,
+                },
                 [1] = mutation switch
                 {
                     "index-clobber" => 0,
@@ -372,12 +390,24 @@ public sealed class Aarch64ExternalJumpTableConsumerProofTests
             encoder,
             0x8B020061u,
             FunctionAddress + (5 * sizeof(uint)),
-            new Dictionary<byte, byte> { [3] = 9 });
+            new Dictionary<byte, byte>
+            {
+                [1] = mutation == "target-index-clobber" ? (byte)0 : (byte)1,
+                [3] = 9,
+                [2] = mutation switch
+                {
+                    "loaded-index-clobber" => (byte)0,
+                    "loaded-tablebase-clobber" => (byte)9,
+                    _ => (byte)2,
+                },
+            });
         words[6] = Permute(
             encoder,
             0xD61F0020u,
             FunctionAddress + (6 * sizeof(uint)),
-            new Dictionary<byte, byte>());
+            mutation == "target-index-clobber"
+                ? new Dictionary<byte, byte> { [1] = 0 }
+                : new Dictionary<byte, byte>());
         words[7] = Create(encoder, new Aarch64InstructionBuildRequest(
             Aarch64InstructionEncodingFamily.MoveWideImmediate,
             FunctionAddress + (7 * sizeof(uint)),

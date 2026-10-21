@@ -353,6 +353,41 @@ internal static partial class ElfFixture
         return bytes;
     }
 
+    public static byte[] HostContextJoinCallbackCmpBranchPie(int conditionCode = 0)
+    {
+        if (conditionCode is not (0 or 1))
+        {
+            throw new ArgumentOutOfRangeException(nameof(conditionCode));
+        }
+
+        const int codeOffset = 0x200;
+        const ulong functionAddress = 0x1200;
+        const int comparisonIndex = 10;
+        const int branchIndex = 11;
+        const int failureIndex = 16;
+        var bytes = HostContextJoinCallbackIntactPie();
+        var compare = new Aarch64InstructionEncoder().TryCreate(new Aarch64InstructionBuildRequest(
+            Aarch64InstructionEncodingFamily.CompareImmediate,
+            functionAddress + (comparisonIndex * sizeof(uint)),
+            0,
+            BaseRegister: 4,
+            DestinationWidth: 64));
+        if (!compare.IsSuccess)
+        {
+            throw new InvalidOperationException(compare.Diagnostic);
+        }
+
+        WriteUInt32(bytes.AsSpan(), codeOffset + (comparisonIndex * sizeof(uint)), compare.Encoding);
+        WriteUInt32(
+            bytes.AsSpan(),
+            codeOffset + (branchIndex * sizeof(uint)),
+            EncodeConditionalBranch(
+                functionAddress + (branchIndex * sizeof(uint)),
+                functionAddress + (failureIndex * sizeof(uint)),
+                conditionCode));
+        return bytes;
+    }
+
     public static byte[] HostContextJoinCallbackAddressBearingMutationPie(uint memoryInstructionEncoding)
     {
         var bytes = HostContextJoinCallbackIntactPie();
