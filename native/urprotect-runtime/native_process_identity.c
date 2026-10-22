@@ -457,8 +457,11 @@ static int find_file_backed_mapping_owner(
         if (!checked_add_u64(segment->file_offset, segment->file_size, &segment_file_end)
             || !checked_align_up_u64(segment_file_end, page_size, &file_page_end)) return 0;
         if (!intervals_intersect(mapping->file_offset, map_file_end, file_page_start, file_page_end)) continue;
-        if (mapping->file_offset < file_page_start || map_file_end > file_page_end
-            || (map_flags & ~segment->flags) != 0U) return 0;
+        /* A PT_LOAD can reuse a rounded file page at a distinct VA. Such an
+         * intersection is not an owner; the complete VMA must be contained by
+         * one candidate, and its VA/memsz owner is checked independently. */
+        if (mapping->file_offset < file_page_start || map_file_end > file_page_end) continue;
+        if ((map_flags & ~segment->flags) != 0U) return 0;
         delta = mapping->file_offset - file_page_start;
         if (!checked_add_u64(virtual_page_start, delta, &expected_vaddr)) return 0;
         if (load_bias_known) {

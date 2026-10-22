@@ -385,8 +385,11 @@ def _verify_maps_file(
             if page_range is None or not _intersects(map_start, map_end, *page_range):
                 continue
             page_start, page_end = page_range
+            # A different PT_LOAD may reuse only some of these file pages at
+            # a separate VA. It is not an owner unless it contains the whole
+            # VMA; the unique virtual-memory owner is checked below.
             if map_start < page_start or map_end > page_end:
-                _fail(f"{label} executable map partially intersects a PT_LOAD page range")
+                continue
             if not segment["flags"] & 1 or flags & ~segment["flags"]:
                 _fail(f"{label} executable map intersects an incompatible PT_LOAD owner")
             virtual_page_start = segment["virtualAddress"] & page_mask
@@ -428,7 +431,7 @@ def _verify_maps_file(
                     continue
                 page_start, page_end = page_range
                 if map_file_start < page_start or map_file_end > page_end:
-                    _fail(f"{label} map partially intersects a PT_LOAD page range")
+                    continue
                 if flags & ~segment["flags"]:
                     _fail(f"{label} map permissions exceed its PT_LOAD owner")
                 virtual_page_start = segment["virtualAddress"] & page_mask

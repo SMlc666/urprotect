@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import importlib.util
 import json
@@ -1651,9 +1652,29 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             path = root / "evidence.bin"
             path.unlink()
             path.symlink_to(outside)
-            with mock.patch.object(INDIRECT_PRIVATE_CHECKER.os, "read", side_effect=AssertionError("read followed final symlink")):
-                with self.assertRaisesRegex(SystemExit, "cannot be opened safely"):
+            expected_no_follow_error = (
+                "indirect-control evidence file cannot be opened safely: evidence.bin: "
+                f"{OSError(errno.ELOOP, os.strerror(errno.ELOOP), 'evidence.bin')}"
+            )
+            with mock.patch.object(
+                INDIRECT_PRIVATE_CHECKER.os,
+                "read",
+                side_effect=AssertionError("read followed final symlink"),
+            ) as checker_read:
+                with self.assertRaises(SystemExit) as rejection:
                     snapshot.read("evidence.bin")
+
+            # Replacing the leaf changes its parent directory timestamp, so the
+            # checker may reject that changed root before the leaf O_NOFOLLOW
+            # open. Otherwise only the exact ELOOP leaf-open diagnostic is valid.
+            self.assertIn(
+                str(rejection.exception),
+                (
+                    "indirect-control evidence root changed after bounded tree preflight",
+                    expected_no_follow_error,
+                ),
+            )
+            checker_read.assert_not_called()
 
     def test_private_checker_detects_final_symlink_replacement_after_same_handle_read(self) -> None:
         with tempfile.TemporaryDirectory(prefix="indirect-control-final-symlink-postread-") as directory:
@@ -1931,7 +1952,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             identity["maps"]["sha256"] = _sha(maps)
             _write_json(identity_path, identity)
         result = self.reject_runtime_identity_mutation(out_of_load_range)
-        self.assertIn("partially intersects a PT_LOAD page range", result.stderr)
+        self.assertIn("runtime helper executable map requires exactly one fully-containing PT_LOAD owner", result.stderr)
 
     def test_native_runtime_identity_rejects_refreshed_version_claim_and_runtime_byte_digest(self) -> None:
         def wrong_version(positive: Path, role: str) -> None:
@@ -2025,7 +2046,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             identity["maps"]["sha256"] = _sha(maps)
             _write_json(identity_path, identity)
         result = self.reject_runtime_identity_mutation(extend_libc_mapping)
-        self.assertIn("partially intersects a PT_LOAD page range", result.stderr)
+        self.assertIn("runtime libc executable map requires exactly one fully-containing PT_LOAD owner", result.stderr)
 
     def test_native_runtime_identity_rejects_checksum_refreshed_pt_load_virtual_memory_aliases(self) -> None:
         page_size = os.sysconf("SC_PAGE_SIZE")
@@ -2098,6 +2119,52 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             _refresh_indirect_manifest(root)
             result = self.run_checker(root, runtime="glibc", require_runtime_identity=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_runtime_identity_accepts_rounded_file_page_alias_at_distinct_virtual_addresses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="runtime-identity-file-alias-distinct-va-") as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.create_evidence(source)
+            root = self.copy_evidence(source, Path(directory))
+            positive = root / INDIRECT_UNIT
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            half_page = page_size // 2
+            for role in ("source", "target"):
+                self.set_runtime_pt_load_layout(
+                    positive,
+                    role,
+                    (
+                        (0, 0, 2 * page_size + half_page, 2 * page_size + half_page, 5),
+                        (
+                            2 * page_size + half_page,
+                            8 * page_size + half_page,
+                            page_size + half_page,
+                            page_size + half_page,
+                            6,
+                        ),
+                    ),
+                    ((0, 0, 3, "r-xp"), (8, 2, 2, "rw-p")),
+                    file_pages=4,
+                )
+                self.refresh_runtime_identity(positive, role)
+            _refresh_indirect_manifest(root)
+            result = self.run_checker(root, runtime="glibc", require_runtime_identity=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_runtime_identity_still_rejects_pt_load_permission_excess(self) -> None:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+
+        def writable_executable_alias(positive: Path, role: str) -> None:
+            self.set_runtime_pt_load_layout(
+                positive,
+                role,
+                ((0, 0, page_size, page_size, 5),),
+                ((0, 0, 1, "rwxp"),),
+            )
+
+        result = self.reject_runtime_identity_mutation(writable_executable_alias)
+        self.assertIn("runtime libc executable map intersects an incompatible PT_LOAD owner", result.stderr)
+        self.assertNotIn("sha256sums", result.stderr.lower())
 
     def test_standalone_rehydration_checker_bounds_evidence_directories(self) -> None:
         with tempfile.TemporaryDirectory(prefix="rehydration-directory-cap-") as directory:

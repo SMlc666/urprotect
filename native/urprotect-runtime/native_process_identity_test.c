@@ -213,6 +213,53 @@ static int test_musl_combined_loader_relro_splits(uint64_t page_size)
     return 1;
 }
 
+static int test_rounded_file_page_alias_at_distinct_virtual_addresses(uint64_t page_size)
+{
+    test_elf elf;
+    Elf64_Phdr loads[2];
+    char maps[1024] = {0};
+    size_t used = 0U;
+    uint64_t half_page = page_size / 2U;
+    loads[0] = make_load(
+        page_size,
+        0U,
+        0U,
+        (2U * page_size) + half_page,
+        (2U * page_size) + half_page,
+        PF_R | PF_X);
+    loads[1] = make_load(
+        page_size,
+        (2U * page_size) + half_page,
+        (8U * page_size) + half_page,
+        (page_size + half_page),
+        (page_size + half_page),
+        PF_R | PF_W);
+    if (!make_elf_with_loads(&elf, page_size, 4U, loads, 2U)
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 0U, 0U, 3U, "r-xp")
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 8U, 2U, 2U, "rw-p")
+        || !verify(&elf, maps, 1)) {
+        (void)fprintf(stderr, "FAIL native identity file-page alias at distinct virtual addresses\n");
+        return 0;
+    }
+    (void)printf("PASS native identity rounded file-page alias at distinct virtual addresses\n");
+    return 1;
+}
+
+static int test_incompatible_pt_load_permissions_rejected(uint64_t page_size)
+{
+    test_elf elf;
+    char maps[512] = {0};
+    size_t used = 0U;
+    if (!make_elf(&elf, page_size, 1U, 0, 0)
+        || !append_map(maps, sizeof(maps), &used, page_size, 0U, 1U, "rwxp")
+        || !verify(&elf, maps, 0)) {
+        (void)fprintf(stderr, "FAIL native identity PT_LOAD permission excess rejection\n");
+        return 0;
+    }
+    (void)printf("PASS native identity PT_LOAD permission excess rejection\n");
+    return 1;
+}
+
 static int test_duplicate_full_pt_load_rejected(uint64_t page_size)
 {
     test_elf elf;
@@ -340,6 +387,8 @@ int main(void)
         return 1;
     }
     if (!test_musl_combined_loader_relro_splits(page_size)
+        || !test_rounded_file_page_alias_at_distinct_virtual_addresses(page_size)
+        || !test_incompatible_pt_load_permissions_rejected(page_size)
         || !test_duplicate_full_pt_load_rejected(page_size)
         || !test_partial_pt_load_overlap_rejected(page_size)
         || !test_review_virtual_overlap(page_size)

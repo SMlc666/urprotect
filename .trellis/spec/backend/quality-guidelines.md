@@ -237,9 +237,15 @@ tests plus the relevant malformed-input path:
   not a substitute for the glibc cell.
 - Native indirect-control evidence must bind a handoff to independently checked
   runtime identity and prove both unique file-backed and page-rounded `p_memsz`
-  `PT_LOAD` ownership of each VMA, using checked half-open arithmetic. Reject
-  VA-only aliases, BSS intersections, partial intersections, and overflow while
-  accepting valid adjacent ranges and RELRO splits. Standalone checkers must
+  `PT_LOAD` ownership of each VMA, using checked half-open arithmetic. In the
+  FILE proof, skip a partial rounded file-interval candidate only when exactly
+  one complete, permission-compatible owner with a consistent load bias
+  survives; reject zero or multiple complete candidates, including two full
+  candidates. Independently, the page-rounded VIRTUAL `p_memsz` proof must fully
+  contain the VMA in exactly one owner identical to the file owner; reject
+  partial or multiple memory intersections, BSS overlaps, VA-only aliases, and
+  overflow. Accept valid adjacent ranges and RELRO splits only when both owner
+  proofs pass. Standalone checkers must
   scan a bounded no-follow evidence tree (512 directories including root) and
   load sibling helpers through explicit file-relative bounded reads rather
   than ambient `PYTHONPATH`. Run Python evidence tests with `PYTHONPATH` unset;

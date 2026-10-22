@@ -1899,7 +1899,10 @@ root checkers. It does not change the HostContext ABI, Protected Image or Native
 Image format, product `urprotect` command grammar, resolver/publication behavior,
 shared-table runner, or provider admission. It is an independent consistency
 check of retained process/ELF/maps facts, not an authenticity mechanism or a
-runtime-support promotion.
+runtime-support promotion. The ownership proof distinguishes page-rounded file
+offset candidates from page-rounded virtual-memory owners: a partial file-range
+candidate may be skipped under the unique complete-owner rule below, while
+virtual-memory containment remains strict.
 
 The ordinary native AArch64/glibc root is locally retained and independently
 checked. This environment has no `musl-gcc`, Docker, or Podman, so no local
@@ -1936,7 +1939,9 @@ int urp_native_process_identity_capture(
 and checkers; neither is a product compatibility setting or a `urprotect`
 command option. The indirect-control runner selects `glibc` by default and
 passes the required-identity option to fresh handoffs/checkers. Musl always
-requires the identity, even if the optional flag is omitted.
+requires the identity, even if the optional flag is omitted. These signatures
+and the identity carrier schema are unchanged by the file-candidate rule; no
+new owner field, schema version, or runtime-support claim is introduced.
 
 ### 3. Contracts
 
@@ -1968,17 +1973,25 @@ requires the identity, even if the optional flag is omitted.
   identity bytes for one process total at most 96 MiB. The C capture reads
   stable regular-file descriptors and the checker independently verifies
   retained SHA-256, device/inode, ELF, interpreter, and maps facts.
-- Map ownership has two independent owners. First, every file-backed VMA must
-  have exactly one fully containing page-rounded `PT_LOAD` file interval with
-  compatible permissions and one consistent load bias. Second, subtracting
-  that bias must place the VMA's half-open virtual interval inside exactly one
-  fully containing page-rounded `PT_LOAD` memory interval derived from checked
-  `p_vaddr + p_memsz`; that memory owner must be the file owner. Reject
-  arithmetic or page-rounding overflow, partial intersection, or any second
-  virtual owner, including a file-disjoint alias or an overlapping zero-
-  `p_filesz` BSS segment. Adjacent half-open ranges remain valid. Kernel RELRO
-  protection splits remain valid when each split independently satisfies both
-  ownership proofs. Unrelated bounded bracketed kernel maps labels are not
+- Map ownership has two independent proofs over strict half-open intervals.
+  For the file proof, derive each checked page-rounded `PT_LOAD` file interval
+  and consider its relation to the VMA's file interval. A candidate that only
+  partially intersects the VMA is not an owner and may be skipped. Accept the
+  file proof only when exactly one candidate fully contains the complete VMA,
+  its `PT_LOAD` permissions are compatible, and its checked load bias agrees
+  with the process mapping. Reject when no complete candidate survives or when
+  two or more complete candidates survive, even if both appear individually
+  compatible; do not choose between two full file owners by VA or bias.
+- Independently, subtract the proven load bias from the VMA address and require
+  its complete half-open virtual interval to be contained by exactly one
+  checked page-rounded `PT_LOAD` memory interval derived from `p_vaddr +
+  p_memsz`. This strict memory owner must be the same `PT_LOAD` as the unique
+  file owner. Reject every partial memory intersection, second/overlapping
+  virtual owner, file-disjoint VA alias, zero-`p_filesz` BSS overlap, and
+  arithmetic or page-rounding overflow. The file-candidate skip never applies
+  to this virtual-memory proof. Adjacent half-open ranges remain valid. Kernel
+  RELRO protection splits remain valid when each split independently satisfies
+  both proofs. Unrelated bounded bracketed kernel maps labels are not
   runtime-file identities and cannot satisfy a mapped-file proof.
 - The standalone rehydration checker rejects a symlink evidence root or path
   component and scans with no-follow, descriptor-relative directory/file opens
@@ -2007,7 +2020,10 @@ requires the identity, even if the optional flag is omitted.
 | Musl carrier absent, malformed, or bound to glibc | Reject; no musl identity fallback |
 | Schema has missing/extra fields, wrong version, or non-exact integer types | Reject the identity record, including refreshed-checksum mutations |
 | Image, role, runtime/version marker, interpreter, maps path, device/inode, retained bytes, or source/target identity differs | Reject the evidence root |
-| `p_vaddr + p_memsz` or page rounding overflows; VMA only partially intersects a `PT_LOAD`; or a second `PT_LOAD` owns the same virtual pages | Reject before accepting the runtime identity |
+| A VMA only partially intersects a page-rounded `PT_LOAD` file interval, but exactly one permission-compatible full file owner with a consistent load bias remains | Skip that partial file candidate; continue to the independent memory-owner proof |
+| No fully containing file owner remains, or two or more fully containing file owners remain | Reject; file ownership must be unique, including the conservative two-full-candidate case |
+| A VMA only partially intersects a page-rounded `PT_LOAD` memory interval from checked `p_vaddr + p_memsz`, or a second segment aliases the virtual pages | Reject before accepting the runtime identity; memory ownership requires one complete owner matching the file owner |
+| A second owner is BSS-only/zero-`p_filesz`, or arithmetic/page rounding overflows | Reject before accepting the runtime identity |
 | Adjacent half-open VMAs or valid RELRO splits have unique file and memory owners | Accept the mapping proof |
 | Root/path component is a symlink, an entry is non-regular, or directory/entry/file/aggregate limit is exceeded | Reject before accepting or hashing an out-of-bound evidence tree |
 | Required runtime, architecture, helper, or mapped file is unavailable | Fail the required lane; do not substitute another runtime or publish successful evidence |
@@ -2018,26 +2034,35 @@ successful handoff, behavior comparison, or runtime-evidence row.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: a fresh ordinary glibc run retains native source and target identities,
-  the independent checker derives both file and page-rounded `p_memsz` owners,
-  and the exact-root manifests and source/transformed behavior pass. This is a
-  scoped glibc observation only.
+- Good: a partial rounded file-interval candidate is skipped when exactly one
+  complete permission-compatible file owner with a consistent load bias
+  remains; the independent page-rounded `p_memsz` proof then establishes that
+  same unique owner. A fresh ordinary glibc run also retains native source and
+  target identities, exact-root manifests, and passing source/transformed
+  behavior. This remains a scoped glibc observation only.
 - Base: an older glibc root without `runtimeIdentity` remains readable when the
   caller did not require the new carrier; if the carrier exists, it is still
-  fully validated.
-- Bad: accept a self-reported runtime version without checking the retained
-  libc/loader bytes, use file-offset ownership to ignore a VA-only/BSS alias,
-  treat a local glibc pass as musl evidence, or convert missing musl tooling
-  into a passing or `not-applicable` result.
+  fully validated. Adjacent half-open mappings and valid RELRO splits remain
+  acceptable only when each has unique complete owners in both domains.
+- Bad: accept when only a partial file candidate exists, choose between two
+  fully containing file candidates, allow any partial/multiple/BSS/VA-alias
+  `p_memsz` owner, accept a self-reported runtime version without checking the
+  retained libc/loader bytes, treat a local glibc pass as musl evidence, or
+  convert missing musl tooling into a passing or `not-applicable` result.
 
 ### 6. Tests Required
 
-- `native_process_identity_test.c` must keep its `-Werror` self-test for the
-  review's VA-only alias, duplicate/partial file owner, full/partial
+- `native_process_identity_test.c` must keep its `-Werror` self-test for
+  distinct-VA reuse of partially overlapping rounded file pages when one full
+  file owner remains; permission excess; no complete file owner; and two full
+  file-owner candidates that still reject. It must separately retain strict
+  page-rounded `p_memsz` negatives for partial intersections, duplicate and
   file-disjoint virtual aliases, zero-file-size BSS overlap, checked memory-end
-  and page-rounding overflow, adjacent half-open pages, and valid musl-shaped
-  RELRO split.
-- `tests/test_rehydration_evidence.py` must verify exact schema/integer types,
+  and page-rounding overflow, plus adjacent half-open pages and a valid
+  musl-shaped RELRO split.
+- `tests/test_rehydration_evidence.py` must verify the matching Python
+  file-candidate behavior (including conservative two-full-candidate refusal),
+  strict memory-owner cases, exact schema/integer types,
   required-versus-optional historical glibc policy, mandatory musl identity,
   source/target agreement, retained-file/version/interpreter/maps binding,
   checksum-refreshed virtual-owner and overflow rejection, and adjacent-page
@@ -2058,8 +2083,10 @@ successful handoff, behavior comparison, or runtime-evidence row.
 #### Wrong
 
 ```text
-match maps file offsets to a PT_LOAD
--> ignore overlapping p_memsz pages because the file offsets differ
+reject every partial rounded file-interval candidate even when another
+complete owner uniquely contains the VMA
+-> or skip a partial page-rounded p_memsz intersection / choose between two
+   complete file candidates
 -> trust a runtime label or self-reported version
 ```
 
@@ -2067,9 +2094,12 @@ match maps file offsets to a PT_LOAD
 
 ```text
 bind the handoff to its exact image and native process
+-> for FILE ownership, skip partial candidates and require exactly one complete,
+   permission-compatible owner with a consistent load bias
+-> independently require exactly one full page-rounded VIRTUAL p_memsz owner
+   for the complete VMA, identical to the file owner; reject partial, multiple,
+   BSS, VA-alias and overflow cases
 -> verify retained helper/libc/loader bytes, interpreter and maps identity
--> prove unique file-backed and page-rounded p_memsz owners with checked
-   half-open arithmetic and one load bias
--> require the trusted runtime-specific identity policy
--> pass the closed-root checker before recording successful evidence
+-> require the trusted runtime-specific identity policy and pass the closed-root
+   checker before recording successful evidence
 ```
