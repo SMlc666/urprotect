@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include "urp/host_adapter.h"
+#include "native_process_identity.h"
 #include "sha256.h"
 
 #include <errno.h>
@@ -79,14 +80,33 @@ static int write_record(
     int entry_status,
     int process_status,
     const char *release_status,
-    const char *first_failure)
+    const char *first_failure,
+    const char *runtime_identity_path,
+    const char *runtime_identity_sha256)
 {
     char temporary[4096];
+    char runtime_identity_json[8192] = "null";
     int result;
     if (path == NULL || status == NULL || image_hash == NULL || entry_symbol == NULL
         || release_status == NULL || first_failure == NULL
+        || ((runtime_identity_path == NULL) != (runtime_identity_sha256 == NULL))
+        || (runtime_identity_sha256 != NULL && strlen(runtime_identity_sha256) != 64U)
         || strlen(path) >= sizeof(temporary) - 8U) {
         return 0;
+    }
+    if (runtime_identity_path != NULL) {
+        for (const unsigned char *cursor = (const unsigned char *)runtime_identity_path; *cursor != 0U; ++cursor) {
+            if (!((*cursor >= 'a' && *cursor <= 'z') || (*cursor >= 'A' && *cursor <= 'Z')
+                  || (*cursor >= '0' && *cursor <= '9') || *cursor == '/' || *cursor == '.'
+                  || *cursor == '_' || *cursor == '-')) return 0;
+        }
+        result = snprintf(
+            runtime_identity_json,
+            sizeof(runtime_identity_json),
+            "{\"schemaVersion\":1,\"path\":\"%s\",\"sha256\":\"%s\"}",
+            runtime_identity_path,
+            runtime_identity_sha256);
+        if (result < 0 || (size_t)result >= sizeof(runtime_identity_json)) return 0;
     }
     result = snprintf(temporary, sizeof(temporary), "%s.tmp", path);
     if (result < 0 || (size_t)result >= sizeof(temporary)) return 0;
@@ -99,6 +119,7 @@ static int write_record(
         "  \"stage\": \"host-context-handoff\",\n"
         "  \"status\": \"%s\",\n"
         "  \"loaderId\": \"host-context.sealed-memfd.dlopen\",\n"
+        "  \"runtimeIdentity\": %s,\n"
         "  \"nativeImageSha256\": \"%s\",\n"
         "  \"entrySymbol\": \"%s\",\n"
         "  \"entryStatus\": %d,\n"
@@ -108,6 +129,7 @@ static int write_record(
         "  \"firstFailureStage\": %s\n"
         "}\n",
         status,
+        runtime_identity_json,
         image_hash,
         entry_symbol,
         entry_status,
@@ -126,6 +148,13 @@ int main(int argc, char **argv)
     const char *image_path;
     const char *entry_symbol;
     const char *record_path;
+    const char *identity_directory = NULL;
+    const char *identity_relative_directory = NULL;
+    const char *identity_role = NULL;
+    char identity_relative_path[512] = {0};
+    char identity_sha256[65] = {0};
+    const char *record_identity_path = NULL;
+    const char *record_identity_sha256 = NULL;
     uint8_t *image = NULL;
     size_t image_size = 0U;
     char image_hash[65] = {0};
@@ -142,12 +171,33 @@ int main(int argc, char **argv)
     const char *first_failure = "host-context-handoff";
     int exit_status = 1;
 
-    if (argc != 4) return 2;
+    if (argc != 4 && argc != 7) return 2;
     image_path = argv[1];
     entry_symbol = argv[2];
     record_path = argv[3];
+    if (argc == 7) {
+        identity_directory = argv[4];
+        identity_relative_directory = argv[5];
+        identity_role = argv[6];
+    }
     if (!read_image(image_path, &image, &image_size)) return 1;
     digest_hex(image, image_size, image_hash);
+    if (identity_directory != NULL) {
+        if (!urp_native_process_identity_capture(
+                identity_directory,
+                identity_relative_directory,
+                identity_role,
+                image_hash,
+                identity_relative_path,
+                sizeof(identity_relative_path),
+                identity_sha256)) {
+            (void)fprintf(stderr, "native mapped runtime identity capture failed\n");
+            free(image);
+            return 1;
+        }
+        record_identity_path = identity_relative_path;
+        record_identity_sha256 = identity_sha256;
+    }
     urp_host_adapter_init(&adapter);
     if (adapter.context.load_image(
             adapter.context.userdata,
@@ -156,7 +206,7 @@ int main(int argc, char **argv)
             URP_LOAD_IMAGE_IMMUTABLE,
             &handle) != URP_STATUS_OK
         || handle == 0U) {
-        (void)write_record(record_path, status, image_hash, entry_symbol, -1, exit_status, release_status_text, first_failure);
+        (void)write_record(record_path, status, image_hash, entry_symbol, -1, exit_status, release_status_text, first_failure, record_identity_path, record_identity_sha256);
         free(image);
         return 1;
     }
@@ -168,7 +218,7 @@ int main(int argc, char **argv)
             &entry_address) != URP_STATUS_OK
         || entry_address == 0U) {
         (void)adapter.context.release_image(adapter.context.userdata, handle);
-        (void)write_record(record_path, status, image_hash, entry_symbol, -1, exit_status, "passed", first_failure);
+        (void)write_record(record_path, status, image_hash, entry_symbol, -1, exit_status, "passed", first_failure, record_identity_path, record_identity_sha256);
         free(image);
         return 1;
     }
@@ -195,7 +245,9 @@ int main(int argc, char **argv)
         entry_status,
         exit_status,
         release_status_text,
-        first_failure);
+        first_failure,
+        record_identity_path,
+        record_identity_sha256);
     free(image);
     return exit_status;
 }

@@ -2,22 +2,38 @@
 set -u -o pipefail
 
 tier=
-unit=runtime.indirect-control.jump-table.glibc.host-context-entry
+runtime=glibc
+unit=
 artifact_root_arg=
 reuse_positive_root_arg=
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --tier) tier="$2"; shift 2 ;;
-    --unit) unit="$2"; shift 2 ;;
+    --tier) [[ $# -ge 2 ]] || { echo "missing --tier value" >&2; exit 2; }; tier="$2"; shift 2 ;;
+    --runtime) [[ $# -ge 2 ]] || { echo "missing --runtime value" >&2; exit 2; }; runtime="$2"; shift 2 ;;
+    --unit) [[ $# -ge 2 ]] || { echo "missing --unit value" >&2; exit 2; }; unit="$2"; shift 2 ;;
     --artifact-root) artifact_root_arg="$2"; shift 2 ;;
     --reuse-positive-root) reuse_positive_root_arg="$2"; shift 2 ;;
-    *) echo "usage: $0 --tier pr|nightly|release [--unit UNIT] [--artifact-root PATH] [--reuse-positive-root PATH]" >&2; exit 2 ;;
+    *) echo "usage: $0 --tier pr|nightly|release [--runtime glibc|musl] [--unit UNIT] [--artifact-root PATH] [--reuse-positive-root PATH]" >&2; exit 2 ;;
   esac
 done
 case "$tier" in pr|nightly|release) ;; *) echo "invalid jump-table tier" >&2; exit 2 ;; esac
+case "$runtime" in glibc|musl) ;; *) echo "invalid jump-table runtime" >&2; exit 2 ;; esac
+if [[ -z "$unit" ]]; then unit="runtime.indirect-control.jump-table.${runtime}.host-context-entry"; fi
+if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then echo "invalid jump-table evidence unit" >&2; exit 2; fi
+if [[ "$runtime" == musl && -n "$reuse_positive_root_arg" ]]; then echo "musl positive execution cannot reuse an existing evidence root" >&2; exit 2; fi
 case "$(uname -m)" in aarch64|arm64) ;; *) echo "environment-unavailable: jump-table native evidence requires AArch64" >&2; exit 2 ;; esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_root="$repo_root/native/urprotect-runtime"
+native_build_dir_relative=build
+make_args=()
+if [[ "$runtime" == musl ]]; then
+  command -v musl-gcc >/dev/null 2>&1 || { echo "environment-unavailable: pinned musl-gcc is required for native musl jump-table evidence" >&2; exit 2; }
+  runtime_cc="$(command -v musl-gcc)"
+  native_build_dir_relative=build/musl-indirect-control
+  make_args+=("CC=$runtime_cc" "LD=$runtime_cc")
+fi
+make_args+=("BUILD_DIR=$native_build_dir_relative")
+native_build_dir="$native_root/$native_build_dir_relative"
 artifact_base="$(realpath -m -- "$repo_root/.artifacts/indirect-control")"
 if [[ -n "$artifact_root_arg" ]]; then
   root="$(realpath -m -- "$artifact_root_arg")"
@@ -28,9 +44,9 @@ fi
 [[ ! -e "$root" && ! -L "$root" ]] || { echo "refusing to overwrite existing indirect evidence root: $root" >&2; exit 2; }
 positive="$root/$unit"
 mkdir -p "$positive" || exit 1
-make -C "$native_root" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture \
+make -C "$native_root" "${make_args[@]}" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture \
   >"$root/native-build.stdout" 2>"$root/native-build.stderr" || exit 1
-source_file="$native_root/build/host-context-jump-table-fixture.so"
+source_file="$native_build_dir/host-context-jump-table-fixture.so"
 function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
 [[ -n "$function_id" ]] || exit 1
 
@@ -76,7 +92,7 @@ record = {
 PY
 else
 PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-rehydration-e2e.sh" \
-  --tier "$tier" --runtime glibc --unit "$unit" --source "$source_file" \
+  --tier "$tier" --runtime "$runtime" --native-build-dir "$native_build_dir_relative" --require-runtime-identity --unit "$unit" --source "$source_file" \
   --function-id "$function_id" --entry-status 91 --producer-id gcc-aarch64-jump-table-fixture \
   >"$root/rehydration.stdout" 2>"$root/rehydration.stderr" || exit 1
 
@@ -184,7 +200,7 @@ PY
 
 (cd "$positive" && find . -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -r sha256sum) >"$positive/SHA256SUMS" || exit 1
 python3 "$repo_root/scripts/check-rehydration-evidence.py" "$positive" \
-  --tier "$tier" --runtime glibc --unit "$unit" || exit 1
+  --tier "$tier" --runtime "$runtime" --require-runtime-identity --unit "$unit" || exit 1
 fi
 
 run_negative() {
@@ -311,13 +327,13 @@ run_negative \
   out-of-executable-range || exit 1
 run_negative \
   negative-index-clobber \
-  "$native_root/build/host-context-jump-table-index-clobber-fixture.so" \
+  "$native_build_dir/host-context-jump-table-index-clobber-fixture.so" \
   "The checked jump-table index register W0/X0 is overwritten between B.HI and the indexed LDRSW." || exit 1
 run_negative \
   negative-external-table \
-  "$native_root/build/host-context-external-jump-table-fixture.so" \
+  "$native_build_dir/host-context-external-jump-table-fixture.so" \
   "The selected instruction does not match the promoted relative jump-table family." || exit 1
 
 (cd "$root" && find . -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -r sha256sum) >"$root/SHA256SUMS" || exit 1
-python3 "$repo_root/scripts/check-indirect-control-evidence.py" "$root" --tier "$tier" --unit "$unit"
+python3 "$repo_root/scripts/check-indirect-control-evidence.py" "$root" --tier "$tier" --runtime "$runtime" --require-runtime-identity --unit "$unit"
 printf 'Indirect jump-table HostContext evidence: PASS (all four table cases and four fail-closed negatives)\n'

@@ -156,6 +156,27 @@ _RANGE_HELPER = _load_sibling_evidence_range_helper()
 resolve_isolated_evidence_root = _RANGE_HELPER.resolve_isolated_evidence_root
 unique_file_backed_pt_load = _RANGE_HELPER.unique_file_backed_pt_load
 
+
+def _load_native_runtime_identity_helper() -> Any:
+    helper_path = Path(__file__).resolve().with_name("native_runtime_identity.py")
+    source = _read_sibling_helper_source(helper_path)
+    module_name = f"_urprotect_native_runtime_identity_{hashlib.sha256(source).hexdigest()[:16]}_{id(globals()):x}"
+    module = types.ModuleType(module_name)
+    namespace = types.ModuleType.__getattribute__(module, "__dict__")
+    namespace["__file__"] = str(helper_path)
+    namespace["__package__"] = ""
+    namespace["_urprotect_runtime_identity_source_sha256"] = hashlib.sha256(source).hexdigest()
+    sys.modules[module_name] = module
+    try:
+        exec(compile(source, str(helper_path), "exec"), namespace)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+_RUNTIME_IDENTITY_HELPER = _load_native_runtime_identity_helper()
+
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 EXPECTED_CASE_INDICES = [0, 1, 2, 3]
 EXPECTED_CASE_RESULTS = [17, 103, -7, 91]
@@ -2284,7 +2305,7 @@ def table_entry_offsets(layout: dict[str, Any]) -> tuple[list[int], list[int]]:
     return source_offsets, target_offsets
 
 
-def check_positive(root: Path, unit: str) -> None:
+def check_positive(root: Path, unit: str, runtime: str = "glibc", require_runtime_identity: bool = False) -> None:
     positive = root / unit
     try:
         positive.resolve().relative_to(root.resolve())
@@ -2343,6 +2364,26 @@ def check_positive(root: Path, unit: str) -> None:
         fail("jump-table behavior does not bind the measured source handoff record")
     if behavior.get("targetHandoffSha256") != digest(target_handoff_path):
         fail("jump-table behavior does not bind the measured transformed handoff record")
+    try:
+        source_runtime_identity = _RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
+            positive,
+            source_handoff,
+            expected_runtime=runtime,
+            expected_role="source",
+            expected_image_sha256=source_hash,
+            required=require_runtime_identity,
+        )
+        target_runtime_identity = _RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
+            positive,
+            target_handoff,
+            expected_runtime=runtime,
+            expected_role="target",
+            expected_image_sha256=native_hash,
+            required=require_runtime_identity,
+        )
+        _RUNTIME_IDENTITY_HELPER.require_same_runtime_identity(source_runtime_identity, target_runtime_identity)
+    except ValueError as error:
+        fail(f"native runtime identity invalid: {error}")
 
     rehydration = read_json(root, f"{unit}/rehydration.json")
     layout = rehydration.get("layoutEvidence")
@@ -2983,11 +3024,13 @@ def main() -> None:
     parser.add_argument("root", type=Path, nargs="?")
     parser.add_argument("--tier", choices=("pr", "nightly", "release"))
     parser.add_argument("--unit")
+    parser.add_argument("--runtime", choices=("glibc", "musl"), default="glibc")
+    parser.add_argument("--require-runtime-identity", action="store_true")
     parser.add_argument("--inspect-external-table", type=Path)
     parser.add_argument("--selected-function")
     args = parser.parse_args()
     if args.inspect_external_table is not None:
-        if args.root is not None or args.tier is not None or args.unit is not None or not args.selected_function:
+        if args.root is not None or args.tier is not None or args.unit is not None or args.require_runtime_identity or args.runtime != "glibc" or not args.selected_function:
             parser.error("--inspect-external-table requires only --selected-function and no evidence-root arguments")
         source = read_bounded_external_file(
             args.inspect_external_table,
@@ -3004,7 +3047,7 @@ def main() -> None:
     except ValueError as error:
         fail(str(error))
     check_closed_manifest(root)
-    check_positive(root, args.unit)
+    check_positive(root, args.unit, args.runtime, args.require_runtime_identity)
     if (root / "positive-reuse.json").exists():
         check_positive_reuse(root, args.unit)
     for negative_name in EXPECTED_NEGATIVES:

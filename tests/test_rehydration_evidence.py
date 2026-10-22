@@ -38,6 +38,13 @@ if INDIRECT_CHECKER_SPEC is None or INDIRECT_CHECKER_SPEC.loader is None:
     raise RuntimeError("could not import indirect-control checker by explicit file path")
 INDIRECT_PRIVATE_CHECKER = importlib.util.module_from_spec(INDIRECT_CHECKER_SPEC)
 INDIRECT_CHECKER_SPEC.loader.exec_module(INDIRECT_PRIVATE_CHECKER)
+REHYDRATION_CHECKER_SPEC = importlib.util.spec_from_file_location(
+    "rehydration_test_checker_runtime", CHECKER
+)
+if REHYDRATION_CHECKER_SPEC is None or REHYDRATION_CHECKER_SPEC.loader is None:
+    raise RuntimeError("could not import rehydration checker by explicit file path")
+REHYDRATION_PRIVATE_CHECKER = importlib.util.module_from_spec(REHYDRATION_CHECKER_SPEC)
+REHYDRATION_CHECKER_SPEC.loader.exec_module(REHYDRATION_PRIVATE_CHECKER)
 
 
 def _sha(data: bytes) -> str:
@@ -352,6 +359,209 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
 
 
 class IndirectControlEvidenceTests(unittest.TestCase):
+    @staticmethod
+    def runtime_elf(*, interpreter: str | None = None, version_marker: bytes | None = None) -> bytes:
+        image = bytearray(0x200)
+        image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+        struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 183, 1, 0, 64, 0, 0, 64, 56, 2 if interpreter else 1, 0, 0, 0)
+        struct.pack_into("<IIQQQQQQ", image, 64, 1, 5, 0, 0, 0, len(image), len(image), 0x1000)
+        if interpreter is not None:
+            encoded = interpreter.encode("ascii") + b"\0"
+            struct.pack_into("<IIQQQQQQ", image, 120, 3, 4, 0x180, 0, 0, len(encoded), len(encoded), 1)
+            image[0x180 : 0x180 + len(encoded)] = encoded
+        if version_marker is not None:
+            image[0x100 : 0x100 + len(version_marker)] = version_marker
+        return bytes(image)
+
+    def write_runtime_identity(self, positive: Path, role: str, image_hash: str, *, runtime: str = "glibc", version_marker: bytes | None = None) -> dict[str, object]:
+        identity_root = positive / "runtime-identity" / role
+        identity_root.mkdir(parents=True)
+        if runtime == "glibc":
+            version_marker = b"release version 2.43." if version_marker is None else version_marker
+            helper = self.runtime_elf(interpreter="/lib/ld-linux-aarch64.so.1")
+            libc = self.runtime_elf(version_marker=version_marker)
+            loader = self.runtime_elf()
+            libc_path = "/usr/lib/aarch64-linux-gnu/libc.so.6"
+            loader_path = "/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1"
+            loader_inode = 1003
+            maps = (
+                "0000000000100000-0000000000101000 r-xp 00000000 08:01 1001 /evidence/host-context-image-handoff\n"
+                "0000000000150000-0000000000151000 rw-p 00000000 00:00 0 [heap]\n"
+                f"0000000000200000-0000000000201000 r-xp 00000000 08:01 1002 {libc_path}\n"
+                f"0000000000300000-0000000000301000 r-xp 00000000 08:01 {loader_inode} {loader_path}\n"
+            ).encode("ascii")
+            runtime_version = "2.43"
+            version_source = "glibc-libc-release-version-marker"
+        elif runtime == "musl":
+            version_marker = b"Version 1.2.3" if version_marker is None else version_marker
+            helper = self.runtime_elf(interpreter="/lib/ld-musl-aarch64.so.1")
+            libc = self.runtime_elf(version_marker=version_marker)
+            loader = libc
+            libc_path = "/lib/aarch64-linux-musl/libc.so"
+            loader_path = libc_path
+            loader_inode = 1002
+            maps = (
+                "0000000000100000-0000000000101000 r-xp 00000000 08:01 1001 /evidence/host-context-image-handoff\n"
+                "0000000000150000-0000000000151000 rw-p 00000000 00:00 0 [heap]\n"
+                f"0000000000200000-0000000000201000 r-xp 00000000 08:01 {loader_inode} {loader_path}\n"
+            ).encode("ascii")
+            runtime_version = "1.2.3"
+            version_source = "musl-loader-version-marker"
+        else:
+            raise ValueError("unsupported test runtime")
+        loader_dev_inode = loader_inode
+        for name, data in (("helper.elf", helper), ("libc.elf", libc), ("loader.elf", loader), ("maps.txt", maps)):
+            (identity_root / name).write_bytes(data)
+        def file_record(name: str, mapped_path: str, inode: int) -> dict[str, object]:
+            data = (identity_root / name).read_bytes()
+            return {
+                "mappedPath": mapped_path,
+                "deviceMajor": 8,
+                "deviceMinor": 1,
+                "inode": inode,
+                "size": len(data),
+                "sha256": _sha(data),
+                "retainedPath": f"runtime-identity/{role}/{name}",
+            }
+        identity = {
+            "schemaVersion": 1,
+            "runtime": runtime,
+            "architecture": "aarch64",
+            "role": role,
+            "processId": 5000 if role == "source" else 5001,
+            "imageSha256": image_hash,
+            "runtimeVersion": runtime_version,
+            "runtimeVersionSource": version_source,
+            "interpreter": {
+                "declaredPath": "/lib/ld-linux-aarch64.so.1" if runtime == "glibc" else "/lib/ld-musl-aarch64.so.1",
+                "resolvedPath": loader_path,
+                "deviceMajor": 8,
+                "deviceMinor": 1,
+                "inode": loader_dev_inode,
+            },
+            "maps": {
+                "retainedPath": f"runtime-identity/{role}/maps.txt",
+                "sha256": _sha(maps),
+            },
+            "helper": file_record("helper.elf", "/evidence/host-context-image-handoff", 1001),
+            "libc": file_record("libc.elf", libc_path, 1002),
+            "loader": file_record("loader.elf", loader_path, loader_dev_inode),
+        }
+        identity_path = identity_root / "identity.json"
+        _write_json(identity_path, identity)
+        return {
+            "schemaVersion": 1,
+            "path": f"runtime-identity/{role}/identity.json",
+            "sha256": _sha(identity_path.read_bytes()),
+        }
+
+    def set_runtime_pt_load_layout(
+        self,
+        positive: Path,
+        role: str,
+        loads: tuple[tuple[int, int, int, int, int], ...],
+        maps: tuple[tuple[int, int, int, str], ...],
+        *,
+        file_pages: int = 3,
+    ) -> None:
+        identity_path = positive / "runtime-identity" / role / "identity.json"
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        libc_record = identity["libc"]
+        libc_path = positive / libc_record["retainedPath"]
+        old_image = libc_path.read_bytes()
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        image = bytearray(file_pages * page_size)
+        image[: min(len(old_image), len(image))] = old_image[: min(len(old_image), len(image))]
+        phoff = struct.unpack_from("<Q", image, 32)[0]
+        phentsize = struct.unpack_from("<H", image, 54)[0]
+        if phentsize != 56 or phoff + len(loads) * phentsize > len(image):
+            raise AssertionError("synthetic runtime ELF has no bounded PT_LOAD header storage")
+        struct.pack_into("<H", image, 56, len(loads))
+        for index, (file_offset, virtual_address, file_size, memory_size, flags) in enumerate(loads):
+            alignment = page_size if file_offset % page_size == virtual_address % page_size else 1
+            struct.pack_into(
+                "<IIQQQQQQ",
+                image,
+                phoff + index * phentsize,
+                1,
+                flags,
+                file_offset,
+                virtual_address,
+                virtual_address,
+                file_size,
+                memory_size,
+                alignment,
+            )
+        libc_path.write_bytes(image)
+        libc_record["size"] = len(image)
+        libc_record["sha256"] = _sha(image)
+
+        if identity["runtime"] == "musl":
+            loader_record = identity["loader"]
+            loader_path = positive / loader_record["retainedPath"]
+            loader_path.write_bytes(image)
+            loader_record["size"] = len(image)
+            loader_record["sha256"] = _sha(image)
+
+        maps_path = positive / identity["maps"]["retainedPath"]
+        retained_maps = maps_path.read_text(encoding="ascii").splitlines()
+        mapped_path = libc_record["mappedPath"]
+        major, minor, inode = libc_record["deviceMajor"], libc_record["deviceMinor"], libc_record["inode"]
+        other_maps = []
+        for line in retained_maps:
+            fields = line.split(None, 5)
+            if len(fields) == 6 and fields[3:5] == [f"{major:02x}:{minor:02x}", str(inode)] and fields[5] == mapped_path:
+                continue
+            other_maps.append(line)
+        retained_maps = other_maps
+        for virtual_page, file_page, page_count, permissions in maps:
+            map_start = 0x200000 + virtual_page * page_size
+            map_end = map_start + page_count * page_size
+            file_offset = file_page * page_size
+            retained_maps.append(
+                f"{map_start:016x}-{map_end:016x} {permissions} {file_offset:08x} "
+                f"{major:02x}:{minor:02x} {inode} {mapped_path}"
+            )
+        retained_maps.sort(key=lambda line: int(line.split("-", 1)[0], 16))
+        maps_bytes = ("\n".join(retained_maps) + "\n").encode("ascii")
+        maps_path.write_bytes(maps_bytes)
+        identity["maps"]["sha256"] = _sha(maps_bytes)
+        _write_json(identity_path, identity)
+
+    def refresh_runtime_identity(self, positive: Path, role: str) -> None:
+        identity_path = positive / "runtime-identity" / role / "identity.json"
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        handoff_name = "source-handoff.json" if role == "source" else "handoff.json"
+        handoff_path = positive / handoff_name
+        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+        image_name = "source-image.bin" if role == "source" else "native-image.bin"
+        image_hash = _sha((positive / image_name).read_bytes())
+        identity["imageSha256"] = image_hash
+        handoff["nativeImageSha256"] = image_hash
+        _write_json(identity_path, identity)
+        handoff["runtimeIdentity"]["sha256"] = _sha(identity_path.read_bytes())
+        _write_json(handoff_path, handoff)
+        behavior_path = positive / "jump-table-behavior.json"
+        if behavior_path.is_file():
+            behavior = json.loads(behavior_path.read_text(encoding="utf-8"))
+            behavior["sourceHandoffSha256" if role == "source" else "targetHandoffSha256"] = _sha(handoff_path.read_bytes())
+            _write_json(behavior_path, behavior)
+
+    def reject_runtime_identity_mutation(self, mutate, *, role: str = "target") -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-runtime-identity-") as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.create_evidence(source)
+            root = self.copy_evidence(source, Path(directory))
+            positive = root / INDIRECT_UNIT
+            mutate(positive, role)
+            self.refresh_runtime_identity(positive, role)
+            _refresh_indirect_manifest(root)
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertNotIn("SHA256SUMS", result.stderr)
+            return result
+
     def create_evidence(self, root: Path) -> None:
         positive = root / INDIRECT_UNIT
         positive.mkdir(parents=True)
@@ -388,7 +598,9 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             "releaseOrder": "entry-dispatch-before-release-image",
             "firstFailureStage": None,
         }
+        source_handoff["runtimeIdentity"] = self.write_runtime_identity(positive, "source", source_hash)
         target_handoff = {**source_handoff, "nativeImageSha256": native_hash}
+        target_handoff["runtimeIdentity"] = self.write_runtime_identity(positive, "target", native_hash)
         _write_json(positive / "source-handoff.json", source_handoff)
         _write_json(positive / "handoff.json", target_handoff)
         code_output_range = {
@@ -758,6 +970,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
         behavior["nativeSha256"] = native_hash
         behavior["targetHandoffSha256"] = _sha(handoff_path.read_bytes())
         _write_json(behavior_path, behavior)
+        self.refresh_runtime_identity(positive, "target")
 
     def add_native_load_alias(
         self,
@@ -789,9 +1002,28 @@ class IndirectControlEvidenceTests(unittest.TestCase):
         struct.pack_into("<H", image, 56, phnum + 1)
         image_path.write_bytes(image)
 
-    def run_checker(self, root: Path) -> subprocess.CompletedProcess[str]:
+    def run_checker(
+        self,
+        root: Path,
+        *,
+        runtime: str = "glibc",
+        require_runtime_identity: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        command = [
+            sys.executable,
+            str(INDIRECT_CHECKER),
+            str(root),
+            "--tier",
+            "pr",
+            "--unit",
+            INDIRECT_UNIT if runtime == "glibc" else INDIRECT_UNIT.replace("glibc", runtime),
+            "--runtime",
+            runtime,
+        ]
+        if require_runtime_identity:
+            command.append("--require-runtime-identity")
         return subprocess.run(
-            [sys.executable, str(INDIRECT_CHECKER), str(root), "--tier", "pr", "--unit", INDIRECT_UNIT],
+            command,
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -809,7 +1041,10 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             source.mkdir()
             self.create_evidence(source)
             root = self.copy_evidence(source, Path(directory))
-            mutate(root / INDIRECT_UNIT)
+            positive = root / INDIRECT_UNIT
+            mutate(positive)
+            self.refresh_runtime_identity(positive, "source")
+            self.refresh_runtime_identity(positive, "target")
             _refresh_indirect_manifest(root)
             return self.run_checker(root)
 
@@ -1180,6 +1415,68 @@ class IndirectControlEvidenceTests(unittest.TestCase):
         result = self.reject_refreshed_mutation(add_adjacent_loads)
         self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_musl_runtime_identity_is_independently_verified_from_native_mapped_bytes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="musl-runtime-identity-verified-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            image_hash = "c" * 64
+            carrier = self.write_runtime_identity(root, "target", image_hash, runtime="musl")
+            handoff = {
+                "schemaVersion": 1,
+                "stage": "host-context-handoff",
+                "status": "passed",
+                "loaderId": "host-context.sealed-memfd.dlopen",
+                "nativeImageSha256": image_hash,
+                "entryStatus": 23,
+                "processStatus": 23,
+                "releaseStatus": "passed",
+                "releaseOrder": "entry-dispatch-before-release-image",
+                "rehydrationRecordSha256": "d" * 64,
+                "runtimeIdentity": carrier,
+            }
+            identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
+                root, handoff, expected_runtime="musl", expected_role="target",
+                expected_image_sha256=image_hash, required=True,
+            )
+            self.assertEqual(identity["runtime"], "musl")
+            with self.assertRaises(ValueError):
+                REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="glibc", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
+
+    def test_rehydration_handoff_checker_preserves_optional_glibc_and_required_native_identity_gate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="rehydration-runtime-identity-gate-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            image_hash = "a" * 64
+            carrier = self.write_runtime_identity(root, "target", image_hash)
+            handoff = {
+                "schemaVersion": 1,
+                "stage": "host-context-handoff",
+                "status": "passed",
+                "loaderId": "host-context.sealed-memfd.dlopen",
+                "nativeImageSha256": image_hash,
+                "entryStatus": 23,
+                "processStatus": 23,
+                "releaseStatus": "passed",
+                "releaseOrder": "entry-dispatch-before-release-image",
+                "rehydrationRecordSha256": "b" * 64,
+                "runtimeIdentity": carrier,
+            }
+            rehydration = {
+                "status": "passed",
+                "processStatus": 23,
+                "preHandoffRecordSha256": "b" * 64,
+            }
+            _write_json(root / "handoff.json", handoff)
+            REHYDRATION_PRIVATE_CHECKER.check_handoff(root, rehydration, image_hash, "glibc", True)
+            REHYDRATION_PRIVATE_CHECKER.check_handoff(root, rehydration, image_hash, "glibc", False)
+            handoff.pop("runtimeIdentity")
+            _write_json(root / "handoff.json", handoff)
+            with self.assertRaises(SystemExit):
+                REHYDRATION_PRIVATE_CHECKER.check_handoff(root, rehydration, image_hash, "glibc", True)
+
     def test_measured_four_case_evidence_and_four_negatives_are_accepted(self) -> None:
         with tempfile.TemporaryDirectory(prefix="indirect-control-valid-") as directory:
             root = Path(directory) / "evidence"
@@ -1189,6 +1486,391 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("all table cases", result.stdout)
             self.assertIn("four fail-closed negatives", result.stdout)
+
+    def test_missing_or_downgraded_runtime_identity_is_rejected_after_manifest_refresh(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="indirect-control-runtime-identity-missing-") as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.create_evidence(source)
+            root = self.copy_evidence(source, Path(directory))
+            positive = root / INDIRECT_UNIT
+            handoff_path = positive / "handoff.json"
+            handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+            handoff.pop("runtimeIdentity")
+            _write_json(handoff_path, handoff)
+            behavior_path = positive / "jump-table-behavior.json"
+            behavior = json.loads(behavior_path.read_text(encoding="utf-8"))
+            behavior["targetHandoffSha256"] = _sha(handoff_path.read_bytes())
+            source_handoff_path = positive / "source-handoff.json"
+            source_handoff = json.loads(source_handoff_path.read_text(encoding="utf-8"))
+            source_handoff.pop("runtimeIdentity")
+            _write_json(source_handoff_path, source_handoff)
+            behavior["sourceHandoffSha256"] = _sha(source_handoff_path.read_bytes())
+            _write_json(behavior_path, behavior)
+            _refresh_indirect_manifest(root)
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing its required native runtime identity", result.stderr)
+            historical_glibc = self.run_checker(root, require_runtime_identity=False)
+            self.assertEqual(historical_glibc.returncode, 0, historical_glibc.stderr)
+
+    def test_native_runtime_identity_rejects_wrong_helper_interpreter_and_symlink_claim(self) -> None:
+        def wrong_interpreter(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            helper_path = positive / identity["helper"]["retainedPath"]
+            helper = bytearray(helper_path.read_bytes())
+            encoded = b"/lib/ld-musl-aarch64.so.1\0"
+            struct.pack_into("<Q", helper, 120 + 32, len(encoded))
+            struct.pack_into("<Q", helper, 120 + 40, len(encoded))
+            helper[0x180 : 0x180 + 32] = bytes(32)
+            helper[0x180 : 0x180 + len(encoded)] = encoded
+            helper_path.write_bytes(helper)
+            identity["helper"]["sha256"] = _sha(bytes(helper))
+            identity["interpreter"]["declaredPath"] = "/lib/ld-musl-aarch64.so.1"
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(wrong_interpreter)
+        self.assertIn("wrong loader family", result.stderr)
+
+        def symlink_alias_claim(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["interpreter"]["resolvedPath"] = identity["interpreter"]["declaredPath"]
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(symlink_alias_claim)
+        self.assertIn("does not identify the mapped loader path", result.stderr)
+
+    def test_native_runtime_identity_rejects_maps_inode_and_range_mismatch(self) -> None:
+        def wrong_inode(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["helper"]["inode"] += 1
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(wrong_inode)
+        self.assertIn("device/inode does not identify", result.stderr)
+
+        def malformed_kernel_region_label(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            maps_path = positive / identity["maps"]["retainedPath"]
+            maps = maps_path.read_bytes().replace(b"[heap]", b"[heap", 1)
+            maps_path.write_bytes(maps)
+            identity["maps"]["sha256"] = _sha(maps)
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(malformed_kernel_region_label)
+        self.assertIn("canonical mapped path or kernel region label", result.stderr)
+
+        def out_of_load_range(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            maps_path = positive / identity["maps"]["retainedPath"]
+            maps = maps_path.read_bytes().replace(b"0000000000101000", b"0000000000102000", 1)
+            maps_path.write_bytes(maps)
+            identity["maps"]["sha256"] = _sha(maps)
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(out_of_load_range)
+        self.assertIn("partially intersects a PT_LOAD page range", result.stderr)
+
+    def test_native_runtime_identity_rejects_refreshed_version_claim_and_runtime_byte_digest(self) -> None:
+        def wrong_version(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["runtimeVersion"] = "2.44"
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(wrong_version)
+        self.assertIn("version differs from the retained mapped libc bytes", result.stderr)
+
+        def runtime_bytes_changed_without_digest_refresh(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            libc_path = positive / identity["libc"]["retainedPath"]
+            data = bytearray(libc_path.read_bytes())
+            data[0x100] ^= 1
+            libc_path.write_bytes(data)
+        result = self.reject_runtime_identity_mutation(runtime_bytes_changed_without_digest_refresh)
+        self.assertIn("retained ELF digest does not match", result.stderr)
+
+    def test_native_runtime_identity_rejects_valid_per_process_runtime_version_divergence(self) -> None:
+        def valid_but_different_target_version(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            libc_path = positive / identity["libc"]["retainedPath"]
+            data = libc_path.read_bytes().replace(b"release version 2.43.", b"release version 2.44.", 1)
+            libc_path.write_bytes(data)
+            identity["libc"]["sha256"] = _sha(data)
+            identity["runtimeVersion"] = "2.44"
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(valid_but_different_target_version)
+        self.assertIn("different runtime families or versions", result.stderr)
+
+    def test_native_runtime_identity_schema_versions_require_exact_integer_tokens(self) -> None:
+        for location in ("carrier", "identity"):
+            for invalid_version in (True, 1.0, "1"):
+                with self.subTest(location=location, invalid_version=invalid_version):
+                    def mutate(positive: Path, role: str, *, target: str = location, value=invalid_version) -> None:
+                        identity_path = positive / "runtime-identity" / role / "identity.json"
+                        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+                        if target == "identity":
+                            identity["schemaVersion"] = value
+                            _write_json(identity_path, identity)
+                            return
+                        handoff_name = "source-handoff.json" if role == "source" else "handoff.json"
+                        handoff_path = positive / handoff_name
+                        handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+                        handoff["runtimeIdentity"]["schemaVersion"] = value
+                        _write_json(handoff_path, handoff)
+                    result = self.reject_runtime_identity_mutation(mutate)
+                    expected = (
+                        "schemaVersion must be an exact integer"
+                        if location == "identity"
+                        else "schemaVersion must be the exact integer 1"
+                    )
+                    self.assertIn(expected, result.stderr)
+
+    def test_native_runtime_identity_rejects_checksum_refreshed_duplicate_pt_load_owner(self) -> None:
+        def duplicate_libc_load(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            libc_record = identity["libc"]
+            libc_path = positive / libc_record["retainedPath"]
+            libc = bytearray(libc_path.read_bytes())
+            phoff = struct.unpack_from("<Q", libc, 32)[0]
+            phentsize, phnum = struct.unpack_from("<HH", libc, 54)
+            if phentsize != 56 or phnum != 1 or phoff + 2 * phentsize > len(libc):
+                raise AssertionError("synthetic libc has no bounded spare program-header slot")
+            libc[phoff + phentsize : phoff + 2 * phentsize] = libc[phoff : phoff + phentsize]
+            struct.pack_into("<H", libc, 56, phnum + 1)
+            libc_path.write_bytes(libc)
+            libc_record["size"] = len(libc)
+            libc_record["sha256"] = _sha(libc)
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(duplicate_libc_load)
+        self.assertIn("exactly one fully-containing PT_LOAD owner", result.stderr)
+
+    def test_native_runtime_identity_rejects_partial_pt_load_file_interval_intersection(self) -> None:
+        def extend_libc_mapping(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            maps_path = positive / identity["maps"]["retainedPath"]
+            maps = maps_path.read_bytes().replace(
+                b"0000000000201000 r-xp 00000000 08:01 1002",
+                b"0000000000202000 r-xp 00000000 08:01 1002",
+                1,
+            )
+            if maps == maps_path.read_bytes():
+                raise AssertionError("synthetic libc maps row was not found")
+            maps_path.write_bytes(maps)
+            identity["maps"]["sha256"] = _sha(maps)
+            _write_json(identity_path, identity)
+        result = self.reject_runtime_identity_mutation(extend_libc_mapping)
+        self.assertIn("partially intersects a PT_LOAD page range", result.stderr)
+
+    def test_native_runtime_identity_rejects_checksum_refreshed_pt_load_virtual_memory_aliases(self) -> None:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        primary = (0, 0, 2 * page_size, 2 * page_size, 5)
+        cases = (
+            (
+                "independent review example",
+                (primary, (2 * page_size, 0, page_size, page_size, 4)),
+                ((0, 0, 1, "r-xp"),),
+                "conflicting pt_load virtual-memory owner",
+            ),
+            (
+                "full virtual-only overlap",
+                (primary, (2 * page_size, 0, page_size, 2 * page_size, 4)),
+                ((0, 0, 2, "r-xp"),),
+                "conflicting pt_load virtual-memory owner",
+            ),
+            (
+                "partial virtual-only overlap",
+                (primary, (2 * page_size, page_size, page_size, page_size, 4)),
+                ((0, 0, 2, "r-xp"),),
+                "partially intersects a pt_load virtual-memory interval",
+            ),
+            (
+                "zero-filesz BSS overlap",
+                (primary, (2 * page_size, 0, 0, page_size, 4)),
+                ((0, 0, 1, "r-xp"),),
+                "conflicting pt_load virtual-memory owner",
+            ),
+            (
+                "overflowing page-rounded memsz",
+                (
+                    primary,
+                    (2 * page_size, (1 << 64) - page_size + 1, 0, page_size - 2, 4),
+                ),
+                ((0, 0, 1, "r-xp"),),
+                "pt_load memory interval page rounding overflows",
+            ),
+        )
+        for name, loads, maps, expected_message in cases:
+            with self.subTest(name=name):
+                def mutate(positive: Path, role: str, *, current_loads=loads, current_maps=maps) -> None:
+                    self.set_runtime_pt_load_layout(positive, role, current_loads, current_maps)
+
+                result = self.reject_runtime_identity_mutation(mutate)
+                self.assertIn(expected_message, result.stderr.lower())
+                self.assertNotIn("sha256sums", result.stderr.lower())
+                self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+                self.assertNotIn("retained elf digest does not match", result.stderr.lower())
+
+    def test_native_runtime_identity_accepts_adjacent_half_open_pt_load_pages(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="runtime-identity-adjacent-half-open-") as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.create_evidence(source)
+            root = self.copy_evidence(source, Path(directory))
+            positive = root / INDIRECT_UNIT
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            for role in ("source", "target"):
+                self.set_runtime_pt_load_layout(
+                    positive,
+                    role,
+                    (
+                        (0, 0, page_size, page_size, 5),
+                        (2 * page_size, page_size, page_size, page_size, 5),
+                    ),
+                    ((0, 0, 1, "r-xp"), (1, 2, 1, "r-xp")),
+                )
+                self.refresh_runtime_identity(positive, role)
+            _refresh_indirect_manifest(root)
+            result = self.run_checker(root, runtime="glibc", require_runtime_identity=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_standalone_rehydration_checker_bounds_evidence_directories(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="rehydration-directory-cap-") as directory:
+            parent = Path(directory)
+            self.create_evidence(parent)
+            root = parent / INDIRECT_UNIT
+            _refresh_indirect_manifest(root)
+            maximum_directories = REHYDRATION_PRIVATE_CHECKER.MAX_DIRECTORIES
+            existing_directories = 1 + sum(path.is_dir() for path in root.rglob("*"))
+            if existing_directories >= maximum_directories:
+                self.fail("synthetic evidence tree already exceeds the directory-limit fixture budget")
+            for index in range(maximum_directories - existing_directories):
+                (root / f"bounded-empty-{index:04d}").mkdir()
+            command = [
+                sys.executable,
+                str(CHECKER),
+                str(root),
+                "--tier", "pr",
+                "--runtime", "glibc",
+                "--unit", INDIRECT_UNIT,
+            ]
+            exact_tree = REHYDRATION_PRIVATE_CHECKER.BoundedEvidenceTree(root)
+            exact_tree.preflight()
+            self.assertEqual(maximum_directories, len(exact_tree.directories))
+            at_limit = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+            self.assertNotEqual(at_limit.returncode, 0)
+            self.assertIn("missing or invalid rehydration evidence file: protected-image.json", at_limit.stderr)
+            (root / "one-over-directory-bound").mkdir()
+            over_limit = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+            self.assertNotEqual(over_limit.returncode, 0, over_limit.stdout)
+            self.assertIn("directory count exceeds its configured bound", over_limit.stderr)
+
+    def test_standalone_rehydration_checker_rejects_directory_overflow_before_descent(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="rehydration-directory-pre-descent-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            exact_child_limit = REHYDRATION_PRIVATE_CHECKER.MAX_DIRECTORIES - 1
+            for index in range(exact_child_limit):
+                (root / f"dir-{index:04d}").mkdir()
+            exact_tree = REHYDRATION_PRIVATE_CHECKER.BoundedEvidenceTree(root)
+            exact_tree.preflight()
+            self.assertEqual(REHYDRATION_PRIVATE_CHECKER.MAX_DIRECTORIES, len(exact_tree.directories))
+
+            (root / "overflow-dir").mkdir()
+            original_open = os.open
+            child_directory_opens = 0
+
+            def count_child_directory_open(path, *args, **kwargs):
+                nonlocal child_directory_opens
+                if kwargs.get("dir_fd") is not None and isinstance(path, str):
+                    child_directory_opens += 1
+                    if child_directory_opens > exact_child_limit:
+                        raise AssertionError("standalone evidence checker descended into an over-limit directory")
+                return original_open(path, *args, **kwargs)
+
+            with mock.patch.object(REHYDRATION_PRIVATE_CHECKER.os, "open", side_effect=count_child_directory_open):
+                with self.assertRaisesRegex(SystemExit, "directory count exceeds its configured bound"):
+                    REHYDRATION_PRIVATE_CHECKER.BoundedEvidenceTree(root).preflight()
+            self.assertEqual(exact_child_limit, child_directory_opens)
+
+    def test_standalone_rehydration_tree_enforces_exact_entry_and_file_caps(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="rehydration-reader-entry-cap-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            for index in range(REHYDRATION_PRIVATE_CHECKER.MAX_FILES):
+                (root / f"payload-{index:04d}").touch()
+            exact_files = REHYDRATION_PRIVATE_CHECKER.BoundedEvidenceTree(root)
+            exact_files.preflight()
+            self.assertEqual(REHYDRATION_PRIVATE_CHECKER.MAX_FILES, len(exact_files.files))
+            (root / "one-over-file-cap").touch()
+            with self.assertRaisesRegex(SystemExit, "file count exceeds its configured bound"):
+                REHYDRATION_PRIVATE_CHECKER.BoundedEvidenceTree(root).preflight()
+
+        with tempfile.TemporaryDirectory(prefix="rehydration-reader-file-cap-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            for index in range(REHYDRATION_PRIVATE_CHECKER.MAX_DIRECTORIES - 1):
+                (root / f"dir-{index:04d}").mkdir()
+            file_count = REHYDRATION_PRIVATE_CHECKER.MAX_ENTRIES - (REHYDRATION_PRIVATE_CHECKER.MAX_DIRECTORIES - 1)
+            for index in range(file_count):
+                (root / f"payload-{index:04d}").touch()
+            exact_entries = REHYDRATION_PRIVATE_CHECKER.BoundedEvidenceTree(root)
+            exact_entries.preflight()
+            self.assertEqual(REHYDRATION_PRIVATE_CHECKER.MAX_ENTRIES, len(exact_entries.files) + len(exact_entries.directories) - 1)
+            (root / "one-over-entry-cap").touch()
+            with self.assertRaisesRegex(SystemExit, "entry count exceeds its configured bound"):
+                REHYDRATION_PRIVATE_CHECKER.BoundedEvidenceTree(root).preflight()
+
+    def test_standalone_rehydration_checker_rejects_root_and_nested_symlink_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="rehydration-reader-symlink-guards-") as directory:
+            parent = Path(directory)
+            self.create_evidence(parent)
+            root = parent / INDIRECT_UNIT
+            _refresh_indirect_manifest(root)
+            command = [
+                sys.executable,
+                str(CHECKER),
+                str(root),
+                "--tier", "pr",
+                "--runtime", "glibc",
+                "--unit", INDIRECT_UNIT,
+            ]
+            alias_parent = parent / "evidence-alias-parent"
+            alias_parent.symlink_to(parent, target_is_directory=True)
+            parent_alias = alias_parent / INDIRECT_UNIT
+            parent_alias_result = subprocess.run(
+                [*command[:2], str(parent_alias), *command[3:]],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(parent_alias_result.returncode, 0)
+            self.assertIn("must not contain symlink path components", parent_alias_result.stderr)
+
+            root_alias_parent = parent / "evidence-root-alias"
+            root_alias_parent.mkdir()
+            alias = root_alias_parent / INDIRECT_UNIT
+            alias.symlink_to(root, target_is_directory=True)
+            root_alias = subprocess.run(
+                [*command[:2], str(alias), *command[3:]],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(root_alias.returncode, 0)
+            self.assertIn("must not contain symlink path components", root_alias.stderr)
+
+            outside = parent / "outside"
+            outside.mkdir()
+            (root / "unlisted-symlink").symlink_to(outside, target_is_directory=True)
+            nested_link = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+            self.assertNotEqual(nested_link.returncode, 0)
+            self.assertIn("tree contains a symlink", nested_link.stderr)
 
     def test_external_table_bhi_targeting_indexed_read_is_rejected_after_hash_refresh(self) -> None:
         with tempfile.TemporaryDirectory(prefix="indirect-control-external-unsafe-bounds-") as directory:

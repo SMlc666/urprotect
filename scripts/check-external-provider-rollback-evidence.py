@@ -86,6 +86,7 @@ EVIDENCE_TOOL_FILES = {
     "scripts/check-indirect-control-evidence.py",
     "scripts/evidence_load_range.py",
     "scripts/tls_runtime_identity.py",
+    "scripts/native_runtime_identity.py",
 }
 TOOLCHAIN_FILES = {
     "toolchain/cc-driver",
@@ -465,6 +466,7 @@ def _verify_build(root: Path, build: dict[str, Any]) -> dict[str, bytes]:
         "providerElfParserSha256", "rollbackCheckerSha256", "rollbackProducerSha256",
         "dynamicImportParserSha256", "indirectControlParserSha256",
         "evidenceLoadRangeHelperSha256", "runtimeIdentityVerifierSha256",
+        "indirectControlRuntimeIdentityVerifierSha256",
     }, "evidence tool identity")
     producer_source = read_file(root, "evidence-tools/run-external-provider-rollback-oracle.sh")
     require(evidence_tools.get("rollbackProducerSha256") == sha(producer_source), "retained rollback producer source digest mismatch")
@@ -480,6 +482,7 @@ def _verify_build(root: Path, build: dict[str, Any]) -> dict[str, bytes]:
         "indirectControlParserSha256": "scripts/check-indirect-control-evidence.py",
         "evidenceLoadRangeHelperSha256": "scripts/evidence_load_range.py",
         "runtimeIdentityVerifierSha256": "scripts/tls_runtime_identity.py",
+        "indirectControlRuntimeIdentityVerifierSha256": "scripts/native_runtime_identity.py",
     }
     for field, relative in tool_bindings.items():
         retained = read_file(root, relative)
