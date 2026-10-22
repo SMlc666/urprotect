@@ -1962,10 +1962,22 @@ new owner field, schema version, or runtime-support claim is introduced.
   must equal `declaredPath`; realpath resolution and device/inode must identify
   the actual mapped loader. Glibc libc and loader are distinct mapped files;
   musl records its combined loader/libc identity consistently in both fields.
-  The checker recomputes runtime version from retained bytes using exactly one
-  `glibc-libc-release-version-marker` or `musl-loader-version-marker`, and
-  source and target family, version, interpreter, and helper/libc/loader file
-  identities must agree.
+  Glibc runtime version is recomputed from retained libc bytes using exactly
+  one `glibc-libc-release-version-marker`, unchanged from the existing glibc
+  identity contract. Musl runtime-version admission is deliberately scoped to
+  the exact reviewed combined libc/loader ELF of 711,128 bytes with SHA-256
+  `4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9`.
+  Native capture compares the digest it computed for the mapped libc bytes;
+  the independent checker recomputes the digest from retained libc bytes and
+  requires it to equal both the identity's libc digest and this fixed pin
+  before accepting `runtimeVersion`. For this exact artifact, static
+  disassembly ties its unique `Version %s\n` format string to the `dprintf`
+  argument `1.2.3`; this does not establish generic musl token linkage. The
+  synchronized `runtimeVersionSource` value is
+  `musl-reviewed-libc-sha256-pinned-version-marker`. Other musl artifacts fail
+  closed pending code/data linkage proof or a separately audited exact digest
+  pin. Source and target family, version, interpreter, and helper/libc/loader
+  file identities must agree.
 - Native capture and Python validation are bounded before allocation or reads:
   `/proc/self/maps` is at most 1 MiB, each maps line at most 8192 bytes, each
   retained runtime/helper ELF at most 32 MiB, identity JSON at most 16 KiB,
@@ -2017,7 +2029,7 @@ new owner field, schema version, or runtime-support claim is introduced.
 | --- | --- |
 | Historical glibc carrier absent and identity is not required | Accept the historical evidence shape; validate any carrier that is present |
 | Fresh glibc identity required but carrier is absent | Reject the evidence root; no successful evidence result |
-| Musl carrier absent, malformed, or bound to glibc | Reject; no musl identity fallback |
+| Musl carrier absent, malformed, bound to glibc, or claiming a runtime version from any combined libc/loader digest other than `4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9` | Reject; no musl identity fallback or generic-token admission |
 | Schema has missing/extra fields, wrong version, or non-exact integer types | Reject the identity record, including refreshed-checksum mutations |
 | Image, role, runtime/version marker, interpreter, maps path, device/inode, retained bytes, or source/target identity differs | Reject the evidence root |
 | A VMA only partially intersects a page-rounded `PT_LOAD` file interval, but exactly one permission-compatible full file owner with a consistent load bias remains | Skip that partial file candidate; continue to the independent memory-owner proof |

@@ -723,7 +723,12 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
 
 class IndirectControlEvidenceTests(unittest.TestCase):
     @staticmethod
-    def runtime_elf(*, interpreter: str | None = None, version_marker: bytes | None = None) -> bytes:
+    def runtime_elf(
+        *,
+        interpreter: str | None = None,
+        version_marker: bytes | None = None,
+        version_string: bytes | None = None,
+    ) -> bytes:
         image = bytearray(0x200)
         image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 183, 1, 0, 64, 0, 0, 64, 56, 2 if interpreter else 1, 0, 0, 0)
@@ -734,6 +739,8 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             image[0x180 : 0x180 + len(encoded)] = encoded
         if version_marker is not None:
             image[0x100 : 0x100 + len(version_marker)] = version_marker
+        if version_string is not None:
+            image[0x140 : 0x140 + len(version_string)] = version_string
         return bytes(image)
 
     def write_runtime_identity(self, positive: Path, role: str, image_hash: str, *, runtime: str = "glibc", version_marker: bytes | None = None) -> dict[str, object]:
@@ -756,9 +763,9 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             runtime_version = "2.43"
             version_source = "glibc-libc-release-version-marker"
         elif runtime == "musl":
-            version_marker = b"Version 1.2.3" if version_marker is None else version_marker
+            version_marker = b"Version %s\n" if version_marker is None else version_marker
             helper = self.runtime_elf(interpreter="/lib/ld-musl-aarch64.so.1")
-            libc = self.runtime_elf(version_marker=version_marker)
+            libc = self.runtime_elf(version_marker=version_marker, version_string=b"1.2.3\0")
             loader = libc
             libc_path = "/lib/aarch64-linux-musl/libc.so"
             loader_path = libc_path
@@ -769,7 +776,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 f"0000000000200000-0000000000201000 r-xp 00000000 08:01 {loader_inode} {loader_path}\n"
             ).encode("ascii")
             runtime_version = "1.2.3"
-            version_source = "musl-loader-version-marker"
+            version_source = "musl-reviewed-libc-sha256-pinned-version-marker"
         else:
             raise ValueError("unsupported test runtime")
         loader_dev_inode = loader_inode
@@ -1798,6 +1805,35 @@ class IndirectControlEvidenceTests(unittest.TestCase):
         result = self.reject_refreshed_mutation(add_adjacent_loads)
         self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_musl_lexical_version_parser_requires_one_unambiguous_elf_version_string(self) -> None:
+        runtime_identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER
+        positive = self.runtime_elf(version_marker=b"Version %s\n", version_string=b"1.2.3\0")
+        self.assertEqual("1.2.3", runtime_identity._version_from_bytes(positive, "musl"))
+
+        missing_version = self.runtime_elf(version_marker=b"Version %s\n")
+        conflicting_versions = bytearray(positive)
+        conflicting_versions[0x160 : 0x166] = b"1.2.4\0"
+        duplicate_version = bytearray(positive)
+        duplicate_version[0x160 : 0x166] = b"1.2.3\0"
+        duplicate_marker = bytearray(positive)
+        duplicate_marker[0x180 : 0x18c] = b"Version %s\n\0"
+        malformed_template = bytearray(positive)
+        malformed_template[0x109] = ord("x")
+        inline_numeric = self.runtime_elf(version_marker=b"Version 1.2.3")
+        malformed_version = bytearray(positive)
+        malformed_version[0x145] = ord("x")
+        for name, candidate in (
+            ("missing version", missing_version),
+            ("conflicting versions", bytes(conflicting_versions)),
+            ("duplicate version", bytes(duplicate_version)),
+            ("duplicate marker", bytes(duplicate_marker)),
+            ("malformed template", bytes(malformed_template)),
+            ("inline numeric marker", inline_numeric),
+            ("malformed version token", bytes(malformed_version)),
+        ):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                runtime_identity._version_from_bytes(candidate, "musl")
+
     def test_musl_runtime_identity_is_independently_verified_from_native_mapped_bytes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="musl-runtime-identity-verified-") as directory:
             root = Path(directory) / "evidence"
@@ -1817,14 +1853,86 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "rehydrationRecordSha256": "d" * 64,
                 "runtimeIdentity": carrier,
             }
-            identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
-                root, handoff, expected_runtime="musl", expected_role="target",
-                expected_image_sha256=image_hash, required=True,
+            runtime_identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER
+            self.assertEqual(
+                "4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9",
+                runtime_identity.MUSL_REVIEWED_LIBC_SHA256,
             )
+            self.assertEqual(
+                "musl-reviewed-libc-sha256-pinned-version-marker",
+                runtime_identity.MUSL_RUNTIME_VERSION_SOURCE,
+            )
+            retained_libc = (root / "runtime-identity" / "target" / "libc.elf").read_bytes()
+            with mock.patch.object(runtime_identity, "MUSL_REVIEWED_LIBC_SHA256", _sha(retained_libc)):
+                identity = runtime_identity.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="musl", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
             self.assertEqual(identity["runtime"], "musl")
+            self.assertEqual(identity["runtimeVersion"], "1.2.3")
+            self.assertEqual(identity["runtimeVersionSource"], runtime_identity.MUSL_RUNTIME_VERSION_SOURCE)
             with self.assertRaises(ValueError):
                 REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
                     root, handoff, expected_runtime="glibc", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
+
+    def test_musl_runtime_identity_rejects_synthetic_digest_and_forged_digest_metadata(self) -> None:
+        runtime_identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER
+        reviewed_digest = runtime_identity.MUSL_REVIEWED_LIBC_SHA256
+        with tempfile.TemporaryDirectory(prefix="musl-runtime-identity-unreviewed-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            image_hash = "e" * 64
+            carrier = self.write_runtime_identity(root, "target", image_hash, runtime="musl")
+            identity_path = root / "runtime-identity" / "target" / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            libc_path = root / identity["libc"]["retainedPath"]
+            loader_path = root / identity["loader"]["retainedPath"]
+            libc = bytearray(libc_path.read_bytes())
+            malformed_alternative = b"1.2.3beta\0"
+            libc[0x120 : 0x120 + len(malformed_alternative)] = malformed_alternative
+            libc_bytes = bytes(libc)
+            libc_path.write_bytes(libc_bytes)
+            loader_path.write_bytes(libc_bytes)
+            identity["libc"]["sha256"] = _sha(libc_bytes)
+            identity["loader"]["sha256"] = _sha(libc_bytes)
+            _write_json(identity_path, identity)
+            carrier["sha256"] = _sha(identity_path.read_bytes())
+            handoff = {
+                "schemaVersion": 1,
+                "stage": "host-context-handoff",
+                "status": "passed",
+                "loaderId": "host-context.sealed-memfd.dlopen",
+                "nativeImageSha256": image_hash,
+                "entryStatus": 23,
+                "processStatus": 23,
+                "releaseStatus": "passed",
+                "releaseOrder": "entry-dispatch-before-release-image",
+                "rehydrationRecordSha256": "d" * 64,
+                "runtimeIdentity": carrier,
+            }
+
+            self.assertEqual("1.2.3", runtime_identity._version_from_bytes(libc_bytes, "musl"))
+            self.assertNotEqual(reviewed_digest, _sha(libc_bytes))
+            with self.assertRaisesRegex(ValueError, "exact reviewed libc SHA-256 pin"):
+                runtime_identity.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="musl", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
+
+            # Refresh the JSON/carrier hash while forging only the declared libc digest.
+            identity["libc"]["sha256"] = reviewed_digest
+            identity["loader"]["sha256"] = reviewed_digest
+            _write_json(identity_path, identity)
+            handoff["runtimeIdentity"] = {
+                "schemaVersion": 1,
+                "path": carrier["path"],
+                "sha256": _sha(identity_path.read_bytes()),
+            }
+            with self.assertRaisesRegex(ValueError, "retained ELF digest does not match its native identity"):
+                runtime_identity.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="musl", expected_role="target",
                     expected_image_sha256=image_hash, required=True,
                 )
 

@@ -9,6 +9,17 @@
 #include <string.h>
 #include <unistd.h>
 
+int urp_native_process_identity_test_parse_musl_version(
+    const uint8_t *bytes,
+    size_t size,
+    char output[64]);
+int urp_native_process_identity_test_is_reviewed_musl_libc_digest(const char *sha256);
+const char *urp_native_process_identity_test_musl_runtime_version_source(void);
+int urp_native_process_identity_test_admit_musl_bytes(
+    const uint8_t *bytes,
+    size_t size,
+    char output[64]);
+
 #define TEST_ELF_CAPACITY (64U * 1024U)
 #define TEST_BASE_ADDRESS UINT64_C(0x400000)
 #define TEST_DEVICE_MAJOR 8U
@@ -371,6 +382,109 @@ static int test_half_open_adjacent_virtual_load_pages(uint64_t page_size)
     return 1;
 }
 
+static int parse_musl_version_test_case(const uint8_t *bytes, size_t size, const char *expected)
+{
+    char output[64] = {0};
+    int parsed = urp_native_process_identity_test_parse_musl_version(bytes, size, output);
+    if (expected == NULL) return !parsed;
+    return parsed && strcmp(output, expected) == 0;
+}
+
+static int test_musl_version_template_uses_one_strict_version_token(void)
+{
+    static const uint8_t marker[] = "musl libc (aarch64)\nVersion %s\n";
+    uint8_t bytes[512] = {0};
+    memcpy(bytes + 0x80U, marker, sizeof(marker));
+    memcpy(bytes + 0x180U, "1.2.3", sizeof("1.2.3"));
+    if (!parse_musl_version_test_case(bytes, sizeof(bytes), "1.2.3")) {
+        (void)fprintf(stderr, "FAIL native identity musl version template and unique token\n");
+        return 0;
+    }
+    (void)printf("PASS native identity musl version template and unique token\n");
+    return 1;
+}
+
+static int test_musl_version_identity_requires_exact_reviewed_digest(uint64_t page_size)
+{
+    static const char reviewed_digest[] = "4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9";
+    static const char other_digest[] = "0000000000000000000000000000000000000000000000000000000000000000";
+    static const uint8_t marker[] = "Version %s\n";
+    static const uint8_t unrelated[] = "unrelated string";
+    test_elf elf;
+    char altered_digest[sizeof(reviewed_digest)];
+    char version[64] = {0};
+
+    if (!make_elf(&elf, page_size, 1U, 0, 0)) return 0;
+    memcpy(elf.bytes + 0x100U, marker, sizeof(marker));
+    memcpy(elf.bytes + 0x140U, unrelated, sizeof(unrelated));
+    memcpy(elf.bytes + 0x180U, "1.2.3", sizeof("1.2.3"));
+
+    /* Lexical extraction intentionally remains separate from identity admission. */
+    if (!parse_musl_version_test_case(elf.bytes, elf.size, "1.2.3")) goto failure;
+    if (urp_native_process_identity_test_admit_musl_bytes(elf.bytes, elf.size, version)) goto failure;
+    if (!urp_native_process_identity_test_is_reviewed_musl_libc_digest(reviewed_digest)) goto failure;
+    memcpy(altered_digest, reviewed_digest, sizeof(reviewed_digest));
+    altered_digest[0] = altered_digest[0] == '0' ? '1' : '0';
+    if (urp_native_process_identity_test_is_reviewed_musl_libc_digest(altered_digest)
+        || urp_native_process_identity_test_is_reviewed_musl_libc_digest(other_digest)
+        || strcmp(
+            urp_native_process_identity_test_musl_runtime_version_source(),
+            "musl-reviewed-libc-sha256-pinned-version-marker") != 0) goto failure;
+
+    (void)printf("PASS native identity musl runtime version requires the exact reviewed libc SHA-256\n");
+    return 1;
+
+failure:
+    (void)fprintf(stderr, "FAIL native identity musl runtime version accepted an unreviewed digest or rejected the reviewed pin\n");
+    return 0;
+}
+
+static int test_musl_version_template_rejects_ambiguous_or_malformed_inputs(void)
+{
+    static const uint8_t marker[] = "musl libc (aarch64)\nVersion %s\n";
+    static const uint8_t marker_only[] = "Version %s\n";
+    static const uint8_t inline_numeric[] = "musl libc (aarch64)\nVersion 1.2.3";
+    static const uint8_t malformed[] = "musl libc (aarch64)\nVersion %x\n";
+    uint8_t bytes[512] = {0};
+
+    memcpy(bytes + 0x80U, marker, sizeof(marker));
+    if (!parse_musl_version_test_case(bytes, sizeof(bytes), NULL)) goto failure;
+
+    memset(bytes, 0, sizeof(bytes));
+    memcpy(bytes + 0x80U, marker, sizeof(marker));
+    memcpy(bytes + 0x180U, "1.2.3", sizeof("1.2.3"));
+    memcpy(bytes + 0x1a0U, "1.2.4", sizeof("1.2.4"));
+    if (!parse_musl_version_test_case(bytes, sizeof(bytes), NULL)) goto failure;
+
+    memset(bytes, 0, sizeof(bytes));
+    memcpy(bytes + 0x80U, marker, sizeof(marker));
+    memcpy(bytes + 0x180U, "1.2.3", sizeof("1.2.3"));
+    memcpy(bytes + 0x1a0U, "1.2.3", sizeof("1.2.3"));
+    if (!parse_musl_version_test_case(bytes, sizeof(bytes), NULL)) goto failure;
+
+    memset(bytes, 0, sizeof(bytes));
+    memcpy(bytes + 0x80U, marker, sizeof(marker));
+    memcpy(bytes + 0x120U, marker_only, sizeof(marker_only));
+    memcpy(bytes + 0x180U, "1.2.3", sizeof("1.2.3"));
+    if (!parse_musl_version_test_case(bytes, sizeof(bytes), NULL)) goto failure;
+
+    memset(bytes, 0, sizeof(bytes));
+    memcpy(bytes + 0x80U, malformed, sizeof(malformed));
+    memcpy(bytes + 0x180U, "1.2.3", sizeof("1.2.3"));
+    if (!parse_musl_version_test_case(bytes, sizeof(bytes), NULL)) goto failure;
+
+    memset(bytes, 0, sizeof(bytes));
+    memcpy(bytes + 0x80U, inline_numeric, sizeof(inline_numeric));
+    if (!parse_musl_version_test_case(bytes, sizeof(bytes), NULL)) goto failure;
+
+    (void)printf("PASS native identity musl version marker rejects missing, duplicate, conflicting, and malformed facts\n");
+    return 1;
+
+failure:
+    (void)fprintf(stderr, "FAIL native identity musl version marker accepted missing, duplicate, conflicting, or malformed facts\n");
+    return 0;
+}
+
 int main(void)
 {
     long page_size_long = sysconf(_SC_PAGESIZE);
@@ -386,7 +500,10 @@ int main(void)
         (void)fprintf(stderr, "FAIL native identity test page size is not a supported power of two\n");
         return 1;
     }
-    if (!test_musl_combined_loader_relro_splits(page_size)
+    if (!test_musl_version_template_uses_one_strict_version_token()
+        || !test_musl_version_identity_requires_exact_reviewed_digest(page_size)
+        || !test_musl_version_template_rejects_ambiguous_or_malformed_inputs()
+        || !test_musl_combined_loader_relro_splits(page_size)
         || !test_rounded_file_page_alias_at_distinct_virtual_addresses(page_size)
         || !test_incompatible_pt_load_permissions_rejected(page_size)
         || !test_duplicate_full_pt_load_rejected(page_size)

@@ -29,6 +29,8 @@
 #define MAX_IDENTITY_JSON_BYTES 16384U
 #define IDENTITY_PATH_CAPACITY 4096U
 #define IDENTITY_RELPATH_CAPACITY 512U
+#define REVIEWED_MUSL_LIBC_SHA256 "4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9"
+#define MUSL_RUNTIME_VERSION_SOURCE "musl-reviewed-libc-sha256-pinned-version-marker"
 
 typedef struct {
     char path[IDENTITY_PATH_CAPACITY];
@@ -882,6 +884,116 @@ static int parse_version_marker(
     return 1;
 }
 
+/* musl stores "Version %s\n" as the loader format string and VERSION as a
+ * separate NUL-delimited ELF string; require a unique strict token. */
+static int is_musl_version_token(const uint8_t *bytes, size_t size)
+{
+    size_t dots = 0U;
+    int previous_dot = 1;
+    if (bytes == NULL || size == 0U || size >= 64U) return 0;
+    for (size_t index = 0U; index < size; ++index) {
+        uint8_t ch = bytes[index];
+        if (ch >= (uint8_t)'0' && ch <= (uint8_t)'9') {
+            previous_dot = 0;
+        } else if (ch == (uint8_t)'.') {
+            if (previous_dot) return 0;
+            ++dots;
+            previous_dot = 1;
+        } else {
+            return 0;
+        }
+    }
+    return !previous_dot && dots == 2U;
+}
+
+static int parse_musl_version_marker(const uint8_t *bytes, size_t size, char output[64])
+{
+    static const char marker[] = "Version ";
+    static const uint8_t expected_format[] = {'%', 's', '\n'};
+    size_t marker_start = 0U;
+    size_t marker_count = 0U;
+    size_t version_start = 0U;
+    size_t version_size = 0U;
+    size_t version_count = 0U;
+    if (bytes == NULL || size == 0U || output == NULL) return 0;
+    for (size_t index = 0U; index + (sizeof(marker) - 1U) <= size; ++index) {
+        if (memcmp(bytes + index, marker, sizeof(marker) - 1U) == 0) {
+            marker_start = index + sizeof(marker) - 1U;
+            ++marker_count;
+        }
+    }
+    if (marker_count != 1U || marker_start > size
+        || size - marker_start < sizeof(expected_format)
+        || memcmp(bytes + marker_start, expected_format, sizeof(expected_format)) != 0) return 0;
+
+    for (size_t cursor = 0U; cursor < size;) {
+        size_t end;
+        size_t candidate_size;
+        while (cursor < size && bytes[cursor] == 0U) ++cursor;
+        if (cursor >= size) break;
+        end = cursor;
+        while (end < size && bytes[end] != 0U) ++end;
+        candidate_size = end - cursor;
+        if (end < size && is_musl_version_token(bytes + cursor, candidate_size)) {
+            version_start = cursor;
+            version_size = candidate_size;
+            ++version_count;
+            if (version_count > 1U) return 0;
+        }
+        cursor = end < size ? end + 1U : size;
+    }
+    if (version_count != 1U) return 0;
+    memcpy(output, bytes + version_start, version_size);
+    output[version_size] = '\0';
+    return 1;
+}
+
+static int is_reviewed_musl_libc_digest(const char *sha256)
+{
+    return is_sha256(sha256) && strcmp(sha256, REVIEWED_MUSL_LIBC_SHA256) == 0;
+}
+
+static int parse_reviewed_musl_version(
+    const uint8_t *bytes,
+    size_t size,
+    const char *libc_sha256,
+    char output[64])
+{
+    if (!is_reviewed_musl_libc_digest(libc_sha256)) return 0;
+    return parse_musl_version_marker(bytes, size, output);
+}
+
+#ifdef URP_NATIVE_PROCESS_IDENTITY_TEST
+int urp_native_process_identity_test_parse_musl_version(
+    const uint8_t *bytes,
+    size_t size,
+    char output[64])
+{
+    return parse_musl_version_marker(bytes, size, output);
+}
+
+int urp_native_process_identity_test_is_reviewed_musl_libc_digest(const char *sha256)
+{
+    return is_reviewed_musl_libc_digest(sha256);
+}
+
+const char *urp_native_process_identity_test_musl_runtime_version_source(void)
+{
+    return MUSL_RUNTIME_VERSION_SOURCE;
+}
+
+int urp_native_process_identity_test_admit_musl_bytes(
+    const uint8_t *bytes,
+    size_t size,
+    char output[64])
+{
+    char computed_sha256[65];
+    if (bytes == NULL || size == 0U || output == NULL) return 0;
+    digest_hex(bytes, size, computed_sha256);
+    return parse_reviewed_musl_version(bytes, size, computed_sha256, output);
+}
+#endif
+
 static int write_identity_json(
     int directory_fd,
     const char *relative_directory,
@@ -1143,8 +1255,8 @@ int urp_native_process_identity_capture(
 
     failure_stage = "runtime-version-check";
     if (strcmp(runtime, "musl") == 0) {
-        if (!parse_version_marker(libc_bytes, libc_size, "Version ", 1, version)) goto cleanup;
-        (void)snprintf(version_source, sizeof(version_source), "%s", "musl-loader-version-marker");
+        if (!parse_reviewed_musl_version(libc_bytes, libc_size, libc_capture.sha256, version)) goto cleanup;
+        (void)snprintf(version_source, sizeof(version_source), "%s", MUSL_RUNTIME_VERSION_SOURCE);
     } else {
         if (!parse_version_marker(libc_bytes, libc_size, "release version ", 0, version)) goto cleanup;
 #if defined(__GLIBC__)

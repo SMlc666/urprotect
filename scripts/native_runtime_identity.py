@@ -23,6 +23,8 @@ MAX_TOTAL_BYTES = 96 * 1024 * 1024
 MAX_IDENTITY_BYTES = 16 * 1024
 MAX_ELF_PROGRAM_HEADERS = 4096
 MAX_U64 = (1 << 64) - 1
+MUSL_REVIEWED_LIBC_SHA256 = "4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9"
+MUSL_RUNTIME_VERSION_SOURCE = "musl-reviewed-libc-sha256-pinned-version-marker"
 
 
 def _fail(message: str) -> None:
@@ -486,14 +488,36 @@ def _version_from_bytes(data: bytes, runtime: str) -> str:
     if len(occurrences) != 1:
         _fail("runtime ELF has missing or conflicting version markers")
     start = occurrences[0] + len(marker)
+    if runtime == "musl":
+        # musl stores the loader's Version %s line and VERSION as separate ELF strings.
+        if data[start : start + 3] != b"%s\n":
+            _fail("musl runtime ELF version marker has an unexpected format")
+        versions: list[bytes] = []
+        cursor = 0
+        while cursor < len(data):
+            while cursor < len(data) and data[cursor] == 0:
+                cursor += 1
+            if cursor >= len(data):
+                break
+            end = data.find(b"\0", cursor)
+            if end < 0:
+                break
+            if end - cursor < 64 and re.fullmatch(rb"[0-9]+\.[0-9]+\.[0-9]+", data[cursor:end]):
+                versions.append(data[cursor:end])
+                if len(versions) > 1:
+                    _fail("runtime ELF has missing or conflicting musl version strings")
+            cursor = end + 1
+        if len(versions) != 1:
+            _fail("runtime ELF has missing or conflicting musl version strings")
+        return versions[0].decode("ascii")
+
     match = re.match(rb"[0-9]+\.[0-9]+(?:\.[0-9]+)?", data[start : start + 64])
     if match is None:
         _fail("runtime ELF version marker has no strict numeric version")
     version = match.group(0).decode("ascii")
-    expected_parts = 3 if runtime == "musl" else 2
-    if version.count(".") != expected_parts - 1:
+    if version.count(".") != 1:
         _fail("runtime ELF version has the wrong component count")
-    if runtime == "glibc" and data[start + len(version) : start + len(version) + 1] not in {b"", b"."}:
+    if data[start + len(version) : start + len(version) + 1] not in {b"", b"."}:
         _fail("glibc version marker has an unexpected suffix")
     return version
 
@@ -550,7 +574,7 @@ def validate_handoff_runtime_identity(
     version = identity["runtimeVersion"]
     if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", version) is None:
         _fail("native runtime identity version is malformed")
-    expected_version_source = "musl-loader-version-marker" if expected_runtime == "musl" else "glibc-libc-release-version-marker"
+    expected_version_source = MUSL_RUNTIME_VERSION_SOURCE if expected_runtime == "musl" else "glibc-libc-release-version-marker"
     if identity["runtimeVersionSource"] != expected_version_source:
         _fail("native runtime identity version source is unsupported")
 
@@ -607,6 +631,11 @@ def validate_handoff_runtime_identity(
 
     libc = identity["libc"]
     if expected_runtime == "musl":
+        retained_libc_sha256 = hashlib.sha256(retained["libc"]).hexdigest()
+        if libc["sha256"] != retained_libc_sha256:
+            _fail("musl retained libc digest does not match its native identity")
+        if retained_libc_sha256 != MUSL_REVIEWED_LIBC_SHA256:
+            _fail("musl runtime version requires the exact reviewed libc SHA-256 pin")
         if any(libc[key] != loader[key] for key in ("mappedPath", "deviceMajor", "deviceMinor", "inode", "size", "sha256")):
             _fail("musl loader and combined libc identities disagree")
         if identity["runtimeVersion"] != _version_from_bytes(retained["libc"], "musl"):
