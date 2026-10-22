@@ -6,6 +6,8 @@ AS ?= as
 PYTHON ?= python3
 BUILD_DIR ?= build
 CFLAGS ?= -std=c11 -O2 -g0 -Wall -Wextra -Werror -Wshadow -Wconversion -pthread
+HOST_ADAPTER_CFLAGS ?=
+HOST_ADAPTER_CONFIG_STAMP := $(BUILD_DIR)/host_adapter.compile-config
 CPPFLAGS := -Iinclude -I../urprotect-launcher -I../../third_party/miniz
 MINIZ_CPPFLAGS := -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_DEFLATE_APIS \
                   -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ZLIB_APIS \
@@ -608,9 +610,25 @@ $(BUILD_DIR)/runtime.o: runtime.c include/urp/host_context.h include/urp/runtime
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c "$<" -o "$@"
 
-$(BUILD_DIR)/host_adapter.o: host_adapter.c host_image_validation.h include/urp/host_context.h include/urp/host_adapter.h
+# Rebuild this object when its effective compile configuration changes, without
+# cleaning other outputs in a shared BUILD_DIR. The content-stable stamp avoids
+# recompiling it when the same configuration is requested again.
+.PHONY: host-adapter-config-force
+host-adapter-config-force:
+
+$(BUILD_DIR):
+	@mkdir -p "$@"
+
+$(HOST_ADAPTER_CONFIG_STAMP): host-adapter-config-force | $(BUILD_DIR)
+	$(file >$@.tmp,CC=$(CC))
+	$(file >>$@.tmp,CPPFLAGS=$(CPPFLAGS))
+	$(file >>$@.tmp,CFLAGS=$(CFLAGS))
+	$(file >>$@.tmp,HOST_ADAPTER_CFLAGS=$(HOST_ADAPTER_CFLAGS))
+	@if cmp -s "$@.tmp" "$@"; then rm -f "$@.tmp"; else mv -f "$@.tmp" "$@"; fi
+
+$(BUILD_DIR)/host_adapter.o: host_adapter.c host_image_validation.h include/urp/host_context.h include/urp/host_adapter.h $(HOST_ADAPTER_CONFIG_STAMP)
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_ADAPTER_CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1 -c "$<" -o "$@"
 
 $(BUILD_DIR)/host_image_validation.o: host_image_validation.c host_image_validation.h android_packed_relocation_tags.h include/urp/host_context.h
 	@mkdir -p "$(BUILD_DIR)"

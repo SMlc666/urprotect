@@ -110,10 +110,16 @@ record = {
 (root / "positive-reuse.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 else
-PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-rehydration-e2e.sh" \
+rehydration_status=0
+URP_NATIVE_BUILD_DIAGNOSTICS_ROOT="$native_build_diagnostics_root" \
+  PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-rehydration-e2e.sh" \
   --tier "$tier" --runtime "$runtime" --native-build-dir "$native_build_dir_relative" --require-runtime-identity --unit "$unit" --source "$source_file" \
   --function-id "$function_id" --entry-status 91 --producer-id gcc-aarch64-jump-table-fixture \
-  >"$root/rehydration.stdout" 2>"$root/rehydration.stderr" || exit 1
+  >"$root/rehydration.stdout" 2>"$root/rehydration.stderr" || rehydration_status=$?
+if [[ "$rehydration_status" -ne 0 ]]; then
+  printf 'HostContext rehydration runner failed with status %s\n' "$rehydration_status" >&2
+  exit "$rehydration_status"
+fi
 
 readelf -hW -lW -SW -rW -Ws "$positive/source-image.bin" >"$positive/source-readelf.txt" || exit 1
 readelf -hW -lW -SW -rW "$positive/native-image.bin" >"$positive/native-readelf.txt" || exit 1

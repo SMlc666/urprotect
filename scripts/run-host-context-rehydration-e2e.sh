@@ -76,12 +76,40 @@ fi
 make_args=("BUILD_DIR=$native_build_dir_relative")
 if [[ "$runtime" == musl ]]; then
   make_args+=("CC=$runtime_cc" "LD=ld")
+  make_args+=("HOST_ADAPTER_CFLAGS=-mno-outline-atomics")
 fi
-make -C "$native_root" "${make_args[@]}" host-context-entry-fixture host-context-image-handoff \
-  >"$artifact_root/native-build.stdout" 2>"$artifact_root/native-build.stderr" || {
-  echo "HostContext native fixture/helper build failed" >&2
-  exit 1
-}
+native_build_diagnostics_root="${URP_NATIVE_BUILD_DIAGNOSTICS_ROOT:-${artifact_root}.native-build-diagnostics}"
+artifact_root_resolved="$(realpath -m -- "$artifact_root")" || exit 1
+native_build_diagnostics_root_resolved="$(realpath -m -- "$native_build_diagnostics_root")" || exit 1
+case "$native_build_diagnostics_root_resolved" in
+  "$artifact_root_resolved"|"$artifact_root_resolved"/*)
+    echo "HostContext native-build diagnostics must be outside the positive evidence root" >&2
+    exit 2
+    ;;
+esac
+nested_build_diagnostics_root="$native_build_diagnostics_root/host-context-image-handoff"
+if [[ -e "$nested_build_diagnostics_root" || -L "$nested_build_diagnostics_root" ]]; then
+  echo "refusing to overwrite existing HostContext native-build diagnostics: $nested_build_diagnostics_root" >&2
+  exit 2
+fi
+mkdir -p "$nested_build_diagnostics_root" || exit 1
+native_build_command=(make -C "$native_root" "${make_args[@]}" host-context-entry-fixture host-context-image-handoff)
+{
+  printf 'cwd=%s\n' "$native_root"
+  printf 'runtime=%s\n' "$runtime"
+  printf 'argv='
+  printf '%q ' "${native_build_command[@]}"
+  printf '\n'
+} >"$nested_build_diagnostics_root/native-build.command.txt" || exit 1
+native_build_status=0
+"${native_build_command[@]}" \
+  >"$nested_build_diagnostics_root/native-build.stdout" \
+  2>"$nested_build_diagnostics_root/native-build.stderr" || native_build_status=$?
+printf '%s\n' "$native_build_status" >"$nested_build_diagnostics_root/native-build.status" || exit 1
+if [[ "$native_build_status" -ne 0 ]]; then
+  printf 'HostContext native fixture/helper build failed with status %s\n' "$native_build_status" >&2
+  exit "$native_build_status"
+fi
 source_file="$(realpath -e -- "$source_file" 2>/dev/null || true)"
 [[ -f "$source_file" && ! -L "$source_file" ]] || { echo "HostContext source fixture is not a regular ELF" >&2; exit 2; }
 native_helper="$native_build_dir/host-context-image-handoff"

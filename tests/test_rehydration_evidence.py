@@ -351,7 +351,15 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         self.assertIn('native-build.status', indirect_runner)
         self.assertIn('native_build_status=$?', indirect_runner)
         self.assertIn('exit "$native_build_status"', indirect_runner)
+        self.assertIn('URP_NATIVE_BUILD_DIAGNOSTICS_ROOT="$native_build_diagnostics_root"', indirect_runner)
+        self.assertIn('rehydration_status=$?', indirect_runner)
+        self.assertIn('exit "$rehydration_status"', indirect_runner)
         self.assertIn('"${native_build_command[@]}"', indirect_runner)
+        self.assertIn('make_args+=("HOST_ADAPTER_CFLAGS=-mno-outline-atomics")', host_context_runner)
+        makefile = (ROOT / "native/urprotect-runtime/Makefile").read_text(encoding="utf-8")
+        self.assertIn("HOST_ADAPTER_CFLAGS ?=", makefile)
+        self.assertIn("$(CFLAGS) $(HOST_ADAPTER_CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1", makefile)
+        self.assertIn("HOST_ADAPTER_CONFIG_STAMP := $(BUILD_DIR)/host_adapter.compile-config", makefile)
 
     def test_musl_jump_table_runner_retains_and_propagates_stubbed_make_failure(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pr29-musl-build-status-") as temporary_directory:
@@ -479,6 +487,218 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
                 ".artifacts/indirect-control/musl-${{ github.run_id }}-${{ github.run_attempt }}/",
                 workflow,
             )
+
+    def test_musl_host_context_helper_build_failure_retains_nested_make_and_propagates_status(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pr29-musl-nested-build-") as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            repository = temporary_root / "repo"
+            scripts = repository / "scripts"
+            native_root = repository / "native" / "urprotect-runtime"
+            stub_bin = temporary_root / "stub-bin"
+            scripts.mkdir(parents=True)
+            native_root.mkdir(parents=True)
+            stub_bin.mkdir()
+
+            isolated_runner = scripts / "run-host-context-rehydration-e2e.sh"
+            shutil.copy2(ROOT / "scripts/run-host-context-rehydration-e2e.sh", isolated_runner)
+            isolated_runner.chmod(0o755)
+
+            uname_stub = stub_bin / "uname"
+            uname_stub.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$#\" -eq 1 ] && [ \"$1\" = '-m' ]; then printf 'aarch64\n'; exit 0; fi\n"
+                "exit 98\n",
+                encoding="utf-8",
+            )
+            uname_stub.chmod(0o755)
+
+            compiler_stub = stub_bin / "musl-gcc"
+            compiler_invoked = temporary_root / "musl-gcc-was-invoked"
+            compiler_stub.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(compiler_invoked))}\n"
+                "exit 97\n",
+                encoding="utf-8",
+            )
+            compiler_stub.chmod(0o755)
+
+            make_stub = stub_bin / "make"
+            make_stub.write_text(
+                "#!/bin/sh\n"
+                "printf 'PR29_NESTED_MAKE_STDOUT\\n'\n"
+                "printf 'PR29_NESTED_MAKE_STDERR\\n' >&2\n"
+                "exit 23\n",
+                encoding="utf-8",
+            )
+            make_stub.chmod(0o755)
+
+            upload_parent = repository / ".artifacts" / "indirect-control" / "musl-run"
+            artifact_root = upload_parent / "ordinary" / "runtime.indirect-control.jump-table.musl.host-context-entry"
+            diagnostics_root = upload_parent / "ordinary.native-build-diagnostics"
+            diagnostics_root.mkdir(parents=True)
+            environment = {
+                "PATH": os.pathsep.join((str(stub_bin), "/usr/bin", "/bin")),
+                "HOME": str(temporary_root),
+                "TMPDIR": str(temporary_root),
+                "RUNNER_TEMP": str(temporary_root),
+                "PROTECTED_IMAGE_ARTIFACT_ROOT": str(artifact_root),
+                "URP_NATIVE_BUILD_DIAGNOSTICS_ROOT": str(diagnostics_root),
+                "LANG": "C",
+                "LC_ALL": "C",
+            }
+            result = subprocess.run(
+                [
+                    str(isolated_runner),
+                    "--tier",
+                    "pr",
+                    "--runtime",
+                    "musl",
+                    "--native-build-dir",
+                    "build/musl-indirect-control",
+                    "--unit",
+                    "runtime.indirect-control.jump-table.musl.host-context-entry",
+                ],
+                cwd=repository,
+                env=environment,
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+
+            self.assertEqual(23, result.returncode, result.stderr.decode(errors="replace"))
+            self.assertEqual(b"", result.stdout)
+            self.assertEqual(
+                b"HostContext native fixture/helper build failed with status 23\n",
+                result.stderr,
+            )
+            self.assertFalse(compiler_invoked.exists(), "the musl-gcc availability stub must not execute")
+            self.assertEqual([], list(artifact_root.iterdir()), "failed helper build polluted positive evidence")
+
+            nested_diagnostics = diagnostics_root / "host-context-image-handoff"
+            self.assertTrue(nested_diagnostics.resolve().is_relative_to(upload_parent.resolve()))
+            self.assertTrue(nested_diagnostics.resolve().is_relative_to(diagnostics_root.resolve()))
+            self.assertFalse(nested_diagnostics.resolve().is_relative_to(artifact_root.resolve()))
+            self.assertEqual(b"23\n", (nested_diagnostics / "native-build.status").read_bytes())
+            self.assertEqual(
+                b"PR29_NESTED_MAKE_STDOUT\n",
+                (nested_diagnostics / "native-build.stdout").read_bytes(),
+            )
+            self.assertEqual(
+                b"PR29_NESTED_MAKE_STDERR\n",
+                (nested_diagnostics / "native-build.stderr").read_bytes(),
+            )
+            command_lines = dict(
+                line.split("=", 1)
+                for line in (nested_diagnostics / "native-build.command.txt")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            )
+            expected_native_root = str(native_root.resolve())
+            self.assertEqual(expected_native_root, command_lines["cwd"])
+            self.assertEqual("musl", command_lines["runtime"])
+            argv = shlex.split(command_lines["argv"])
+            self.assertEqual(
+                [
+                    "make",
+                    "-C",
+                    expected_native_root,
+                    "BUILD_DIR=build/musl-indirect-control",
+                    f"CC={compiler_stub}",
+                    "LD=ld",
+                    "HOST_ADAPTER_CFLAGS=-mno-outline-atomics",
+                    "host-context-entry-fixture",
+                    "host-context-image-handoff",
+                ],
+                argv,
+            )
+
+    def test_host_adapter_make_rule_rebuilds_only_when_compile_configuration_changes(self) -> None:
+        make = shutil.which("make")
+        self.assertIsNotNone(make, "make is required to exercise the native object rule")
+        makefile_root = ROOT / "native/urprotect-runtime"
+        with tempfile.TemporaryDirectory(prefix="pr29-host-adapter-flags-") as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            compiler_stub = temporary_root / "cc-capture"
+            compiler_stub.write_text(
+                f"#!{sys.executable}\n"
+                "import json, os, pathlib, sys\n"
+                "args = sys.argv[1:]\n"
+                "with pathlib.Path(os.environ['URP_TEST_CC_CAPTURE']).open('a', encoding='utf-8') as capture:\n"
+                "    capture.write(json.dumps(args) + '\\n')\n"
+                "output = pathlib.Path(args[args.index('-o') + 1])\n"
+                "output.parent.mkdir(parents=True, exist_ok=True)\n"
+                "output.write_bytes(b'compiler-stub-output')\n",
+                encoding="utf-8",
+            )
+            compiler_stub.chmod(0o755)
+            standard_cflags = "-std=c11 -O2 -g0 -Wall -Wextra -Werror -Wshadow -Wconversion -pthread"
+            environment = os.environ.copy()
+            for key in ("CFLAGS", "HOST_ADAPTER_CFLAGS", "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS"):
+                environment.pop(key, None)
+
+            build_dir = temporary_root / "build-reused-by-default-and-musl"
+            capture_path = temporary_root / "compiler-argv.jsonl"
+            configurations = (
+                ("default", []),
+                ("musl", ["HOST_ADAPTER_CFLAGS=-mno-outline-atomics"]),
+                ("musl-unchanged", ["HOST_ADAPTER_CFLAGS=-mno-outline-atomics"]),
+                ("default-again", []),
+            )
+            compile_counts = (1, 2, 2, 3)
+            config_snapshots: list[bytes] = []
+            unchanged_stamp_mtime: int | None = None
+            for index, (label, extra_flags) in enumerate(configurations):
+                result = subprocess.run(
+                    [
+                        str(make),
+                        "-C",
+                        str(makefile_root),
+                        f"BUILD_DIR={build_dir}",
+                        f"CC={compiler_stub}",
+                        f"CFLAGS={standard_cflags}",
+                        *extra_flags,
+                        str(build_dir / "host_adapter.o"),
+                    ],
+                    cwd=makefile_root,
+                    env={**environment, "URP_TEST_CC_CAPTURE": str(capture_path)},
+                    capture_output=True,
+                    timeout=20,
+                    check=False,
+                )
+                self.assertEqual(0, result.returncode, f"{label}: {result.stderr.decode(errors='replace')}")
+                stamp = build_dir / "host_adapter.compile-config"
+                stamp_bytes = stamp.read_bytes()
+                config_snapshots.append(stamp_bytes)
+                stamp_values = dict(line.split("=", 1) for line in stamp_bytes.decode().splitlines())
+                self.assertEqual(str(compiler_stub), stamp_values["CC"])
+                self.assertEqual("-Iinclude -I../urprotect-launcher -I../../third_party/miniz", stamp_values["CPPFLAGS"])
+                self.assertEqual(standard_cflags, stamp_values["CFLAGS"])
+                expected_host_adapter_flags = "-mno-outline-atomics" if label.startswith("musl") else ""
+                self.assertEqual(expected_host_adapter_flags, stamp_values["HOST_ADAPTER_CFLAGS"])
+                captured = capture_path.read_text(encoding="utf-8").splitlines() if capture_path.exists() else []
+                self.assertEqual(compile_counts[index], len(captured), f"{label}: compiler invocation count")
+                if label == "musl":
+                    unchanged_stamp_mtime = stamp.stat().st_mtime_ns
+                elif label == "musl-unchanged":
+                    self.assertEqual(unchanged_stamp_mtime, stamp.stat().st_mtime_ns)
+
+            self.assertEqual(config_snapshots[1], config_snapshots[2], "unchanged musl config must keep its provenance stamp")
+            self.assertNotEqual(config_snapshots[0], config_snapshots[1])
+            self.assertEqual(config_snapshots[0], config_snapshots[3], "returning to default config must restore its stamp content")
+
+            compiler_invocations = [json.loads(line) for line in capture_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(3, len(compiler_invocations))
+            cppflags = ["-Iinclude", "-I../urprotect-launcher", "-I../../third_party/miniz"]
+            cflags = standard_cflags.split()
+            for argv, expected_musl in zip(compiler_invocations, (False, True, False), strict=True):
+                self.assertEqual(cppflags, argv[: len(cppflags)])
+                self.assertEqual(cflags, argv[len(cppflags) : len(cppflags) + len(cflags)])
+                next_flag = len(cppflags) + len(cflags)
+                if expected_musl:
+                    self.assertEqual("-mno-outline-atomics", argv[next_flag])
+                    next_flag += 1
+                self.assertEqual("-DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1", argv[next_flag])
+                self.assertEqual(str(build_dir / "host_adapter.o"), argv[argv.index("-o") + 1])
 
     def test_checker_requires_stage_specific_bindings_and_closed_evidence(self) -> None:
         for marker in (
