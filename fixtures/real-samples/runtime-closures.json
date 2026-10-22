@@ -14,10 +14,10 @@
     },
     "musl": {
       "family": "alpine-v3.22-main-aarch64",
-      "packageIndexUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz",
-      "packageIndexSha256": "4d5e75508936b08bed7423bb9e9039a669eadc05323189a9c31c90573766ab99",
-      "registryObservationIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
-      "repositoryRoot": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/",
+      "packageIndexUrl": "https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz",
+      "packageIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
+      "registryObservationIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
+      "repositoryRoot": "https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/",
       "loader": "/lib/ld-musl-aarch64.so.1",
       "archiveFormat": "apk",
       "resolver": "apk-depends-v1"
@@ -29,7 +29,7 @@
       "resolver": "termux-container-v1",
       "execution": "locked-native-arm64-termux-container",
       "nodejsLock": "bionic-node-runtime-lock.json",
-      "nodejsLockSha256": "a21172380567011c490435ce2ea1dc9ed2d7f8e519be9c0071d0981a5e80e4fb",
+      "nodejsLockSha256": "a67cb225b6761fddc10d6be9fce7f74ab2bf84676a1733ee37f708530afa3f2c",
       "packageRepository": "https://packages-cf.termux.dev/apt/termux-main",
       "image": "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4",
       "imageId": "sha256:4afeef45d346a5e377724efede889c9ccad1046a71e097037494d16f15467c2e"

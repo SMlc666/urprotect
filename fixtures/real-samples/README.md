@@ -21,8 +21,17 @@ projects.
 
 The Debian package-index SHA-256 is
 `2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00`; the
-Alpine APKINDEX SHA-256 is
-`1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20`.
+current signed Alpine v3.22/aarch64 APKINDEX SHA-256 is
+`e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb`, retrieved from
+`https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz`. This
+same Alpine index now anchors the selected APK source records and musl runtime
+resolver. The `alpine-libarchive` sample is locked to `libarchive-tools
+3.8.10-r0` (APK SHA-256
+`8d02a3e2d9bbd9d6718bfa1a9c7773cecaf8f46a1b54cedae8ac433cd84478ee`);
+its extracted `usr/bin/bsdtar` identity is SHA-256
+`265f3e0964973feb1dca883a109616b22a37f4745baf3b6ada4fda7be6bc3289`,
+657,448 bytes. This source/static metadata refresh leaves the existing baseline
+and outer-wrapper expected results unchanged and is not runtime evidence.
 
 `runtime-closures.json` is the execution policy for the complete registry. It
 locks the Debian `Packages.xz` and Alpine `APKINDEX` inputs, resolver family,

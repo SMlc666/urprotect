@@ -16,7 +16,7 @@
     {
       "registryId": "public-real-sample-corpus",
       "path": "fixtures/real-samples/manifest.json",
-      "sha256": "600b6ed362d440bab32eae7632899d40cdf607c0926150399477f057f0badabf",
+      "sha256": "c350f09dcf57b1bee0937ac16a989c57c53c0098dbe65261a8b0872302b5e6ae",
       "role": "auxiliary-not-strict-chain"
     },
     {

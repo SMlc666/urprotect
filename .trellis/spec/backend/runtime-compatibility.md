@@ -1340,6 +1340,122 @@ attempt the required tier oracle
 ```
 
 
+## Scenario: Real-sample archive identity refresh and registry digest chain
+
+### 1. Scope / Trigger
+
+Apply this procedure when a locked public real-sample archive becomes unavailable,
+its upstream index or mirror changes, or a selected package version must be
+refreshed. It governs registry provenance and acquisition evidence, not product
+runtime support.
+
+### 2. Signatures
+
+```sh
+python3 scripts/validate-real-samples.py \
+  fixtures/real-samples/manifest.json \
+  --candidates fixtures/real-samples/candidates.json --tier pr
+python3 scripts/validate-runtime-closures.py \
+  fixtures/real-samples/runtime-closures.json fixtures/real-samples/manifest.json
+python3 scripts/render-real-sample-report.py \
+  fixtures/real-samples/manifest.json --tier pr --registry-only \
+  --artifact-root fixtures/real-samples \
+  --output-json fixtures/real-samples/baseline-aggregate.json \
+  --output-markdown fixtures/real-samples/baseline-aggregate.md
+```
+
+### 3. Contracts
+
+- Archive URL availability and archive identity are separate facts. An upstream
+  404 is an acquisition failure, not an expected runtime result or evidence that
+  the product rejects the sample.
+- Never repair a 404 by replacing the URL or digest from an unreviewed mirror.
+  Retrieve bounded package/index bytes from an authoritative project source or
+  reviewed mirror, verify exact archive size and full SHA-256 independently, and
+  authenticate the source index/package metadata with the publisher's official
+  key when the format provides signatures. For Alpine APKs, the signed
+  `APKINDEX` record is metadata evidence: its `C` field is not a substitute for
+  the complete APK SHA-256 and byte-size lock.
+- If a package release must change, derive its version, archive path, package
+  checksum and license from the authenticated source index. Bounded-extract only
+  the declared artifact; verify its path remains inside the archive root and
+  rederive the executable's size, SHA-256, build ID and ELF identity from the
+  extracted bytes. Static validation or inspection does not execute that target.
+- Keep the upstream project identity (`projectId`, `identityKey`, and
+  `upstreamUrl`), selection rationale, execution policies, expected statuses,
+  and compatibility classifications unchanged unless the identity or new
+  runtime evidence has been separately reviewed. Package/version changes are
+  nested artifact attributes, not new project identities.
+- Synchronize every affected current owner in one change: selected manifest
+  row, candidate ledger entry and review digest, runtime-closure package-index
+  URL/digest/repository root when applicable, the bionic Node.js lock when its
+  source package changes, and the manifest SHA-256 in
+  `fixtures/evaluator/compatibility-corpus.json` under the matching
+  `retainedEvidenceRegistries` entry. The retired
+  `fixtures/evaluator/evaluator-protocol.json` is not part of the live chain.
+- Keep raw archives and extracted binaries in private temporary storage; do not
+  check them into the repository or upload them as compatibility evidence. The
+  checked-in real-sample aggregate is metadata-only and may be regenerated only
+  with the `--registry-only` renderer. Do not rewrite frozen strict product
+  evidence or infer runtime success from registry metadata.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Locked URL returns 404 | Acquisition fails; no runtime classification or digest refresh follows from the failure alone |
+| Package/index signature, full archive SHA-256 or declared size mismatches | Reject before extraction or registry publication |
+| Extracted artifact path escapes the package root or target ELF identity/hash differs | Reject the candidate; do not update the selected sample |
+| Candidate ledger, resolver lock or evaluator manifest digest is stale | Registry validator/tests fail; update all current owners together |
+| Registry-only metadata render succeeds without target execution | Keep all runtime claims and statuses unchanged |
+
+### 5. Good / Base / Bad Cases
+
+- Good: verify publisher metadata and exact archive bytes, inspect the bounded
+  declared target, synchronize current registries and digest owners, then wait
+  for the required native CI oracle before changing runtime outcomes.
+- Base: a different mirror serves identical locked bytes; update only its URL
+  after verifying the existing size and SHA-256, leaving package identity and
+  statuses unchanged.
+- Bad: refresh a hash from whatever a new URL returns, treat an Alpine index
+  checksum as the complete APK digest, rewrite a historical baseline, or call
+  static validation/runtime-closure assembly a successful target execution.
+
+### 6. Tests Required
+
+- Run `tests/test_real_sample_manifest.py`,
+  `tests/test_real_sample_fingerprint.py`, `tests/test_real_sample_evidence.py`,
+  `tests/test_real_sample_aggregate.py`, `tests/test_runtime_closures.py`, and
+  `tests/test_bionic_node_runtime_lock.py` with `PYTHONPATH` unset.
+- Run both validators in the Signatures section and verify the manifest digest
+  against the matching retained registry entry in
+  `fixtures/evaluator/compatibility-corpus.json`.
+- Confirm tests preserve the 100 distinct project identities, package and
+  dependency policy, frozen rows, expected execution policy, and no-runtime-
+  promotion boundary; confirm the registry-only report matches its renderer.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+old package URL returns 404
+-> download arbitrary replacement
+-> copy its observed SHA into the manifest only
+-> treat static inspection as a runtime pass
+```
+
+#### Correct
+
+```text
+authenticate source index/package metadata and exact bounded archive bytes
+-> verify declared artifact path and derive target identity
+-> update manifest, candidate, resolver and current evaluator digest owners
+-> retain frozen evidence/status policy
+-> wait for an actual native runtime oracle before changing runtime outcomes
+```
+
+
 ## Scenario: Independent compatibility-only product evidence verification
 
 The active compatibility evidence contract is defined by
@@ -1792,10 +1908,13 @@ wiring, tests, and remaining hosted/promotion gates follow it below.
    and CI have ordinary/shared-table rows and the external-table fail-closed
    negative, but no provider transformed positive or exact-root gate. Do not
    mark a runtime row validated until Slice C evidence/review exists. Any future
-   fixture-registry edit must synchronize only the current evaluator retained
-   registry/protocol digests, leaving historical immutable baselines intact.
-   Full Python/evidence discovery and Slice C's managed/native/metadata gates
-   remain future execution work; the accepted review ran boundary Python tests,
+   fixture-registry edit must update only the matching current
+   `retainedEvidenceRegistries` digest in
+   `fixtures/evaluator/compatibility-corpus.json`; the retired
+   `evaluator-protocol.json` is not a live digest owner. Keep frozen
+   product-evidence baselines intact. Full Python/evidence discovery and Slice
+   C's managed/native/metadata gates remain future execution work; the accepted
+   review ran boundary Python tests,
    not the full evidence suite.
 
 #### Current retained evidence, CI declaration, and remaining gates

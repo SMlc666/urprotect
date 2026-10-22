@@ -379,11 +379,14 @@ Correct: CC=musl-gcc LD=ld; set HOST_ADAPTER_CFLAGS=-mno-outline-atomics
 ## CI and Release Contract
 
 - Required native Linux jobs run on `aarch64` and retain an environment report.
-- Changes to an auxiliary registry such as `fixtures/manifest.json` must
-  synchronize its current `compatibility-corpus.json` retained-registry digest
-  and the current `evaluator-protocol.json` corpus digest in the same batch.
-  Validate the complete live digest chain; do not rewrite historical immutable
-  baselines or weaken digest checks to repair a stale current registration.
+- Changes to an auxiliary registry such as `fixtures/manifest.json` or
+  `fixtures/real-samples/manifest.json` must update the corresponding
+  `retainedEvidenceRegistries` digest in
+  `fixtures/evaluator/compatibility-corpus.json` in the same batch. This is the
+  current registry owner; the retired `fixtures/evaluator/evaluator-protocol.json`
+  must not be restored. Validate the live registry chain and tests. Keep frozen
+  product-evidence baselines immutable; regenerate the real-sample metadata-only
+  aggregate only through its `--registry-only` renderer.
 - `fixtures/manifest.json` is the source of truth for fixture IDs, tiers,
   toolchains, runtimes, and execution facts. `fixtures/runtime-matrix.json`
   owns the named AArch64 runtime environment covering set and immutable OCI

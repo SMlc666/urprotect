@@ -13,12 +13,9 @@ Artifacts are public, versioned, and SHA-256 locked in `manifest.json` and `cand
 | New Alpine APK projects | 20 | Alpine v3.22 AArch64 APK/musl |
 | **Total** | **100** | **78 glibc / 21 musl / 1 bionic** |
 
-The Debian index lock is `2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00`; the Alpine AArch64 APKINDEX lock is `1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20`. The 20 new APKs are independently sourced upstream identities and are not Alpine variants of an existing project.
+The Debian index lock is `2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00`; the current signed Alpine AArch64 APKINDEX lock is `e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb`. It was retrieved from `https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz`; the same index digest and repository root are used for musl runtime closure resolution. The 20 APK rows remain distinct upstream project identities and are not Alpine variants of an existing project.
 
-The execution closure refresh is recorded separately in
-`runtime-closures.json`. Its current Alpine resolver index is hash-locked to
-`4d5e75508936b08bed7423bb9e9039a669eadc05323189a9c31c90573766ab99`; the
-registry observation hash above remains the historical selection evidence.
+The `alpine-libarchive` source row now uses the signed index's `libarchive-tools 3.8.10-r0` record (`C=Q1h09YexAZ0bqSAwneLYDp3lj46tQ=`; `S=693632`) and its SHA-256-locked APK. Its extracted `usr/bin/bsdtar` is 657,448 bytes with SHA-256 `265f3e0964973feb1dca883a109616b22a37f4745baf3b6ada4fda7be6bc3289` and build ID `36c1152ca47ef606893a2ac6d44306b8cb820df8`. The metadata refresh keeps the existing `accepted-and-runs` baseline and outer-wrapper policies; local inspection and closure assembly did not execute this target.
 
 ## Runtime, source, and producer mix
 
@@ -139,7 +136,7 @@ registry observation hash above remains the historical selection evidence.
 | `alpine-fish` | fish | alpine v3.22 main aarch64 apk<br>`fish-4.0.2-r0.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/bin/fish` | `validated` |
 | `alpine-fping` | fping | alpine v3.22 main aarch64 apk<br>`fping-5.3-r0.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/sbin/fping` | `validated` |
 | `alpine-fsarchiver` | fsarchiver | alpine v3.22 main aarch64 apk<br>`fsarchiver-0.8.8-r0.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/sbin/fsarchiver` | `validated` |
-| `alpine-libarchive` | libarchive | alpine v3.22 main aarch64 apk<br>`libarchive-tools-3.8.3-r0.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/bin/bsdtar` | `validated` |
+| `alpine-libarchive` | libarchive | alpine v3.22 main aarch64 apk<br>`libarchive-tools-3.8.10-r0.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/bin/bsdtar` | `validated` |
 | `alpine-mandoc` | mandoc | alpine v3.22 main aarch64 apk<br>`mandoc-1.14.6-r13.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/bin/mandoc` | `validated` |
 | `alpine-mc` | Midnight Commander | alpine v3.22 main aarch64 apk<br>`mc-4.8.33-r2.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/bin/mc` | `validated` |
 | `alpine-memcached` | memcached | alpine v3.22 main aarch64 apk<br>`memcached-1.6.32-r0.apk` | `musl`<br>`/lib/ld-musl-aarch64.so.1` | `usr/bin/memcached` | `validated` |
