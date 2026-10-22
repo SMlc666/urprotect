@@ -494,7 +494,7 @@ jobs:
           ./scripts/run-indirect-control-e2e.sh --tier "${tier}"
           python3 scripts/check-indirect-control-evidence.py \
             ".artifacts/indirect-control/${tier}" \
-            --tier "${tier}" \
+            --tier "${tier}" --runtime glibc --require-runtime-identity \
             --unit runtime.indirect-control.jump-table.glibc.host-context-entry
       - name: Run and check transformed shared jump-table evidence
         run: |
@@ -1460,12 +1460,27 @@ jobs:
             .artifacts/musl-container/protection --tier "${tier}" --runtime musl
       - name: Run musl container smoke
         run: ./scripts/run-musl-container-smoke.sh
-      - name: Upload musl container evidence
+      - name: Run ordinary musl indirect jump-table evidence
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          unit=runtime.indirect-control.jump-table.musl.host-context-entry
+          root=".artifacts/indirect-control/musl-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/ordinary"
+          ./scripts/run-indirect-control-e2e.sh \
+            --tier "${tier}" --runtime musl --unit "${unit}" --artifact-root "${root}"
+          python3 scripts/check-indirect-control-evidence.py "${root}" \
+            --tier "${tier}" --runtime musl --require-runtime-identity --unit "${unit}"
+      - name: Upload musl container and indirect-control evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: musl-container-${{ github.run_id }}
-          path: .artifacts/musl-container/
+          name: musl-container-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/musl-container/
+            .artifacts/indirect-control/musl-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: warn
 
   benchmark:

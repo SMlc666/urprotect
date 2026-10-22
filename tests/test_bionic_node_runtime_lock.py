@@ -15,6 +15,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / "fixtures/real-samples/bionic-node-runtime-lock.json"
 MANIFEST = ROOT / "fixtures/real-samples/manifest.json"
+CANDIDATES = ROOT / "fixtures/real-samples/candidates.json"
 CLOSURES = ROOT / "fixtures/real-samples/runtime-closures.json"
 RUNNER = ROOT / "scripts/run-bionic-node-sample.sh"
 VALIDATOR = ROOT / "scripts/validate-bionic-node-lock.py"
@@ -51,6 +52,78 @@ class BionicNodeRuntimeLockTests(unittest.TestCase):
         self.assertFalse(provenance["runtimeEvidence"])
         self.assertEqual(self.lock["compatibilityStatus"], "not-established")
         self.assertFalse(self.lock["runtimeEvidence"])
+
+    def test_node_source_archive_url_is_synchronized_without_changing_package_identity(self) -> None:
+        source_url = (
+            "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main/"
+            "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
+        )
+        source_identity = {
+            "projectId": "nodejs",
+            "version": "26.4.0-1",
+            "filename": "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+            "url": source_url,
+            "sizeBytes": 10349280,
+            "sha256": "eaf3ed8a6e4b72ebaa8c2cb3bad778c577cdf9ea87ca91761213d8a3940fc090",
+        }
+        candidate_document = json.loads(CANDIDATES.read_text(encoding="utf-8"))
+        candidate = next(
+            item for item in candidate_document["candidates"]
+            if item["projectId"] == "nodejs"
+        )
+        project = next(
+            item for item in self.manifest["corpus"]["projects"]
+            if item["projectId"] == "nodejs"
+        )
+        provenance = project["provenance"]
+        candidate_provenance = candidate["provenance"]
+        self.assertEqual(self.module.NODE_SOURCE_URL, source_url)
+        self.assertEqual(self.lock["sourceArchiveLock"], source_identity)
+        for fields in (provenance, candidate_provenance):
+            self.assertEqual(fields["archiveUrl"], source_url)
+            self.assertEqual(fields["version"], source_identity["version"])
+            self.assertEqual(fields["archivePath"], source_identity["filename"])
+            self.assertEqual(fields["archiveSizeBytes"], source_identity["sizeBytes"])
+            self.assertEqual(fields["archiveSha256"], source_identity["sha256"])
+
+        # Runtime installation URLs and package policy remain pinned to the
+        # configured Termux package repository; only the source archive URL is
+        # redirected to the verified official-roster mirror.
+        self.assertEqual(
+            self.module.PACKAGE_REPOSITORY,
+            "https://packages-cf.termux.dev/apt/termux-main",
+        )
+        self.assertEqual(self.lock["packageRepository"], self.module.PACKAGE_REPOSITORY)
+        node_package = next(item for item in self.lock["packages"] if item["name"] == "nodejs")
+        self.assertEqual(node_package["url"], self.module.NODE_LOCK_URL)
+        self.assertTrue(node_package["url"].startswith(self.module.PACKAGE_REPOSITORY + "/"))
+        self.assertEqual(
+            node_package["dependencies"],
+            self.module.EXPECTED_PACKAGES["nodejs"]["dependencies"],
+        )
+
+        # A URL-only repair must not rewrite the sample identity, runtime
+        # fingerprint, execution statuses, or metadata-only lock status.
+        self.assertEqual(project["identityKey"], "Node.js")
+        self.assertEqual(project["target"]["runtime"], "bionic")
+        self.assertEqual(project["target"]["loader"], "/system/bin/linker64")
+        self.assertEqual(project["featureFingerprint"]["producer"], "termux-clang")
+        self.assertEqual(project["featureFingerprint"]["type"], "ET_DYN")
+        self.assertEqual(project["featureFingerprint"]["interpreter"], "/system/bin/linker64")
+        self.assertEqual(project["executionPolicy"]["baseline"]["expectedResult"], "accepted-and-runs")
+        self.assertEqual(project["executionPolicy"]["outerWrapper"]["expectedResult"], "accepted-and-runs")
+        self.assertEqual(self.lock["status"], "reviewed-runtime-lock")
+        self.assertIs(self.lock["runtimeEvidence"], False)
+        self.assertEqual(self.lock["compatibilityStatus"], "not-established")
+        self.assertEqual(candidate["disposition"], "selected")
+
+        document = copy.deepcopy(self.lock)
+        document["sourceArchiveLock"]["url"] = (
+            "https://packages.termux.dev/apt/termux-main/"
+            "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
+        )
+        errors = self.module.validate_lock_document(document, manifest=self.manifest)
+        self.assertTrue(any("sourceArchiveLock url" in error for error in errors), errors)
 
     def test_runtime_closure_anchors_the_reviewed_lock_digest(self) -> None:
         closures = json.loads(CLOSURES.read_text(encoding="utf-8"))

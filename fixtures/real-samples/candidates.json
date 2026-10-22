@@ -1342,7 +1342,7 @@
       "upstreamUrl": "https://nodejs.org/",
       "provenance": {
         "sourceKind": "termux-package",
-        "archiveUrl": "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+        "archiveUrl": "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
         "version": "26.4.0-1",
         "archivePath": "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
         "archiveSha256": "eaf3ed8a6e4b72ebaa8c2cb3bad778c577cdf9ea87ca91761213d8a3940fc090",
@@ -12139,13 +12139,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/7zip-24.09-r0.apk",
         "artifactPath": "usr/bin/7z",
         "license": "LGPL-2.0-only",
-        "licenseSource": "https://7-zip.org (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://7-zip.org (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "7zip",
         "packageChecksum": "Q11IFI6fUZVGJAe+obxrQ416tKH0o=",
         "packageName": "7zip",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "24.09-r0",
         "boundedExtraction": {
@@ -12186,7 +12186,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -12309,13 +12309,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/apk-tools-2.14.12-r0.apk",
         "artifactPath": "sbin/apk",
         "license": "GPL-2.0-only",
-        "licenseSource": "https://gitlab.alpinelinux.org/alpine/apk-tools (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://gitlab.alpinelinux.org/alpine/apk-tools (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "apk-tools",
         "packageChecksum": "Q1V00l9/gQEn9S8bz7gul52DAmdaM=",
         "packageName": "apk-tools",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "2.14.12-r0",
         "boundedExtraction": {
@@ -12356,7 +12356,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -12479,13 +12479,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/bc-1.08.2-r0.apk",
         "artifactPath": "usr/bin/bc",
         "license": "GPL-3.0-or-later",
-        "licenseSource": "https://www.gnu.org/software/bc/bc.html (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.gnu.org/software/bc/bc.html (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "bc",
         "packageChecksum": "Q1xPZmgsKppZshLCaZpCIQMoNzSeY=",
         "packageName": "bc",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "1.08.2-r0",
         "boundedExtraction": {
@@ -12526,7 +12526,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -12649,13 +12649,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/diffutils-3.12-r0.apk",
         "artifactPath": "usr/bin/diff",
         "license": "GPL-3.0-or-later",
-        "licenseSource": "https://www.gnu.org/software/diffutils (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.gnu.org/software/diffutils (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "diffutils",
         "packageChecksum": "Q1kepT2sB/4g+ebLjQXo+6V6OlfoY=",
         "packageName": "diffutils",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "3.12-r0",
         "boundedExtraction": {
@@ -12696,7 +12696,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -12819,13 +12819,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/dosfstools-4.2-r2.apk",
         "artifactPath": "sbin/fsck.fat",
         "license": "GPL-3.0-or-later",
-        "licenseSource": "https://github.com/dosfstools/dosfstools (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://github.com/dosfstools/dosfstools (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "dosfstools",
         "packageChecksum": "Q1NcKN1Sk3BA+53h9gHU87upJ+Jpc=",
         "packageName": "dosfstools",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "4.2-r2",
         "boundedExtraction": {
@@ -12866,7 +12866,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -12989,13 +12989,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/ed-1.21-r0.apk",
         "artifactPath": "bin/ed",
         "license": "GPL-2.0-or-later",
-        "licenseSource": "https://www.gnu.org/software/ed (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.gnu.org/software/ed (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "ed",
         "packageChecksum": "Q12RXfu7gdYu146EdNyXZHppQKKwc=",
         "packageName": "ed",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "1.21-r0",
         "boundedExtraction": {
@@ -13036,7 +13036,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -13159,13 +13159,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/fish-4.0.2-r0.apk",
         "artifactPath": "usr/bin/fish",
         "license": "GPL-2.0-only",
-        "licenseSource": "https://fishshell.com (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://fishshell.com (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "fish",
         "packageChecksum": "Q1cfixVnSEaj1fAkTeIKvajEiAHko=",
         "packageName": "fish",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "4.0.2-r0",
         "boundedExtraction": {
@@ -13206,7 +13206,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -13329,13 +13329,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/fping-5.3-r0.apk",
         "artifactPath": "usr/sbin/fping",
         "license": "MIT",
-        "licenseSource": "https://fping.org (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://fping.org (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "fping",
         "packageChecksum": "Q1xsdqgjvaZ4zR8ZJGlmZdBRJr9Hc=",
         "packageName": "fping",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "5.3-r0",
         "boundedExtraction": {
@@ -13376,7 +13376,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -13499,13 +13499,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/fsarchiver-0.8.8-r0.apk",
         "artifactPath": "usr/sbin/fsarchiver",
         "license": "GPL-2.0-or-later",
-        "licenseSource": "https://www.fsarchiver.org (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.fsarchiver.org (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "fsarchiver",
         "packageChecksum": "Q1emiIrbwsoULUwz04jiTvh8KaK6c=",
         "packageName": "fsarchiver",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "0.8.8-r0",
         "boundedExtraction": {
@@ -13546,7 +13546,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -13640,8 +13640,8 @@
         "localReview": {
           "archiveSha256Verified": true,
           "artifactExists": true,
-          "artifactSha256": "450b472c9d43a58d1b6308290271a2ba8f1cec24ff517f6440a77c1776e5a0e7",
-          "artifactSizeBytes": 657400,
+          "artifactSha256": "265f3e0964973feb1dca883a109616b22a37f4745baf3b6ada4fda7be6bc3289",
+          "artifactSizeBytes": 657448,
           "elfFactsVerified": true,
           "managedStaticValidation": "validated",
           "rawInputsRetained": false
@@ -13663,26 +13663,26 @@
       "projectId": "alpine-libarchive",
       "provenance": {
         "archiveFormat": "apk",
-        "archivePath": "main/aarch64/libarchive-tools-3.8.3-r0.apk",
-        "archiveSha256": "5b6fe56af810d2634996893c6a99bb67221e302ba6abc355611180ef798db1ae",
-        "archiveSizeBytes": 678182,
-        "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/libarchive-tools-3.8.3-r0.apk",
+        "archivePath": "main/aarch64/libarchive-tools-3.8.10-r0.apk",
+        "archiveSha256": "8d02a3e2d9bbd9d6718bfa1a9c7773cecaf8f46a1b54cedae8ac433cd84478ee",
+        "archiveSizeBytes": 693632,
+        "archiveUrl": "https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/libarchive-tools-3.8.10-r0.apk",
         "artifactPath": "usr/bin/bsdtar",
         "license": "BSD-2-Clause AND BSD-3-Clause AND Public-Domain",
-        "licenseSource": "https://libarchive.org (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://libarchive.org (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "libarchive",
-        "packageChecksum": "Q1G3LF7a/ZW5+yvW9enWvsaWZtitY=",
+        "packageChecksum": "Q1h09YexAZ0bqSAwneLYDp3lj46tQ=",
         "packageName": "libarchive-tools",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
-        "version": "3.8.3-r0",
+        "version": "3.8.10-r0",
         "boundedExtraction": {
           "memberLimit": 100000,
           "expandedBytesLimit": 2147483648,
           "archiveBytesLimit": 67108864,
-          "localArchiveBytes": 678182,
+          "localArchiveBytes": 693632,
           "declaredArtifactVerified": true,
           "artifactResolvesWithinArchive": true
         }
@@ -13716,7 +13716,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -13839,13 +13839,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/mandoc-1.14.6-r13.apk",
         "artifactPath": "usr/bin/mandoc",
         "license": "ISC",
-        "licenseSource": "https://mandoc.bsd.lv (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://mandoc.bsd.lv (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "mandoc",
         "packageChecksum": "Q1sOhmO6DhkSxaMxynTIW0bjp5EAQ=",
         "packageName": "mandoc",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "1.14.6-r13",
         "boundedExtraction": {
@@ -13886,7 +13886,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -14009,13 +14009,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/mc-4.8.33-r2.apk",
         "artifactPath": "usr/bin/mc",
         "license": "GPL-3.0-or-later",
-        "licenseSource": "https://midnight-commander.org (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://midnight-commander.org (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "mc",
         "packageChecksum": "Q1/sSuCoED4wCaWXHpKFqQNVw5I1I=",
         "packageName": "mc",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "4.8.33-r2",
         "boundedExtraction": {
@@ -14056,7 +14056,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -14179,13 +14179,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/memcached-1.6.32-r0.apk",
         "artifactPath": "usr/bin/memcached",
         "license": "BSD-3-Clause",
-        "licenseSource": "https://memcached.org (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://memcached.org (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "memcached",
         "packageChecksum": "Q1VTAVkGxIsG1NtTRczJkHXMEX9us=",
         "packageName": "memcached",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "1.6.32-r0",
         "boundedExtraction": {
@@ -14226,7 +14226,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -14349,13 +14349,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/openssh-client-default-10.0_p1-r10.apk",
         "artifactPath": "usr/bin/ssh",
         "license": "SSH-OpenSSH",
-        "licenseSource": "https://www.openssh.com/portable.html (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.openssh.com/portable.html (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "openssh",
         "packageChecksum": "Q10bNabi4QtLtBS6n9nUYnVDoI3VY=",
         "packageName": "openssh-client-default",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "10.0_p1-r10",
         "boundedExtraction": {
@@ -14396,7 +14396,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -14519,13 +14519,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/parted-3.6-r2.apk",
         "artifactPath": "usr/sbin/parted",
         "license": "GPL-3.0-or-later",
-        "licenseSource": "https://www.gnu.org/software/parted/parted.html (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.gnu.org/software/parted/parted.html (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "parted",
         "packageChecksum": "Q1pi4GcC0XIwo9uyqO2etVuPFGTJY=",
         "packageName": "parted",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "3.6-r2",
         "boundedExtraction": {
@@ -14566,7 +14566,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -14689,13 +14689,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/patch-2.8-r0.apk",
         "artifactPath": "usr/bin/patch",
         "license": "GPL-3.0-or-later",
-        "licenseSource": "https://www.gnu.org/software/patch/patch.html (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.gnu.org/software/patch/patch.html (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "patch",
         "packageChecksum": "Q1BdXwwrZLbbLHIFUsfu6O5NMhlQg=",
         "packageName": "patch",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "2.8-r0",
         "boundedExtraction": {
@@ -14736,7 +14736,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -14859,13 +14859,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/patchelf-0.18.0-r3.apk",
         "artifactPath": "usr/bin/patchelf",
         "license": "GPL-3.0-or-later",
-        "licenseSource": "https://nixos.org/patchelf.html (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://nixos.org/patchelf.html (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "patchelf",
         "packageChecksum": "Q11nH1JTbqholICKLqra3aTRawTbg=",
         "packageName": "patchelf",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "0.18.0-r3",
         "boundedExtraction": {
@@ -14906,7 +14906,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -15029,13 +15029,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/dropbear-2025.88-r1.apk",
         "artifactPath": "usr/sbin/dropbear",
         "license": "MIT",
-        "licenseSource": "https://matt.ucc.asn.au/dropbear/dropbear.html (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://matt.ucc.asn.au/dropbear/dropbear.html (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "dropbear",
         "packageChecksum": "Q111XU7W+G8Tf8bq1vTw6VsQYdMIE=",
         "packageName": "dropbear",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "2025.88-r1",
         "boundedExtraction": {
@@ -15076,7 +15076,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -15199,13 +15199,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/zstd-1.5.7-r0.apk",
         "artifactPath": "usr/bin/zstd",
         "license": "BSD-3-Clause OR GPL-2.0-or-later",
-        "licenseSource": "https://facebook.github.io/zstd (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://facebook.github.io/zstd (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "zstd",
         "packageChecksum": "Q1VHtaNIeez6v5F73gzuSjD1jL50Y=",
         "packageName": "zstd",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "1.5.7-r0",
         "boundedExtraction": {
@@ -15246,7 +15246,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     },
     {
@@ -15369,13 +15369,13 @@
         "archiveUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/bluez-deprecated-5.82-r0.apk",
         "artifactPath": "usr/bin/hciconfig",
         "license": "GPL-2.0-or-later AND BSD-2-Clause AND MIT",
-        "licenseSource": "https://www.bluez.org (Alpine APKINDEX package metadata; index SHA-256 1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20)",
+        "licenseSource": "https://www.bluez.org (Alpine APKINDEX package metadata; index SHA-256 e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb)",
         "origin": "bluez",
         "packageChecksum": "Q16dek4nr3P6ViYTbweeI+xZFFiWo=",
         "packageName": "bluez-deprecated",
         "redistribution": "Public archive/package redistribution follows the declared Alpine package license; raw inputs stay in runner temporary storage and are never uploaded.",
         "repository": "v3.22/main/aarch64",
-        "sourceIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+        "sourceIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
         "sourceKind": "alpine-v3.22-main-aarch64-apk",
         "version": "5.82-r0",
         "boundedExtraction": {
@@ -15416,7 +15416,7 @@
       "dispositionReason": "Selected after local archive SHA-256 verification, bounded extraction, declared-path resolution, AArch64 ELF inspection, license metadata review, and managed static validation.",
       "review": {
         "reviewStatus": "promoted",
-        "archiveIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20"
+        "archiveIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
       }
     }
   ],
@@ -15428,7 +15428,7 @@
     "newAlpineV322Aarch64Apk": 20,
     "rejectedRetained": 3,
     "debianIndexSha256": "2ddb1737692e8c45c53e8d57c0ce4cd21c78c5703b830c3226b1423566a06c00",
-    "alpineIndexSha256": "1f7a5be0ef6c857f2aa1013f2be0b678d2c5dd2ad3a4eee5760a184be58bbe20",
+    "alpineIndexSha256": "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb",
     "identityRule": "identityKey is the upstream project; package/version/libc/distribution variants never add identities."
   }
 }

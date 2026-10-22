@@ -687,7 +687,7 @@
     "projectId": "nodejs",
     "sha256": "eaf3ed8a6e4b72ebaa8c2cb3bad778c577cdf9ea87ca91761213d8a3940fc090",
     "sizeBytes": 10349280,
-    "url": "https://packages.termux.dev/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
+    "url": "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main/pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb",
     "version": "26.4.0-1"
   },
   "status": "reviewed-runtime-lock"

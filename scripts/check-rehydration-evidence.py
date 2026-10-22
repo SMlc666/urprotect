@@ -6,18 +6,26 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
+import types
 sys.dont_write_bytecode = True
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 MAX_FILES = 1000
+MAX_DIRECTORIES = 512  # Includes the evidence root.
+MAX_ENTRIES = 1024
 MAX_TREE_BYTES = 256 * 1024 * 1024
+MAX_FILE_BYTES = 16 * 1024 * 1024
+MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 MAX_RECORD_BYTES = 1024 * 1024
 MAX_SOURCE_IMAGE_BYTES = 128 * 1024 * 1024
 MAX_NATIVE_IMAGE_BYTES = 128 * 1024 * 1024
+MAX_PROTECTED_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_STREAM_BYTES = 1024 * 1024
 UNIT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 LAYOUT_STRATEGIES = frozenset({
@@ -28,12 +36,321 @@ LAYOUT_STRATEGIES = frozenset({
 LAYOUT_DEFAULT = "generic-elf-layout-v1"
 
 
+def _load_native_runtime_identity_helper() -> Any:
+    helper_path = Path(__file__).resolve(strict=True).with_name("native_runtime_identity.py")
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise ImportError("runtime identity helper load requires O_NOFOLLOW")
+    descriptor = os.open(helper_path, os.O_RDONLY | os.O_CLOEXEC | nofollow)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > 1024 * 1024:
+            raise ImportError("runtime identity helper exceeds its bounded regular-file contract")
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                raise ImportError("runtime identity helper was truncated while reading")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ImportError("runtime identity helper grew while reading")
+        after = os.fstat(descriptor)
+        identity = lambda item: (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+        if identity(before) != identity(after) or not stat.S_ISREG(after.st_mode):
+            raise ImportError("runtime identity helper changed while reading")
+    finally:
+        os.close(descriptor)
+    source = b"".join(chunks)
+    module_name = f"_urprotect_rehydration_runtime_identity_{hashlib.sha256(source).hexdigest()[:16]}"
+    module = types.ModuleType(module_name)
+    namespace = types.ModuleType.__getattribute__(module, "__dict__")
+    namespace["__file__"] = str(helper_path)
+    namespace["__package__"] = ""
+    exec(compile(source, str(helper_path), "exec"), namespace)
+    return module
+
+
+_RUNTIME_IDENTITY_HELPER = _load_native_runtime_identity_helper()
+
+
 def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+def _file_limit(relative: str) -> int:
+    name = PureWindowsPath(relative).name
+    if name == "SHA256SUMS":
+        return MAX_MANIFEST_BYTES
+    if name == "source-image.bin":
+        return MAX_SOURCE_IMAGE_BYTES
+    if name == "native-image.bin":
+        return MAX_NATIVE_IMAGE_BYTES
+    if name == "protected-image.bin":
+        return MAX_PROTECTED_IMAGE_BYTES
+    if name.endswith((".stdout", ".stderr")):
+        return MAX_STREAM_BYTES
+    if name.endswith(".json"):
+        return MAX_RECORD_BYTES
+    return MAX_FILE_BYTES
+
+
+class BoundedEvidenceTree:
+    """No-follow bounded snapshot for a standalone rehydration evidence root."""
+
+    @staticmethod
+    def _directory_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+        return metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns, metadata.st_ctime_ns
+
+    @staticmethod
+    def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+        return metadata.st_size, metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns, metadata.st_ctime_ns
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(os.path.abspath(root))
+        self.files: dict[str, tuple[int, int, int, int, int]] = {}
+        self.directories: dict[str, tuple[int, int, int, int]] = {}
+        self.root_identity: tuple[int, int, int, int] | None = None
+        self.preflighted = False
+
+    def _scan(self) -> tuple[dict[str, tuple[int, int, int, int, int]], dict[str, tuple[int, int, int, int]], tuple[int, int, int, int]]:
+        directory_flag = getattr(os, "O_DIRECTORY", None)
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if directory_flag is None or nofollow is None:
+            fail("rehydration evidence scans require no-follow directory flags")
+        try:
+            resolved_root = self.root.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            fail(f"rehydration evidence root cannot be resolved safely: {error}")
+        if resolved_root != self.root:
+            fail("rehydration evidence root must not contain symlink path components")
+        files: dict[str, tuple[int, int, int, int, int]] = {}
+        directories: dict[str, tuple[int, int, int, int]] = {}
+        total_bytes = 0
+        entries_seen = 0
+        files_seen = 0
+        directories_seen = 1
+        root_fd = -1
+        pending: list[tuple[tuple[str, ...], str, tuple[int, int, int, int] | None]] = [((), "", None)]
+        try:
+            root_fd = os.open(self.root, os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow)
+            root_metadata = os.fstat(root_fd)
+            if not stat.S_ISDIR(root_metadata.st_mode):
+                fail("rehydration evidence root is not a non-symlink directory")
+            root_identity = self._directory_identity(root_metadata)
+            if self.root_identity is not None and root_identity != self.root_identity:
+                fail("rehydration evidence root changed after bounded tree preflight")
+            directories[""] = root_identity
+
+            while pending:
+                parts, relative_directory, expected_identity = pending.pop()
+                directory_fd = os.dup(root_fd)
+                opened_relative = ""
+                try:
+                    directory_identity = self._directory_identity(os.fstat(directory_fd))
+                    for part in parts:
+                        next_fd = os.open(
+                            part,
+                            os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+                            dir_fd=directory_fd,
+                        )
+                        os.close(directory_fd)
+                        directory_fd = next_fd
+                        opened_relative = f"{opened_relative}/{part}".lstrip("/")
+                        opened_metadata = os.fstat(directory_fd)
+                        opened_identity = self._directory_identity(opened_metadata)
+                        if (
+                            not stat.S_ISDIR(opened_metadata.st_mode)
+                            or opened_identity != directories.get(opened_relative)
+                        ):
+                            fail("rehydration evidence directory changed during bounded tree scan")
+                        directory_identity = opened_identity
+                    if relative_directory and expected_identity != directories.get(relative_directory):
+                        fail("rehydration evidence directory changed during bounded tree scan")
+                    with os.scandir(directory_fd) as children:
+                        for child in children:
+                            name = child.name
+                            relative = f"{relative_directory}/{name}".lstrip("/")
+                            safe_relative(relative, "rehydration evidence tree path")
+                            entries_seen += 1
+                            if entries_seen > MAX_ENTRIES:
+                                fail("rehydration evidence entry count exceeds its configured bound")
+                            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                            if stat.S_ISLNK(metadata.st_mode):
+                                fail(f"rehydration evidence tree contains a symlink: {relative}")
+                            if stat.S_ISDIR(metadata.st_mode):
+                                if directories_seen >= MAX_DIRECTORIES:
+                                    fail("rehydration evidence directory count exceeds its configured bound")
+                                directories_seen += 1
+                                identity = self._directory_identity(metadata)
+                                child_fd = os.open(
+                                    name,
+                                    os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+                                    dir_fd=directory_fd,
+                                )
+                                try:
+                                    child_metadata = os.fstat(child_fd)
+                                    if (
+                                        not stat.S_ISDIR(child_metadata.st_mode)
+                                        or self._directory_identity(child_metadata) != identity
+                                    ):
+                                        fail("rehydration evidence directory changed during bounded tree scan")
+                                finally:
+                                    os.close(child_fd)
+                                directories[relative] = identity
+                                pending.append(((*parts, name), relative, identity))
+                                continue
+                            if not stat.S_ISREG(metadata.st_mode):
+                                fail(f"rehydration evidence tree contains a non-regular file: {relative}")
+                            if files_seen >= MAX_FILES:
+                                fail("rehydration evidence file count exceeds its configured bound")
+                            files_seen += 1
+                            limit = _file_limit(relative)
+                            if metadata.st_size < 0 or metadata.st_size > limit:
+                                fail(f"rehydration evidence file exceeds its per-file byte bound: {relative}")
+                            total_bytes += metadata.st_size
+                            if total_bytes > MAX_TREE_BYTES:
+                                fail("rehydration evidence exceeds the bounded tree size")
+                            files[relative] = self._file_identity(metadata)
+                    if self._directory_identity(os.fstat(directory_fd)) != directory_identity:
+                        fail("rehydration evidence directory changed while scanning")
+                finally:
+                    os.close(directory_fd)
+            if self._directory_identity(os.fstat(root_fd)) != root_identity:
+                fail("rehydration evidence root changed during bounded tree scan")
+            return files, directories, root_identity
+        except OSError as error:
+            fail(f"rehydration evidence tree cannot be inspected safely: {error}")
+        finally:
+            if root_fd >= 0:
+                os.close(root_fd)
+
+    def preflight(self) -> None:
+        self.files, self.directories, self.root_identity = self._scan()
+        self.preflighted = True
+
+    def file_size(self, relative: str) -> int | None:
+        fact = self.files.get(relative)
+        return fact[0] if fact is not None else None
+
+    def read(self, relative: str, limit: int | None = None) -> bytes:
+        if not self.preflighted or self.root_identity is None:
+            fail("rehydration evidence root was not bounded before reads")
+        safe_relative(relative, "rehydration evidence path")
+        fact = self.files.get(relative)
+        if fact is None:
+            fail(f"rehydration evidence file is outside the preflighted tree: {relative}")
+        file_limit = _file_limit(relative)
+        if limit is not None:
+            file_limit = min(file_limit, limit)
+        if fact[0] < 0 or fact[0] > file_limit:
+            fail(f"rehydration evidence file exceeds its read bound: {relative}")
+        directory_flag = getattr(os, "O_DIRECTORY", None)
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        root_fd = -1
+        directory_fd = -1
+        file_fd = -1
+        parts = Path(relative).parts
+        try:
+            root_fd = os.open(self.root, os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow)
+            if self._directory_identity(os.fstat(root_fd)) != self.root_identity:
+                fail("rehydration evidence root changed after bounded tree preflight")
+            directory_fd = root_fd
+            parent = ""
+            for part in parts[:-1]:
+                next_fd = os.open(part, os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow, dir_fd=directory_fd)
+                next_relative = f"{parent}/{part}".lstrip("/")
+                next_metadata = os.fstat(next_fd)
+                if (
+                    not stat.S_ISDIR(next_metadata.st_mode)
+                    or self._directory_identity(next_metadata) != self.directories.get(next_relative)
+                ):
+                    os.close(next_fd)
+                    fail(f"rehydration evidence directory changed after preflight: {next_relative}")
+                if directory_fd != root_fd:
+                    os.close(directory_fd)
+                directory_fd = next_fd
+                parent = next_relative
+            file_fd = os.open(parts[-1], os.O_RDONLY | os.O_CLOEXEC | nofollow | getattr(os, "O_NONBLOCK", 0), dir_fd=directory_fd)
+            before = os.fstat(file_fd)
+            before_identity = self._file_identity(before)
+            if not stat.S_ISREG(before.st_mode) or before_identity != fact:
+                fail(f"rehydration evidence file changed after preflight: {relative}")
+            chunks: list[bytes] = []
+            remaining = fact[0]
+            while remaining:
+                chunk = os.read(file_fd, min(1024 * 1024, remaining))
+                if not chunk:
+                    fail(f"rehydration evidence file was truncated while reading: {relative}")
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            if os.read(file_fd, 1):
+                fail(f"rehydration evidence file grew while reading: {relative}")
+            after = os.fstat(file_fd)
+            if not stat.S_ISREG(after.st_mode) or self._file_identity(after) != before_identity:
+                fail(f"rehydration evidence file changed while reading: {relative}")
+            return b"".join(chunks)
+        except OSError as error:
+            fail(f"rehydration evidence file cannot be read safely: {relative}: {error}")
+        finally:
+            if file_fd >= 0:
+                os.close(file_fd)
+            if directory_fd >= 0 and directory_fd != root_fd:
+                os.close(directory_fd)
+            if root_fd >= 0:
+                os.close(root_fd)
+
+    def verify_unchanged(self) -> None:
+        if not self.preflighted:
+            fail("rehydration evidence tree was not preflighted")
+        files, directories, root_identity = self._scan()
+        if files != self.files or directories != self.directories or root_identity != self.root_identity:
+            fail("rehydration evidence tree changed after bounded preflight")
+
+
+_ACTIVE_EVIDENCE_TREE: BoundedEvidenceTree | None = None
+
+
+def read_evidence_file(path: Path, limit: int) -> bytes:
+    if _ACTIVE_EVIDENCE_TREE is not None:
+        try:
+            relative = path.relative_to(_ACTIVE_EVIDENCE_TREE.root).as_posix()
+        except ValueError:
+            fail("rehydration evidence read escaped its root")
+        return _ACTIVE_EVIDENCE_TREE.read(relative, limit)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        fail("rehydration evidence reads require no-follow file opens")
+    descriptor = -1
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | nofollow | getattr(os, "O_NONBLOCK", 0))
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > limit:
+            fail(f"rehydration evidence file is not bounded: {path.name}")
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                fail(f"rehydration evidence file was truncated: {path.name}")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            fail(f"rehydration evidence file grew: {path.name}")
+        after = os.fstat(descriptor)
+        if BoundedEvidenceTree._file_identity(before) != BoundedEvidenceTree._file_identity(after):
+            fail(f"rehydration evidence file changed while reading: {path.name}")
+        return b"".join(chunks)
+    except OSError as error:
+        fail(f"rehydration evidence file cannot be read safely: {path.name}: {error}")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(read_evidence_file(path, MAX_TREE_BYTES)).hexdigest()
 
 
 def require_file(
@@ -44,18 +361,31 @@ def require_file(
     max_bytes: int | None = None,
 ) -> Path:
     path = root / name
-    if not path.is_file() or path.is_symlink() or (not allow_empty and path.stat().st_size == 0):
+    if _ACTIVE_EVIDENCE_TREE is not None:
+        try:
+            relative = path.relative_to(_ACTIVE_EVIDENCE_TREE.root).as_posix()
+        except ValueError:
+            fail("rehydration evidence path escaped its root")
+        size = _ACTIVE_EVIDENCE_TREE.file_size(relative)
+        if size is None or (not allow_empty and size == 0):
+            fail(f"missing or invalid rehydration evidence file: {name}")
+        if max_bytes is not None and size > max_bytes:
+            fail(f"rehydration evidence file exceeds its bound: {name}")
+        return path
+    try:
+        metadata = path.lstat()
+    except OSError:
         fail(f"missing or invalid rehydration evidence file: {name}")
-    if max_bytes is not None and path.stat().st_size > max_bytes:
+    if not stat.S_ISREG(metadata.st_mode) or (not allow_empty and metadata.st_size == 0):
+        fail(f"missing or invalid rehydration evidence file: {name}")
+    if max_bytes is not None and metadata.st_size > max_bytes:
         fail(f"rehydration evidence file exceeds its bound: {name}")
     return path
 
 
 def read_json(path: Path) -> dict[str, Any]:
-    if path.stat().st_size > MAX_RECORD_BYTES:
-        fail(f"evidence JSON exceeds its bound: {path.name}")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(read_evidence_file(path, MAX_RECORD_BYTES).decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         fail(f"invalid evidence JSON {path.name}: {error}")
     if not isinstance(value, dict):
@@ -80,48 +410,38 @@ def safe_relative(value: str, label: str) -> Path:
 
 
 def check_closed_manifest(root: Path) -> dict[str, str]:
-    manifest = require_file(root, "SHA256SUMS")
-    if manifest.stat().st_size > 16 * 1024 * 1024:
-        fail("SHA256SUMS exceeds its configured bound")
+    global _ACTIVE_EVIDENCE_TREE
+    snapshot = BoundedEvidenceTree(root)
+    snapshot.preflight()
+    _ACTIVE_EVIDENCE_TREE = snapshot
+    manifest = require_file(snapshot.root, "SHA256SUMS")
+    manifest_bytes = snapshot.read("SHA256SUMS", MAX_MANIFEST_BYTES)
     entries: dict[str, str] = {}
-    total_bytes = 0
-    for line_number, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
+    try:
+        manifest_text = manifest_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        fail(f"SHA256SUMS is not UTF-8: {error}")
+    for line_number, line in enumerate(manifest_text.splitlines(), 1):
         fields = line.split("  ", 1)
         if len(fields) != 2 or not DIGEST.fullmatch(fields[0]):
             fail(f"invalid SHA256SUMS entry at line {line_number}")
-        relative = safe_relative(fields[1], f"SHA256SUMS:{line_number}")
-        if relative.as_posix() in entries:
-            fail(f"duplicate SHA256SUMS path: {relative.as_posix()}")
-        path = root / relative
-        if path.is_symlink() or not path.is_file():
-            fail(f"SHA256SUMS references a missing, symlink, or non-file path: {relative.as_posix()}")
-        resolved = path.resolve()
-        try:
-            resolved.relative_to(root.resolve())
-        except ValueError:
-            fail(f"SHA256SUMS entry escapes the evidence root: {relative.as_posix()}")
-        size = path.stat().st_size
-        total_bytes += size
-        if size > MAX_TREE_BYTES or total_bytes > MAX_TREE_BYTES:
-            fail("rehydration evidence exceeds the bounded tree size")
-        actual = digest(path)
+        relative = safe_relative(fields[1], f"SHA256SUMS:{line_number}").as_posix()
+        if relative in entries:
+            fail(f"duplicate SHA256SUMS path: {relative}")
+        if relative not in snapshot.files:
+            fail(f"SHA256SUMS references a missing, symlink, or non-file path: {relative}")
+        actual = hashlib.sha256(snapshot.read(relative)).hexdigest()
         if actual != fields[0]:
-            fail(f"SHA256SUMS digest mismatch: {relative.as_posix()}")
-        entries[relative.as_posix()] = actual
+            fail(f"SHA256SUMS digest mismatch: {relative}")
+        entries[relative] = actual
 
-    files: set[str] = set()
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            fail(f"evidence tree contains a symlink: {path.relative_to(root).as_posix()}")
-        if path.is_file() and path != manifest:
-            relative = path.relative_to(root).as_posix()
-            if relative.endswith(".tmp") or ".tmp." in relative:
-                fail(f"evidence tree retains a temporary file: {relative}")
-            files.add(relative)
-    if len(files) > MAX_FILES:
-        fail("rehydration evidence file count exceeds its configured bound")
+    files = set(snapshot.files) - {"SHA256SUMS"}
+    for relative in files:
+        if relative.endswith(".tmp") or ".tmp." in relative:
+            fail(f"evidence tree retains a temporary file: {relative}")
     if files != set(entries):
         fail(f"SHA256SUMS is not closed (missing={sorted(files - set(entries))}, extra={sorted(set(entries) - files)})")
+    snapshot.verify_unchanged()
     return entries
 
 
@@ -163,8 +483,8 @@ def check_producer(root: Path, unit: str) -> tuple[dict[str, Any], dict[str, Any
     role = read_json(require_file(root, "protected-image.json"))
     artifact = require_file(root, "protected-image.bin", max_bytes=16 * 1024 * 1024)
     source_path = require_file(root, "source-image.bin", max_bytes=MAX_SOURCE_IMAGE_BYTES)
-    source_bytes = source_path.read_bytes()
-    artifact_bytes = artifact.read_bytes()
+    source_bytes = read_evidence_file(source_path, MAX_SOURCE_IMAGE_BYTES)
+    artifact_bytes = read_evidence_file(artifact, MAX_PROTECTED_IMAGE_BYTES)
     if role.get("schemaVersion") != 1 or role.get("artifactRole") != "protected-image":
         fail("producer role is not a Protected Image v1 role record")
     if role.get("abiId") != "urprotect.protected-image.v1" or role.get("abiVersion") != 1:
@@ -265,7 +585,7 @@ def check_rehydration(
         for field in ("sourceSha256", "requestSha256", "protectedImageSha256", "producerBuildSha256", "consumerBuildSha256", "nativeImageSha256"):
             require_digest(record.get(field), f"rehydration {field}")
         native_path = require_file(root, "native-image.bin", max_bytes=MAX_NATIVE_IMAGE_BYTES)
-        native_bytes = native_path.read_bytes()
+        native_bytes = read_evidence_file(native_path, MAX_NATIVE_IMAGE_BYTES)
         if len(native_bytes) > MAX_NATIVE_IMAGE_BYTES or len(native_bytes) != record.get("nativeImageSize"):
             fail("Native Image size is outside the bound or differs from the rehydration record")
         if digest(native_path) != record["nativeImageSha256"]:
@@ -326,7 +646,13 @@ def host_context_exit_status(entry_status: int) -> int:
     return 1 if entry_status < 0 else 255 if entry_status > 255 else entry_status
 
 
-def check_handoff(root: Path, rehydration: dict[str, Any], native_hash: str | None) -> tuple[dict[str, Any], str | None]:
+def check_handoff(
+    root: Path,
+    rehydration: dict[str, Any],
+    native_hash: str | None,
+    expected_runtime: str,
+    require_runtime_identity: bool,
+) -> tuple[dict[str, Any], str | None]:
     record = read_json(require_file(root, "handoff.json"))
     if record.get("schemaVersion") == 1 and record.get("stage") == "host-context-handoff":
         if record.get("status") != "passed" or rehydration.get("status") != "passed" or native_hash is None:
@@ -348,6 +674,17 @@ def check_handoff(root: Path, rehydration: dict[str, Any], native_hash: str | No
             fail("HostContext handoff release order did not pass")
         if record.get("rehydrationRecordSha256") != rehydration.get("preHandoffRecordSha256"):
             fail("HostContext handoff does not bind the pre-handoff rehydration record")
+        try:
+            _RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
+                root,
+                record,
+                expected_runtime=expected_runtime,
+                expected_role="target",
+                expected_image_sha256=native_hash,
+                required=require_runtime_identity,
+            )
+        except ValueError as error:
+            fail(f"native runtime identity invalid: {error}")
         return record, native_hash
     if record.get("schemaVersion") != 1 or record.get("stage") != "native-handoff":
         fail("native handoff record schema or stage is unsupported")
@@ -376,8 +713,8 @@ def check_handoff(root: Path, rehydration: dict[str, Any], native_hash: str | No
         target_status = record.get("targetStatus")
         if not isinstance(target_status, int) or not 0 <= target_status <= 255 or record.get("targetSignal") is not None:
             fail("native handoff target status is malformed")
-        stdout = require_file(root, "target.stdout", allow_empty=True, max_bytes=MAX_STREAM_BYTES).read_bytes()
-        stderr = require_file(root, "target.stderr", allow_empty=True, max_bytes=MAX_STREAM_BYTES).read_bytes()
+        stdout = read_evidence_file(require_file(root, "target.stdout", allow_empty=True, max_bytes=MAX_STREAM_BYTES), MAX_STREAM_BYTES)
+        stderr = read_evidence_file(require_file(root, "target.stderr", allow_empty=True, max_bytes=MAX_STREAM_BYTES), MAX_STREAM_BYTES)
         if len(stdout) > MAX_STREAM_BYTES or len(stderr) > MAX_STREAM_BYTES:
             fail("native handoff captured streams exceed their output bounds")
         if record.get("stdoutBytes") != len(stdout) or record.get("stderrBytes") != len(stderr):
@@ -444,6 +781,8 @@ def check_behavior(
     source_hash: str | None,
     native_hash: str | None,
     expected_entry_status: int | None = None,
+    expected_runtime: str = "glibc",
+    require_runtime_identity: bool = False,
 ) -> dict[str, Any]:
     oracle = read_json(require_file(root, "behavioral-oracle.json"))
     if oracle.get("schemaVersion") != 1 or oracle.get("stage") != "behavioral-oracle":
@@ -462,8 +801,28 @@ def check_behavior(
             source_handoff = read_json(source_handoff_path)
             target_handoff = read_json(target_handoff_path)
             comparison = read_json(comparison_path)
+            try:
+                source_runtime_identity = _RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
+                    root,
+                    source_handoff,
+                    expected_runtime=expected_runtime,
+                    expected_role="source",
+                    expected_image_sha256=source_hash,
+                    required=require_runtime_identity,
+                )
+                target_runtime_identity = _RUNTIME_IDENTITY_HELPER.validate_handoff_runtime_identity(
+                    root,
+                    target_handoff,
+                    expected_runtime=expected_runtime,
+                    expected_role="target",
+                    expected_image_sha256=native_hash,
+                    required=require_runtime_identity,
+                )
+                _RUNTIME_IDENTITY_HELPER.require_same_runtime_identity(source_runtime_identity, target_runtime_identity)
+            except ValueError as error:
+                fail(f"native runtime identity invalid: {error}")
             stream_values = {
-                name: require_file(root, name, allow_empty=True, max_bytes=MAX_STREAM_BYTES).read_bytes()
+                name: read_evidence_file(require_file(root, name, allow_empty=True, max_bytes=MAX_STREAM_BYTES), MAX_STREAM_BYTES)
                 for name in ("baseline.stdout", "baseline.stderr", "target.stdout", "target.stderr")
             }
             for label, observed, expected_image in (
@@ -577,7 +936,7 @@ def check_behavior(
             if comparison.get(field) != value:
                 fail(f"behavior comparison {field} binding mismatch")
         for baseline, target in (("baseline.stdout", "target.stdout"), ("baseline.stderr", "target.stderr")):
-            if require_file(root, baseline, allow_empty=True, max_bytes=MAX_STREAM_BYTES).read_bytes() != require_file(root, target, allow_empty=True, max_bytes=MAX_STREAM_BYTES).read_bytes():
+            if read_evidence_file(require_file(root, baseline, allow_empty=True, max_bytes=MAX_STREAM_BYTES), MAX_STREAM_BYTES) != read_evidence_file(require_file(root, target, allow_empty=True, max_bytes=MAX_STREAM_BYTES), MAX_STREAM_BYTES):
                 fail("retained baseline and target streams differ")
         if not all(comparison.get(field) is True for field in ("statusEqual", "stdoutEqual", "stderrEqual")):
             fail("behavior comparison failed equivalence")
@@ -672,16 +1031,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact_root", type=Path)
     parser.add_argument("--tier", choices=("pr", "nightly", "release"), required=True)
-    parser.add_argument("--runtime", choices=("glibc",), required=True)
+    parser.add_argument("--runtime", choices=("glibc", "musl"), required=True)
+    parser.add_argument("--require-runtime-identity", action="store_true")
     parser.add_argument("--unit", required=True)
     parser.add_argument("--expect-failure", action="store_true")
     args = parser.parse_args()
     if not UNIT_PATTERN.fullmatch(args.unit):
         fail("rehydration unit is not a safe bounded identifier")
-    root = args.artifact_root
-    if root.is_symlink() or not root.is_dir():
-        fail("rehydration artifact root is missing or a symlink")
-    root = root.resolve()
+    root = Path(os.path.abspath(args.artifact_root))
     if root.name != args.unit:
         fail("rehydration evidence root does not end in the selected unit")
     manifest_entries = check_closed_manifest(root)
@@ -696,7 +1053,13 @@ def main() -> None:
             require_file(root, name, allow_empty=True)
 
     rehydration, native_hash = check_rehydration(root, args.unit, producer_stage, role, source, protected)
-    handoff, passed_handoff_hash = check_handoff(root, rehydration, native_hash)
+    handoff, passed_handoff_hash = check_handoff(
+        root,
+        rehydration,
+        native_hash,
+        args.runtime,
+        args.require_runtime_identity,
+    )
     handoff_hash = digest(root / "handoff.json") if handoff.get("status") == "passed" else None
     target_loader = check_target_loader(root, handoff, handoff_hash, native_hash if handoff.get("status") == "passed" else None)
     source_hash = role.get("sourceSha256") if role else rehydration.get("sourceSha256")
@@ -709,6 +1072,8 @@ def main() -> None:
         source_hash,
         native_hash if target_loader.get("status") == "passed" else None,
         expected_tls_entry_status,
+        args.runtime,
+        args.require_runtime_identity,
     )
     if producer_stage.get("status") == "passed" and rehydration.get("status") == "passed":
         check_negative_witness(root, args.unit)
@@ -721,6 +1086,8 @@ def main() -> None:
     )
     if args.expect_failure and all_passed:
         fail("evidence unexpectedly completed all rehydration and handoff stages")
+    if _ACTIVE_EVIDENCE_TREE is not None:
+        _ACTIVE_EVIDENCE_TREE.verify_unchanged()
     if all_passed:
         print(f"PASS rehydration evidence: root={root} unit={args.unit} stages=producer,protected-image,rehydration,native-image,target-loader,behavioral-oracle")
     else:

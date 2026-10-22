@@ -2,11 +2,13 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc [--unit UNIT] [--source ELF] [--function-id TABLE:INDEX] [--entry-status STATUS] [--producer-id ID]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc|musl [--unit UNIT] [--source ELF] [--function-id TABLE:INDEX] [--entry-status STATUS] [--producer-id ID] [--native-build-dir build|build/musl-indirect-control]\n' "$0" >&2
 }
 
 tier=''
 runtime=''
+native_build_dir_relative=''
+require_runtime_identity=0
 unit='compat.protection-host-context-fixture.glibc.host-context-entry'
 source_file=''
 function_id=''
@@ -21,12 +23,21 @@ while [[ $# -gt 0 ]]; do
     --function-id) [[ $# -ge 2 ]] || { usage; exit 2; }; function_id="$2"; shift 2 ;;
     --entry-status) [[ $# -ge 2 ]] || { usage; exit 2; }; expected_entry_status="$2"; shift 2 ;;
     --producer-id) [[ $# -ge 2 ]] || { usage; exit 2; }; producer_id="$2"; shift 2 ;;
+    --native-build-dir) [[ $# -ge 2 ]] || { usage; exit 2; }; native_build_dir_relative="$2"; shift 2 ;;
+    --require-runtime-identity) require_runtime_identity=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
 done
 case "$tier" in pr|nightly|release) ;; *) echo "invalid HostContext rehydration tier: $tier" >&2; exit 2 ;; esac
-case "$runtime" in glibc) ;; *) echo "HostContext rehydration requires glibc" >&2; exit 2 ;; esac
+case "$runtime" in glibc|musl) ;; *) echo "unsupported HostContext rehydration runtime: $runtime" >&2; exit 2 ;; esac
+if [[ "$runtime" == musl ]]; then require_runtime_identity=1; fi
+case "$runtime:$native_build_dir_relative" in
+  glibc:) native_build_dir_relative=build ;;
+  musl:) native_build_dir_relative=build/musl-indirect-control ;;
+  glibc:build|musl:build/musl-indirect-control) ;;
+  *) echo "native build directory does not match the selected runtime" >&2; exit 2 ;;
+esac
 if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
   echo "invalid HostContext rehydration unit: $unit" >&2
   exit 2
@@ -42,6 +53,14 @@ if [[ -n "${function_id}" && ! "${function_id}" =~ ^(dynsym|symtab):[0-9]+$ ]]; 
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+native_root="$repo_root/native/urprotect-runtime"
+native_build_dir="$native_root/$native_build_dir_relative"
+if [[ "$runtime" == musl ]]; then
+  command -v musl-gcc >/dev/null 2>&1 || { echo "environment-unavailable: pinned musl-gcc is required for native musl rehydration" >&2; exit 2; }
+  runtime_cc="$(command -v musl-gcc)"
+else
+  runtime_cc=cc
+fi
 artifact_root="${PROTECTED_IMAGE_ARTIFACT_ROOT:-${repo_root}/.artifacts/protected-image/${tier}/${runtime}/${unit}}"
 work_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/urprotect-host-context-rehydration-${tier}-${runtime}-$$"
 mkdir -p "$artifact_root" "$work_root"
@@ -50,22 +69,57 @@ rm -rf -- "$artifact_root"
 mkdir -p "$artifact_root"
 
 if [[ -z "$source_file" ]]; then
-  source_file="$repo_root/native/urprotect-runtime/build/host-context-entry-fixture.so"
+  source_file="$native_build_dir/host-context-entry-fixture.so"
 elif [[ "$source_file" != /* ]]; then
   source_file="$repo_root/$source_file"
 fi
-make -C "$repo_root/native/urprotect-runtime" build/host-context-entry-fixture.so host-context-image-handoff \
-  >"$artifact_root/native-build.stdout" 2>"$artifact_root/native-build.stderr" || {
-  echo "HostContext native fixture/helper build failed" >&2
-  exit 1
-}
-if [[ -z "$source_file" ]]; then
-  source_file="$repo_root/native/urprotect-runtime/build/host-context-entry-fixture.so"
-elif [[ "$source_file" != /* ]]; then
-  source_file="$repo_root/$source_file"
+make_args=("BUILD_DIR=$native_build_dir_relative")
+if [[ "$runtime" == musl ]]; then
+  make_args+=("CC=$runtime_cc" "LD=ld")
+  make_args+=("HOST_ADAPTER_CFLAGS=-mno-outline-atomics")
+fi
+native_build_diagnostics_root="${URP_NATIVE_BUILD_DIAGNOSTICS_ROOT:-${artifact_root}.native-build-diagnostics}"
+artifact_root_resolved="$(realpath -m -- "$artifact_root")" || exit 1
+native_build_diagnostics_root_resolved="$(realpath -m -- "$native_build_diagnostics_root")" || exit 1
+case "$native_build_diagnostics_root_resolved" in
+  "$artifact_root_resolved"|"$artifact_root_resolved"/*)
+    echo "HostContext native-build diagnostics must be outside the positive evidence root" >&2
+    exit 2
+    ;;
+esac
+nested_build_diagnostics_root="$native_build_diagnostics_root/host-context-image-handoff"
+if [[ -e "$nested_build_diagnostics_root" || -L "$nested_build_diagnostics_root" ]]; then
+  echo "refusing to overwrite existing HostContext native-build diagnostics: $nested_build_diagnostics_root" >&2
+  exit 2
+fi
+mkdir -p "$nested_build_diagnostics_root" || exit 1
+native_build_command=(make -C "$native_root" "${make_args[@]}" host-context-entry-fixture host-context-image-handoff)
+{
+  printf 'cwd=%s\n' "$native_root"
+  printf 'runtime=%s\n' "$runtime"
+  printf 'argv='
+  printf '%q ' "${native_build_command[@]}"
+  printf '\n'
+} >"$nested_build_diagnostics_root/native-build.command.txt" || exit 1
+native_build_status=0
+"${native_build_command[@]}" \
+  >"$nested_build_diagnostics_root/native-build.stdout" \
+  2>"$nested_build_diagnostics_root/native-build.stderr" || native_build_status=$?
+printf '%s\n' "$native_build_status" >"$nested_build_diagnostics_root/native-build.status" || exit 1
+if [[ "$native_build_status" -ne 0 ]]; then
+  printf 'HostContext native fixture/helper build failed with status %s\n' "$native_build_status" >&2
+  exit "$native_build_status"
 fi
 source_file="$(realpath -e -- "$source_file" 2>/dev/null || true)"
 [[ -f "$source_file" && ! -L "$source_file" ]] || { echo "HostContext source fixture is not a regular ELF" >&2; exit 2; }
+native_helper="$native_build_dir/host-context-image-handoff"
+[[ -x "$native_helper" && -f "$native_helper" && ! -L "$native_helper" ]] || { echo "HostContext native handoff helper is missing from the selected runtime build directory" >&2; exit 2; }
+helper_interpreter="$(readelf -lW "$native_helper" | sed -n 's/.*Requesting program interpreter: \([^]]*\)].*/\1/p' | head -n 1)"
+[[ -n "$helper_interpreter" && -e "$helper_interpreter" ]] || { echo "environment-unavailable: selected native runtime interpreter is missing" >&2; exit 2; }
+case "$runtime:$(basename "$helper_interpreter")" in
+  glibc:ld-linux-aarch64.so.1|musl:ld-musl-aarch64.so.1) ;;
+  *) echo "native handoff helper was not linked against the selected runtime" >&2; exit 2 ;;
+esac
 source_path="$artifact_root/source-image.bin"
 cp "$source_file" "$source_path"
 artifact_path="$artifact_root/protected-image.bin"
@@ -114,9 +168,14 @@ dotnet "$cli" rehydrate-image "$source_path" \
   >"$artifact_root/rehydration-command.json" 2>"$artifact_root/rehydration-command.stderr"
 
 [[ -s "$native_path" && -s "$record_path" ]] || { echo "HostContext managed rehydration did not publish a Native Image" >&2; exit 1; }
+identity_args=()
+if [[ "$require_runtime_identity" -eq 1 ]]; then
+  mkdir -p "$artifact_root/runtime-identity/target" "$artifact_root/runtime-identity/source"
+  identity_args=("$artifact_root/runtime-identity/target" runtime-identity/target target)
+fi
 set +e
-"$repo_root/native/urprotect-runtime/build/host-context-image-handoff" \
-  "$native_path" urp_entry "$handoff_path" \
+"$native_helper" \
+  "$native_path" urp_entry "$handoff_path" "${identity_args[@]}" \
   >"$artifact_root/handoff.stdout" 2>"$artifact_root/handoff.stderr"
 handoff_status=$?
 set -e
@@ -162,8 +221,12 @@ if role_path.is_file():
 PY
 source_handoff_path="$artifact_root/source-handoff.json"
 set +e
-"$repo_root/native/urprotect-runtime/build/host-context-image-handoff" \
-  "$source_path" urp_entry "$source_handoff_path" \
+source_identity_args=()
+if [[ "$require_runtime_identity" -eq 1 ]]; then
+  source_identity_args=("$artifact_root/runtime-identity/source" runtime-identity/source source)
+fi
+"$native_helper" \
+  "$source_path" urp_entry "$source_handoff_path" "${source_identity_args[@]}" \
   >"$artifact_root/baseline.stdout" 2>"$artifact_root/baseline.stderr"
 source_process_status=$?
 set -e
@@ -289,8 +352,10 @@ PY
   cd "$artifact_root"
   find . -type f ! -name 'SHA256SUMS' -printf '%P\n' | LC_ALL=C sort | xargs -r sha256sum
 ) >"$manifest_path"
+rehydration_checker_args=(--tier "$tier" --runtime "$runtime" --unit "$unit")
+if [[ "$require_runtime_identity" -eq 1 ]]; then rehydration_checker_args+=(--require-runtime-identity); fi
 python3 "$repo_root/scripts/check-rehydration-evidence.py" "$artifact_root" \
-  --tier "$tier" --runtime glibc --unit "$unit"
+  "${rehydration_checker_args[@]}"
 behavior_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$artifact_root/behavioral-oracle.json")"
 [[ "$behavior_status" == "passed" ]] || { echo "HostContext source-vs-transformed behavioral oracle failed" >&2; exit 1; }
 printf 'HostContext rehydration: PASS (entry status %s; source/transformed status, stdout, and stderr matched)\n' "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["entryStatus"])' "$handoff_path")"

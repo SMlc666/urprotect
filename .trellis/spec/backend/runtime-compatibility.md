@@ -1340,6 +1340,122 @@ attempt the required tier oracle
 ```
 
 
+## Scenario: Real-sample archive identity refresh and registry digest chain
+
+### 1. Scope / Trigger
+
+Apply this procedure when a locked public real-sample archive becomes unavailable,
+its upstream index or mirror changes, or a selected package version must be
+refreshed. It governs registry provenance and acquisition evidence, not product
+runtime support.
+
+### 2. Signatures
+
+```sh
+python3 scripts/validate-real-samples.py \
+  fixtures/real-samples/manifest.json \
+  --candidates fixtures/real-samples/candidates.json --tier pr
+python3 scripts/validate-runtime-closures.py \
+  fixtures/real-samples/runtime-closures.json fixtures/real-samples/manifest.json
+python3 scripts/render-real-sample-report.py \
+  fixtures/real-samples/manifest.json --tier pr --registry-only \
+  --artifact-root fixtures/real-samples \
+  --output-json fixtures/real-samples/baseline-aggregate.json \
+  --output-markdown fixtures/real-samples/baseline-aggregate.md
+```
+
+### 3. Contracts
+
+- Archive URL availability and archive identity are separate facts. An upstream
+  404 is an acquisition failure, not an expected runtime result or evidence that
+  the product rejects the sample.
+- Never repair a 404 by replacing the URL or digest from an unreviewed mirror.
+  Retrieve bounded package/index bytes from an authoritative project source or
+  reviewed mirror, verify exact archive size and full SHA-256 independently, and
+  authenticate the source index/package metadata with the publisher's official
+  key when the format provides signatures. For Alpine APKs, the signed
+  `APKINDEX` record is metadata evidence: its `C` field is not a substitute for
+  the complete APK SHA-256 and byte-size lock.
+- If a package release must change, derive its version, archive path, package
+  checksum and license from the authenticated source index. Bounded-extract only
+  the declared artifact; verify its path remains inside the archive root and
+  rederive the executable's size, SHA-256, build ID and ELF identity from the
+  extracted bytes. Static validation or inspection does not execute that target.
+- Keep the upstream project identity (`projectId`, `identityKey`, and
+  `upstreamUrl`), selection rationale, execution policies, expected statuses,
+  and compatibility classifications unchanged unless the identity or new
+  runtime evidence has been separately reviewed. Package/version changes are
+  nested artifact attributes, not new project identities.
+- Synchronize every affected current owner in one change: selected manifest
+  row, candidate ledger entry and review digest, runtime-closure package-index
+  URL/digest/repository root when applicable, the bionic Node.js lock when its
+  source package changes, and the manifest SHA-256 in
+  `fixtures/evaluator/compatibility-corpus.json` under the matching
+  `retainedEvidenceRegistries` entry. The retired
+  `fixtures/evaluator/evaluator-protocol.json` is not part of the live chain.
+- Keep raw archives and extracted binaries in private temporary storage; do not
+  check them into the repository or upload them as compatibility evidence. The
+  checked-in real-sample aggregate is metadata-only and may be regenerated only
+  with the `--registry-only` renderer. Do not rewrite frozen strict product
+  evidence or infer runtime success from registry metadata.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Locked URL returns 404 | Acquisition fails; no runtime classification or digest refresh follows from the failure alone |
+| Package/index signature, full archive SHA-256 or declared size mismatches | Reject before extraction or registry publication |
+| Extracted artifact path escapes the package root or target ELF identity/hash differs | Reject the candidate; do not update the selected sample |
+| Candidate ledger, resolver lock or evaluator manifest digest is stale | Registry validator/tests fail; update all current owners together |
+| Registry-only metadata render succeeds without target execution | Keep all runtime claims and statuses unchanged |
+
+### 5. Good / Base / Bad Cases
+
+- Good: verify publisher metadata and exact archive bytes, inspect the bounded
+  declared target, synchronize current registries and digest owners, then wait
+  for the required native CI oracle before changing runtime outcomes.
+- Base: a different mirror serves identical locked bytes; update only its URL
+  after verifying the existing size and SHA-256, leaving package identity and
+  statuses unchanged.
+- Bad: refresh a hash from whatever a new URL returns, treat an Alpine index
+  checksum as the complete APK digest, rewrite a historical baseline, or call
+  static validation/runtime-closure assembly a successful target execution.
+
+### 6. Tests Required
+
+- Run `tests/test_real_sample_manifest.py`,
+  `tests/test_real_sample_fingerprint.py`, `tests/test_real_sample_evidence.py`,
+  `tests/test_real_sample_aggregate.py`, `tests/test_runtime_closures.py`, and
+  `tests/test_bionic_node_runtime_lock.py` with `PYTHONPATH` unset.
+- Run both validators in the Signatures section and verify the manifest digest
+  against the matching retained registry entry in
+  `fixtures/evaluator/compatibility-corpus.json`.
+- Confirm tests preserve the 100 distinct project identities, package and
+  dependency policy, frozen rows, expected execution policy, and no-runtime-
+  promotion boundary; confirm the registry-only report matches its renderer.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+old package URL returns 404
+-> download arbitrary replacement
+-> copy its observed SHA into the manifest only
+-> treat static inspection as a runtime pass
+```
+
+#### Correct
+
+```text
+authenticate source index/package metadata and exact bounded archive bytes
+-> verify declared artifact path and derive target identity
+-> update manifest, candidate, resolver and current evaluator digest owners
+-> retain frozen evidence/status policy
+-> wait for an actual native runtime oracle before changing runtime outcomes
+```
+
+
 ## Scenario: Independent compatibility-only product evidence verification
 
 The active compatibility evidence contract is defined by
@@ -1792,10 +1908,13 @@ wiring, tests, and remaining hosted/promotion gates follow it below.
    and CI have ordinary/shared-table rows and the external-table fail-closed
    negative, but no provider transformed positive or exact-root gate. Do not
    mark a runtime row validated until Slice C evidence/review exists. Any future
-   fixture-registry edit must synchronize only the current evaluator retained
-   registry/protocol digests, leaving historical immutable baselines intact.
-   Full Python/evidence discovery and Slice C's managed/native/metadata gates
-   remain future execution work; the accepted review ran boundary Python tests,
+   fixture-registry edit must update only the matching current
+   `retainedEvidenceRegistries` digest in
+   `fixtures/evaluator/compatibility-corpus.json`; the retired
+   `evaluator-protocol.json` is not a live digest owner. Keep frozen
+   product-evidence baselines intact. Full Python/evidence discovery and Slice
+   C's managed/native/metadata gates remain future execution work; the accepted
+   review ran boundary Python tests,
    not the full evidence suite.
 
 #### Current retained evidence, CI declaration, and remaining gates
@@ -1887,4 +2006,231 @@ Wrong: local scoped provider E2E + source-loader rollback + green local suites
 Correct: retain the scoped evidence as non-promoted; require the hosted native
          CI/checker gate, preserve separate rollback provenance, and keep
          musl/Bionic and general indirect-control acceptance open.
+```
+
+## Scenario: Native runtime identity and PT_LOAD ownership for ordinary indirect-control evidence
+
+### 1. Scope / Trigger
+
+This evidence-only contract applies to the ordinary signed-relative-32 jump-table
+source/transformed HostContext row and its native handoff, runner, and independent
+root checkers. It does not change the HostContext ABI, Protected Image or Native
+Image format, product `urprotect` command grammar, resolver/publication behavior,
+shared-table runner, or provider admission. It is an independent consistency
+check of retained process/ELF/maps facts, not an authenticity mechanism or a
+runtime-support promotion. The ownership proof distinguishes page-rounded file
+offset candidates from page-rounded virtual-memory owners: a partial file-range
+candidate may be skipped under the unique complete-owner rule below, while
+virtual-memory containment remains strict.
+
+The ordinary native AArch64/glibc root is locally retained and independently
+checked. This environment has no `musl-gcc`, Docker, or Podman, so no local
+ordinary-musl execution is claimed; the pinned hosted musl producer/checker gate
+remains pending. Bionic, shared-musl, provider, and other indirect-control rows
+remain outside this evidence slice and are not promoted by it.
+
+### 2. Signatures
+
+```sh
+scripts/run-indirect-control-e2e.sh --tier pr|nightly|release \
+  [--runtime glibc|musl] [--unit UNIT] [--artifact-root ROOT]
+scripts/run-host-context-rehydration-e2e.sh \
+  --tier pr|nightly|release --runtime glibc|musl \
+  [--require-runtime-identity] [--unit UNIT] [--source ELF]
+python3 scripts/check-rehydration-evidence.py ROOT \
+  --tier pr|nightly|release --runtime glibc|musl --unit UNIT \
+  [--require-runtime-identity]
+python3 scripts/check-indirect-control-evidence.py ROOT \
+  --tier pr|nightly|release --runtime glibc|musl --unit UNIT \
+  [--require-runtime-identity]
+
+int urp_native_process_identity_capture(
+    const char *directory_path,
+    const char *relative_directory,
+    const char *role,
+    const char *image_sha256,
+    char *identity_relative_path,
+    size_t identity_relative_path_capacity,
+    char identity_sha256[65]);
+```
+
+`--runtime` and `--require-runtime-identity` belong only to evidence runners
+and checkers; neither is a product compatibility setting or a `urprotect`
+command option. The indirect-control runner selects `glibc` by default and
+passes the required-identity option to fresh handoffs/checkers. Musl always
+requires the identity, even if the optional flag is omitted. These signatures
+and the identity carrier schema are unchanged by the file-candidate rule; no
+new owner field, schema version, or runtime-support claim is introduced.
+
+### 3. Contracts
+
+- The native handoff's `runtimeIdentity` carrier is either `null` or exactly
+  `{ "schemaVersion": 1, "path": RELATIVE_PATH, "sha256": LOWERCASE_SHA256 }`.
+  The bounded retained identity JSON has exact keys `schemaVersion`, `runtime`,
+  `architecture`, `role`, `processId`, `imageSha256`, `runtimeVersion`,
+  `runtimeVersionSource`, `interpreter`, `maps`, `helper`, `libc`, and `loader`.
+  Schema versions and numeric facts require exact integer values (booleans,
+  floats, and strings are not integers). Its architecture is `aarch64`; runtime
+  is `glibc` or `musl`; role is `source` or `target`; and the image digest binds
+  the exact image bytes consumed by that handoff process.
+- `interpreter` has exactly `declaredPath`, `resolvedPath`, `deviceMajor`,
+  `deviceMinor`, and `inode`. `maps` has `retainedPath` and `sha256`. Each of
+  `helper`, `libc`, and `loader` has exactly `mappedPath`, `deviceMajor`,
+  `deviceMinor`, `inode`, `size`, `sha256`, and `retainedPath`. Retained paths
+  are safe evidence-root-relative paths. The helper's retained ELF `PT_INTERP`
+  must equal `declaredPath`; realpath resolution and device/inode must identify
+  the actual mapped loader. Glibc libc and loader are distinct mapped files;
+  musl records its combined loader/libc identity consistently in both fields.
+  Glibc runtime version is recomputed from retained libc bytes using exactly
+  one `glibc-libc-release-version-marker`, unchanged from the existing glibc
+  identity contract. Musl runtime-version admission is deliberately scoped to
+  the exact reviewed combined libc/loader ELF of 711,128 bytes with SHA-256
+  `4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9`.
+  Native capture compares the digest it computed for the mapped libc bytes;
+  the independent checker recomputes the digest from retained libc bytes and
+  requires it to equal both the identity's libc digest and this fixed pin
+  before accepting `runtimeVersion`. For this exact artifact, static
+  disassembly ties its unique `Version %s\n` format string to the `dprintf`
+  argument `1.2.3`; this does not establish generic musl token linkage. The
+  synchronized `runtimeVersionSource` value is
+  `musl-reviewed-libc-sha256-pinned-version-marker`. Other musl artifacts fail
+  closed pending code/data linkage proof or a separately audited exact digest
+  pin. Source and target family, version, interpreter, and helper/libc/loader
+  file identities must agree.
+- Native capture and Python validation are bounded before allocation or reads:
+  `/proc/self/maps` is at most 1 MiB, each maps line at most 8192 bytes, each
+  retained runtime/helper ELF at most 32 MiB, identity JSON at most 16 KiB,
+  the ELF has at most 4096 program headers, and all maps/helper/libc/loader/
+  identity bytes for one process total at most 96 MiB. The C capture reads
+  stable regular-file descriptors and the checker independently verifies
+  retained SHA-256, device/inode, ELF, interpreter, and maps facts.
+- Map ownership has two independent proofs over strict half-open intervals.
+  For the file proof, derive each checked page-rounded `PT_LOAD` file interval
+  and consider its relation to the VMA's file interval. A candidate that only
+  partially intersects the VMA is not an owner and may be skipped. Accept the
+  file proof only when exactly one candidate fully contains the complete VMA,
+  its `PT_LOAD` permissions are compatible, and its checked load bias agrees
+  with the process mapping. Reject when no complete candidate survives or when
+  two or more complete candidates survive, even if both appear individually
+  compatible; do not choose between two full file owners by VA or bias.
+- Independently, subtract the proven load bias from the VMA address and require
+  its complete half-open virtual interval to be contained by exactly one
+  checked page-rounded `PT_LOAD` memory interval derived from `p_vaddr +
+  p_memsz`. This strict memory owner must be the same `PT_LOAD` as the unique
+  file owner. Reject every partial memory intersection, second/overlapping
+  virtual owner, file-disjoint VA alias, zero-`p_filesz` BSS overlap, and
+  arithmetic or page-rounding overflow. The file-candidate skip never applies
+  to this virtual-memory proof. Adjacent half-open ranges remain valid. Kernel
+  RELRO protection splits remain valid when each split independently satisfies
+  both proofs. Unrelated bounded bracketed kernel maps labels are not
+  runtime-file identities and cannot satisfy a mapped-file proof.
+- The standalone rehydration checker rejects a symlink evidence root or path
+  component and scans with no-follow, descriptor-relative directory/file opens
+  after `stat(..., follow_symlinks=False)`. Its explicit limits are 512
+  directories including the evidence root, 1024 entries, 1000 regular files,
+  and 256 MiB aggregate file bytes, in addition to the existing per-file
+  bounds. It rechecks descriptor and tree identity during reads and before
+  completion. Checker helper modules are loaded from the sibling file resolved
+  from `__file__` through bounded `O_NOFOLLOW` reads, not ambient
+  `PYTHONPATH`/module discovery.
+- Historical glibc evidence without a carrier remains readable in default
+  compatibility mode. A present carrier is always validated, even when it is
+  optional. Fresh ordinary glibc producer/checker invocations require it, and
+  musl requires it unconditionally. The requirement comes from the trusted
+  runner/checker option and is not inferred from mutable retained JSON. No host
+  paths or identity configuration are serialized into product snapshots or
+  artifacts. These checks establish internal consistency only; they do not
+  cryptographically attest a process or host.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Historical glibc carrier absent and identity is not required | Accept the historical evidence shape; validate any carrier that is present |
+| Fresh glibc identity required but carrier is absent | Reject the evidence root; no successful evidence result |
+| Musl carrier absent, malformed, bound to glibc, or claiming a runtime version from any combined libc/loader digest other than `4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9` | Reject; no musl identity fallback or generic-token admission |
+| Schema has missing/extra fields, wrong version, or non-exact integer types | Reject the identity record, including refreshed-checksum mutations |
+| Image, role, runtime/version marker, interpreter, maps path, device/inode, retained bytes, or source/target identity differs | Reject the evidence root |
+| A VMA only partially intersects a page-rounded `PT_LOAD` file interval, but exactly one permission-compatible full file owner with a consistent load bias remains | Skip that partial file candidate; continue to the independent memory-owner proof |
+| No fully containing file owner remains, or two or more fully containing file owners remain | Reject; file ownership must be unique, including the conservative two-full-candidate case |
+| A VMA only partially intersects a page-rounded `PT_LOAD` memory interval from checked `p_vaddr + p_memsz`, or a second segment aliases the virtual pages | Reject before accepting the runtime identity; memory ownership requires one complete owner matching the file owner |
+| A second owner is BSS-only/zero-`p_filesz`, or arithmetic/page rounding overflows | Reject before accepting the runtime identity |
+| Adjacent half-open VMAs or valid RELRO splits have unique file and memory owners | Accept the mapping proof |
+| Root/path component is a symlink, an entry is non-regular, or directory/entry/file/aggregate limit is exceeded | Reject before accepting or hashing an out-of-bound evidence tree |
+| Required runtime, architecture, helper, or mapped file is unavailable | Fail the required lane; do not substitute another runtime or publish successful evidence |
+
+No new product diagnostic code is introduced; these are evidence-validation
+failures. A failed required identity or root scan must not be represented as a
+successful handoff, behavior comparison, or runtime-evidence row.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a partial rounded file-interval candidate is skipped when exactly one
+  complete permission-compatible file owner with a consistent load bias
+  remains; the independent page-rounded `p_memsz` proof then establishes that
+  same unique owner. A fresh ordinary glibc run also retains native source and
+  target identities, exact-root manifests, and passing source/transformed
+  behavior. This remains a scoped glibc observation only.
+- Base: an older glibc root without `runtimeIdentity` remains readable when the
+  caller did not require the new carrier; if the carrier exists, it is still
+  fully validated. Adjacent half-open mappings and valid RELRO splits remain
+  acceptable only when each has unique complete owners in both domains.
+- Bad: accept when only a partial file candidate exists, choose between two
+  fully containing file candidates, allow any partial/multiple/BSS/VA-alias
+  `p_memsz` owner, accept a self-reported runtime version without checking the
+  retained libc/loader bytes, treat a local glibc pass as musl evidence, or
+  convert missing musl tooling into a passing or `not-applicable` result.
+
+### 6. Tests Required
+
+- `native_process_identity_test.c` must keep its `-Werror` self-test for
+  distinct-VA reuse of partially overlapping rounded file pages when one full
+  file owner remains; permission excess; no complete file owner; and two full
+  file-owner candidates that still reject. It must separately retain strict
+  page-rounded `p_memsz` negatives for partial intersections, duplicate and
+  file-disjoint virtual aliases, zero-file-size BSS overlap, checked memory-end
+  and page-rounding overflow, plus adjacent half-open pages and a valid
+  musl-shaped RELRO split.
+- `tests/test_rehydration_evidence.py` must verify the matching Python
+  file-candidate behavior (including conservative two-full-candidate refusal),
+  strict memory-owner cases, exact schema/integer types,
+  required-versus-optional historical glibc policy, mandatory musl identity,
+  source/target agreement, retained-file/version/interpreter/maps binding,
+  checksum-refreshed virtual-owner and overflow rejection, and adjacent-page
+  acceptance. The standalone tree tests cover the exact 512-directory bound,
+  the first over-limit directory before descent, and symlink root/path guards.
+- Run focused evidence tests and full Python discovery without ambient
+  `PYTHONPATH`; the loaders must use owned file-relative imports. Keep exact-root
+  checker and SHA256SUMS verification separate from producer success. Current
+  scoped review passed: ten C identity cases, four focused Python ownership
+  cases, 29 provider-positive tests, eight rollback tests, and 487 Python tests
+  with no skips; retained ordinary-glibc and provider-rollback exact roots also
+  passed. The review found no blocking findings. The local musl E2E remains
+  unrun because `musl-gcc` and a container runtime are unavailable; the hosted
+  musl gate remains pending.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+reject every partial rounded file-interval candidate even when another
+complete owner uniquely contains the VMA
+-> or skip a partial page-rounded p_memsz intersection / choose between two
+   complete file candidates
+-> trust a runtime label or self-reported version
+```
+
+#### Correct
+
+```text
+bind the handoff to its exact image and native process
+-> for FILE ownership, skip partial candidates and require exactly one complete,
+   permission-compatible owner with a consistent load bias
+-> independently require exactly one full page-rounded VIRTUAL p_memsz owner
+   for the complete VMA, identical to the file owner; reject partial, multiple,
+   BSS, VA-alias and overflow cases
+-> verify retained helper/libc/loader bytes, interpreter and maps identity
+-> require the trusted runtime-specific identity policy and pass the closed-root
+   checker before recording successful evidence
 ```

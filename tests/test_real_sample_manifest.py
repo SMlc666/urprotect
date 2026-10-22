@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -91,6 +92,85 @@ class RealSampleManifestTests(unittest.TestCase):
         }
         self.assertEqual(selected, {project["projectId"] for project in self.manifest["corpus"]["projects"]})
         self.assertTrue(any(candidate["disposition"] in {"rejected", "deferred"} for candidate in self.candidates["candidates"]))
+
+    def test_evaluator_registry_digest_tracks_the_live_real_sample_manifest(self) -> None:
+        corpus_path = ROOT / "fixtures/evaluator/compatibility-corpus.json"
+        corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+        registration = next(
+            item for item in corpus["retainedEvidenceRegistries"]
+            if item["registryId"] == "public-real-sample-corpus"
+        )
+        self.assertEqual(registration["path"], "fixtures/real-samples/manifest.json")
+        self.assertEqual(
+            registration["sha256"],
+            hashlib.sha256(MANIFEST.read_bytes()).hexdigest(),
+        )
+
+    def test_alpine_refresh_syncs_signed_index_without_runtime_promotion(self) -> None:
+        index_sha256 = "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
+        projects = self.manifest["corpus"]["projects"]
+        alpine_projects = [
+            project for project in projects
+            if project["provenance"].get("sourceKind") == "alpine-v3.22-main-aarch64-apk"
+        ]
+        alpine_candidates = [
+            candidate for candidate in self.candidates["candidates"]
+            if candidate["provenance"].get("sourceKind") == "alpine-v3.22-main-aarch64-apk"
+        ]
+        self.assertEqual(len(alpine_projects), 20)
+        self.assertEqual(len(alpine_candidates), 20)
+        self.assertEqual(
+            self.manifest["corpus"]["expansion"]["increment"]["alpineIndexSha256"],
+            index_sha256,
+        )
+        self.assertTrue(
+            all(project["provenance"]["sourceIndexSha256"] == index_sha256 for project in alpine_projects)
+        )
+        self.assertTrue(
+            all(candidate["provenance"]["sourceIndexSha256"] == index_sha256 for candidate in alpine_candidates)
+        )
+        self.assertTrue(
+            all(candidate["review"]["archiveIndexSha256"] == index_sha256 for candidate in alpine_candidates)
+        )
+        self.assertTrue(
+            all(index_sha256 in project["provenance"]["licenseSource"] for project in alpine_projects)
+        )
+        self.assertTrue(
+            all(index_sha256 in candidate["provenance"]["licenseSource"] for candidate in alpine_candidates)
+        )
+        self.assertEqual(self.candidates["registryReview"]["alpineIndexSha256"], index_sha256)
+
+        project = next(item for item in alpine_projects if item["projectId"] == "alpine-libarchive")
+        candidate = next(item for item in alpine_candidates if item["projectId"] == "alpine-libarchive")
+        provenance = project["provenance"]
+        candidate_provenance = candidate["provenance"]
+        expected_provenance = {
+            "version": "3.8.10-r0",
+            "archivePath": "main/aarch64/libarchive-tools-3.8.10-r0.apk",
+            "archiveSha256": "8d02a3e2d9bbd9d6718bfa1a9c7773cecaf8f46a1b54cedae8ac433cd84478ee",
+            "archiveSizeBytes": 693632,
+            "archiveUrl": "https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/libarchive-tools-3.8.10-r0.apk",
+            "packageChecksum": "Q1h09YexAZ0bqSAwneLYDp3lj46tQ=",
+            "sourceIndexSha256": index_sha256,
+        }
+        for field, expected in expected_provenance.items():
+            self.assertEqual(provenance[field], expected)
+            self.assertEqual(candidate_provenance[field], expected)
+        self.assertEqual(provenance["boundedExtraction"]["localArchiveBytes"], 693632)
+        self.assertEqual(candidate_provenance["boundedExtraction"]["localArchiveBytes"], 693632)
+        expected_artifact = {
+            "artifactSha256": "265f3e0964973feb1dca883a109616b22a37f4745baf3b6ada4fda7be6bc3289",
+            "artifactSizeBytes": 657448,
+        }
+        project_review = project["featureFingerprint"]["localReview"]
+        candidate_review = candidate["featureFingerprint"]["localReview"]
+        self.assertEqual({key: project_review[key] for key in expected_artifact}, expected_artifact)
+        self.assertEqual({key: candidate_review[key] for key in expected_artifact}, expected_artifact)
+        self.assertEqual(project["target"]["runtime"], "musl")
+        self.assertEqual(project["expectedResults"]["baseline"], "accepted-and-runs")
+        self.assertEqual(project["expectedResults"]["outerWrapper"], "accepted-and-runs")
+        self.assertEqual(project["executionPolicy"]["baseline"]["expectedStatus"], 0)
+        self.assertEqual(project["executionPolicy"]["outerWrapper"]["expectedStatus"], 0)
 
     def test_pr_runtime_witness_policies_are_explicit_and_bionic_is_locked(self) -> None:
         projects = {project["projectId"]: project for project in self.manifest["corpus"]["projects"]}

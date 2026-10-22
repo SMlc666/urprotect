@@ -43,6 +43,28 @@ class RuntimeClosureContractTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
 
+    def test_musl_closure_uses_signed_index_without_policy_change(self) -> None:
+        closures = json.loads(
+            (ROOT / "fixtures/real-samples/runtime-closures.json").read_text(encoding="utf-8")
+        )
+        musl = closures["runtimes"]["musl"]
+        expected_index = "e1b4f22b6a3486ae42790d660899c954cc18d120d40ae4cf710fe6b5aafc70bb"
+        self.assertEqual(
+            musl["packageIndexUrl"],
+            "https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/APKINDEX.tar.gz",
+        )
+        self.assertEqual(musl["packageIndexSha256"], expected_index)
+        self.assertEqual(musl["registryObservationIndexSha256"], expected_index)
+        self.assertEqual(
+            musl["repositoryRoot"],
+            "https://dl-4.alpinelinux.org/alpine/v3.22/main/aarch64/",
+        )
+        libarchive = closures["projects"]["alpine-libarchive"]
+        for layer in ("baseline", "outerWrapper"):
+            self.assertEqual(libarchive[layer]["expectedResult"], "accepted-and-runs")
+            self.assertEqual(libarchive[layer]["expectedStatus"], 0)
+        self.assertEqual(libarchive["baseline"]["command"], ["/usr/bin/bsdtar", "--version"])
+
     def test_isolation_protocol_separates_helper_and_target_statuses(self) -> None:
         sys.path.insert(0, str(ROOT / "scripts"))
         try:

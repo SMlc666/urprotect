@@ -235,6 +235,22 @@ tests plus the relevant malformed-input path:
   before image destructor, serial reruns, concurrent independent dispatches,
   and retained runtime identity/status/hash evidence. Musl/bionic execution is
   not a substitute for the glibc cell.
+- Native indirect-control evidence must bind a handoff to independently checked
+  runtime identity and prove both unique file-backed and page-rounded `p_memsz`
+  `PT_LOAD` ownership of each VMA, using checked half-open arithmetic. In the
+  FILE proof, skip a partial rounded file-interval candidate only when exactly
+  one complete, permission-compatible owner with a consistent load bias
+  survives; reject zero or multiple complete candidates, including two full
+  candidates. Independently, the page-rounded VIRTUAL `p_memsz` proof must fully
+  contain the VMA in exactly one owner identical to the file owner; reject
+  partial or multiple memory intersections, BSS overlaps, VA-only aliases, and
+  overflow. Accept valid adjacent ranges and RELRO splits only when both owner
+  proofs pass. Standalone checkers must
+  scan a bounded no-follow evidence tree (512 directories including root) and
+  load sibling helpers through explicit file-relative bounded reads rather
+  than ambient `PYTHONPATH`. Run Python evidence tests with `PYTHONPATH` unset;
+  keep optional historical glibc handling distinct from mandatory fresh glibc
+  and musl identity. See the [native runtime identity contract](runtime-compatibility.md#scenario-native-runtime-identity-and-pt_load-ownership-for-ordinary-indirect-control-evidence).
 
 Package-merge cleanup tests must inventory only resources owned by that test,
 not a before/after glob of shared `/tmp`. Keep the real merge shell, privilege
@@ -251,14 +267,126 @@ change affects a launcher, fixture, or release. Compare runtime behavior using
 status, stdout, stderr, signals, cwd, environment, and declared files; exclude
 ASLR addresses and timing.
 
+## Scenario: Native musl fixture-build boundary and failed-build evidence
+
+### 1. Scope / Trigger
+
+Apply this contract when ordinary indirect-control or HostContext rehydration
+runners build musl fixtures/helper. It governs build configuration and failure
+provenance, not runtime identity; the separate [native runtime identity contract](runtime-compatibility.md#scenario-native-runtime-identity-and-pt_load-ownership-for-ordinary-indirect-control-evidence)
+remains authoritative for musl execution evidence.
+
+### 2. Signatures
+
+```sh
+make -C native/urprotect-runtime \
+  "CC=$runtime_cc" "LD=ld" \
+  BUILD_DIR=build/musl-indirect-control \
+  jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture
+
+# HostContext helper only; pass this only for runtime=musl.
+make -C native/urprotect-runtime \
+  "CC=$runtime_cc" "LD=ld" "HOST_ADAPTER_CFLAGS=-mno-outline-atomics" \
+  BUILD_DIR=build/musl-indirect-control \
+  host-context-entry-fixture host-context-image-handoff
+```
+
+Ordinary Make stdout/stderr are retained under `<upload-root>/ordinary/`; its
+command/status sidecar is in sibling `<upload-root>/ordinary.native-build-diagnostics/`.
+Nested HostContext Make diagnostics are under
+`ordinary.native-build-diagnostics/host-context-image-handoff/`.
+
+### 3. Contracts
+
+- Keep `CC` bound to the selected `musl-gcc` driver for C compilation and
+  helper linkage; set `LD=ld` for recipes that directly invoke the linker with
+  options such as `--build-id=none`, `--no-undefined`, and `--eh-frame-hdr`.
+- For musl only, pass `HOST_ADAPTER_CFLAGS=-mno-outline-atomics` to the
+  HostContext helper build. Apply it only while compiling `host_adapter.o`, not
+  through common `CFLAGS`: GCC outlined atomics can otherwise pull in
+  `libgcc.a(lse-init.o)` and its glibc-internal `__getauxval` reference, which
+  musl does not provide. This changes code-generation policy, not atomic
+  semantics.
+- The object-specific `host_adapter.compile-config` stamp records effective
+  `CC`, `CPPFLAGS`, `CFLAGS`, and `HOST_ADAPTER_CFLAGS`; `host_adapter.o`
+  depends on it. Check the configuration on each Make invocation, replacing
+  the stamp only when its contents change: changed flags rebuild the object in
+  the same `BUILD_DIR`, while an unchanged configuration does not. Allow only
+  one independent Make writer per `BUILD_DIR`; concurrent independent builds
+  must use separate build directories.
+- The ordinary runner records exact Make argv, cwd, runtime, both streams, and
+  actual status; it propagates a failed fixture build and stops before readelf,
+  handoff, or evidence checking. The HostContext runner likewise retains nested
+  `native-build.command.txt`, `.stdout`, `.stderr`, and numeric `.status`
+  (including argv/cwd/runtime), outside the positive evidence root but inside
+  the uploaded run-specific parent. It exits with the nested Make status, and
+  the ordinary runner propagates that status unchanged.
+- Preserve both diagnostics roots in the `if: always()` upload. Fake-tool tests
+  prove only build-failure/configuration handling; musl acceptance still
+  requires the pinned producer and exact-root runtime-identity checker.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Musl assembly fixture uses linker-only flags | direct `LD=ld`; C/helper compiler remains `CC=musl-gcc` |
+| Musl HostContext helper is built | only `host_adapter.o` receives `-mno-outline-atomics`; ordinary `CFLAGS` and other objects stay unchanged |
+| `CC`, `CPPFLAGS`, `CFLAGS`, or `HOST_ADAPTER_CFLAGS` changes in the same build directory | compile-config stamp changes and `host_adapter.o` rebuilds; unchanged config leaves stamp/object current |
+| Ordinary or nested Make fails | retain exact argv/cwd/runtime, streams, and numeric status; propagate that status and publish no success evidence |
+| Diagnostics escape the uploaded run root, overlap the positive evidence root, or status is lost | executable regression fails |
+| Independent Make processes would share one `BUILD_DIR` | use separate build directories; cross-process writers are not locked |
+| Required architecture/toolchain is absent | explicit environment failure; no substitute runtime or success claim |
+
+### 5. Good / Base / Bad Cases
+
+- Good: same-directory default → musl → unchanged musl → default builds invoke
+  the compiler `1, 2, 2, 3` times; the unchanged stamp mtime is stable. A nested
+  fake Make exits 23; the HostContext runner retains exact streams/argv/cwd/runtime
+  and `23\n`, and the ordinary runner propagates 23 without positive evidence.
+- Base: the pinned musl build succeeds, after which normal ELF, HostContext,
+  and exact-root runtime-identity checks run.
+- Bad: put `-mno-outline-atomics` in common `CFLAGS`, reuse a stale
+  `host_adapter.o` after a configuration change, share one `BUILD_DIR` across
+  independent writers, lose a nested status/stream, or treat build failure as
+  musl runtime evidence.
+
+### 6. Tests Required
+
+`tests/test_rehydration_evidence.py` retains the CC/LD source-contract check,
+`test_musl_jump_table_runner_retains_and_propagates_stubbed_make_failure`,
+`test_musl_host_context_helper_build_failure_retains_nested_make_and_propagates_status`,
+and `test_host_adapter_make_rule_rebuilds_only_when_compile_configuration_changes`.
+The ordinary and nested fake-Make tests assert exit 23, exact distinct streams,
+status/argv/cwd/runtime, upload-parent containment, no positive-root pollution,
+and that the availability-only compiler stub is not invoked. The actual-Makefile
+configuration test uses one `BUILD_DIR`, checks `1, 2, 2, 3` compiler counts,
+stable unchanged-stamp mtime/content, effective `CC`/`CPPFLAGS`/`CFLAGS`/
+`HOST_ADAPTER_CFLAGS`, and the musl-only object compiler argument. Also run
+shell syntax and diff hygiene checks; hosted musl production and exact-root
+checking remain a separate gate.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: CC=musl-gcc LD=musl-gcc; put the musl workaround in common CFLAGS;
+       trust Make to notice changed command-line flags or coerce nested errors.
+Correct: CC=musl-gcc LD=ld; set HOST_ADAPTER_CFLAGS=-mno-outline-atomics
+         only for host_adapter.o, track compile inputs with its config stamp,
+         give each independent writer its own BUILD_DIR, and retain/propagate
+         the nested command, streams, and actual status before runtime evidence.
+```
+
 ## CI and Release Contract
 
 - Required native Linux jobs run on `aarch64` and retain an environment report.
-- Changes to an auxiliary registry such as `fixtures/manifest.json` must
-  synchronize its current `compatibility-corpus.json` retained-registry digest
-  and the current `evaluator-protocol.json` corpus digest in the same batch.
-  Validate the complete live digest chain; do not rewrite historical immutable
-  baselines or weaken digest checks to repair a stale current registration.
+- Changes to an auxiliary registry such as `fixtures/manifest.json` or
+  `fixtures/real-samples/manifest.json` must update the corresponding
+  `retainedEvidenceRegistries` digest in
+  `fixtures/evaluator/compatibility-corpus.json` in the same batch. This is the
+  current registry owner; the retired `fixtures/evaluator/evaluator-protocol.json`
+  must not be restored. Validate the live registry chain and tests. Keep frozen
+  product-evidence baselines immutable; regenerate the real-sample metadata-only
+  aggregate only through its `--registry-only` renderer.
 - `fixtures/manifest.json` is the source of truth for fixture IDs, tiers,
   toolchains, runtimes, and execution facts. `fixtures/runtime-matrix.json`
   owns the named AArch64 runtime environment covering set and immutable OCI

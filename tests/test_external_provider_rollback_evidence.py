@@ -183,6 +183,25 @@ class ProviderLoadedRollbackEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "retained evidence tool digest mismatch for scripts/evidence_load_range.py"):
                 CHECKER.validate(root, seal=False)
 
+    def test_native_runtime_identity_helper_is_required_and_bound_by_retained_source_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self._copy(temporary)
+            build_path = root / "native-build.json"
+            build = json.loads(build_path.read_text(encoding="utf-8"))
+            build["evidenceTools"].pop("indirectControlRuntimeIdentityVerifierSha256")
+            build_path.write_text(json.dumps(build, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+            self._write_closed_manifest(root)
+            with self.assertRaisesRegex(SystemExit, "evidence tool identity has an unsupported property set.*indirectControlRuntimeIdentityVerifierSha256"):
+                CHECKER.validate(root, seal=False)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self._copy(temporary)
+            helper = root / "scripts/native_runtime_identity.py"
+            helper.write_bytes(helper.read_bytes() + b"\\n# tampered helper\\n")
+            self._refresh_manifest(root)
+            with self.assertRaisesRegex(SystemExit, "retained evidence tool digest mismatch for scripts/native_runtime_identity.py"):
+                CHECKER.validate(root, seal=False)
+
 
 if __name__ == "__main__":
     unittest.main()
