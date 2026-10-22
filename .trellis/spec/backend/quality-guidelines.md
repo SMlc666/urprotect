@@ -235,6 +235,16 @@ tests plus the relevant malformed-input path:
   before image destructor, serial reruns, concurrent independent dispatches,
   and retained runtime identity/status/hash evidence. Musl/bionic execution is
   not a substitute for the glibc cell.
+- Native indirect-control evidence must bind a handoff to independently checked
+  runtime identity and prove both unique file-backed and page-rounded `p_memsz`
+  `PT_LOAD` ownership of each VMA, using checked half-open arithmetic. Reject
+  VA-only aliases, BSS intersections, partial intersections, and overflow while
+  accepting valid adjacent ranges and RELRO splits. Standalone checkers must
+  scan a bounded no-follow evidence tree (512 directories including root) and
+  load sibling helpers through explicit file-relative bounded reads rather
+  than ambient `PYTHONPATH`. Run Python evidence tests with `PYTHONPATH` unset;
+  keep optional historical glibc handling distinct from mandatory fresh glibc
+  and musl identity. See the [native runtime identity contract](runtime-compatibility.md#scenario-native-runtime-identity-and-pt_load-ownership-for-ordinary-indirect-control-evidence).
 
 Package-merge cleanup tests must inventory only resources owned by that test,
 not a before/after glob of shared `/tmp`. Keep the real merge shell, privilege

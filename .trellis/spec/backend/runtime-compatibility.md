@@ -1888,3 +1888,188 @@ Correct: retain the scoped evidence as non-promoted; require the hosted native
          CI/checker gate, preserve separate rollback provenance, and keep
          musl/Bionic and general indirect-control acceptance open.
 ```
+
+## Scenario: Native runtime identity and PT_LOAD ownership for ordinary indirect-control evidence
+
+### 1. Scope / Trigger
+
+This evidence-only contract applies to the ordinary signed-relative-32 jump-table
+source/transformed HostContext row and its native handoff, runner, and independent
+root checkers. It does not change the HostContext ABI, Protected Image or Native
+Image format, product `urprotect` command grammar, resolver/publication behavior,
+shared-table runner, or provider admission. It is an independent consistency
+check of retained process/ELF/maps facts, not an authenticity mechanism or a
+runtime-support promotion.
+
+The ordinary native AArch64/glibc root is locally retained and independently
+checked. This environment has no `musl-gcc`, Docker, or Podman, so no local
+ordinary-musl execution is claimed; the pinned hosted musl producer/checker gate
+remains pending. Bionic, shared-musl, provider, and other indirect-control rows
+remain outside this evidence slice and are not promoted by it.
+
+### 2. Signatures
+
+```sh
+scripts/run-indirect-control-e2e.sh --tier pr|nightly|release \
+  [--runtime glibc|musl] [--unit UNIT] [--artifact-root ROOT]
+scripts/run-host-context-rehydration-e2e.sh \
+  --tier pr|nightly|release --runtime glibc|musl \
+  [--require-runtime-identity] [--unit UNIT] [--source ELF]
+python3 scripts/check-rehydration-evidence.py ROOT \
+  --tier pr|nightly|release --runtime glibc|musl --unit UNIT \
+  [--require-runtime-identity]
+python3 scripts/check-indirect-control-evidence.py ROOT \
+  --tier pr|nightly|release --runtime glibc|musl --unit UNIT \
+  [--require-runtime-identity]
+
+int urp_native_process_identity_capture(
+    const char *directory_path,
+    const char *relative_directory,
+    const char *role,
+    const char *image_sha256,
+    char *identity_relative_path,
+    size_t identity_relative_path_capacity,
+    char identity_sha256[65]);
+```
+
+`--runtime` and `--require-runtime-identity` belong only to evidence runners
+and checkers; neither is a product compatibility setting or a `urprotect`
+command option. The indirect-control runner selects `glibc` by default and
+passes the required-identity option to fresh handoffs/checkers. Musl always
+requires the identity, even if the optional flag is omitted.
+
+### 3. Contracts
+
+- The native handoff's `runtimeIdentity` carrier is either `null` or exactly
+  `{ "schemaVersion": 1, "path": RELATIVE_PATH, "sha256": LOWERCASE_SHA256 }`.
+  The bounded retained identity JSON has exact keys `schemaVersion`, `runtime`,
+  `architecture`, `role`, `processId`, `imageSha256`, `runtimeVersion`,
+  `runtimeVersionSource`, `interpreter`, `maps`, `helper`, `libc`, and `loader`.
+  Schema versions and numeric facts require exact integer values (booleans,
+  floats, and strings are not integers). Its architecture is `aarch64`; runtime
+  is `glibc` or `musl`; role is `source` or `target`; and the image digest binds
+  the exact image bytes consumed by that handoff process.
+- `interpreter` has exactly `declaredPath`, `resolvedPath`, `deviceMajor`,
+  `deviceMinor`, and `inode`. `maps` has `retainedPath` and `sha256`. Each of
+  `helper`, `libc`, and `loader` has exactly `mappedPath`, `deviceMajor`,
+  `deviceMinor`, `inode`, `size`, `sha256`, and `retainedPath`. Retained paths
+  are safe evidence-root-relative paths. The helper's retained ELF `PT_INTERP`
+  must equal `declaredPath`; realpath resolution and device/inode must identify
+  the actual mapped loader. Glibc libc and loader are distinct mapped files;
+  musl records its combined loader/libc identity consistently in both fields.
+  The checker recomputes runtime version from retained bytes using exactly one
+  `glibc-libc-release-version-marker` or `musl-loader-version-marker`, and
+  source and target family, version, interpreter, and helper/libc/loader file
+  identities must agree.
+- Native capture and Python validation are bounded before allocation or reads:
+  `/proc/self/maps` is at most 1 MiB, each maps line at most 8192 bytes, each
+  retained runtime/helper ELF at most 32 MiB, identity JSON at most 16 KiB,
+  the ELF has at most 4096 program headers, and all maps/helper/libc/loader/
+  identity bytes for one process total at most 96 MiB. The C capture reads
+  stable regular-file descriptors and the checker independently verifies
+  retained SHA-256, device/inode, ELF, interpreter, and maps facts.
+- Map ownership has two independent owners. First, every file-backed VMA must
+  have exactly one fully containing page-rounded `PT_LOAD` file interval with
+  compatible permissions and one consistent load bias. Second, subtracting
+  that bias must place the VMA's half-open virtual interval inside exactly one
+  fully containing page-rounded `PT_LOAD` memory interval derived from checked
+  `p_vaddr + p_memsz`; that memory owner must be the file owner. Reject
+  arithmetic or page-rounding overflow, partial intersection, or any second
+  virtual owner, including a file-disjoint alias or an overlapping zero-
+  `p_filesz` BSS segment. Adjacent half-open ranges remain valid. Kernel RELRO
+  protection splits remain valid when each split independently satisfies both
+  ownership proofs. Unrelated bounded bracketed kernel maps labels are not
+  runtime-file identities and cannot satisfy a mapped-file proof.
+- The standalone rehydration checker rejects a symlink evidence root or path
+  component and scans with no-follow, descriptor-relative directory/file opens
+  after `stat(..., follow_symlinks=False)`. Its explicit limits are 512
+  directories including the evidence root, 1024 entries, 1000 regular files,
+  and 256 MiB aggregate file bytes, in addition to the existing per-file
+  bounds. It rechecks descriptor and tree identity during reads and before
+  completion. Checker helper modules are loaded from the sibling file resolved
+  from `__file__` through bounded `O_NOFOLLOW` reads, not ambient
+  `PYTHONPATH`/module discovery.
+- Historical glibc evidence without a carrier remains readable in default
+  compatibility mode. A present carrier is always validated, even when it is
+  optional. Fresh ordinary glibc producer/checker invocations require it, and
+  musl requires it unconditionally. The requirement comes from the trusted
+  runner/checker option and is not inferred from mutable retained JSON. No host
+  paths or identity configuration are serialized into product snapshots or
+  artifacts. These checks establish internal consistency only; they do not
+  cryptographically attest a process or host.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Historical glibc carrier absent and identity is not required | Accept the historical evidence shape; validate any carrier that is present |
+| Fresh glibc identity required but carrier is absent | Reject the evidence root; no successful evidence result |
+| Musl carrier absent, malformed, or bound to glibc | Reject; no musl identity fallback |
+| Schema has missing/extra fields, wrong version, or non-exact integer types | Reject the identity record, including refreshed-checksum mutations |
+| Image, role, runtime/version marker, interpreter, maps path, device/inode, retained bytes, or source/target identity differs | Reject the evidence root |
+| `p_vaddr + p_memsz` or page rounding overflows; VMA only partially intersects a `PT_LOAD`; or a second `PT_LOAD` owns the same virtual pages | Reject before accepting the runtime identity |
+| Adjacent half-open VMAs or valid RELRO splits have unique file and memory owners | Accept the mapping proof |
+| Root/path component is a symlink, an entry is non-regular, or directory/entry/file/aggregate limit is exceeded | Reject before accepting or hashing an out-of-bound evidence tree |
+| Required runtime, architecture, helper, or mapped file is unavailable | Fail the required lane; do not substitute another runtime or publish successful evidence |
+
+No new product diagnostic code is introduced; these are evidence-validation
+failures. A failed required identity or root scan must not be represented as a
+successful handoff, behavior comparison, or runtime-evidence row.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a fresh ordinary glibc run retains native source and target identities,
+  the independent checker derives both file and page-rounded `p_memsz` owners,
+  and the exact-root manifests and source/transformed behavior pass. This is a
+  scoped glibc observation only.
+- Base: an older glibc root without `runtimeIdentity` remains readable when the
+  caller did not require the new carrier; if the carrier exists, it is still
+  fully validated.
+- Bad: accept a self-reported runtime version without checking the retained
+  libc/loader bytes, use file-offset ownership to ignore a VA-only/BSS alias,
+  treat a local glibc pass as musl evidence, or convert missing musl tooling
+  into a passing or `not-applicable` result.
+
+### 6. Tests Required
+
+- `native_process_identity_test.c` must keep its `-Werror` self-test for the
+  review's VA-only alias, duplicate/partial file owner, full/partial
+  file-disjoint virtual aliases, zero-file-size BSS overlap, checked memory-end
+  and page-rounding overflow, adjacent half-open pages, and valid musl-shaped
+  RELRO split.
+- `tests/test_rehydration_evidence.py` must verify exact schema/integer types,
+  required-versus-optional historical glibc policy, mandatory musl identity,
+  source/target agreement, retained-file/version/interpreter/maps binding,
+  checksum-refreshed virtual-owner and overflow rejection, and adjacent-page
+  acceptance. The standalone tree tests cover the exact 512-directory bound,
+  the first over-limit directory before descent, and symlink root/path guards.
+- Run focused evidence tests and full Python discovery without ambient
+  `PYTHONPATH`; the loaders must use owned file-relative imports. Keep exact-root
+  checker and SHA256SUMS verification separate from producer success. Current
+  scoped review passed: ten C identity cases, four focused Python ownership
+  cases, 29 provider-positive tests, eight rollback tests, and 487 Python tests
+  with no skips; retained ordinary-glibc and provider-rollback exact roots also
+  passed. The review found no blocking findings. The local musl E2E remains
+  unrun because `musl-gcc` and a container runtime are unavailable; the hosted
+  musl gate remains pending.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+match maps file offsets to a PT_LOAD
+-> ignore overlapping p_memsz pages because the file offsets differ
+-> trust a runtime label or self-reported version
+```
+
+#### Correct
+
+```text
+bind the handoff to its exact image and native process
+-> verify retained helper/libc/loader bytes, interpreter and maps identity
+-> prove unique file-backed and page-rounded p_memsz owners with checked
+   half-open arithmetic and one load bias
+-> require the trusted runtime-specific identity policy
+-> pass the closed-root checker before recording successful evidence
+```
