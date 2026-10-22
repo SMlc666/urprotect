@@ -30,7 +30,7 @@ if [[ "$runtime" == musl ]]; then
   command -v musl-gcc >/dev/null 2>&1 || { echo "environment-unavailable: pinned musl-gcc is required for native musl jump-table evidence" >&2; exit 2; }
   runtime_cc="$(command -v musl-gcc)"
   native_build_dir_relative=build/musl-indirect-control
-  make_args+=("CC=$runtime_cc" "LD=$runtime_cc")
+  make_args+=("CC=$runtime_cc" "LD=ld")
 fi
 make_args+=("BUILD_DIR=$native_build_dir_relative")
 native_build_dir="$native_root/$native_build_dir_relative"
@@ -42,10 +42,29 @@ else
   root="$artifact_base/$tier"
 fi
 [[ ! -e "$root" && ! -L "$root" ]] || { echo "refusing to overwrite existing indirect evidence root: $root" >&2; exit 2; }
+native_build_diagnostics_root="${root}.native-build-diagnostics"
+[[ ! -e "$native_build_diagnostics_root" && ! -L "$native_build_diagnostics_root" ]] || {
+  echo "refusing to overwrite existing native build diagnostics root: $native_build_diagnostics_root" >&2
+  exit 2
+}
 positive="$root/$unit"
-mkdir -p "$positive" || exit 1
-make -C "$native_root" "${make_args[@]}" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture \
-  >"$root/native-build.stdout" 2>"$root/native-build.stderr" || exit 1
+mkdir -p "$positive" "$native_build_diagnostics_root" || exit 1
+native_build_command=(make -C "$native_root" "${make_args[@]}" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture)
+{
+  printf 'cwd=%s\n' "$native_root"
+  printf 'runtime=%s\n' "$runtime"
+  printf 'argv='
+  printf '%q ' "${native_build_command[@]}"
+  printf '\n'
+} >"$native_build_diagnostics_root/native-build.command.txt" || exit 1
+native_build_status=0
+"${native_build_command[@]}" \
+  >"$root/native-build.stdout" 2>"$root/native-build.stderr" || native_build_status=$?
+printf '%s\n' "$native_build_status" >"$native_build_diagnostics_root/native-build.status" || exit 1
+if [[ "$native_build_status" -ne 0 ]]; then
+  printf 'native fixture build failed at native-build with status %s\n' "$native_build_status" >&2
+  exit "$native_build_status"
+fi
 source_file="$native_build_dir/host-context-jump-table-fixture.so"
 function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
 [[ -n "$function_id" ]] || exit 1

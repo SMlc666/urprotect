@@ -75,7 +75,7 @@ elif [[ "$source_file" != /* ]]; then
 fi
 make_args=("BUILD_DIR=$native_build_dir_relative")
 if [[ "$runtime" == musl ]]; then
-  make_args+=("CC=$runtime_cc" "LD=$runtime_cc")
+  make_args+=("CC=$runtime_cc" "LD=ld")
 fi
 make -C "$native_root" "${make_args[@]}" host-context-entry-fixture host-context-image-handoff \
   >"$artifact_root/native-build.stdout" 2>"$artifact_root/native-build.stderr" || {

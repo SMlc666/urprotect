@@ -261,6 +261,81 @@ change affects a launcher, fixture, or release. Compare runtime behavior using
 status, stdout, stderr, signals, cwd, environment, and declared files; exclude
 ASLR addresses and timing.
 
+## Scenario: Native musl fixture-build boundary and failed-build evidence
+
+### 1. Scope / Trigger
+
+Apply this contract when ordinary indirect-control or HostContext rehydration
+runners build the musl fixtures/helper. It records build-stage diagnostics, not
+runtime identity; the separate [native runtime identity contract](runtime-compatibility.md#scenario-native-runtime-identity-and-pt_load-ownership-for-ordinary-indirect-control-evidence)
+remains authoritative for musl execution evidence.
+
+### 2. Signatures
+
+```sh
+make -C native/urprotect-runtime \
+  "CC=$runtime_cc" "LD=ld" \
+  BUILD_DIR=build/musl-indirect-control \
+  jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture
+```
+
+For a failed ordinary build, retain Make stdout/stderr under
+`<upload-root>/ordinary/` and command/status diagnostics under its sibling
+`<upload-root>/ordinary.native-build-diagnostics/`.
+
+### 3. Contracts
+
+- Keep `CC` bound to the selected `musl-gcc` driver for C compilation and
+  helper linkage; set `LD=ld` for Makefile recipes that directly invoke the
+  linker with options such as `--build-id=none`, `--no-undefined`, and
+  `--eh-frame-hdr`.
+- The ordinary runner records exact Make argv, build cwd, runtime, both output
+  streams, and the actual exit status; it propagates the Make status and stops
+  before readelf, handoff, or evidence checking on failure.
+- Keep the command/status sidecar next to (not inside or outside) the ordinary
+  evidence directory. The `if: always()` upload must cover their shared
+  run-specific parent, including failed-build diagnostics.
+- A fake-tool regression proves this failure path only; musl acceptance still
+  requires the pinned producer and exact-root runtime-identity checker.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Musl assembly fixture links with linker-only flags | direct `LD=ld`; C compiler remains `CC=musl-gcc` |
+| Ordinary Make fails | preserve exact stdout/stderr, argv/cwd/runtime, and status; exit with the same status; publish no success evidence |
+| Diagnostic sidecar is outside the uploaded run root or status is lost | executable regression fails |
+| Required architecture/toolchain is absent | explicit environment failure; no substitute runtime or success claim |
+
+### 5. Good / Base / Bad Cases
+
+- Good: an isolated fake `make` exits 23; the runner exits 23, retains both
+  streams and a `23\n` status, and uploads its sibling command record.
+- Base: Make succeeds, after which the normal ELF, HostContext, and exact-root
+  checks still run.
+- Bad: pass `musl-gcc` as `LD` for direct linker flags, discard child status,
+  or treat a fixture-build failure as musl runtime evidence.
+
+### 6. Tests Required
+
+`tests/test_rehydration_evidence.py` must retain both the CC/LD source-contract
+check and `test_musl_jump_table_runner_retains_and_propagates_stubbed_make_failure`.
+The executable test copies the ordinary runner into a private temporary tree,
+stubs `uname -m` and the availability-only `musl-gcc`, and uses a bounded fake
+`make` that emits distinct streams and exits 23. Assert runner status, exact
+stream bytes, exact sidecar status, `musl`/cwd/argv (`CC=<stub>`, `LD=ld`, the
+isolated build directory and targets), upload-parent containment, and that the
+compiler stub was not invoked. Also run shell syntax and diff hygiene checks;
+the hosted musl producer/checker remains a separate gate.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: CC=musl-gcc LD=musl-gcc -> direct $(LD) receives linker-only flags.
+Correct: CC=musl-gcc LD=ld -> preserve and upload failed-build diagnostics;
+         require the hosted exact-root runtime check before claiming musl evidence.
+```
+
 ## CI and Release Contract
 
 - Required native Linux jobs run on `aarch64` and retain an environment report.

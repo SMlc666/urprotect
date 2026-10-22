@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import struct
 import subprocess
@@ -337,6 +338,147 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         self.assertLess(outer_close, outer_check)
         self.assertIn("--artifact-root PATH", runner)
         self.assertIn("refusing to overwrite existing indirect evidence root", runner)
+
+    def test_musl_jump_table_runners_separate_compiler_and_linker_and_retain_build_status(self) -> None:
+        indirect_runner = INDIRECT_RUNNER.read_text(encoding="utf-8")
+        host_context_runner = (ROOT / "scripts/run-host-context-rehydration-e2e.sh").read_text(encoding="utf-8")
+        for runner in (indirect_runner, host_context_runner):
+            self.assertIn('make_args+=("CC=$runtime_cc" "LD=ld")', runner)
+            self.assertNotIn('"LD=$runtime_cc"', runner)
+
+        self.assertIn('native_build_diagnostics_root="${root}.native-build-diagnostics"', indirect_runner)
+        self.assertIn('native-build.command.txt', indirect_runner)
+        self.assertIn('native-build.status', indirect_runner)
+        self.assertIn('native_build_status=$?', indirect_runner)
+        self.assertIn('exit "$native_build_status"', indirect_runner)
+        self.assertIn('"${native_build_command[@]}"', indirect_runner)
+
+    def test_musl_jump_table_runner_retains_and_propagates_stubbed_make_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pr29-musl-build-status-") as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            repository = temporary_root / "repo"
+            scripts = repository / "scripts"
+            native_root = repository / "native" / "urprotect-runtime"
+            stub_bin = temporary_root / "stub-bin"
+            scripts.mkdir(parents=True)
+            native_root.mkdir(parents=True)
+            stub_bin.mkdir()
+
+            isolated_runner = scripts / "run-indirect-control-e2e.sh"
+            shutil.copy2(INDIRECT_RUNNER, isolated_runner)
+            isolated_runner.chmod(0o755)
+
+            uname_stub = stub_bin / "uname"
+            uname_stub.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$#\" -eq 1 ] && [ \"$1\" = '-m' ]; then\n"
+                "  printf 'aarch64\\n'\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 98\n",
+                encoding="utf-8",
+            )
+            uname_stub.chmod(0o755)
+
+            compiler_stub = stub_bin / "musl-gcc"
+            compiler_invoked = temporary_root / "musl-gcc-was-invoked"
+            compiler_stub.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(compiler_invoked))}\n"
+                "exit 97\n",
+                encoding="utf-8",
+            )
+            compiler_stub.chmod(0o755)
+
+            make_stub = stub_bin / "make"
+            make_stub.write_text(
+                "#!/bin/sh\n"
+                "printf 'PR29_STUB_MAKE_STDOUT\\n'\n"
+                "printf 'PR29_STUB_MAKE_STDERR\\n' >&2\n"
+                "exit 23\n",
+                encoding="utf-8",
+            )
+            make_stub.chmod(0o755)
+
+            run_id = "pr29-test-run"
+            run_attempt = "1"
+            upload_parent = repository / ".artifacts" / "indirect-control" / f"musl-{run_id}-{run_attempt}"
+            artifact_root = upload_parent / "ordinary"
+            environment = {
+                "PATH": os.pathsep.join((str(stub_bin), "/usr/bin", "/bin")),
+                "HOME": str(temporary_root),
+                "TMPDIR": str(temporary_root),
+                "RUNNER_TEMP": str(temporary_root),
+                "GITHUB_RUN_ID": run_id,
+                "GITHUB_RUN_ATTEMPT": run_attempt,
+                "LANG": "C",
+                "LC_ALL": "C",
+            }
+            result = subprocess.run(
+                [
+                    str(isolated_runner),
+                    "--tier",
+                    "pr",
+                    "--runtime",
+                    "musl",
+                    "--unit",
+                    "runtime.indirect-control.jump-table.musl.host-context-entry",
+                    "--artifact-root",
+                    str(artifact_root),
+                ],
+                cwd=repository,
+                env=environment,
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+
+            self.assertEqual(23, result.returncode, result.stderr.decode(errors="replace"))
+            self.assertEqual(b"", result.stdout)
+            self.assertEqual(
+                b"native fixture build failed at native-build with status 23\n",
+                result.stderr,
+            )
+            self.assertEqual(b"PR29_STUB_MAKE_STDOUT\n", (artifact_root / "native-build.stdout").read_bytes())
+            self.assertEqual(b"PR29_STUB_MAKE_STDERR\n", (artifact_root / "native-build.stderr").read_bytes())
+            self.assertFalse(compiler_invoked.exists(), "the availability-only musl-gcc stub must never execute")
+
+            diagnostics_root = Path(f"{artifact_root}.native-build-diagnostics")
+            status_path = diagnostics_root / "native-build.status"
+            command_path = diagnostics_root / "native-build.command.txt"
+            self.assertTrue(status_path.is_file())
+            self.assertTrue(command_path.is_file())
+            self.assertEqual(b"23\n", status_path.read_bytes())
+            self.assertEqual(upload_parent, diagnostics_root.parent)
+            self.assertTrue(diagnostics_root.resolve().is_relative_to(upload_parent.resolve()))
+
+            command_lines = dict(
+                line.split("=", 1)
+                for line in command_path.read_text(encoding="utf-8").splitlines()
+            )
+            expected_native_root = str(native_root.resolve())
+            self.assertEqual(expected_native_root, command_lines["cwd"])
+            self.assertEqual("musl", command_lines["runtime"])
+            argv = shlex.split(command_lines["argv"])
+            self.assertEqual("make", argv[0])
+            self.assertEqual(["-C", expected_native_root], argv[1:3])
+            self.assertIn(f"CC={compiler_stub}", argv)
+            self.assertIn("LD=ld", argv)
+            self.assertIn("BUILD_DIR=build/musl-indirect-control", argv)
+            self.assertEqual(
+                [
+                    "jump-table-fixture",
+                    "jump-table-index-clobber-fixture",
+                    "external-jump-table-fixture",
+                ],
+                argv[-3:],
+            )
+
+            workflow = WORKFLOW.read_text(encoding="utf-8")
+            self.assertIn(
+                ".artifacts/indirect-control/musl-${{ github.run_id }}-${{ github.run_attempt }}/",
+                workflow,
+            )
 
     def test_checker_requires_stage_specific_bindings_and_closed_evidence(self) -> None:
         for marker in (
