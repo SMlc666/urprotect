@@ -17,10 +17,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$tier" in pr|nightly|release) ;; *) echo "invalid jump-table tier" >&2; exit 2 ;; esac
-case "$runtime" in glibc|musl) ;; *) echo "invalid jump-table runtime" >&2; exit 2 ;; esac
+case "$runtime" in glibc|musl|bionic) ;; *) echo "invalid jump-table runtime" >&2; exit 2 ;; esac
 if [[ -z "$unit" ]]; then unit="runtime.indirect-control.jump-table.${runtime}.host-context-entry"; fi
 if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then echo "invalid jump-table evidence unit" >&2; exit 2; fi
-if [[ "$runtime" == musl && -n "$reuse_positive_root_arg" ]]; then echo "musl positive execution cannot reuse an existing evidence root" >&2; exit 2; fi
+if [[ "$runtime" != glibc && -n "$reuse_positive_root_arg" ]]; then echo "$runtime positive execution cannot reuse an existing evidence root" >&2; exit 2; fi
 case "$(uname -m)" in aarch64|arm64) ;; *) echo "environment-unavailable: jump-table native evidence requires AArch64" >&2; exit 2 ;; esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_root="$repo_root/native/urprotect-runtime"
@@ -31,9 +31,18 @@ if [[ "$runtime" == musl ]]; then
   runtime_cc="$(command -v musl-gcc)"
   native_build_dir_relative=build/musl-indirect-control
   make_args+=("CC=$runtime_cc" "LD=ld")
+elif [[ "$runtime" == bionic ]]; then
+  native_build_dir_relative=build/bionic-indirect-control
+  [[ -n "${BIONIC_INDIRECT_CONTROL_BUILD_ROOT:-}" ]] || { echo "environment-unavailable: pinned Bionic fixture build root is required" >&2; exit 2; }
+  native_build_dir="$(realpath -e -- "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" 2>/dev/null || true)"
+  [[ -n "$native_build_dir" && -d "$native_build_dir" && ! -L "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" ]] || { echo "Bionic fixture build root is not a real directory" >&2; exit 2; }
+else
+  native_build_dir="$native_root/$native_build_dir_relative"
 fi
-make_args+=("BUILD_DIR=$native_build_dir_relative")
-native_build_dir="$native_root/$native_build_dir_relative"
+if [[ "$runtime" != bionic ]]; then
+  make_args+=("BUILD_DIR=$native_build_dir_relative")
+  native_build_dir="$native_root/$native_build_dir_relative"
+fi
 artifact_base="$(realpath -m -- "$repo_root/.artifacts/indirect-control")"
 if [[ -n "$artifact_root_arg" ]]; then
   root="$(realpath -m -- "$artifact_root_arg")"
@@ -49,21 +58,46 @@ native_build_diagnostics_root="${root}.native-build-diagnostics"
 }
 positive="$root/$unit"
 mkdir -p "$positive" "$native_build_diagnostics_root" || exit 1
-native_build_command=(make -C "$native_root" "${make_args[@]}" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture)
-{
-  printf 'cwd=%s\n' "$native_root"
-  printf 'runtime=%s\n' "$runtime"
-  printf 'argv='
-  printf '%q ' "${native_build_command[@]}"
-  printf '\n'
-} >"$native_build_diagnostics_root/native-build.command.txt" || exit 1
-native_build_status=0
-"${native_build_command[@]}" \
-  >"$root/native-build.stdout" 2>"$root/native-build.stderr" || native_build_status=$?
-printf '%s\n' "$native_build_status" >"$native_build_diagnostics_root/native-build.status" || exit 1
-if [[ "$native_build_status" -ne 0 ]]; then
+if [[ "$runtime" == bionic ]]; then
+  for diagnostic in native-build.command.txt native-build.stdout native-build.stderr; do
+    [[ -f "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/$diagnostic" && ! -L "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/$diagnostic" ]] || {
+      echo "Bionic fixture build did not retain regular non-symlink diagnostic $diagnostic" >&2
+      exit 1
+    }
+  done
+  cp -- "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/native-build.command.txt" "$native_build_diagnostics_root/native-build.command.txt" || exit 1
+  cp -- "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/native-build.stdout" "$root/native-build.stdout" || exit 1
+  cp -- "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/native-build.stderr" "$root/native-build.stderr" || exit 1
+  if ! native_build_status="$(python3 "$repo_root/scripts/parse-native-build-status.py" "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/native-build.status")"; then
+    echo "refusing Bionic fixture continuation without an exact canonical native-build status" >&2
+    exit 1
+  fi
+  printf '%s\n' "$native_build_status" >"$native_build_diagnostics_root/native-build.status" || exit 1
+else
+  native_build_command=(make -C "$native_root" "${make_args[@]}" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture)
+  {
+    printf 'cwd=%s\n' "$native_root"
+    printf 'runtime=%s\n' "$runtime"
+    printf 'argv='
+    printf '%q ' "${native_build_command[@]}"
+    printf '\n'
+  } >"$native_build_diagnostics_root/native-build.command.txt" || exit 1
+  native_build_status=0
+  "${native_build_command[@]}" \
+    >"$root/native-build.stdout" 2>"$root/native-build.stderr" || native_build_status=$?
+  printf '%s\n' "$native_build_status" >"$native_build_diagnostics_root/native-build.status" || exit 1
+fi
+if [[ "$native_build_status" != "0" ]]; then
   printf 'native fixture build failed at native-build with status %s\n' "$native_build_status" >&2
   exit "$native_build_status"
+fi
+if [[ "$runtime" == bionic ]]; then
+  [[ -n "${BIONIC_RUNTIME_RESULT:-}" && -f "$BIONIC_RUNTIME_RESULT" && ! -L "$BIONIC_RUNTIME_RESULT" ]] || {
+    echo "Bionic runtime provenance result is missing or not a regular file" >&2
+    exit 2
+  }
+  cp -- "$BIONIC_RUNTIME_RESULT" "$positive/bionic-runtime-environment.json" || exit 1
+  chmod a+rwx "$positive" || exit 1
 fi
 source_file="$native_build_dir/host-context-jump-table-fixture.so"
 function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"

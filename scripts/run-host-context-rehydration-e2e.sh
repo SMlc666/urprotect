@@ -2,7 +2,7 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc|musl [--unit UNIT] [--source ELF] [--function-id TABLE:INDEX] [--entry-status STATUS] [--producer-id ID] [--native-build-dir build|build/musl-indirect-control|build/musl-shared-jump-table]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc|musl|bionic [--unit UNIT] [--source ELF] [--function-id TABLE:INDEX] [--entry-status STATUS] [--producer-id ID] [--native-build-dir build|build/musl-indirect-control|build/musl-shared-jump-table|build/bionic-indirect-control]\n' "$0" >&2
 }
 
 tier=''
@@ -30,12 +30,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$tier" in pr|nightly|release) ;; *) echo "invalid HostContext rehydration tier: $tier" >&2; exit 2 ;; esac
-case "$runtime" in glibc|musl) ;; *) echo "unsupported HostContext rehydration runtime: $runtime" >&2; exit 2 ;; esac
-if [[ "$runtime" == musl ]]; then require_runtime_identity=1; fi
+case "$runtime" in glibc|musl|bionic) ;; *) echo "unsupported HostContext rehydration runtime: $runtime" >&2; exit 2 ;; esac
+if [[ "$runtime" == musl || "$runtime" == bionic ]]; then require_runtime_identity=1; fi
 case "$runtime:$native_build_dir_relative" in
   glibc:) native_build_dir_relative=build ;;
   musl:) native_build_dir_relative=build/musl-indirect-control ;;
-  glibc:build|musl:build/musl-indirect-control|musl:build/musl-shared-jump-table) ;;
+  bionic:) native_build_dir_relative=build/bionic-indirect-control ;;
+  glibc:build|musl:build/musl-indirect-control|musl:build/musl-shared-jump-table|bionic:build/bionic-indirect-control) ;;
   *) echo "native build directory does not match the selected runtime" >&2; exit 2 ;;
 esac
 if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then
@@ -55,7 +56,11 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_root="$repo_root/native/urprotect-runtime"
 native_build_dir="$native_root/$native_build_dir_relative"
-if [[ "$runtime" == musl ]]; then
+if [[ "$runtime" == bionic ]]; then
+  [[ -n "${BIONIC_INDIRECT_CONTROL_BUILD_ROOT:-}" ]] || { echo "environment-unavailable: pinned Bionic fixture build root is required" >&2; exit 2; }
+  native_build_dir="$(realpath -e -- "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" 2>/dev/null || true)"
+  [[ -n "$native_build_dir" && -d "$native_build_dir" && ! -L "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" ]] || { echo "Bionic fixture build root is not a real directory" >&2; exit 2; }
+elif [[ "$runtime" == musl ]]; then
   command -v musl-gcc >/dev/null 2>&1 || { echo "environment-unavailable: pinned musl-gcc is required for native musl rehydration" >&2; exit 2; }
   runtime_cc="$(command -v musl-gcc)"
 else
@@ -67,7 +72,6 @@ mkdir -p "$artifact_root" "$work_root"
 trap 'rm -rf -- "$work_root"' EXIT
 rm -rf -- "$artifact_root"
 mkdir -p "$artifact_root"
-
 if [[ -z "$source_file" ]]; then
   source_file="$native_build_dir/host-context-entry-fixture.so"
 elif [[ "$source_file" != /* ]]; then
@@ -93,33 +97,60 @@ if [[ -e "$nested_build_diagnostics_root" || -L "$nested_build_diagnostics_root"
   exit 2
 fi
 mkdir -p "$nested_build_diagnostics_root" || exit 1
-native_build_command=(make -C "$native_root" "${make_args[@]}" host-context-entry-fixture host-context-image-handoff)
-{
-  printf 'cwd=%s\n' "$native_root"
-  printf 'runtime=%s\n' "$runtime"
-  printf 'argv='
-  printf '%q ' "${native_build_command[@]}"
-  printf '\n'
-} >"$nested_build_diagnostics_root/native-build.command.txt" || exit 1
-native_build_status=0
-"${native_build_command[@]}" \
-  >"$nested_build_diagnostics_root/native-build.stdout" \
-  2>"$nested_build_diagnostics_root/native-build.stderr" || native_build_status=$?
-printf '%s\n' "$native_build_status" >"$nested_build_diagnostics_root/native-build.status" || exit 1
-if [[ "$native_build_status" -ne 0 ]]; then
+if [[ "$runtime" == bionic ]]; then
+  for diagnostic in native-build.command.txt native-build.stdout native-build.stderr; do
+    [[ -f "$native_build_dir/$diagnostic" && ! -L "$native_build_dir/$diagnostic" ]] || {
+      echo "Bionic native build is missing regular non-symlink diagnostic $diagnostic" >&2
+      exit 1
+    }
+    cp -- "$native_build_dir/$diagnostic" "$nested_build_diagnostics_root/$diagnostic" || exit 1
+  done
+  if ! native_build_status="$(python3 "$repo_root/scripts/parse-native-build-status.py" "$native_build_dir/native-build.status")"; then
+    echo "refusing Bionic HostContext continuation without an exact canonical native-build status" >&2
+    exit 1
+  fi
+  printf '%s\n' "$native_build_status" >"$nested_build_diagnostics_root/native-build.status" || exit 1
+else
+  native_build_command=(make -C "$native_root" "${make_args[@]}" host-context-entry-fixture host-context-image-handoff)
+  {
+    printf 'cwd=%s\n' "$native_root"
+    printf 'runtime=%s\n' "$runtime"
+    printf 'argv='
+    printf '%q ' "${native_build_command[@]}"
+    printf '\n'
+  } >"$nested_build_diagnostics_root/native-build.command.txt" || exit 1
+  native_build_status=0
+  "${native_build_command[@]}" \
+    >"$nested_build_diagnostics_root/native-build.stdout" \
+    2>"$nested_build_diagnostics_root/native-build.stderr" || native_build_status=$?
+  printf '%s\n' "$native_build_status" >"$nested_build_diagnostics_root/native-build.status" || exit 1
+fi
+if [[ "$native_build_status" != "0" ]]; then
   printf 'HostContext native fixture/helper build failed with status %s\n' "$native_build_status" >&2
   exit "$native_build_status"
 fi
+if [[ "$runtime" == bionic ]]; then
+  [[ -n "${BIONIC_RUNTIME_RESULT:-}" && -f "$BIONIC_RUNTIME_RESULT" && ! -L "$BIONIC_RUNTIME_RESULT" ]] || { echo "Bionic pinned runtime provenance result is missing" >&2; exit 2; }
+  cp -- "$BIONIC_RUNTIME_RESULT" "$artifact_root/bionic-runtime-environment.json" || exit 1
+fi
 source_file="$(realpath -e -- "$source_file" 2>/dev/null || true)"
 [[ -f "$source_file" && ! -L "$source_file" ]] || { echo "HostContext source fixture is not a regular ELF" >&2; exit 2; }
-native_helper="$native_build_dir/host-context-image-handoff"
-[[ -x "$native_helper" && -f "$native_helper" && ! -L "$native_helper" ]] || { echo "HostContext native handoff helper is missing from the selected runtime build directory" >&2; exit 2; }
-helper_interpreter="$(readelf -lW "$native_helper" | sed -n 's/.*Requesting program interpreter: \([^]]*\)].*/\1/p' | head -n 1)"
-[[ -n "$helper_interpreter" && -e "$helper_interpreter" ]] || { echo "environment-unavailable: selected native runtime interpreter is missing" >&2; exit 2; }
-case "$runtime:$(basename "$helper_interpreter")" in
-  glibc:ld-linux-aarch64.so.1|musl:ld-musl-aarch64.so.1) ;;
-  *) echo "native handoff helper was not linked against the selected runtime" >&2; exit 2 ;;
-esac
+native_helper_elf="$native_build_dir/host-context-image-handoff"
+[[ -x "$native_helper_elf" && -f "$native_helper_elf" && ! -L "$native_helper_elf" ]] || { echo "HostContext native handoff helper is missing from the selected runtime build directory" >&2; exit 2; }
+helper_interpreter="$(readelf -lW "$native_helper_elf" | sed -n 's/.*Requesting program interpreter: \([^]]*\)].*/\1/p' | head -n 1)"
+if [[ "$runtime" == bionic ]]; then
+  [[ "$helper_interpreter" == /system/bin/linker64 ]] || { echo "Bionic native handoff helper PT_INTERP is not exactly /system/bin/linker64" >&2; exit 2; }
+  [[ -n "${BIONIC_RUNTIME_RESULT:-}" && -f "$BIONIC_RUNTIME_RESULT" && ! -L "$BIONIC_RUNTIME_RESULT" ]] || { echo "Bionic pinned runtime provenance result is missing" >&2; exit 2; }
+  native_helper="$repo_root/scripts/run-bionic-host-context-handoff.sh"
+  [[ -x "$native_helper" && -f "$native_helper" && ! -L "$native_helper" ]] || { echo "Bionic HostContext container bridge is missing" >&2; exit 2; }
+else
+  [[ -n "$helper_interpreter" && -e "$helper_interpreter" ]] || { echo "environment-unavailable: selected native runtime interpreter is missing" >&2; exit 2; }
+  case "$runtime:$(basename "$helper_interpreter")" in
+    glibc:ld-linux-aarch64.so.1|musl:ld-musl-aarch64.so.1) ;;
+    *) echo "native handoff helper was not linked against the selected runtime" >&2; exit 2 ;;
+  esac
+  native_helper="$native_helper_elf"
+fi
 source_path="$artifact_root/source-image.bin"
 cp "$source_file" "$source_path"
 artifact_path="$artifact_root/protected-image.bin"
@@ -130,6 +161,21 @@ native_path="$artifact_root/native-image.bin"
 native_role_path="$artifact_root/native-image.json"
 record_path="$artifact_root/rehydration.json"
 handoff_path="$artifact_root/handoff.json"
+
+capture_bionic_handoff() {
+  local label="$1" record="$2" expected="$3" wrapper_status
+  shift 3
+  python3 "$repo_root/scripts/capture-bionic-handoff.py" \
+    --root "$artifact_root" --label "$label" --record "$record" \
+    --expected-status "$expected" -- "$@"
+  wrapper_status=$?
+  BIONIC_CAPTURE_WRAPPER_STATUS="$wrapper_status"
+  BIONIC_CAPTURE_PROCESS_STATUS=''
+  if [[ -f "$artifact_root/$label.process-status" && ! -L "$artifact_root/$label.process-status" ]]; then
+    BIONIC_CAPTURE_PROCESS_STATUS="$(cat "$artifact_root/$label.process-status")"
+  fi
+  return "$wrapper_status"
+}
 
 # Name-only selection is intentionally rejected by the shared selector contract.
 if [[ -z "${function_id}" ]]; then
@@ -171,14 +217,26 @@ dotnet "$cli" rehydrate-image "$source_path" \
 identity_args=()
 if [[ "$require_runtime_identity" -eq 1 ]]; then
   mkdir -p "$artifact_root/runtime-identity/target" "$artifact_root/runtime-identity/source"
+  if [[ "$runtime" == bionic ]]; then chmod a+rwx "$artifact_root" "$artifact_root/runtime-identity" "$artifact_root/runtime-identity/target" "$artifact_root/runtime-identity/source" || exit 1; fi
   identity_args=("$artifact_root/runtime-identity/target" runtime-identity/target target)
 fi
-set +e
-"$native_helper" \
-  "$native_path" urp_entry "$handoff_path" "${identity_args[@]}" \
-  >"$artifact_root/handoff.stdout" 2>"$artifact_root/handoff.stderr"
-handoff_status=$?
-set -e
+if [[ "$runtime" == bionic ]]; then
+  target_handoff_command=("$native_helper" "$BIONIC_TERMUX_IMAGE" "$native_path" urp_entry "$handoff_path" "${identity_args[@]}")
+  if ! capture_bionic_handoff handoff "$handoff_path" "$expected_entry_status" "${target_handoff_command[@]}"; then
+    handoff_status="${BIONIC_CAPTURE_PROCESS_STATUS:-unknown}"
+    echo "Bionic HostContext transformed handoff failed; captured process status=${handoff_status}, wrapper status=${BIONIC_CAPTURE_WRAPPER_STATUS}" >&2
+    if [[ "$handoff_status" =~ ^[0-9]+$ && "$handoff_status" -ne "$expected_entry_status" && "$handoff_status" -gt 0 ]]; then exit "$handoff_status"; fi
+    exit 1
+  fi
+  handoff_status="$BIONIC_CAPTURE_PROCESS_STATUS"
+else
+  set +e
+  "$native_helper" \
+    "$native_path" urp_entry "$handoff_path" "${identity_args[@]}" \
+    >"$artifact_root/handoff.stdout" 2>"$artifact_root/handoff.stderr"
+  handoff_status=$?
+  set -e
+fi
 [[ "$handoff_status" -eq "$expected_entry_status" && -s "$handoff_path" ]] || { echo "HostContext native handoff failed with status $handoff_status" >&2; exit 1; }
 cp -- "$artifact_root/handoff.stdout" "$artifact_root/target.stdout"
 cp -- "$artifact_root/handoff.stderr" "$artifact_root/target.stderr"
@@ -220,16 +278,29 @@ if role_path.is_file():
     role_path.write_text(json.dumps(role, indent=2, sort_keys=True) + "\n")
 PY
 source_handoff_path="$artifact_root/source-handoff.json"
-set +e
 source_identity_args=()
 if [[ "$require_runtime_identity" -eq 1 ]]; then
   source_identity_args=("$artifact_root/runtime-identity/source" runtime-identity/source source)
 fi
-"$native_helper" \
-  "$source_path" urp_entry "$source_handoff_path" "${source_identity_args[@]}" \
-  >"$artifact_root/baseline.stdout" 2>"$artifact_root/baseline.stderr"
-source_process_status=$?
-set -e
+if [[ "$runtime" == bionic ]]; then
+  source_handoff_command=("$native_helper" "$BIONIC_TERMUX_IMAGE" "$source_path" urp_entry "$source_handoff_path" "${source_identity_args[@]}")
+  if ! capture_bionic_handoff source-handoff "$source_handoff_path" "$expected_entry_status" "${source_handoff_command[@]}"; then
+    source_process_status="${BIONIC_CAPTURE_PROCESS_STATUS:-unknown}"
+    echo "Bionic HostContext source handoff failed; captured process status=${source_process_status}, wrapper status=${BIONIC_CAPTURE_WRAPPER_STATUS}" >&2
+    if [[ "$source_process_status" =~ ^[0-9]+$ && "$source_process_status" -ne "$expected_entry_status" && "$source_process_status" -gt 0 ]]; then exit "$source_process_status"; fi
+    exit 1
+  fi
+  source_process_status="$BIONIC_CAPTURE_PROCESS_STATUS"
+  cp -- "$artifact_root/source-handoff.stdout" "$artifact_root/baseline.stdout"
+  cp -- "$artifact_root/source-handoff.stderr" "$artifact_root/baseline.stderr"
+else
+  set +e
+  "$native_helper" \
+    "$source_path" urp_entry "$source_handoff_path" "${source_identity_args[@]}" \
+    >"$artifact_root/baseline.stdout" 2>"$artifact_root/baseline.stderr"
+  source_process_status=$?
+  set -e
+fi
 python3 - "$artifact_root" "$source_sha256" "$native_path" "$handoff_path" "$source_handoff_path" "$source_process_status" "$handoff_status" "$expected_entry_status" <<'PY'
 import hashlib
 import json

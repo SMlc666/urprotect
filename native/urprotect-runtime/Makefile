@@ -108,6 +108,7 @@ RUNTIME_OBJECTS += $(BUILD_DIR)/host_image_validation.o
 SELF_TEST_OBJECT := $(BUILD_DIR)/host_context_self_test.o
 LDLIBS ?= -ldl -pthread
 ENTRY_FIXTURE_LDFLAGS ?=
+INDIRECT_CONTROL_FIXTURE_LDFLAGS ?=
 HOST_CONTEXT_PLATFORM_CFLAGS ?=
 
 .PHONY: all test runtime self-test host-context-launcher host-context-entry-fixture host-context-image-handoff host-image-validation-probe tls-validation-test symbol-fixture symbol-self-test plt-fixture plt-self-test version-self-test dependency-fixture tls-fixture tlsle-fixture tlsld-fixture tlsgd-fixture tlsdesc-fixture threaded-tls-fixture threaded-tls-harness threaded-tls-trace-test threaded-tls-runtime-test thread-adapter-test cfi-fixture cfi-runtime-test jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture external-provider-fixtures external-provider-self-test external-provider-image-handoff external-provider-provider-loaded-rollback-test shared-jump-table-fixture dynamic-import-fixture static-function-pointer-fixture native-image-handoff native-handoff-test native-process-identity-self-test property-fixture graph-fixture graph-self-test contract-probe contract-check clean check-host
@@ -246,7 +247,7 @@ $(NATIVE_IMAGE_HANDOFF): native_image_handoff.c ../urprotect-launcher/sha256.c .
 
 $(HOST_CONTEXT_IMAGE_HANDOFF): host_context_image_handoff.c native_process_identity.c native_process_identity.h ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o
 	@mkdir -p "$(BUILD_DIR)"
-	$(CC) $(CPPFLAGS) $(CFLAGS) host_context_image_handoff.c native_process_identity.c ../urprotect-launcher/sha256.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o $(LDLIBS) -o "$@"
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_CONTEXT_PLATFORM_CFLAGS) host_context_image_handoff.c native_process_identity.c ../urprotect-launcher/sha256.c $(BUILD_DIR)/host_adapter.o $(BUILD_DIR)/host_image_validation.o $(LDLIBS) -o "$@"
 
 $(NATIVE_PROCESS_IDENTITY_TEST): native_process_identity_test.c native_process_identity.c native_process_identity.h ../urprotect-launcher/sha256.c ../urprotect-launcher/sha256.h
 	@mkdir -p "$(BUILD_DIR)"
@@ -448,7 +449,7 @@ $(CFI_REGISTER_CALL_OBJECT): host_context_cfi_register_call.S
 
 $(JUMP_TABLE_FIXTURE): $(JUMP_TABLE_FIXTURE_S)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
+	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now $(INDIRECT_CONTROL_FIXTURE_LDFLAGS) "$<" -o "$@"
 
 $(JUMP_TABLE_FIXTURE_S): host_context_jump_table_fixture.S
 	@mkdir -p "$(BUILD_DIR)"
@@ -456,7 +457,7 @@ $(JUMP_TABLE_FIXTURE_S): host_context_jump_table_fixture.S
 
 $(JUMP_TABLE_INDEX_CLOBBER_FIXTURE): $(JUMP_TABLE_INDEX_CLOBBER_FIXTURE_S)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now "$<" -o "$@"
+	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now $(INDIRECT_CONTROL_FIXTURE_LDFLAGS) "$<" -o "$@"
 
 $(JUMP_TABLE_INDEX_CLOBBER_FIXTURE_S): host_context_jump_table_fixture.S
 	@mkdir -p "$(BUILD_DIR)"
@@ -464,7 +465,7 @@ $(JUMP_TABLE_INDEX_CLOBBER_FIXTURE_S): host_context_jump_table_fixture.S
 
 $(EXTERNAL_JUMP_TABLE_FIXTURE): $(EXTERNAL_JUMP_TABLE_FIXTURE_S)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none --hash-style=gnu -z now "$<" -o "$@"
+	$(LD) -shared --build-id=none --hash-style=gnu -z now $(INDIRECT_CONTROL_FIXTURE_LDFLAGS) "$<" -o "$@"
 
 $(EXTERNAL_JUMP_TABLE_FIXTURE_S): host_context_external_jump_table_fixture.S
 	@mkdir -p "$(BUILD_DIR)"
@@ -520,7 +521,7 @@ $(EXTERNAL_PROVIDER_CONSUMER_OBJECT): host_context_external_provider_consumer_fi
 
 $(SHARED_JUMP_TABLE_FIXTURE): $(SHARED_JUMP_TABLE_FIXTURE_S)
 	@mkdir -p "$(BUILD_DIR)"
-	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now --emit-relocs "$<" -o "$@"
+	$(LD) -shared --build-id=none --no-undefined --eh-frame-hdr -z now --emit-relocs $(INDIRECT_CONTROL_FIXTURE_LDFLAGS) "$<" -o "$@"
 
 $(SHARED_JUMP_TABLE_FIXTURE_S): host_context_shared_jump_table_fixture.S
 	@mkdir -p "$(BUILD_DIR)"

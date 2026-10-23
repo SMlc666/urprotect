@@ -25,10 +25,106 @@ MAX_ELF_PROGRAM_HEADERS = 4096
 MAX_U64 = (1 << 64) - 1
 MUSL_REVIEWED_LIBC_SHA256 = "4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9"
 MUSL_RUNTIME_VERSION_SOURCE = "musl-reviewed-libc-sha256-pinned-version-marker"
+BIONIC_RUNTIME_VERSION_SOURCE = "bionic-semantic-version-not-claimed"
+BIONIC_RUNTIME_FINGERPRINT_KIND = "mapped-libc-and-loader-sha256"
+BIONIC_KERNEL_RELEASE = re.compile(r"^[A-Za-z0-9._+-]{1,128}$")
+BIONIC_PAGE_SIZES = {4096, 16384, 65536}
 
 
 def _fail(message: str) -> None:
     raise ValueError(message)
+
+
+def _validate_bionic_runtime_environment(root: Path) -> dict[str, Any]:
+    evidence = _read_root_file(root, "bionic-runtime-environment.json", 128 * 1024)
+    try:
+        record = json.loads(evidence.decode("utf-8", errors="strict"))
+        manifest_path = Path(__file__).resolve().parents[1] / "fixtures" / "manifest.json"
+        if manifest_path.parent.resolve(strict=True) != manifest_path.parent:
+            _fail("trusted Bionic fixture manifest root is not a real directory")
+        manifest_bytes = _read_bounded_regular_file(
+            manifest_path, 8 * 1024 * 1024, "trusted Bionic fixture manifest"
+        )
+        manifest = json.loads(manifest_bytes.decode("utf-8", errors="strict"))
+        case = next(item for item in manifest["cases"] if item.get("id") == "c-termux-bionic-pie")
+        host = case["host"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, StopIteration, TypeError) as error:
+        raise ValueError("Bionic runtime environment provenance is malformed") from error
+    if not isinstance(record, dict):
+        _fail("Bionic runtime environment provenance is not an object")
+    if type(record.get("schemaVersion")) is not int:
+        _fail("Bionic runtime environment schemaVersion must be an exact integer")
+    packages = host.get("compilerPackages")
+    if not isinstance(packages, list):
+        _fail("trusted Bionic compiler package lock is malformed")
+    package_lock_bytes = (json.dumps(packages, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    image = host.get("image")
+    expected = {
+        "schemaVersion": 1,
+        "case": "c-termux-bionic-pie",
+        "status": "validated",
+        "execution": "native-arm64-bionic-container",
+        "androidRuntime": False,
+        "emulation": False,
+        "image": image,
+        "imageDigest": image.rsplit("@", 1)[-1] if isinstance(image, str) else None,
+        "termuxSourceCommit": host.get("sourceCommit"),
+        "compilerPackage": host.get("compilerPackage"),
+        "compilerPackages": packages,
+        "packageRepository": host.get("packageRepository"),
+        "packageLockSha256": hashlib.sha256(package_lock_bytes).hexdigest(),
+        "linker": "/system/bin/linker64",
+    }
+    for key, value in expected.items():
+        if record.get(key) != value:
+            _fail(f"Bionic runtime environment provenance differs from the pinned lock: {key}")
+    for key in ("hostPageSize", "containerPageSize"):
+        page_size = record.get(key)
+        if type(page_size) is not int or page_size not in BIONIC_PAGE_SIZES:
+            _fail(f"Bionic runtime environment {key} must be an exact supported integer")
+    if record["hostPageSize"] != record["containerPageSize"]:
+        _fail("Bionic host/container page sizes disagree for the native same-kernel lane")
+    for key in ("hostKernel", "containerKernel"):
+        kernel = record.get(key)
+        if not isinstance(kernel, str) or BIONIC_KERNEL_RELEASE.fullmatch(kernel) is None:
+            _fail(f"Bionic runtime environment {key} is not a bounded kernel release token")
+    if record["hostKernel"] != record["containerKernel"]:
+        _fail("Bionic host/container kernel releases disagree for the native same-kernel lane")
+    # These are relational checks among retained producer observations and per-handoff
+    # uname/sysconf readings, not a cryptographic attestation of either reporter.
+    return record
+
+
+def _read_bounded_regular_file(path: Path, maximum: int, label: str) -> bytes:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        _fail(f"{label} read requires O_NOFOLLOW")
+    descriptor = -1
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | nofollow | getattr(os, "O_NONBLOCK", 0))
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size < 0 or before.st_size > maximum:
+            _fail(f"{label} exceeds its regular-file bound")
+        content = bytearray(before.st_size)
+        offset = 0
+        while offset < before.st_size:
+            chunk = os.read(descriptor, min(1024 * 1024, before.st_size - offset))
+            if not chunk:
+                _fail(f"{label} was truncated while reading")
+            content[offset : offset + len(chunk)] = chunk
+            offset += len(chunk)
+        if os.read(descriptor, 1):
+            _fail(f"{label} grew while reading")
+        after = os.fstat(descriptor)
+        identity = lambda item: (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+        if identity(before) != identity(after) or not stat.S_ISREG(after.st_mode):
+            _fail(f"{label} changed while reading")
+        return bytes(content)
+    except OSError as error:
+        raise ValueError(f"{label} cannot be read safely") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _safe_relative(value: Any, label: str) -> str:
@@ -531,16 +627,18 @@ def validate_handoff_runtime_identity(
     expected_image_sha256: str,
     required: bool = False,
 ) -> dict[str, Any] | None:
-    if expected_runtime not in {"glibc", "musl"} or expected_role not in {"source", "target"}:
+    if expected_runtime not in {"glibc", "musl", "bionic"} or expected_role not in {"source", "target"}:
         _fail("runtime identity request has an unsupported runtime or role")
+    bionic_environment = _validate_bionic_runtime_environment(root) if expected_runtime == "bionic" else None
     carrier = handoff.get("runtimeIdentity")
     if carrier is None:
-        if required or expected_runtime == "musl":
+        if required or expected_runtime in {"musl", "bionic"}:
             _fail("HostContext handoff is missing its required native runtime identity")
         return None
     carrier = _exact_keys(carrier, {"schemaVersion", "path", "sha256"}, "runtimeIdentity carrier")
-    if type(carrier["schemaVersion"]) is not int or carrier["schemaVersion"] != 1:
-        _fail("runtime identity carrier schemaVersion must be the exact integer 1")
+    expected_carrier_schema = 2 if expected_runtime == "bionic" else 1
+    if type(carrier["schemaVersion"]) is not int or carrier["schemaVersion"] != expected_carrier_schema:
+        _fail(f"runtime identity carrier schemaVersion must be the exact integer {expected_carrier_schema}")
     identity_path = _safe_relative(carrier["path"], "runtime identity carrier path")
     if not isinstance(carrier["sha256"], str) or not DIGEST.fullmatch(carrier["sha256"]):
         _fail("runtime identity carrier digest is malformed")
@@ -551,18 +649,18 @@ def validate_handoff_runtime_identity(
         identity = json.loads(identity_bytes.decode("utf-8", errors="strict"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError("native runtime identity record is malformed") from error
-    identity = _exact_keys(
-        identity,
-        {
-            "schemaVersion", "runtime", "architecture", "role", "processId", "imageSha256",
-            "runtimeVersion", "runtimeVersionSource", "interpreter", "maps", "helper", "libc", "loader",
-        },
-        "native runtime identity",
-    )
+    expected_identity_schema = 2 if expected_runtime == "bionic" else 1
+    expected_identity_keys = {
+        "schemaVersion", "runtime", "architecture", "role", "processId", "imageSha256",
+        "runtimeVersion", "runtimeVersionSource", "interpreter", "maps", "helper", "libc", "loader",
+    }
+    if expected_runtime == "bionic":
+        expected_identity_keys.update({"runtimeFingerprint", "runtimeEnvironment"})
+    identity = _exact_keys(identity, expected_identity_keys, "native runtime identity")
     if type(identity["schemaVersion"]) is not int:
         _fail("native runtime identity schemaVersion must be an exact integer")
-    if identity["schemaVersion"] != 1:
-        _fail("native runtime identity schemaVersion is unsupported")
+    if identity["schemaVersion"] != expected_identity_schema:
+        _fail("native runtime identity schemaVersion is unsupported for its runtime family")
     if (
         identity["runtime"] != expected_runtime
         or identity["architecture"] != "aarch64"
@@ -572,9 +670,14 @@ def validate_handoff_runtime_identity(
         _fail("native runtime identity does not bind the expected family, role, architecture, or image")
     _integer(identity["processId"], "runtime identity processId", maximum=(1 << 31) - 1)
     version = identity["runtimeVersion"]
-    if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", version) is None:
-        _fail("native runtime identity version is malformed")
-    expected_version_source = MUSL_RUNTIME_VERSION_SOURCE if expected_runtime == "musl" else "glibc-libc-release-version-marker"
+    if expected_runtime == "bionic":
+        if version is not None:
+            _fail("Bionic runtime identity must not invent a semantic runtime version")
+        expected_version_source = BIONIC_RUNTIME_VERSION_SOURCE
+    else:
+        if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", version) is None:
+            _fail("native runtime identity version is malformed")
+        expected_version_source = MUSL_RUNTIME_VERSION_SOURCE if expected_runtime == "musl" else "glibc-libc-release-version-marker"
     if identity["runtimeVersionSource"] != expected_version_source:
         _fail("native runtime identity version source is unsupported")
 
@@ -616,9 +719,14 @@ def validate_handoff_runtime_identity(
     resolved = _mapped_path(interpreter["resolvedPath"], "runtime interpreter resolvedPath")
     if declared != helper_elf["interpreter"]:
         _fail("runtime identity PT_INTERP differs from the retained helper ELF")
-    expected_interpreter = "ld-musl-aarch64.so.1" if expected_runtime == "musl" else "ld-linux-aarch64.so.1"
-    if PurePosixPath(declared).name != expected_interpreter:
-        _fail("runtime helper PT_INTERP names the wrong loader family")
+    if expected_runtime == "bionic":
+        expected_interpreter = "/system/bin/linker64"
+        if declared != expected_interpreter:
+            _fail("Bionic runtime helper PT_INTERP is not exactly /system/bin/linker64")
+    else:
+        expected_interpreter = "ld-musl-aarch64.so.1" if expected_runtime == "musl" else "ld-linux-aarch64.so.1"
+        if PurePosixPath(declared).name != expected_interpreter:
+            _fail("runtime helper PT_INTERP names the wrong loader family")
     loader = identity["loader"]
     if resolved != loader["mappedPath"]:
         _fail("resolved PT_INTERP does not identify the mapped loader path")
@@ -640,13 +748,49 @@ def validate_handoff_runtime_identity(
             _fail("musl loader and combined libc identities disagree")
         if identity["runtimeVersion"] != _version_from_bytes(retained["libc"], "musl"):
             _fail("musl runtime version differs from the retained mapped libc/loader bytes")
-    else:
+    elif expected_runtime == "glibc":
         if PurePosixPath(libc["mappedPath"]).name != "libc.so.6":
             _fail("glibc identity does not name the actual mapped libc")
         if PurePosixPath(loader["mappedPath"]).name != "ld-linux-aarch64.so.1":
             _fail("glibc identity does not name the actual mapped loader")
         if identity["runtimeVersion"] != _version_from_bytes(retained["libc"], "glibc"):
             _fail("glibc runtime version differs from the retained mapped libc bytes")
+    else:
+        runtime_environment = _exact_keys(
+            identity["runtimeEnvironment"],
+            {"kernelRelease", "pageSize"},
+            "Bionic per-handoff runtime environment",
+        )
+        kernel_release = runtime_environment["kernelRelease"]
+        if not isinstance(kernel_release, str) or BIONIC_KERNEL_RELEASE.fullmatch(kernel_release) is None:
+            _fail("Bionic per-handoff kernel release is not a bounded kernel token")
+        page_size = _integer(runtime_environment["pageSize"], "Bionic per-handoff page size")
+        if page_size not in BIONIC_PAGE_SIZES:
+            _fail("Bionic per-handoff page size is unsupported")
+        assert bionic_environment is not None
+        if kernel_release != bionic_environment["containerKernel"]:
+            _fail("Bionic per-handoff kernel release differs from the retained container observation")
+        if page_size != bionic_environment["containerPageSize"]:
+            _fail("Bionic per-handoff page size differs from the retained container observation")
+        fingerprint = _exact_keys(
+            identity["runtimeFingerprint"],
+            {"kind", "libcSha256", "loaderSha256"},
+            "Bionic runtime fingerprint",
+        )
+        if fingerprint["kind"] != BIONIC_RUNTIME_FINGERPRINT_KIND:
+            _fail("Bionic runtime fingerprint kind is unsupported")
+        if PurePosixPath(libc["mappedPath"]).name != "libc.so":
+            _fail("Bionic identity does not name the actual mapped libc.so")
+        if PurePosixPath(loader["mappedPath"]).name != "linker64":
+            _fail("Bionic identity does not name the actual mapped linker64")
+        libc_sha256 = hashlib.sha256(retained["libc"]).hexdigest()
+        loader_sha256 = hashlib.sha256(retained["loader"]).hexdigest()
+        if fingerprint["libcSha256"] != libc_sha256 or libc["sha256"] != libc_sha256:
+            _fail("Bionic mapped libc fingerprint differs from retained mapped bytes")
+        if fingerprint["loaderSha256"] != loader_sha256 or loader["sha256"] != loader_sha256:
+            _fail("Bionic mapped loader fingerprint differs from retained mapped bytes")
+        if all(libc[key] == loader[key] for key in ("deviceMajor", "deviceMinor", "inode")):
+            _fail("Bionic mapped libc and linker must be distinct file identities")
     return identity
 
 

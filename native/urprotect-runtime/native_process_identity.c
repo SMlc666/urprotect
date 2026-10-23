@@ -16,6 +16,9 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
+#if defined(__BIONIC__) || defined(__ANDROID__)
+#include <sys/utsname.h>
+#endif
 #include <unistd.h>
 
 #if defined(__GLIBC__)
@@ -31,6 +34,8 @@
 #define IDENTITY_RELPATH_CAPACITY 512U
 #define REVIEWED_MUSL_LIBC_SHA256 "4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9"
 #define MUSL_RUNTIME_VERSION_SOURCE "musl-reviewed-libc-sha256-pinned-version-marker"
+#define BIONIC_RUNTIME_VERSION_SOURCE "bionic-semantic-version-not-claimed"
+#define BIONIC_RUNTIME_FINGERPRINT_KIND "mapped-libc-and-loader-sha256"
 
 typedef struct {
     char path[IDENTITY_PATH_CAPACITY];
@@ -358,7 +363,7 @@ static int find_mapping_by_stat(const uint8_t *maps, size_t maps_size, const str
     return 1;
 }
 
-static int find_glibc_libc_mapping(const uint8_t *maps, size_t maps_size, mapped_file *result)
+static int find_libc_mapping(const uint8_t *maps, size_t maps_size, const char *expected_name, mapped_file *result)
 {
     size_t offset = 0U;
     char line[MAX_MAP_LINE_BYTES];
@@ -373,7 +378,7 @@ static int find_glibc_libc_mapping(const uint8_t *maps, size_t maps_size, mapped
         memcpy(line, maps + offset, length);
         line[length] = '\0';
         if (!parse_map_line(line, &candidate)) return 0;
-        if (candidate.present && strcmp(base_name(candidate.path), "libc.so.6") == 0) {
+        if (candidate.present && strcmp(base_name(candidate.path), expected_name) == 0) {
             if (!add_unique_mapping(&found, &candidate)) return 0;
         }
         offset = end < maps_size ? end + 1U : end;
@@ -1015,64 +1020,148 @@ static int write_identity_json(
 {
     char json[MAX_IDENTITY_JSON_BYTES];
     int length;
+    long runtime_page_size = -1L;
+    char kernel_release[128];
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    struct utsname runtime_uname;
+#endif
     if (directory_fd < 0 || relative_directory == NULL || role == NULL || image_sha256 == NULL
         || runtime == NULL || version == NULL || version_source == NULL
         || interpreter_declared_path == NULL || interpreter_resolved_path == NULL
         || maps_relative_path == NULL || maps_sha256 == NULL || total_bytes == NULL
         || helper == NULL || libc == NULL || loader == NULL
         || identity_bytes_out == NULL || identity_size_out == NULL) return 0;
-    length = snprintf(
-        json,
-        sizeof(json),
-        "{\n"
-        "  \"schemaVersion\": 1,\n"
-        "  \"runtime\": \"%s\",\n"
-        "  \"architecture\": \"aarch64\",\n"
-        "  \"role\": \"%s\",\n"
-        "  \"processId\": %ld,\n"
-        "  \"imageSha256\": \"%s\",\n"
-        "  \"runtimeVersion\": \"%s\",\n"
-        "  \"runtimeVersionSource\": \"%s\",\n"
-        "  \"interpreter\": {\"declaredPath\": \"%s\", \"resolvedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 "},\n"
-        "  \"maps\": {\"retainedPath\": \"%s\", \"sha256\": \"%s\"},\n"
-        "  \"helper\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"},\n"
-        "  \"libc\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"},\n"
-        "  \"loader\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"}\n"
-        "}\n",
-        runtime,
-        role,
-        (long)getpid(),
-        image_sha256,
-        version,
-        version_source,
-        interpreter_declared_path,
-        interpreter_resolved_path,
-        loader->device_major,
-        loader->device_minor,
-        loader->inode,
-        maps_relative_path,
-        maps_sha256,
-        helper->mapped_path,
-        helper->device_major,
-        helper->device_minor,
-        helper->inode,
-        helper->size,
-        helper->sha256,
-        helper->retained_path,
-        libc->mapped_path,
-        libc->device_major,
-        libc->device_minor,
-        libc->inode,
-        libc->size,
-        libc->sha256,
-        libc->retained_path,
-        loader->mapped_path,
-        loader->device_major,
-        loader->device_minor,
-        loader->inode,
-        loader->size,
-        loader->sha256,
-        loader->retained_path);
+    if (strcmp(runtime, "bionic") == 0) {
+#if defined(__BIONIC__) || defined(__ANDROID__)
+        size_t kernel_length;
+        if (uname(&runtime_uname) != 0) return 0;
+        kernel_length = strnlen(runtime_uname.release, sizeof(runtime_uname.release));
+        if (kernel_length == 0U || kernel_length >= sizeof(runtime_uname.release)
+            || kernel_length >= sizeof(kernel_release)) return 0;
+        for (size_t index = 0U; index < kernel_length; ++index) {
+            unsigned char character = (unsigned char)runtime_uname.release[index];
+            if (!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
+                  || (character >= '0' && character <= '9') || character == '.' || character == '-'
+                  || character == '_' || character == '+')) return 0;
+        }
+        runtime_page_size = sysconf(_SC_PAGESIZE);
+        if (runtime_page_size != 4096L && runtime_page_size != 16384L && runtime_page_size != 65536L) return 0;
+        memcpy(kernel_release, runtime_uname.release, kernel_length);
+        kernel_release[kernel_length] = '\0';
+#else
+        return 0;
+#endif
+        length = snprintf(
+            json,
+            sizeof(json),
+            "{\n"
+            "  \"schemaVersion\": 2,\n"
+            "  \"runtime\": \"bionic\",\n"
+            "  \"architecture\": \"aarch64\",\n"
+            "  \"role\": \"%s\",\n"
+            "  \"processId\": %ld,\n"
+            "  \"imageSha256\": \"%s\",\n"
+            "  \"runtimeVersion\": null,\n"
+            "  \"runtimeVersionSource\": \"%s\",\n"
+            "  \"runtimeFingerprint\": {\"kind\": \"%s\", \"libcSha256\": \"%s\", \"loaderSha256\": \"%s\"},\n"
+            "  \"runtimeEnvironment\": {\"kernelRelease\": \"%s\", \"pageSize\": %ld},\n"
+            "  \"interpreter\": {\"declaredPath\": \"%s\", \"resolvedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 "},\n"
+            "  \"maps\": {\"retainedPath\": \"%s\", \"sha256\": \"%s\"},\n"
+            "  \"helper\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"},\n"
+            "  \"libc\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"},\n"
+            "  \"loader\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"}\n"
+            "}\n",
+            role,
+            (long)getpid(),
+            image_sha256,
+            BIONIC_RUNTIME_VERSION_SOURCE,
+            BIONIC_RUNTIME_FINGERPRINT_KIND,
+            libc->sha256,
+            loader->sha256,
+            kernel_release,
+            runtime_page_size,
+            interpreter_declared_path,
+            interpreter_resolved_path,
+            loader->device_major,
+            loader->device_minor,
+            loader->inode,
+            maps_relative_path,
+            maps_sha256,
+            helper->mapped_path,
+            helper->device_major,
+            helper->device_minor,
+            helper->inode,
+            helper->size,
+            helper->sha256,
+            helper->retained_path,
+            libc->mapped_path,
+            libc->device_major,
+            libc->device_minor,
+            libc->inode,
+            libc->size,
+            libc->sha256,
+            libc->retained_path,
+            loader->mapped_path,
+            loader->device_major,
+            loader->device_minor,
+            loader->inode,
+            loader->size,
+            loader->sha256,
+            loader->retained_path);
+    } else {
+        length = snprintf(
+            json,
+            sizeof(json),
+            "{\n"
+            "  \"schemaVersion\": 1,\n"
+            "  \"runtime\": \"%s\",\n"
+            "  \"architecture\": \"aarch64\",\n"
+            "  \"role\": \"%s\",\n"
+            "  \"processId\": %ld,\n"
+            "  \"imageSha256\": \"%s\",\n"
+            "  \"runtimeVersion\": \"%s\",\n"
+            "  \"runtimeVersionSource\": \"%s\",\n"
+            "  \"interpreter\": {\"declaredPath\": \"%s\", \"resolvedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 "},\n"
+            "  \"maps\": {\"retainedPath\": \"%s\", \"sha256\": \"%s\"},\n"
+            "  \"helper\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"},\n"
+            "  \"libc\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"},\n"
+            "  \"loader\": {\"mappedPath\": \"%s\", \"deviceMajor\": %" PRIu32 ", \"deviceMinor\": %" PRIu32 ", \"inode\": %" PRIu64 ", \"size\": %" PRIu64 ", \"sha256\": \"%s\", \"retainedPath\": \"%s\"}\n"
+            "}\n",
+            runtime,
+            role,
+            (long)getpid(),
+            image_sha256,
+            version,
+            version_source,
+            interpreter_declared_path,
+            interpreter_resolved_path,
+            loader->device_major,
+            loader->device_minor,
+            loader->inode,
+            maps_relative_path,
+            maps_sha256,
+            helper->mapped_path,
+            helper->device_major,
+            helper->device_minor,
+            helper->inode,
+            helper->size,
+            helper->sha256,
+            helper->retained_path,
+            libc->mapped_path,
+            libc->device_major,
+            libc->device_minor,
+            libc->inode,
+            libc->size,
+            libc->sha256,
+            libc->retained_path,
+            loader->mapped_path,
+            loader->device_major,
+            loader->device_minor,
+            loader->inode,
+            loader->size,
+            loader->sha256,
+            loader->retained_path);
+    }
     if (length < 0 || (size_t)length >= sizeof(json)
         || (uint64_t)length > MAX_IDENTITY_TOTAL_BYTES - *total_bytes) return 0;
     {
@@ -1190,13 +1279,20 @@ int urp_native_process_identity_capture(
         libc_mapping = loader_mapping;
     } else if (strcmp(base_name(helper_elf.interpreter), "ld-linux-aarch64.so.1") == 0) {
         (void)snprintf(runtime, sizeof(runtime), "%s", "glibc");
-        if (!find_glibc_libc_mapping(maps, maps_size, &libc_mapping)
+        if (!find_libc_mapping(maps, maps_size, "libc.so.6", &libc_mapping)
+            || same_mapping(&libc_mapping, &loader_mapping)) goto cleanup;
+    } else if (strcmp(helper_elf.interpreter, "/system/bin/linker64") == 0
+               && strcmp(base_name(interpreter_resolved_path), "linker64") == 0) {
+        (void)snprintf(runtime, sizeof(runtime), "%s", "bionic");
+        if (!find_libc_mapping(maps, maps_size, "libc.so", &libc_mapping)
             || same_mapping(&libc_mapping, &loader_mapping)) goto cleanup;
     } else {
         goto cleanup;
     }
 #if defined(__GLIBC__)
     if (strcmp(runtime, "glibc") != 0) goto cleanup;
+#elif defined(__BIONIC__) || defined(__ANDROID__)
+    if (strcmp(runtime, "bionic") != 0) goto cleanup;
 #else
     if (strcmp(runtime, "musl") != 0) goto cleanup;
 #endif
@@ -1257,6 +1353,12 @@ int urp_native_process_identity_capture(
     if (strcmp(runtime, "musl") == 0) {
         if (!parse_reviewed_musl_version(libc_bytes, libc_size, libc_capture.sha256, version)) goto cleanup;
         (void)snprintf(version_source, sizeof(version_source), "%s", MUSL_RUNTIME_VERSION_SOURCE);
+    } else if (strcmp(runtime, "bionic") == 0) {
+        if (strcmp(helper_elf.interpreter, "/system/bin/linker64") != 0
+            || strcmp(base_name(libc_mapping.path), "libc.so") != 0
+            || strcmp(base_name(loader_mapping.path), "linker64") != 0) goto cleanup;
+        version[0] = '\0';
+        (void)snprintf(version_source, sizeof(version_source), "%s", BIONIC_RUNTIME_VERSION_SOURCE);
     } else {
         if (!parse_version_marker(libc_bytes, libc_size, "release version ", 0, version)) goto cleanup;
 #if defined(__GLIBC__)

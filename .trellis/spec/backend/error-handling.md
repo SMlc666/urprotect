@@ -72,6 +72,17 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
 - Catch only expected I/O, argument, and codec exceptions at boundaries. Do not
   catch all exceptions and continue with a partial model. The CLI top level
   maps an unexpected exception to `Internal` and includes a correlation id.
+- Bionic evidence-only native-build statuses are a runner contract, not managed
+  CLI exit codes: preserve each native build's command/stdout/stderr sidecars,
+  then parse its status with the bounded no-follow parser and allow continuation
+  only for canonical zero. Valid nonzero status is retained and propagated;
+  missing or malformed status fails before downstream inspection or identity
+  publication. Per-handoff argv/status/stdout/stderr sidecars likewise precede
+  success-record parsing. The capture helper still lacks a per-process timeout
+  and stdout/stderr byte cap; track those as a non-blocking P3 follow-up, not an
+  existing guarantee. See the single Bionic scenario in
+  [`runtime-compatibility.md`](runtime-compatibility.md#scenario-native-bionic-indirect-control-evidence)
+  for the exact schema, roots, and error table.
 
 ## CLI Contract
 

@@ -265,6 +265,33 @@ run_shell -c '
     CC=clang self-test > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
+  build_dir=/artifacts/host-context/indirect-control-build
+  mkdir -p "$build_dir"
+  printf "%s\\n" \
+    "cwd=/workspace/native/urprotect-runtime" \
+    "runtime=bionic" \
+    "argv=make -C /workspace/native/urprotect-runtime SHELL=$PREFIX/bin/sh BUILD_DIR=/artifacts/host-context/indirect-control-build CC=clang LD=ld.lld AS=/workspace/scripts/termux-aarch64-as.sh HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ INDIRECT_CONTROL_FIXTURE_LDFLAGS=--pack-dyn-relocs=none jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture shared-jump-table-fixture host-context-image-handoff" \
+    > "$build_dir/native-build.command.txt"
+  set +e
+  make -C /workspace/native/urprotect-runtime \
+    SHELL="${PREFIX}/bin/sh" \
+    BUILD_DIR="$build_dir" \
+    CC=clang LD=ld.lld AS=/workspace/scripts/termux-aarch64-as.sh \
+    HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ \
+    INDIRECT_CONTROL_FIXTURE_LDFLAGS=--pack-dyn-relocs=none \
+    jump-table-fixture jump-table-index-clobber-fixture \
+    external-jump-table-fixture shared-jump-table-fixture host-context-image-handoff \
+    > "$build_dir/native-build.stdout" 2> "$build_dir/native-build.stderr"
+  build_status=$?
+  set -e
+  printf "%s\\n" "$build_status" > "$build_dir/native-build.status"
+  if test "$build_status" -ne 0; then
+    cat "$build_dir/native-build.stderr" >&2
+    exit "$build_status"
+  fi
+  for output in host-context-jump-table-fixture.so host-context-jump-table-index-clobber-fixture.so host-context-external-jump-table-fixture.so host-context-shared-jump-table-fixture.so host-context-image-handoff; do
+    test -s "$build_dir/$output"
+  done
 ' -- "${compiler_package_specs[@]}"
 
 # The container's apt sandbox may leave its incomplete partial-download
@@ -438,10 +465,35 @@ fi
 
 container_page_size="$(sed -n 's/^container_page_size=//p' "${case_root}/container-facts.txt")"
 container_kernel="$(sed -n 's/^container_kernel=//p' "${case_root}/container-facts.txt")"
-if ! [[ "${container_page_size}" =~ ^[0-9]+$ ]] || [[ -z "${container_kernel}" ]]; then
-  echo "container kernel and page-size facts were not recorded" >&2
+if ! [[ "${host_page_size}" =~ ^(4096|16384|65536)$ && "${container_page_size}" =~ ^(4096|16384|65536)$ ]]; then
+  echo "Bionic host/container page sizes are not exact supported decimal tokens" >&2
   exit 1
 fi
+if [[ ! "${host_kernel}" =~ ^[A-Za-z0-9._+-]{1,128}$ || ! "${container_kernel}" =~ ^[A-Za-z0-9._+-]{1,128}$ ]]; then
+  echo "Bionic host/container kernel releases are not bounded release tokens" >&2
+  exit 1
+fi
+if [[ "${host_kernel}" != "${container_kernel}" || "${host_page_size}" != "${container_page_size}" ]]; then
+  echo "Bionic host/container kernel or page-size observations disagree for the native same-kernel lane" >&2
+  exit 1
+fi
+bionic_build_root="${case_root}/host-context/indirect-control-build"
+for output in host-context-jump-table-fixture.so host-context-jump-table-index-clobber-fixture.so host-context-external-jump-table-fixture.so host-context-shared-jump-table-fixture.so host-context-image-handoff; do
+  [[ -s "${bionic_build_root}/${output}" ]] || { echo "Bionic indirect-control build output is missing: ${output}" >&2; exit 1; }
+done
+readelf -hW -lW -dW "${bionic_build_root}/host-context-image-handoff" > "${bionic_build_root}/host-context-image-handoff.readelf.txt"
+if ! grep -Fq 'Requesting program interpreter: /system/bin/linker64' "${bionic_build_root}/host-context-image-handoff.readelf.txt"; then
+  echo "Bionic HostContext helper did not retain the exact /system/bin/linker64 interpreter" >&2
+  exit 1
+fi
+for fixture in host-context-jump-table-fixture.so host-context-jump-table-index-clobber-fixture.so host-context-external-jump-table-fixture.so host-context-shared-jump-table-fixture.so; do
+  readelf -hW -lW -dW "${bionic_build_root}/${fixture}" > "${bionic_build_root}/${fixture}.readelf.txt"
+  grep -Fq 'AArch64' "${bionic_build_root}/${fixture}.readelf.txt" || { echo "Bionic fixture is not AArch64: ${fixture}" >&2; exit 1; }
+  if grep -Eq '\(RELR\)|DT_RELR' "${bionic_build_root}/${fixture}.readelf.txt"; then
+    echo "Bionic fixture unexpectedly contains RELR metadata: ${fixture}" >&2
+    exit 1
+  fi
+done
 printf '%s\n' \
   "image=${image}" \
   "image_arch=${image_arch}" \
@@ -587,5 +639,37 @@ document = {
 }
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")
 PY
+
+if [[ "${BIONIC_INDIRECT_CONTROL_E2E:-false}" == "true" ]]; then
+  evidence_tier="${BIONIC_EVIDENCE_TIER:-${RUNTIME_MATRIX_TIER:-pr}}"
+  case "$evidence_tier" in pr|nightly|release) ;; *) echo "invalid Bionic indirect-control evidence tier: $evidence_tier" >&2; exit 2 ;; esac
+  evidence_run_id="${GITHUB_RUN_ID:-local}"
+  [[ "$evidence_run_id" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { echo "invalid Bionic CI run identifier" >&2; exit 2; }
+  evidence_parent="${repo_root}/.artifacts/indirect-control/bionic-${evidence_tier}-${evidence_run_id}-$$"
+  [[ ! -e "$evidence_parent" && ! -L "$evidence_parent" ]] || { echo "refusing to overwrite Bionic indirect-control evidence root: $evidence_parent" >&2; exit 2; }
+  mkdir -p "${repo_root}/.artifacts/indirect-control"
+  printf '%s\n' \
+    "ordinary=${evidence_parent}/ordinary" \
+    "shared=${evidence_parent}/shared" \
+    > "${case_root}/indirect-control-roots.txt"
+  export BIONIC_TERMUX_IMAGE="$image"
+  export BIONIC_INDIRECT_CONTROL_BUILD_ROOT="${case_root}/host-context/indirect-control-build"
+  export BIONIC_RUNTIME_RESULT="${case_root}/result.json"
+  export BIONIC_CONTAINER_RUNTIME="$container_runtime"
+  ordinary_unit="runtime.indirect-control.jump-table.bionic.host-context-entry"
+  shared_unit="runtime.indirect-control.shared-table.bionic.host-context-entry"
+  "$repo_root/scripts/run-indirect-control-e2e.sh" \
+    --tier "$evidence_tier" --runtime bionic --unit "$ordinary_unit" \
+    --artifact-root "${evidence_parent}/ordinary"
+  python3 "$repo_root/scripts/check-indirect-control-evidence.py" \
+    "${evidence_parent}/ordinary" --tier "$evidence_tier" --runtime bionic \
+    --require-runtime-identity --unit "$ordinary_unit"
+  "$repo_root/scripts/run-shared-jump-table-copy-e2e.sh" \
+    --tier "$evidence_tier" --runtime bionic --unit "$shared_unit" \
+    --artifact-root "${evidence_parent}/shared"
+  python3 "$repo_root/scripts/check-shared-jump-table-evidence.py" \
+    "${evidence_parent}/shared/${shared_unit}" --runtime bionic \
+    --unit "$shared_unit" --selected-function "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selectedFunction"])' "${evidence_parent}/shared/${shared_unit}/shared-table-behavior.json")"
+fi
 
 echo "PASS ${case_id}: SHA-256-locked Termux compiler packages, bionic linker, and native ARM64 execution validated"

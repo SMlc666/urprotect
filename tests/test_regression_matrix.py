@@ -136,6 +136,61 @@ class RegressionMatrixTests(unittest.TestCase):
         self.assertIn("--require-runtime-identity", shared_step)
         self.assertIn("check-shared-jump-table-evidence.py", shared_step)
 
+    def test_bionic_ordinary_and_shared_jump_table_evidence_are_exactly_registered(self) -> None:
+        cases = {
+            case["id"]: case
+            for case in self.data["cases"]
+            if case["id"] in {
+                "fixture.indirect-control-jump-table-bionic",
+                "fixture.indirect-control-shared-jump-table-bionic",
+            }
+        }
+        ordinary_id = "fixture.indirect-control-jump-table-bionic"
+        shared_id = "fixture.indirect-control-shared-jump-table-bionic"
+        self.assertEqual({ordinary_id, shared_id}, cases.keys())
+        ordinary = cases[ordinary_id]
+        shared = cases[shared_id]
+        for case in (ordinary, shared):
+            self.assertEqual("bionic", case["class"])
+            self.assertEqual("native-arm64-container", case["platform"])
+            self.assertEqual(["pr", "nightly", "release"], case["tiers"])
+            self.assertEqual(1800, case["budgetSeconds"])
+            self.assertEqual(4096, case["memoryMb"])
+            self.assertTrue(case["required"])
+            self.assertEqual("pass", case["expected"])
+            self.assertIn("BIONIC_INDIRECT_CONTROL_E2E=true", case["command"])
+            self.assertIn("scripts/run-bionic-fixture.sh", case["command"])
+            witnesses = "\n".join(case["artifacts"])
+            for diagnostic in (
+                "native-build.command.txt",
+                "native-build.stdout",
+                "native-build.stderr",
+                "native-build.status",
+                "host-context-image-handoff/native-build.command.txt",
+                "host-context-image-handoff/native-build.stdout",
+                "host-context-image-handoff/native-build.stderr",
+                "host-context-image-handoff/native-build.status",
+            ):
+                self.assertIn(diagnostic, witnesses)
+        expected_ordinary_command = """root=\".artifacts/bionic/indirect-control-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$\"; BIONIC_PROTECTION_E2E=true BIONIC_INDIRECT_CONTROL_E2E=true BIONIC_EVIDENCE_TIER=pr BIONIC_ARTIFACT_ROOT=\"$root\" scripts/run-bionic-fixture.sh && case_root=\"$root/c-termux-bionic-pie\" && ordinary_root=\"$(sed -n 's/^ordinary=//p' \"$case_root/indirect-control-roots.txt\")\" && python3 scripts/check-indirect-control-evidence.py \"$ordinary_root\" --tier pr --runtime bionic --require-runtime-identity --unit runtime.indirect-control.jump-table.bionic.host-context-entry && python3 scripts/check-rehydration-evidence.py \"$ordinary_root/runtime.indirect-control.jump-table.bionic.host-context-entry\" --tier pr --runtime bionic --require-runtime-identity --unit runtime.indirect-control.jump-table.bionic.host-context-entry"""
+        self.assertEqual(expected_ordinary_command, ordinary["command"])
+        ordinary_command = ordinary["command"]
+        self.assertIn("check-indirect-control-evidence.py", ordinary_command)
+        self.assertIn("check-rehydration-evidence.py", ordinary_command)
+        self.assertIn("runtime.indirect-control.jump-table.bionic.host-context-entry", ordinary_command)
+        ordinary_witnesses = "\n".join(ordinary["artifacts"])
+        self.assertIn("/ordinary/runtime.indirect-control.jump-table.bionic.host-context-entry/SHA256SUMS", ordinary_witnesses)
+        self.assertIn("/ordinary/runtime.indirect-control.jump-table.bionic.host-context-entry/handoff.process-status", ordinary_witnesses)
+        expected_shared_command = """root=\".artifacts/bionic/indirect-control-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$\"; BIONIC_PROTECTION_E2E=true BIONIC_INDIRECT_CONTROL_E2E=true BIONIC_EVIDENCE_TIER=pr BIONIC_ARTIFACT_ROOT=\"$root\" scripts/run-bionic-fixture.sh && case_root=\"$root/c-termux-bionic-pie\" && shared_root=\"$(sed -n 's/^shared=//p' \"$case_root/indirect-control-roots.txt\")\" && shared_unit=runtime.indirect-control.shared-table.bionic.host-context-entry && python3 scripts/check-shared-jump-table-evidence.py \"$shared_root/$shared_unit\" --runtime bionic --unit \"$shared_unit\" --selected-function \"$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"selectedFunction\"])' \"$shared_root/$shared_unit/shared-table-behavior.json\")\" && python3 scripts/check-rehydration-evidence.py \"$shared_root/$shared_unit\" --tier pr --runtime bionic --require-runtime-identity --unit \"$shared_unit\""""
+        self.assertEqual(expected_shared_command, shared["command"])
+        shared_command = shared["command"]
+        self.assertIn("check-shared-jump-table-evidence.py", shared_command)
+        self.assertIn("check-rehydration-evidence.py", shared_command)
+        self.assertIn("runtime.indirect-control.shared-table.bionic.host-context-entry", shared_command)
+        shared_witnesses = "\n".join(shared["artifacts"])
+        self.assertIn("/shared/runtime.indirect-control.shared-table.bionic.host-context-entry/SHA256SUMS", shared_witnesses)
+        self.assertIn("shared-table-behavior.json", shared_witnesses)
+
     def test_duplicate_case_id_is_rejected(self) -> None:
         data = copy.deepcopy(self.data)
         data["cases"].append(copy.deepcopy(data["cases"][0]))

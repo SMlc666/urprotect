@@ -359,12 +359,12 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
             self.assertIn("unterminated or overlong symbol name", str(failure.exception))
 
     @staticmethod
-    def _synthetic_runtime_handoffs() -> list[tuple[str, dict[str, Any], str, str]]:
+    def _synthetic_runtime_handoffs(runtime: str = "musl") -> list[tuple[str, dict[str, Any], str, str]]:
         source_sha256 = "a" * 64
         target_sha256 = "b" * 64
         common_identity = {
-            "runtime": "musl",
-            "runtimeVersion": "1.2.3",
+            "runtime": runtime,
+            "runtimeVersion": "1.2.3" if runtime == "musl" else None,
             "libcSha256": "c" * 64,
             "loaderSha256": "d" * 64,
         }
@@ -393,6 +393,21 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
             [call[0] for call in identity_helper.calls],
         )
         self.assertTrue(all(call[1] == "musl" and call[4] for call in identity_helper.calls))
+
+    def test_all_four_valid_bionic_handoffs_share_the_checked_runtime_identity(self) -> None:
+        checker = self._load_checker_module()
+        handoffs = self._synthetic_runtime_handoffs("bionic")
+        identity_helper = _FakeNativeRuntimeIdentity()
+
+        checker.validate_runtime_identity_agreement(
+            self.root, identity_helper, handoffs, expected_runtime="bionic"
+        )
+
+        self.assertEqual(
+            ["selected source", "selected transformed", "observer source", "observer transformed"],
+            [call[0] for call in identity_helper.calls],
+        )
+        self.assertTrue(all(call[1] == "bionic" and call[4] for call in identity_helper.calls))
 
     def test_musl_identity_is_required_individually_for_all_four_handoffs(self) -> None:
         checker = self._load_checker_module()

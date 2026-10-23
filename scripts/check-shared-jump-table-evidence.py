@@ -550,7 +550,7 @@ def main() -> None:
     parser.add_argument("artifact_root", type=Path)
     parser.add_argument("--unit", required=True)
     parser.add_argument("--selected-function", required=True)
-    parser.add_argument("--runtime", choices=("glibc", "musl"), default="glibc")
+    parser.add_argument("--runtime", choices=("glibc", "musl", "bionic"), default="glibc")
     args = parser.parse_args()
     candidate_root = Path(os.path.abspath(args.artifact_root))
     try:
@@ -917,11 +917,11 @@ def main() -> None:
     check_handoff(observer_target, "urp_observer", EXPECTED_OBSERVER_STATUS, native_sha256)
     behavior = read_json(root, "shared-table-behavior.json")
     behavior_runtime = behavior.get("runtime")
-    if (args.runtime == "musl" and behavior_runtime != "musl") or (
+    if (args.runtime in {"musl", "bionic"} and behavior_runtime != args.runtime) or (
         args.runtime == "glibc" and behavior_runtime not in (None, "glibc")
     ):
         fail("shared-table behavior runtime discriminator does not match the requested runtime")
-    if args.runtime == "musl":
+    if args.runtime in {"musl", "bionic"}:
         try:
             identity_helper = _load_native_runtime_identity_helper()
         except (ImportError, OSError) as error:
@@ -935,7 +935,7 @@ def main() -> None:
                 ("observer source", observer_source, "source", source_sha256),
                 ("observer transformed", observer_target, "target", native_sha256),
             ],
-            expected_runtime="musl",
+            expected_runtime=args.runtime,
         )
     process_statuses: dict[str, int] = {}
     process_status_digests: dict[str, str] = {}

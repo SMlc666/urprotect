@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$tier" in pr|nightly|release) ;; *) echo 'invalid shared jump-table tier' >&2; exit 2 ;; esac
-case "$runtime" in glibc|musl) ;; *) echo 'invalid shared jump-table runtime' >&2; exit 2 ;; esac
+case "$runtime" in glibc|musl|bionic) ;; *) echo 'invalid shared jump-table runtime' >&2; exit 2 ;; esac
 [[ -n "$unit" ]] || unit="runtime.indirect-control.shared-table.${runtime}.host-context-entry"
 [[ "$unit" == "runtime.indirect-control.shared-table.${runtime}.host-context-entry" ]] || { echo 'shared jump-table unit does not match the selected runtime' >&2; exit 2; }
 case "$(uname -m)" in aarch64|arm64) ;; *) echo 'environment-unavailable: shared jump-table native evidence requires AArch64' >&2; exit 2 ;; esac
@@ -34,9 +34,15 @@ if [[ "$runtime" == musl ]]; then
   runtime_cc="$(command -v musl-gcc)"
   native_build_dir_relative=build/musl-shared-jump-table
   make_args+=("CC=$runtime_cc" "LD=ld" "HOST_ADAPTER_CFLAGS=-mno-outline-atomics")
+elif [[ "$runtime" == bionic ]]; then
+  native_build_dir_relative=build/bionic-indirect-control
+  [[ -n "${BIONIC_INDIRECT_CONTROL_BUILD_ROOT:-}" ]] || { echo "environment-unavailable: pinned Bionic fixture build root is required" >&2; exit 2; }
+  native_build_dir="$(realpath -e -- "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" 2>/dev/null || true)"
+  [[ -n "$native_build_dir" && -d "$native_build_dir" && ! -L "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" ]] || { echo "Bionic fixture build root is not a real directory" >&2; exit 2; }
+else
+  native_build_dir="$native_root/$native_build_dir_relative"
 fi
-make_args+=("BUILD_DIR=$native_build_dir_relative")
-native_build_dir="$native_root/$native_build_dir_relative"
+if [[ "$runtime" != bionic ]]; then make_args+=("BUILD_DIR=$native_build_dir_relative"); native_build_dir="$native_root/$native_build_dir_relative"; fi
 artifact_base="$(realpath -m -- "$repo_root/.artifacts/indirect-control")"
 if [[ -z "$root_arg" ]]; then
   root_arg="$artifact_base/shared-copy-${tier}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -47,21 +53,37 @@ root="$(realpath -m -- "$root_arg")"
 mkdir -p "$root"
 positive="$root/$unit"
 mkdir -p "$positive"
-
-native_build_command=(make -C "$native_root" "${make_args[@]}" shared-jump-table-fixture host-context-image-handoff)
-{
-  printf 'cwd=%s\n' "$native_root"
-  printf 'runtime=%s\n' "$runtime"
-  printf 'argv='
-  printf '%q ' "${native_build_command[@]}"
-  printf '\n'
-} >"$root/native-build.command.txt"
-native_build_status=0
-"${native_build_command[@]}" >"$root/native-build.stdout" 2>"$root/native-build.stderr" || native_build_status=$?
-printf '%s\n' "$native_build_status" >"$root/native-build.status"
-if [[ "$native_build_status" -ne 0 ]]; then
+if [[ "$runtime" == bionic ]]; then
+  for diagnostic in native-build.command.txt native-build.stdout native-build.stderr; do
+    [[ -f "$native_build_dir/$diagnostic" && ! -L "$native_build_dir/$diagnostic" ]] || { echo "Bionic native build is missing regular non-symlink diagnostic $diagnostic" >&2; exit 1; }
+    cp -- "$native_build_dir/$diagnostic" "$root/$diagnostic"
+  done
+  if ! native_build_status="$(python3 "$repo_root/scripts/parse-native-build-status.py" "$native_build_dir/native-build.status")"; then
+    echo "refusing Bionic shared-fixture continuation without an exact canonical native-build status" >&2
+    exit 1
+  fi
+  printf '%s\n' "$native_build_status" >"$root/native-build.status" || exit 1
+else
+  native_build_command=(make -C "$native_root" "${make_args[@]}" shared-jump-table-fixture host-context-image-handoff)
+  {
+    printf 'cwd=%s\n' "$native_root"
+    printf 'runtime=%s\n' "$runtime"
+    printf 'argv='
+    printf '%q ' "${native_build_command[@]}"
+    printf '\n'
+  } >"$root/native-build.command.txt"
+  native_build_status=0
+  "${native_build_command[@]}" >"$root/native-build.stdout" 2>"$root/native-build.stderr" || native_build_status=$?
+  printf '%s\n' "$native_build_status" >"$root/native-build.status"
+fi
+if [[ "$native_build_status" != "0" ]]; then
   printf 'shared jump-table native fixture/helper build failed with status %s\n' "$native_build_status" >&2
   exit "$native_build_status"
+fi
+if [[ "$runtime" == bionic ]]; then
+  [[ -n "${BIONIC_RUNTIME_RESULT:-}" && -f "$BIONIC_RUNTIME_RESULT" && ! -L "$BIONIC_RUNTIME_RESULT" ]] || { echo "Bionic runtime provenance result is missing" >&2; exit 2; }
+  cp -- "$BIONIC_RUNTIME_RESULT" "$positive/bionic-runtime-environment.json" || exit 1
+  chmod a+rwx "$positive" || exit 1
 fi
 source_file="$native_build_dir/host-context-shared-jump-table-fixture.so"
 function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
@@ -73,26 +95,46 @@ PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-r
   --native-build-dir "$native_build_dir_relative" \
   >"$root/rehydration.stdout" 2>"$root/rehydration.stderr"
 
-helper="$native_build_dir/host-context-image-handoff"
+if [[ "$runtime" == bionic ]]; then
+  helper="$repo_root/scripts/run-bionic-host-context-handoff.sh"
+else
+  helper="$native_build_dir/host-context-image-handoff"
+fi
 observer_source_identity_args=()
 observer_transformed_identity_args=()
-if [[ "$runtime" == musl ]]; then
+if [[ "$runtime" == musl || "$runtime" == bionic ]]; then
   mkdir -p "$positive/runtime-identity/observer-source" "$positive/runtime-identity/observer-transformed"
+  if [[ "$runtime" == bionic ]]; then chmod a+rwx "$positive" "$positive/runtime-identity" "$positive/runtime-identity/observer-source" "$positive/runtime-identity/observer-transformed"; fi
   observer_source_identity_args=("$positive/runtime-identity/observer-source" runtime-identity/observer-source source)
   observer_transformed_identity_args=("$positive/runtime-identity/observer-transformed" runtime-identity/observer-transformed target)
 fi
-set +e
-"$helper" "$positive/source-image.bin" urp_observer "$positive/observer-source-handoff.json" \
-  "${observer_source_identity_args[@]}" \
-  >"$positive/observer-source.stdout" 2>"$positive/observer-source.stderr"
-observer_source_status=$?
-"$helper" "$positive/native-image.bin" urp_observer "$positive/observer-transformed-handoff.json" \
-  "${observer_transformed_identity_args[@]}" \
-  >"$positive/observer-transformed.stdout" 2>"$positive/observer-transformed.stderr"
-observer_transformed_status=$?
-set -e
-printf '%s\n' "$observer_source_status" >"$positive/observer-source.process-status"
-printf '%s\n' "$observer_transformed_status" >"$positive/observer-transformed.process-status"
+if [[ "$runtime" == bionic ]]; then
+  python3 "$repo_root/scripts/capture-bionic-handoff.py" \
+    --root "$positive" --label observer-source \
+    --record "$positive/observer-source-handoff.json" --expected-status 91 -- \
+    "$helper" "$BIONIC_TERMUX_IMAGE" "$positive/source-image.bin" urp_observer \
+    "$positive/observer-source-handoff.json" "${observer_source_identity_args[@]}"
+  observer_source_status="$(cat "$positive/observer-source.process-status")"
+  python3 "$repo_root/scripts/capture-bionic-handoff.py" \
+    --root "$positive" --label observer-transformed \
+    --record "$positive/observer-transformed-handoff.json" --expected-status 91 -- \
+    "$helper" "$BIONIC_TERMUX_IMAGE" "$positive/native-image.bin" urp_observer \
+    "$positive/observer-transformed-handoff.json" "${observer_transformed_identity_args[@]}"
+  observer_transformed_status="$(cat "$positive/observer-transformed.process-status")"
+else
+  set +e
+  "$helper" "$positive/source-image.bin" urp_observer "$positive/observer-source-handoff.json" \
+    "${observer_source_identity_args[@]}" \
+    >"$positive/observer-source.stdout" 2>"$positive/observer-source.stderr"
+  observer_source_status=$?
+  "$helper" "$positive/native-image.bin" urp_observer "$positive/observer-transformed-handoff.json" \
+    "${observer_transformed_identity_args[@]}" \
+    >"$positive/observer-transformed.stdout" 2>"$positive/observer-transformed.stderr"
+  observer_transformed_status=$?
+  set -e
+  printf '%s\n' "$observer_source_status" >"$positive/observer-source.process-status"
+  printf '%s\n' "$observer_transformed_status" >"$positive/observer-transformed.process-status"
+fi
 [[ "$observer_source_status" -eq 91 && "$observer_transformed_status" -eq 91 ]] || {
   echo "unselected observer handoff differed from expected status 91 (source=$observer_source_status transformed=$observer_transformed_status)" >&2
   exit 1
@@ -168,7 +210,7 @@ PY
 ) >"$positive/SHA256SUMS"
 rehydration_checker_args=(--tier "$tier" --runtime "$runtime" --unit "$unit")
 shared_checker_args=(--unit "$unit" --selected-function "$function_id" --runtime "$runtime")
-if [[ "$runtime" == musl ]]; then rehydration_checker_args+=(--require-runtime-identity); fi
+if [[ "$runtime" == musl || "$runtime" == bionic ]]; then rehydration_checker_args+=(--require-runtime-identity); fi
 python3 "$repo_root/scripts/check-rehydration-evidence.py" "$positive" \
   "${rehydration_checker_args[@]}"
 python3 "$repo_root/scripts/check-shared-jump-table-evidence.py" "$positive" \

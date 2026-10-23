@@ -2028,8 +2028,9 @@ checked. This environment has no `musl-gcc`, Docker, or Podman, so no local
 ordinary-musl execution is claimed; the pinned hosted musl producer/checker gate
 remains pending. Bionic, shared-musl, provider, and other indirect-control rows
 are separate evidence slices (see [shared-table musl
-evidence](#scenario-native-shared-table-musl-evidence)); this ordinary-row
-implementation does not cover or promote them.
+evidence](#scenario-native-shared-table-musl-evidence) and [native Bionic
+indirect-control evidence](#scenario-native-bionic-indirect-control-evidence));
+this ordinary-row implementation does not cover or promote them.
 
 ### 2. Signatures
 
@@ -2247,7 +2248,9 @@ selects `--runtime musl`. It proves selected-consumer clone dispatch and
 unselected-observer preservation for one native AArch64/musl fixture only. It
 does not change ELF resolution, layout, Protected Image, Native Image, HostContext
 ABI, or product CLI behavior; it does not promote shared-table support on musl,
-other table encodings, Bionic, or general indirect control. The row remains
+other table encodings, Bionic, or general indirect control. The separate
+[Bionic evidence slice](#scenario-native-bionic-indirect-control-evidence) is
+also non-promoting. The row remains
 `unknown` / non-promoted. A passing hosted producer/checker gate permits retaining
 this scoped observation only; promotion still requires explicit review of the
 task-wide three-runtime acceptance criteria and remaining required gates.
@@ -2385,4 +2388,251 @@ Correct: bind every measured handoff to its exact image and pinned native musl
          identity, compare the shared runtime identities while preserving each
          process/role/image binding, and pass the closed-root checker on the
          hosted AArch64/musl job before recording the scoped observation.
+```
+
+## Scenario: Native Bionic indirect-control evidence
+
+### 1. Scope / Trigger
+
+This single existing evidence-only scenario applies only to the locked native
+AArch64/Bionic lane and its ordinary signed-relative jump-table and shared-table
+clone fixtures. It measures the already managed-produced source and Native
+Images through the existing HostContext adapter inside the pinned Termux
+container. It adds no product behavior, HostContext/frame ABI, image format,
+ELF admission, provider behavior, runtime mode, or support claim. The ordinary
+and shared-table Bionic runtime rows remain `unknown` / non-promoted; even a
+successful hosted producer and exact-root checker retains only these scoped
+observations. Keep the contract here rather than creating a second Bionic
+runtime-compatibility scenario.
+
+### 2. Signatures
+
+```sh
+# The required native ARM64 job sets these only for the locked Bionic fixture.
+BIONIC_PROTECTION_E2E=true BIONIC_INDIRECT_CONTROL_E2E=true \
+BIONIC_EVIDENCE_TIER=pr BIONIC_ARTIFACT_ROOT=.artifacts/bionic/<run> \
+  scripts/run-bionic-fixture.sh
+
+scripts/run-indirect-control-e2e.sh --tier pr|nightly|release \
+  --runtime bionic \
+  --unit runtime.indirect-control.jump-table.bionic.host-context-entry \
+  --artifact-root ROOT/ordinary
+scripts/run-shared-jump-table-copy-e2e.sh --tier pr|nightly|release \
+  --runtime bionic \
+  --unit runtime.indirect-control.shared-table.bionic.host-context-entry \
+  --artifact-root ROOT/shared
+
+# The nested Bionic HostContext helper is run by the ordinary/shared producers.
+scripts/run-host-context-rehydration-e2e.sh --tier pr|nightly|release \
+  --runtime bionic --require-runtime-identity --unit UNIT \
+  --source SOURCE-ELF --function-id dynsym:INDEX --entry-status STATUS \
+  --native-build-dir BUILD-DIR
+
+# Positional domains are distinct: OCI reference, input ELF, symbol, record,
+# then the optional identity directory, identity-relative directory, and role.
+scripts/run-bionic-host-context-handoff.sh PINNED-OCI-IMAGE INPUT-ELF \
+  ENTRY-SYMBOL RECORD [IDENTITY-DIR IDENTITY-RELATIVE-DIR ROLE]
+python3 scripts/capture-bionic-handoff.py --root ROOT --label LABEL \
+  --record RECORD --expected-status STATUS -- COMMAND ...
+python3 scripts/parse-native-build-status.py NATIVE-BUILD-STATUS
+
+python3 scripts/check-rehydration-evidence.py ROOT \
+  --tier pr|nightly|release --runtime bionic --unit UNIT \
+  --require-runtime-identity
+python3 scripts/check-indirect-control-evidence.py ROOT \
+  --tier pr|nightly|release --runtime bionic --require-runtime-identity \
+  --unit runtime.indirect-control.jump-table.bionic.host-context-entry
+python3 scripts/check-shared-jump-table-evidence.py ROOT/UNIT \
+  --runtime bionic \
+  --unit runtime.indirect-control.shared-table.bionic.host-context-entry \
+  --selected-function dynsym:<urp_entry-index>
+```
+
+The regression inventory registers the two required Bionic rows as
+`fixture.indirect-control-jump-table-bionic` and
+`fixture.indirect-control-shared-jump-table-bionic` in `tests/regression-matrix.json`
+for PR, nightly, and release on `native-arm64-container`; their exact commands
+and required evidence are asserted by
+`tests.test_regression_matrix.RegressionMatrixTests.test_bionic_ordinary_and_shared_jump_table_evidence_are_exactly_registered`.
+
+### 3. Contracts
+
+- **Pinned producer facts.** `fixtures/manifest.json` case
+  `c-termux-bionic-pie` owns the OCI and compiler pins: image
+  `termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4`,
+  Termux source commit `7033c7639eb86107a4fdf8b72bd6388c07b1284a`, compiler
+  package `clang=21.1.8-3`, and the exact compiler/linker package closure and
+  repository facts. The producer requires a native AArch64 host and Linux/arm64
+  Docker server/container; it rejects Android/emulator/Waydroid and other
+  architectures and has no host or emulation fallback. The checked-in locks,
+  not a runtime label or a new guess, own these facts.
+- **Bridge argument and path domains.** In
+  `run-bionic-host-context-handoff.sh`, argument 1 is the exact OCI reference
+  and must equal the `BIONIC_TERMUX_IMAGE` digest pin; argument 2 is a separate
+  regular, non-symlink `INPUT-ELF`; argument 3 is a validated entry-symbol
+  token; argument 4 is a new record path directly under the evidence unit. The
+  optional identity arguments are constrained to that unit. The ELF must
+  resolve under either the evidence unit or the fixed Bionic build root and is
+  mapped to `/evidence/...` or read-only `/bionic-build/...`; all other path
+  domains reject. The bridge verifies the runtime's `linux/arm64` server and
+  exact image repo digest, then invokes the helper in the pinned image. OCI
+  image and ELF arguments are not interchangeable, and ambient host paths are
+  not passed as payload paths or serialized into product state.
+- **Build status publication gate.** The Bionic ordinary, shared, and nested
+  HostContext runner paths all retain the native build command, stdout, and
+  stderr sidecars before invoking the same
+  `scripts/parse-native-build-status.py`. The parser opens without following
+  symlinks or blocking on special files; requires a regular file of 2–4 bytes;
+  reads at most four bytes on one descriptor with an extra-byte probe; verifies
+  the pre/post device, inode, size, mtime, and ctime; and accepts only canonical
+  `0..255` decimal followed by exactly one LF (`0\n`, `1\n`, …, `255\n`). The
+  runner proceeds only when the parsed shell value is exactly the string `0`.
+  Missing, empty, truncated, noncanonical, over-range, replaced, or changing
+  status stops before `readelf`, downstream managed handoff, success-record
+  publication, or Bionic runtime-environment copy. A valid nonzero status is
+  retained and propagated unchanged; malformed status is a required-lane
+  failure, not success or a skip.
+- **Handoff sidecars precede record parsing.**
+  `capture-bionic-handoff.py` creates the exact argv record and separate
+  `<label>.process-status`, `<label>.stdout`, and `<label>.stderr` files before
+  it parses the native success record. It checks the expected process status
+  and then validates the bounded record's exact schema/status/image binding,
+  entry status, release evidence and loader/failure fields. A command failure or
+  malformed/missing success record leaves its actual captured sidecars and
+  cannot become positive evidence. These sidecars are separate from the
+  success record and are included in the registered closed evidence roots.
+- **Non-blocking P3 follow-up.** `capture-bionic-handoff.py` currently uses
+  `subprocess.run` with direct stdout/stderr file descriptors and has no
+  per-handoff timeout or output-byte cap. The outer 30-minute hosted job timeout
+  is not an output cap or a per-process bound. Track a follow-up to define
+  bounded stdout/stderr and duration, process-group termination semantics, and
+  preservation of the actual child status plus bounded partial diagnostics;
+  add boundary/timeout/status-propagation tests. This remains a scoped,
+  non-blocking P3 risk for the current documentation sync; no output or timeout
+  limit is claimed here.
+- **Identity wire boundary.** Bionic has a private native process-identity
+  carrier and identity-record schema v2; the existing glibc and musl identity
+  carrier/record bytes and schema v1 are unchanged. The separate
+  `bionic-runtime-environment.json` provenance envelope is schema v1. A Bionic
+  handoff records `runtimeVersion: null` with exact source marker
+  `bionic-semantic-version-not-claimed`, not an invented release string. It
+  fingerprints the live mapped `libc.so` and `/system/bin/linker64` bytes by
+  SHA-256 and retains process maps, mapped file/device/inode/size facts, and ELF
+  bytes. The independent checker derives those hashes and verifies exact helper
+  `PT_INTERP=/system/bin/linker64`, image/role binding, unique map ownership,
+  and retained ELF/map consistency. This is evidence consistency, not runtime
+  attestation or a Bionic release pin.
+- **Relational environment proof and limits.** The v1 environment envelope is
+  checked against the fixture's exact image digest, compiler package closure,
+  package-lock digest, Termux commit, direct linker path, native execution and
+  no-emulation facts. Host and container kernel observations must each be a
+  token matching `[A-Za-z0-9._+-]{1,128}` and exactly equal. Host and container
+  page sizes must each be exact JSON integers in `{4096, 16384, 65536}` and
+  equal; each per-handoff kernel/page observation must then equal the recorded
+  container values. These are bounded relationships among producer and
+  process observations on a same-kernel container lane, not cryptographic
+  proof of the host kernel or a generalized page-size guarantee. The checker
+  also requires bounded no-follow reads, exact-root closure, and the existing
+  half-open map/PT_LOAD ownership rules. Python helper imports remain explicit
+  file-relative and work with ambient `PYTHONPATH` unset.
+- **Measured handoffs and behavior.** The ordinary unit carries two distinct
+  source/Native Image handoffs and identities (source and target). The shared
+  unit carries four separately bound handoffs and identities: selected source,
+  selected transformed, observer source, and observer transformed. Every
+  process runs with the pinned `/system/bin/linker64`; each identity retains its
+  own role, image digest, process/maps facts, and record. The shared checker
+  requires those four individually validated identities to agree on the same
+  pinned Bionic runtime without collapsing their process or image bindings.
+  The ordinary row retains measured results/status/streams, source and exact
+  read-only table clone ranges, and malformed/index-clobber/bounds/external
+  negatives. The shared row retains selected clone behavior plus unchanged
+  unselected observer behavior. Both use existing independent ELF/layout
+  checkers; Bionic is only a runner selector, not a product mode.
+- **Registry and required hosted lane.** The two regression rows named in the
+  signatures are `required: true`, `expected: pass`, use the native ARM64
+  container, and require exact-root/checker, handoff, behavior, and build
+  diagnostic witnesses; each declares a 1800-second budget and 4096 MiB memory.
+  `bionic-native-arm64` runs the producer and independently reruns ordinary,
+  shared, and rehydration exact-root checkers, then uploads hidden evidence.
+  Those rows/commands are registered; this contract does not claim their hosted
+  execution has been observed. Local execution without the pinned container is
+  not a pass.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Pinned digest/package lock, native AArch64 Linux/arm64 engine, or live Bionic identity is unavailable | Required hosted lane fails; no substitute runtime and no positive Bionic root |
+| OCI reference, input ELF, record, or optional identity path escapes its declared bridge domain | Reject before container execution; do not remap through a host-path fallback |
+| Build status is missing, empty, non-regular, symlinked, changing, over-bound, noncanonical, or outside 0..255 | Preserve command/stdout/stderr; fail closed before `readelf`, managed handoff, identity copy, or successful evidence/checksum publication |
+| Canonical native build status is nonzero (for example `37\n`) | Retain exact build diagnostics and propagate the same status; do not continue to a handoff |
+| Canonical native build status is exactly `0\n` | The three runner paths may continue; no other byte spelling is accepted as zero |
+| Handoff exits with unexpected status or the success record is missing/malformed | Keep command/status/stdout/stderr sidecars; reject the handoff and do not claim success |
+| Handoff subprocess runs too long or produces excessive output | Current runner has no per-handoff timeout/output cap; outer CI timeout is not a bound. Track as non-blocking P3: add explicit duration/output limits, process-group semantics, and tests; do not claim such a cap exists |
+| Bionic interpreter, map owner, libc/loader digest, image/role binding, or retained ELF/map facts disagree | Reject identity; never infer from image tags or self-reported JSON alone |
+| Runtime version is a fabricated semantic string | Reject; the Bionic identity record's `runtimeVersion` must be exactly `null` |
+| Host/container kernel tokens or exact page-size integers disagree, or a per-process fact differs from the envelope | Reject the provenance root; do not widen the relational proof to an attestation claim |
+| Any shared handoff is missing, misbound, or disagrees with the pinned runtime | Reject the exact shared root |
+| Evidence root, manifest, checker, or half-open map/PT_LOAD ownership validation fails | Preserve diagnostics and fail closed before acceptance |
+| Both ordinary/shared checkers pass in the pinned hosted lane | Retain scoped evidence only; both runtime rows stay `unknown` / non-promoted pending remaining gates and independent review |
+
+### 5. Good / Base / Bad Cases
+
+- Good: the locked native ARM64/Bionic job retains native-build status/streams,
+  each handoff's argv/status/stdout/stderr before record parsing, both ordinary
+  identities, all four shared identities, and passes each exact-root checker;
+  the evidence remains a scoped observation rather than a promotion.
+- Base: glibc/musl carrier schemas remain v1, Bionic handoff identities use
+  private v2, and the separate Bionic environment envelope stays v1. The local
+  synthetic/unit tests can prove parser/checker behavior but cannot substitute
+  for the hosted native container run.
+- Bad: accept a tag or host label as proof of Bionic execution; conflate the
+  OCI argument with the input ELF path; parse build status after downstream
+  inspection; treat a missing/empty status as zero; parse the success JSON
+  before retaining sidecars; invent a semantic Bionic version; omit a shared
+  observer; claim kernel/page facts beyond the checked equality relation; or
+  promote runtime support from these scoped rows.
+
+### 6. Tests Required
+
+- `tests/test_bionic_handoff_bridge.py` covers the distinct OCI/ELF argv
+  domains, exact status parser, and three-runner branches:
+  `test_native_build_status_parser_requires_exact_bounded_no_follow_decimal`,
+  `test_all_three_bionic_runners_fail_closed_on_missing_empty_and_malformed_status`,
+  and `test_all_three_bionic_runners_progress_only_on_canonical_zero_and_propagate_nonzero`.
+  It also verifies the exact handoff argv and that process-status, stdout and
+  stderr are persisted before success-record parsing.
+- `tests/test_rehydration_evidence.py` covers Bionic environment/schema,
+  interpreter, mapped-file fingerprint, exact-integer schema/page-size and
+  kernel/page relationships plus refreshed-hash tampering; shared identity
+  tests check four per-handoff bindings and common runtime; workflow tests bind
+  the gate/upload behavior. `tests.test_regression_matrix.RegressionMatrixTests.test_bionic_ordinary_and_shared_jump_table_evidence_are_exactly_registered`
+  pins both rows, commands, tiers, and witnesses.
+- The independent review reran focused groups: Bionic bridge/status (10 tests),
+  Bionic identity/shared-identity/workflow (6), and glibc/musl compatibility
+  plus registration (8); shell syntax, Python compilation, whitespace, and
+  PR/nightly/release matrix checks passed. The implementation checkpoint reports
+  full Python discovery at 508 passed, 2 skipped; the reviewer did not rerun
+  that full suite. The earlier failure in
+  `test_unrelated_global_temp_stage_does_not_trigger_owned_leak_check` remains
+  an unresolved historical failure: green reruns do not diagnose or close it.
+- The `bionic-native-arm64` hosted producer plus exact ordinary/shared and
+  rehydration checkers remains the required live observation. The local host
+  has no Docker or Podman, so no live Bionic mapping, handoff, or exact root is
+  claimed. Documentation-only synchronization must not be reported as live
+  runtime validation.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: parse or interpret build status only after `readelf`/handoff, treat an
+       absent status as zero, parse success JSON before saving actual process
+       streams/status, swap the OCI and ELF arguments, trust a container tag or
+       self-report as runtime proof, invent a Bionic version, or promote support.
+Correct: validate canonical `0..255\n` on the shared no-follow parser before
+         any continuation and proceed only on exact zero; durably retain argv,
+         status, stdout and stderr before parsing the success record; run only
+         the declared ELF through the exact pinned Termux image, check runtime
+         identities and kernel/page relationships from retained observations,
+         validate every handoff separately, and keep the rows unknown/non-promoted.
 ```

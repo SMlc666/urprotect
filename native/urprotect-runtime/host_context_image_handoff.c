@@ -14,6 +14,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(__BIONIC__) || defined(__ANDROID__)
+#define RUNTIME_IDENTITY_CARRIER_SCHEMA_VERSION 2
+#else
+#define RUNTIME_IDENTITY_CARRIER_SCHEMA_VERSION 1
+#endif
+
 #define MAX_IMAGE_BYTES (128U * 1024U * 1024U)
 
 extern char **environ;
@@ -103,7 +109,8 @@ static int write_record(
         result = snprintf(
             runtime_identity_json,
             sizeof(runtime_identity_json),
-            "{\"schemaVersion\":1,\"path\":\"%s\",\"sha256\":\"%s\"}",
+            "{\"schemaVersion\":%d,\"path\":\"%s\",\"sha256\":\"%s\"}",
+            RUNTIME_IDENTITY_CARRIER_SCHEMA_VERSION,
             runtime_identity_path,
             runtime_identity_sha256);
         if (result < 0 || (size_t)result >= sizeof(runtime_identity_json)) return 0;

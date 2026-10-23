@@ -1032,7 +1032,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact_root", type=Path)
     parser.add_argument("--tier", choices=("pr", "nightly", "release"), required=True)
-    parser.add_argument("--runtime", choices=("glibc", "musl"), required=True)
+    parser.add_argument("--runtime", choices=("glibc", "musl", "bionic"), required=True)
     parser.add_argument("--require-runtime-identity", action="store_true")
     parser.add_argument("--unit", required=True)
     parser.add_argument("--expect-failure", action="store_true")

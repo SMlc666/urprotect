@@ -53,6 +53,23 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
             self.assertIn(f"      - {job}", block)
         self.assertIn("Require every mandatory validation result", block)
 
+    def test_bionic_indirect_control_runs_only_in_the_pinned_native_lane(self) -> None:
+        start = self.workflow.index("  bionic-native-arm64:")
+        end = self.workflow.index("  musl-container-smoke:", start)
+        block = self.workflow[start:end]
+        self.assertIn("runs-on: ubuntu-24.04-arm", block)
+        self.assertIn("docker version", block)
+        self.assertIn("BIONIC_INDIRECT_CONTROL_E2E: 'true'", block)
+        self.assertIn("BIONIC_EVIDENCE_TIER: ${{ env.BIONIC_EVIDENCE_TIER }}", block)
+        self.assertIn("run-bionic-fixture.sh", block)
+        self.assertIn("--runtime bionic", block)
+        self.assertIn("--require-runtime-identity", block)
+        self.assertIn("runtime.indirect-control.jump-table.bionic.host-context-entry", block)
+        self.assertIn("runtime.indirect-control.shared-table.bionic.host-context-entry", block)
+        self.assertIn("check-indirect-control-evidence.py", block)
+        self.assertIn("check-shared-jump-table-evidence.py", block)
+        self.assertIn("include-hidden-files: true", block)
+
     def test_shared_musl_run_block_uses_posix_dynsym_index_validation(self) -> None:
         start = self.workflow.index("      - name: Run shared musl indirect jump-table evidence")
         end = self.workflow.index("      - name: Upload musl container and indirect-control evidence", start)
