@@ -152,7 +152,14 @@ tests plus the relevant malformed-input path:
   `urp_entry` consumer reads a distinct read-only file-backed clone while an
   unselected `urp_observer` keeps its original table bytes/reference chain;
   this is limited to the controlled signed-32-bit shared-table fixture and does
-  not promote other encodings or runtimes. For a proven bounded in-image table
+  not promote other encodings or runtimes. A separate native AArch64/musl
+  evidence runner for this same fixture requires identity checks for all four
+  selected/observer source/transformed handoffs, a bounded closed evidence root,
+  and outer plus nested failed-build sidecars; a hosted pass records only this
+  scoped observation and does not promote support. Runtime/feature state remains
+  `unknown` pending the task-wide compatibility criteria and remaining gates. See
+  the [shared-table musl evidence contract](./runtime-compatibility.md#scenario-native-shared-table-musl-evidence).
+  For a proven bounded in-image table
   with an exact selected ADRP/ADD reference but incomplete owner inventory, the
   managed safe-default is `Ambiguous` ownership plus the same distinct PF_R
   clone-and-retarget policy. Global/default-visible symbols and missing or

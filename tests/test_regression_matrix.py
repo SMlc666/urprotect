@@ -86,6 +86,56 @@ class RegressionMatrixTests(unittest.TestCase):
         self.assertIn(rollback_root + "/SHA256SUMS", rollback["artifacts"])
         self.assertIn("provider-ci-logs/provider-loaded-rollback-*.log", " ".join(rollback["artifacts"]))
 
+    def test_shared_musl_indirect_control_e2e_is_registered_with_identity_and_build_evidence(self) -> None:
+        case = next(
+            item for item in self.data["cases"]
+            if item["id"] == "fixture.indirect-control-shared-jump-table-copy-musl"
+        )
+        self.assertTrue(case["required"])
+        self.assertEqual(["pr", "nightly", "release"], case["tiers"])
+        self.assertEqual("native-arm64-container", case["platform"])
+        self.assertEqual(1200, case["budgetSeconds"])
+        self.assertIn("run-shared-jump-table-copy-e2e.sh", case["command"])
+        self.assertIn("--runtime musl", case["command"])
+        self.assertIn("runtime.indirect-control.shared-table.musl.host-context-entry", case["command"])
+
+        witnesses = "\n".join(case["artifacts"])
+        self.assertIn(".artifacts/musl-container/environment.txt", witnesses)
+        self.assertIn("shared-table-behavior.json", witnesses)
+        for handoff in (
+            "source-handoff.json",
+            "handoff.json",
+            "observer-source-handoff.json",
+            "observer-transformed-handoff.json",
+        ):
+            self.assertIn(handoff, witnesses)
+        for identity in (
+            "runtime-identity/source/identity.json",
+            "runtime-identity/target/identity.json",
+            "runtime-identity/observer-source/identity.json",
+            "runtime-identity/observer-transformed/identity.json",
+        ):
+            self.assertIn(identity, witnesses)
+        self.assertIn("native-build.command.txt", witnesses)
+        self.assertIn("native-build.stdout", witnesses)
+        self.assertIn("native-build.stderr", witnesses)
+        self.assertIn("native-build.status", witnesses)
+        for nested_sidecar in (
+            "host-context-image-handoff/native-build.command.txt",
+            "host-context-image-handoff/native-build.stdout",
+            "host-context-image-handoff/native-build.stderr",
+            "host-context-image-handoff/native-build.status",
+        ):
+            self.assertIn(nested_sidecar, witnesses)
+
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        shared_step_start = workflow.index("      - name: Run shared musl indirect jump-table evidence")
+        shared_step_end = workflow.index("      - name: Upload musl container and indirect-control evidence", shared_step_start)
+        shared_step = workflow[shared_step_start:shared_step_end]
+        self.assertIn("--runtime musl", shared_step)
+        self.assertIn("--require-runtime-identity", shared_step)
+        self.assertIn("check-shared-jump-table-evidence.py", shared_step)
+
     def test_duplicate_case_id_is_rejected(self) -> None:
         data = copy.deepcopy(self.data)
         data["cases"].append(copy.deepcopy(data["cases"][0]))

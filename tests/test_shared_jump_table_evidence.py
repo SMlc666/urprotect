@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
+import os
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from typing import Any
@@ -106,6 +109,39 @@ def _file_offset_for_va(image: bytes, address: int, size: int) -> int:
     return matches[0]
 
 
+class _FakeNativeRuntimeIdentity:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str, str, bool]] = []
+
+    def validate_handoff_runtime_identity(
+        self,
+        root: Path,
+        handoff: dict[str, Any],
+        *,
+        expected_runtime: str,
+        expected_role: str,
+        expected_image_sha256: str,
+        required: bool,
+    ) -> dict[str, str]:
+        del root
+        self.calls.append((handoff["label"], expected_runtime, expected_role, expected_image_sha256, required))
+        identity = handoff.get("runtimeIdentity")
+        if identity is None:
+            raise ValueError("synthetic identity missing")
+        if identity.get("runtime") != expected_runtime:
+            raise ValueError("runtime mismatch")
+        if identity.get("role") != expected_role:
+            raise ValueError("role mismatch")
+        if identity.get("imageSha256") != expected_image_sha256:
+            raise ValueError("image digest mismatch")
+        return {key: identity[key] for key in ("runtime", "runtimeVersion", "libcSha256", "loaderSha256")}
+
+    @staticmethod
+    def require_same_runtime_identity(first: dict[str, str], other: dict[str, str]) -> None:
+        if first != other:
+            raise ValueError("identity mismatch")
+
+
 class SharedJumpTableEvidenceTests(unittest.TestCase):
     def setUp(self) -> None:
         if not FIXTURE.is_dir():
@@ -117,16 +153,24 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
         self.source = (self.root / "source-image.bin").read_bytes()
         self.selector = _dynsym_selector(self.source)
 
-    def run_checker(self, root: Path | None = None) -> subprocess.CompletedProcess[str]:
+    def run_checker(
+        self,
+        root: Path | None = None,
+        *,
+        runtime: str = "glibc",
+        unit: str = UNIT,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 sys.executable,
                 str(CHECKER),
                 str(root or self.root),
                 "--unit",
-                UNIT,
+                unit,
                 "--selected-function",
                 self.selector,
+                "--runtime",
+                runtime,
             ],
             check=False,
             capture_output=True,
@@ -216,6 +260,369 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
     def test_checked_in_evidence_fixture_is_accepted(self) -> None:
         result = self.run_checker()
         self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_runtime_discriminator_rejects_refreshed_cross_runtime_claim(self) -> None:
+        behavior_path = self.root / "shared-table-behavior.json"
+        behavior = _read_json(behavior_path)
+        behavior["runtime"] = "musl"
+        _write_json(behavior_path, behavior)
+        _refresh_manifest(self.root)
+
+        result = self.run_checker(runtime="glibc")
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("runtime discriminator", result.stderr.lower())
+        self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
+    def test_musl_runtime_requires_its_distinct_unit_id(self) -> None:
+        result = self.run_checker(
+            runtime="musl",
+            unit="runtime.indirect-control.shared-table.glibc.host-context-entry",
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("unit id does not match the selected shared-table runtime", result.stderr.lower())
+
+    def _load_checker_module(self) -> Any:
+        checker_spec = importlib.util.spec_from_file_location("shared_identity_test_checker", CHECKER)
+        self.assertIsNotNone(checker_spec)
+        self.assertIsNotNone(checker_spec.loader)
+        checker = importlib.util.module_from_spec(checker_spec)
+        checker_spec.loader.exec_module(checker)
+        return checker
+
+    def test_symbol_record_count_is_bounded_before_record_materialization(self) -> None:
+        checker = self._load_checker_module()
+        count = checker.MAX_EVIDENCE_SYMBOL_RECORDS + 1
+        table_bytes = count * 24
+        image = bytes(table_bytes + 1)
+        sections = [
+            {"type": 11, "link": 1, "entsize": 24, "size": table_bytes, "offset": 0},
+            {"type": 3, "offset": table_bytes, "size": 1},
+        ]
+
+        with self.assertRaises(SystemExit) as failure:
+            checker.symbol_records(image, sections, "synthetic ELF")
+
+        self.assertIn("bounded symbol-record count", str(failure.exception))
+
+        exact_count = checker.MAX_EVIDENCE_SYMBOL_RECORDS
+        exact_table_bytes = exact_count * 24
+        exact_image = bytes(exact_table_bytes + 1)
+        exact_sections = [
+            {"type": 11, "link": 1, "entsize": 24, "size": exact_table_bytes, "offset": 0},
+            {"type": 3, "offset": exact_table_bytes, "size": 1},
+        ]
+        self.assertEqual(
+            exact_count,
+            len(checker.symbol_records(exact_image, exact_sections, "synthetic ELF")),
+        )
+
+    def test_symbol_name_decoding_has_per_name_and_aggregate_byte_budgets(self) -> None:
+        checker = self._load_checker_module()
+        with self.subTest(limit="aggregate maximum"):
+            count = checker.MAX_EVIDENCE_SYMBOL_NAME_BYTES // checker.MAX_EVIDENCE_SYMBOL_NAME_LENGTH
+            table_bytes = count * 24
+            name = b"n" * checker.MAX_EVIDENCE_SYMBOL_NAME_LENGTH + b"\0"
+            image = bytes(table_bytes) + name
+            sections = [
+                {"type": 11, "link": 1, "entsize": 24, "size": table_bytes, "offset": 0},
+                {"type": 3, "offset": table_bytes, "size": len(name)},
+            ]
+            self.assertEqual(count, len(checker.symbol_records(image, sections, "synthetic ELF")))
+
+        with self.subTest(limit="aggregate"):
+            count = checker.MAX_EVIDENCE_SYMBOL_NAME_BYTES // checker.MAX_EVIDENCE_SYMBOL_NAME_LENGTH + 1
+            table_bytes = count * 24
+            name = b"n" * checker.MAX_EVIDENCE_SYMBOL_NAME_LENGTH + b"\0"
+            image = bytearray(table_bytes + len(name))
+            image[table_bytes:] = name
+            sections = [
+                {"type": 11, "link": 1, "entsize": 24, "size": table_bytes, "offset": 0},
+                {"type": 3, "offset": table_bytes, "size": len(name)},
+            ]
+            with self.assertRaises(SystemExit) as failure:
+                checker.symbol_records(bytes(image), sections, "synthetic ELF")
+            self.assertIn("aggregate symbol-name byte count", str(failure.exception))
+
+        with self.subTest(limit="single name"):
+            table_bytes = 24
+            name = b"n" * (checker.MAX_EVIDENCE_SYMBOL_NAME_LENGTH + 1) + b"\0"
+            image = bytearray(table_bytes + len(name))
+            image[table_bytes:] = name
+            sections = [
+                {"type": 11, "link": 1, "entsize": 24, "size": table_bytes, "offset": 0},
+                {"type": 3, "offset": table_bytes, "size": len(name)},
+            ]
+            with self.assertRaises(SystemExit) as failure:
+                checker.symbol_records(bytes(image), sections, "synthetic ELF")
+            self.assertIn("unterminated or overlong symbol name", str(failure.exception))
+
+    @staticmethod
+    def _synthetic_runtime_handoffs() -> list[tuple[str, dict[str, Any], str, str]]:
+        source_sha256 = "a" * 64
+        target_sha256 = "b" * 64
+        common_identity = {
+            "runtime": "musl",
+            "runtimeVersion": "1.2.3",
+            "libcSha256": "c" * 64,
+            "loaderSha256": "d" * 64,
+        }
+        result = []
+        for label, role, image_sha256 in (
+            ("selected source", "source", source_sha256),
+            ("selected transformed", "target", target_sha256),
+            ("observer source", "source", source_sha256),
+            ("observer transformed", "target", target_sha256),
+        ):
+            identity = {**common_identity, "role": role, "imageSha256": image_sha256}
+            result.append((label, {"label": label, "runtimeIdentity": identity}, role, image_sha256))
+        return result
+
+    def test_all_four_valid_musl_handoffs_share_the_checked_runtime_identity(self) -> None:
+        checker = self._load_checker_module()
+        handoffs = self._synthetic_runtime_handoffs()
+        identity_helper = _FakeNativeRuntimeIdentity()
+
+        checker.validate_runtime_identity_agreement(
+            self.root, identity_helper, handoffs, expected_runtime="musl"
+        )
+
+        self.assertEqual(
+            ["selected source", "selected transformed", "observer source", "observer transformed"],
+            [call[0] for call in identity_helper.calls],
+        )
+        self.assertTrue(all(call[1] == "musl" and call[4] for call in identity_helper.calls))
+
+    def test_musl_identity_is_required_individually_for_all_four_handoffs(self) -> None:
+        checker = self._load_checker_module()
+        for missing_index, (label, _handoff, _role, _image_sha256) in enumerate(self._synthetic_runtime_handoffs()):
+            with self.subTest(handoff=label):
+                handoffs = self._synthetic_runtime_handoffs()
+                handoffs[missing_index][1]["runtimeIdentity"] = None
+                identity_helper = _FakeNativeRuntimeIdentity()
+                with self.assertRaises(SystemExit) as failure:
+                    checker.validate_runtime_identity_agreement(
+                        self.root, identity_helper, handoffs, expected_runtime="musl"
+                    )
+                self.assertIn(
+                    f"{label} native runtime identity is invalid: synthetic identity missing",
+                    str(failure.exception),
+                )
+                self.assertEqual(
+                    [item[0] for item in handoffs[:missing_index + 1]],
+                    [call[0] for call in identity_helper.calls],
+                )
+
+    def test_musl_identity_binds_each_handoff_role_and_image(self) -> None:
+        checker = self._load_checker_module()
+        for invalid_field in ("role", "imageSha256"):
+            for invalid_index, (label, _handoff, _role, _image_sha256) in enumerate(
+                self._synthetic_runtime_handoffs()
+            ):
+                with self.subTest(handoff=label, field=invalid_field):
+                    handoffs = self._synthetic_runtime_handoffs()
+                    handoffs[invalid_index][1]["runtimeIdentity"][invalid_field] = "wrong-binding"
+                    identity_helper = _FakeNativeRuntimeIdentity()
+                    with self.assertRaises(SystemExit) as failure:
+                        checker.validate_runtime_identity_agreement(
+                            self.root, identity_helper, handoffs, expected_runtime="musl"
+                        )
+                    self.assertIn(f"{label} native runtime identity is invalid:", str(failure.exception))
+
+    def test_musl_handoffs_must_share_one_runtime_identity(self) -> None:
+        checker = self._load_checker_module()
+        handoffs = self._synthetic_runtime_handoffs()
+        handoffs[3][1]["runtimeIdentity"]["loaderSha256"] = "e" * 64
+        with self.assertRaises(SystemExit) as failure:
+            checker.validate_runtime_identity_agreement(
+                self.root, _FakeNativeRuntimeIdentity(), handoffs, expected_runtime="musl"
+            )
+        self.assertIn("shared-table handoffs used different native runtime identities", str(failure.exception))
+
+    def test_musl_shared_evidence_without_selected_identity_reports_first_missing_handoff(self) -> None:
+        musl_unit = "runtime.indirect-control.shared-table.musl.host-context-entry"
+        for name in ("stage.json", "rehydration.json", "native-image.json", "shared-table-behavior.json"):
+            path = self.root / name
+            record = _read_json(path)
+            record["unitId"] = musl_unit
+            if name == "shared-table-behavior.json":
+                record["runtime"] = "musl"
+            _write_json(path, record)
+        _refresh_manifest(self.root)
+
+        result = self.run_checker(runtime="musl", unit=musl_unit)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(
+            "selected source native runtime identity is invalid: HostContext handoff is missing its required native runtime identity\n",
+            result.stderr,
+        )
+        self.assertNotIn("malformed", result.stderr.lower())
+        self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
+    def test_bounded_tree_rejects_directory_entry_and_file_count_limits(self) -> None:
+        with self.subTest(limit="directories"):
+            for index in range(512):
+                (self.root / f"directory-{index:04d}").mkdir()
+            result = self.run_checker()
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("directory count exceeds its configured bound", result.stderr.lower())
+
+        with self.subTest(limit="entries"):
+            shutil.rmtree(self.root)
+            shutil.copytree(FIXTURE, self.root)
+            initial_entries = sum(1 for _ in self.root.rglob("*"))
+            directory_count = 511
+            for index in range(directory_count):
+                (self.root / f"entry-dir-{index:04d}").mkdir()
+            file_count = 1025 - initial_entries - directory_count
+            for index in range(file_count):
+                (self.root / f"entry-file-{index:04d}.txt").touch()
+            result = self.run_checker()
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("entry count exceeds its configured bound", result.stderr.lower())
+
+        with self.subTest(limit="files"):
+            shutil.rmtree(self.root)
+            shutil.copytree(FIXTURE, self.root)
+            initial_files = sum(1 for path in self.root.rglob("*") if path.is_file())
+            for index in range(1000 - initial_files + 1):
+                (self.root / f"extra-file-{index:04d}.txt").touch()
+            result = self.run_checker()
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("file count exceeds its configured bound", result.stderr.lower())
+
+    def test_bounded_tree_rejects_per_file_size_before_file_read(self) -> None:
+        oversized = self.root / "oversized.bin"
+        with oversized.open("wb") as output:
+            output.truncate(16 * 1024 * 1024 + 1)
+
+        result = self.run_checker()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("per-file byte bound", result.stderr.lower())
+
+    def test_bounded_tree_rejects_aggregate_size_before_file_hashing(self) -> None:
+        image_size = 128 * 1024 * 1024
+        for directory_name, filename in (
+            ("aggregate-source", "source-image.bin"),
+            ("aggregate-native", "native-image.bin"),
+        ):
+            directory = self.root / directory_name
+            directory.mkdir()
+            with (directory / filename).open("wb") as sparse_image:
+                sparse_image.truncate(image_size)
+
+        result = self.run_checker()
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("exceeds the bounded tree size", result.stderr.lower())
+
+    def test_descriptor_anchored_reader_rejects_in_place_mutation_file_replacement_and_root_replacement(self) -> None:
+        prior_range_module = sys.modules.get("evidence_load_range")
+        hostile_range_module = types.ModuleType("evidence_load_range")
+        hostile_range_module.unique_file_backed_pt_load = lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ambient evidence-load-range module was used")
+        )
+        sys.modules["evidence_load_range"] = hostile_range_module
+        checker_spec = importlib.util.spec_from_file_location("shared_tree_test_checker", CHECKER)
+        self.assertIsNotNone(checker_spec)
+        self.assertIsNotNone(checker_spec.loader)
+        checker = importlib.util.module_from_spec(checker_spec)
+        try:
+            checker_spec.loader.exec_module(checker)
+            self.assertIsNot(checker._EVIDENCE_RANGE_HELPER, hostile_range_module)
+            self.assertEqual(
+                str((ROOT / "scripts/evidence_load_range.py").resolve(strict=True)),
+                checker._EVIDENCE_RANGE_HELPER.__file__,
+            )
+            tree = checker._load_bounded_evidence_tree(self.root)
+            checker._ACTIVE_EVIDENCE_TREE = tree
+            stage_path = self.root / "stage.json"
+            with stage_path.open("r+b") as mutated:
+                mutated.write(b"[")
+            with self.assertRaises(SystemExit) as file_failure:
+                checker.read_evidence_bytes(self.root, "stage.json", checker.MAX_EVIDENCE_JSON_BYTES)
+            self.assertIn("changed after preflight", str(file_failure.exception).lower())
+
+            replacement_tree = checker._load_bounded_evidence_tree(self.root)
+            checker._ACTIVE_EVIDENCE_TREE = replacement_tree
+            replacement_path = self.root.parent / "stage-replacement.json"
+            replacement_path.write_bytes((FIXTURE / "stage.json").read_bytes())
+            original_inode = stage_path.stat().st_ino
+            os.replace(replacement_path, stage_path)
+            self.assertNotEqual(original_inode, stage_path.stat().st_ino)
+            with self.assertRaises(SystemExit) as replacement_failure:
+                checker.read_evidence_bytes(self.root, "stage.json", checker.MAX_EVIDENCE_JSON_BYTES)
+            self.assertIn("changed after bounded tree preflight", str(replacement_failure.exception).lower())
+
+            root_tree = checker._load_bounded_evidence_tree(self.root)
+            moved_root = self.root.with_name("evidence-moved")
+            self.root.rename(moved_root)
+            self.root.mkdir()
+            with self.assertRaises(SystemExit) as root_failure:
+                root_tree.read("stage.json", checker.MAX_EVIDENCE_JSON_BYTES)
+            self.assertIn("root changed after bounded tree preflight", str(root_failure.exception).lower())
+        finally:
+            if prior_range_module is None:
+                sys.modules.pop("evidence_load_range", None)
+            else:
+                sys.modules["evidence_load_range"] = prior_range_module
+
+    def test_bounded_sibling_helper_loader_rejects_fifo_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="shared-table-helper-fifo-") as temporary:
+            helper_root = Path(temporary)
+            checker_copy = helper_root / CHECKER.name
+            shutil.copyfile(CHECKER, checker_copy)
+            os.mkfifo(helper_root / "evidence_load_range.py")
+
+            result = subprocess.run(
+                [sys.executable, str(checker_copy), str(self.root)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("bounded shared-table PT_LOAD range helper is unavailable", result.stderr)
+
+    def test_bounded_checker_helper_chain_rejects_nested_identity_fifo_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="shared-table-nested-helper-fifo-") as temporary:
+            helper_root = Path(temporary) / "scripts"
+            helper_root.mkdir()
+            for name in (
+                CHECKER.name,
+                "evidence_load_range.py",
+                "check-rehydration-evidence.py",
+            ):
+                shutil.copyfile(ROOT / "scripts" / name, helper_root / name)
+            os.mkfifo(helper_root / "native_runtime_identity.py")
+            evidence_root = Path(temporary) / "evidence"
+            evidence_root.mkdir()
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(helper_root / CHECKER.name),
+                    str(evidence_root),
+                    "--unit",
+                    "runtime.indirect-control.shared-table.musl.host-context-entry",
+                    "--selected-function",
+                    "dynsym:1",
+                    "--runtime",
+                    "musl",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("bounded shared-table evidence reader is unavailable", result.stderr)
+        self.assertIn("runtime identity helper", result.stderr)
 
     def test_artifact_root_rejects_symlink_alias_and_nested_symlink(self) -> None:
         alias = self.root.parent / "evidence-root-alias"

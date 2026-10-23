@@ -52,6 +52,26 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
             self.assertIn(f"      - {job}", block)
         self.assertIn("Require every mandatory validation result", block)
 
+    def test_shared_musl_jump_table_row_runs_with_exact_identity_and_checker(self) -> None:
+        start = self.workflow.index("      - name: Run shared musl indirect jump-table evidence")
+        end = self.workflow.index("      - name: Upload musl container and indirect-control evidence", start)
+        block = self.workflow[start:end]
+        self.assertIn("run-shared-jump-table-copy-e2e.sh", block)
+        self.assertIn("--runtime musl", block)
+        self.assertIn("runtime.indirect-control.shared-table.musl.host-context-entry", block)
+        self.assertIn("check-rehydration-evidence.py", block)
+        self.assertIn("--require-runtime-identity", block)
+        self.assertIn("build/musl-shared-jump-table/host-context-shared-jump-table-fixture.so", block)
+        self.assertIn("check-shared-jump-table-evidence.py", block)
+
+        upload_start = self.workflow.index("      - name: Upload musl container and indirect-control evidence")
+        upload_end = self.workflow.index("  benchmark:\n", upload_start)
+        upload = self.workflow[upload_start:upload_end]
+        self.assertIn("if: always()", upload)
+        self.assertIn("include-hidden-files: true", upload)
+        self.assertIn("if-no-files-found: error", upload)
+        self.assertIn(".artifacts/indirect-control/musl-${{ github.run_id }}-${{ github.run_attempt }}/", upload)
+
     def test_runner_and_checker_are_checked_in(self) -> None:
         self.assertTrue(RUNNER.is_file())
         self.assertTrue(CHECKER.is_file())

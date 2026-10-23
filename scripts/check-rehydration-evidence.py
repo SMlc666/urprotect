@@ -39,9 +39,10 @@ LAYOUT_DEFAULT = "generic-elf-layout-v1"
 def _load_native_runtime_identity_helper() -> Any:
     helper_path = Path(__file__).resolve(strict=True).with_name("native_runtime_identity.py")
     nofollow = getattr(os, "O_NOFOLLOW", None)
-    if nofollow is None:
-        raise ImportError("runtime identity helper load requires O_NOFOLLOW")
-    descriptor = os.open(helper_path, os.O_RDONLY | os.O_CLOEXEC | nofollow)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nofollow is None or nonblock is None:
+        raise ImportError("runtime identity helper load requires O_NOFOLLOW and O_NONBLOCK")
+    descriptor = os.open(helper_path, os.O_RDONLY | os.O_CLOEXEC | nofollow | nonblock)
     try:
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > 1024 * 1024:

@@ -2,7 +2,7 @@
 set -u -o pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release --runtime glibc|musl [--unit UNIT] [--source ELF] [--function-id TABLE:INDEX] [--entry-status STATUS] [--producer-id ID] [--native-build-dir build|build/musl-indirect-control]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release --runtime glibc|musl [--unit UNIT] [--source ELF] [--function-id TABLE:INDEX] [--entry-status STATUS] [--producer-id ID] [--native-build-dir build|build/musl-indirect-control|build/musl-shared-jump-table]\n' "$0" >&2
 }
 
 tier=''
@@ -35,7 +35,7 @@ if [[ "$runtime" == musl ]]; then require_runtime_identity=1; fi
 case "$runtime:$native_build_dir_relative" in
   glibc:) native_build_dir_relative=build ;;
   musl:) native_build_dir_relative=build/musl-indirect-control ;;
-  glibc:build|musl:build/musl-indirect-control) ;;
+  glibc:build|musl:build/musl-indirect-control|musl:build/musl-shared-jump-table) ;;
   *) echo "native build directory does not match the selected runtime" >&2; exit 2 ;;
 esac
 if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then

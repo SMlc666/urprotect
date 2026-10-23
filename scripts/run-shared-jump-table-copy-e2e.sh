@@ -2,15 +2,17 @@
 set -euo pipefail
 
 usage() {
-  printf 'usage: %s --tier pr|nightly|release [--artifact-root PATH] [--unit UNIT]\n' "$0" >&2
+  printf 'usage: %s --tier pr|nightly|release [--runtime glibc|musl] [--artifact-root PATH] [--unit UNIT]\n' "$0" >&2
 }
 
 tier=
+runtime=glibc
 root_arg=
-unit=runtime.indirect-control.shared-table.glibc.host-context-entry
+unit=
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tier) [[ $# -ge 2 ]] || { usage; exit 2; }; tier="$2"; shift 2 ;;
+    --runtime) [[ $# -ge 2 ]] || { usage; exit 2; }; runtime="$2"; shift 2 ;;
     --artifact-root) [[ $# -ge 2 ]] || { usage; exit 2; }; root_arg="$2"; shift 2 ;;
     --unit) [[ $# -ge 2 ]] || { usage; exit 2; }; unit="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -18,10 +20,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$tier" in pr|nightly|release) ;; *) echo 'invalid shared jump-table tier' >&2; exit 2 ;; esac
+case "$runtime" in glibc|musl) ;; *) echo 'invalid shared jump-table runtime' >&2; exit 2 ;; esac
+[[ -n "$unit" ]] || unit="runtime.indirect-control.shared-table.${runtime}.host-context-entry"
+[[ "$unit" == "runtime.indirect-control.shared-table.${runtime}.host-context-entry" ]] || { echo 'shared jump-table unit does not match the selected runtime' >&2; exit 2; }
 case "$(uname -m)" in aarch64|arm64) ;; *) echo 'environment-unavailable: shared jump-table native evidence requires AArch64' >&2; exit 2 ;; esac
 [[ "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]] || { echo 'invalid shared jump-table unit' >&2; exit 2; }
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_root="$repo_root/native/urprotect-runtime"
+native_build_dir_relative=build
+make_args=()
+if [[ "$runtime" == musl ]]; then
+  command -v musl-gcc >/dev/null 2>&1 || { echo "environment-unavailable: pinned musl-gcc is required for native shared jump-table evidence" >&2; exit 2; }
+  runtime_cc="$(command -v musl-gcc)"
+  native_build_dir_relative=build/musl-shared-jump-table
+  make_args+=("CC=$runtime_cc" "LD=ld" "HOST_ADAPTER_CFLAGS=-mno-outline-atomics")
+fi
+make_args+=("BUILD_DIR=$native_build_dir_relative")
+native_build_dir="$native_root/$native_build_dir_relative"
 artifact_base="$(realpath -m -- "$repo_root/.artifacts/indirect-control")"
 if [[ -z "$root_arg" ]]; then
   root_arg="$artifact_base/shared-copy-${tier}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -33,23 +48,46 @@ mkdir -p "$root"
 positive="$root/$unit"
 mkdir -p "$positive"
 
-make -C "$native_root" shared-jump-table-fixture host-context-image-handoff \
-  >"$root/native-build.stdout" 2>"$root/native-build.stderr"
-source_file="$native_root/build/host-context-shared-jump-table-fixture.so"
+native_build_command=(make -C "$native_root" "${make_args[@]}" shared-jump-table-fixture host-context-image-handoff)
+{
+  printf 'cwd=%s\n' "$native_root"
+  printf 'runtime=%s\n' "$runtime"
+  printf 'argv='
+  printf '%q ' "${native_build_command[@]}"
+  printf '\n'
+} >"$root/native-build.command.txt"
+native_build_status=0
+"${native_build_command[@]}" >"$root/native-build.stdout" 2>"$root/native-build.stderr" || native_build_status=$?
+printf '%s\n' "$native_build_status" >"$root/native-build.status"
+if [[ "$native_build_status" -ne 0 ]]; then
+  printf 'shared jump-table native fixture/helper build failed with status %s\n' "$native_build_status" >&2
+  exit "$native_build_status"
+fi
+source_file="$native_build_dir/host-context-shared-jump-table-fixture.so"
 function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
 [[ "$function_id" =~ ^dynsym:[0-9]+$ ]] || { echo 'shared fixture has no selected urp_entry dynsym' >&2; exit 1; }
 
 PROTECTED_IMAGE_ARTIFACT_ROOT="$positive" "$repo_root/scripts/run-host-context-rehydration-e2e.sh" \
-  --tier "$tier" --runtime glibc --unit "$unit" --source "$source_file" \
+  --tier "$tier" --runtime "$runtime" --unit "$unit" --source "$source_file" \
   --function-id "$function_id" --entry-status 91 --producer-id gcc-aarch64-shared-jump-table-fixture \
+  --native-build-dir "$native_build_dir_relative" \
   >"$root/rehydration.stdout" 2>"$root/rehydration.stderr"
 
-helper="$native_root/build/host-context-image-handoff"
+helper="$native_build_dir/host-context-image-handoff"
+observer_source_identity_args=()
+observer_transformed_identity_args=()
+if [[ "$runtime" == musl ]]; then
+  mkdir -p "$positive/runtime-identity/observer-source" "$positive/runtime-identity/observer-transformed"
+  observer_source_identity_args=("$positive/runtime-identity/observer-source" runtime-identity/observer-source source)
+  observer_transformed_identity_args=("$positive/runtime-identity/observer-transformed" runtime-identity/observer-transformed target)
+fi
 set +e
 "$helper" "$positive/source-image.bin" urp_observer "$positive/observer-source-handoff.json" \
+  "${observer_source_identity_args[@]}" \
   >"$positive/observer-source.stdout" 2>"$positive/observer-source.stderr"
 observer_source_status=$?
 "$helper" "$positive/native-image.bin" urp_observer "$positive/observer-transformed-handoff.json" \
+  "${observer_transformed_identity_args[@]}" \
   >"$positive/observer-transformed.stdout" 2>"$positive/observer-transformed.stderr"
 observer_transformed_status=$?
 set -e
@@ -60,16 +98,16 @@ printf '%s\n' "$observer_transformed_status" >"$positive/observer-transformed.pr
   exit 1
 }
 
-python3 - "$positive" "$unit" "$function_id" "$observer_source_status" "$observer_transformed_status" <<'PY'
+python3 - "$positive" "$unit" "$function_id" "$runtime" "$observer_source_status" "$observer_transformed_status" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
-unit, selected_function = sys.argv[2:4]
-observer_source_status = int(sys.argv[4])
-observer_transformed_status = int(sys.argv[5])
+unit, selected_function, runtime = sys.argv[2:5]
+observer_source_status = int(sys.argv[5])
+observer_transformed_status = int(sys.argv[6])
 def sha(name):
     return hashlib.sha256((root / name).read_bytes()).hexdigest()
 def read(name):
@@ -87,6 +125,7 @@ if len(clones) != 1:
 clone = clones[0]
 report = {
     "schemaVersion": 2,
+    "runtime": runtime,
     "unitId": unit,
     "selectedFunction": selected_function,
     "selectedEntryStatus": read("handoff.json").get("entryStatus"),
@@ -127,9 +166,12 @@ PY
   cd "$positive"
   find . -type f ! -name SHA256SUMS -printf '%P\n' | LC_ALL=C sort | xargs -r sha256sum
 ) >"$positive/SHA256SUMS"
+rehydration_checker_args=(--tier "$tier" --runtime "$runtime" --unit "$unit")
+shared_checker_args=(--unit "$unit" --selected-function "$function_id" --runtime "$runtime")
+if [[ "$runtime" == musl ]]; then rehydration_checker_args+=(--require-runtime-identity); fi
 python3 "$repo_root/scripts/check-rehydration-evidence.py" "$positive" \
-  --tier "$tier" --runtime glibc --unit "$unit"
+  "${rehydration_checker_args[@]}"
 python3 "$repo_root/scripts/check-shared-jump-table-evidence.py" "$positive" \
-  --unit "$unit" --selected-function "$function_id"
+  "${shared_checker_args[@]}"
 printf 'Shared jump-table copy-and-retarget: PASS (selected clone read and unselected observer preserved)\n'
 printf 'Shared jump-table artifact root: %s\n' "$root"

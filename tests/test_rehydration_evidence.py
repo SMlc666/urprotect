@@ -343,8 +343,10 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
     def test_musl_jump_table_runners_separate_compiler_and_linker_and_retain_build_status(self) -> None:
         indirect_runner = INDIRECT_RUNNER.read_text(encoding="utf-8")
         host_context_runner = (ROOT / "scripts/run-host-context-rehydration-e2e.sh").read_text(encoding="utf-8")
-        for runner in (indirect_runner, host_context_runner):
-            self.assertIn('make_args+=("CC=$runtime_cc" "LD=ld")', runner)
+        shared_runner = (ROOT / "scripts/run-shared-jump-table-copy-e2e.sh").read_text(encoding="utf-8")
+        for runner in (indirect_runner, host_context_runner, shared_runner):
+            self.assertIn('"CC=$runtime_cc"', runner)
+            self.assertIn('"LD=ld"', runner)
             self.assertNotIn('"LD=$runtime_cc"', runner)
 
         self.assertIn('native_build_diagnostics_root="${root}.native-build-diagnostics"', indirect_runner)
@@ -357,10 +359,127 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         self.assertIn('exit "$rehydration_status"', indirect_runner)
         self.assertIn('"${native_build_command[@]}"', indirect_runner)
         self.assertIn('make_args+=("HOST_ADAPTER_CFLAGS=-mno-outline-atomics")', host_context_runner)
+        self.assertIn('native_build_dir_relative=build/musl-shared-jump-table', shared_runner)
+        self.assertIn('native_build_command=(make -C "$native_root" "${make_args[@]}" shared-jump-table-fixture host-context-image-handoff)', shared_runner)
+        self.assertIn('native-build.command.txt', shared_runner)
+        self.assertIn('native-build.status', shared_runner)
+        self.assertIn('exit "$native_build_status"', shared_runner)
+        self.assertIn('--native-build-dir "$native_build_dir_relative"', shared_runner)
+        self.assertIn('make_args+=("CC=$runtime_cc" "LD=ld" "HOST_ADAPTER_CFLAGS=-mno-outline-atomics")', shared_runner)
+        self.assertIn('shared_checker_args=(--unit "$unit" --selected-function "$function_id" --runtime "$runtime")', shared_runner)
         makefile = (ROOT / "native/urprotect-runtime/Makefile").read_text(encoding="utf-8")
         self.assertIn("HOST_ADAPTER_CFLAGS ?=", makefile)
-        self.assertIn("$(CFLAGS) $(HOST_ADAPTER_CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1", makefile)
+        adapter_rule = makefile.split("$(BUILD_DIR)/host_adapter.o:", 1)[1].split(
+            "$(BUILD_DIR)/host_image_validation.o:", 1
+        )[0]
+        validation_rule = makefile.split("$(BUILD_DIR)/host_image_validation.o:", 1)[1].split(
+            "$(BUILD_DIR)/sha256.o:", 1
+        )[0]
+        self.assertIn("$(CFLAGS) $(HOST_ADAPTER_CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1", adapter_rule)
+        self.assertNotIn("HOST_ADAPTER_CFLAGS", validation_rule)
         self.assertIn("HOST_ADAPTER_CONFIG_STAMP := $(BUILD_DIR)/host_adapter.compile-config", makefile)
+
+    def test_musl_shared_jump_table_runner_retains_and_propagates_stubbed_make_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="musl-shared-jump-table-build-status-") as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            repository = temporary_root / "repo"
+            scripts = repository / "scripts"
+            native_root = repository / "native" / "urprotect-runtime"
+            stub_bin = temporary_root / "stub-bin"
+            scripts.mkdir(parents=True)
+            native_root.mkdir(parents=True)
+            stub_bin.mkdir()
+
+            isolated_runner = scripts / "run-shared-jump-table-copy-e2e.sh"
+            shutil.copy2(ROOT / "scripts/run-shared-jump-table-copy-e2e.sh", isolated_runner)
+            isolated_runner.chmod(0o755)
+
+            uname_stub = stub_bin / "uname"
+            uname_stub.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$#\" -eq 1 ] && [ \"$1\" = '-m' ]; then printf 'aarch64\\n'; exit 0; fi\n"
+                "exit 98\n",
+                encoding="utf-8",
+            )
+            uname_stub.chmod(0o755)
+
+            compiler_stub = stub_bin / "musl-gcc"
+            compiler_invoked = temporary_root / "musl-gcc-was-invoked"
+            compiler_stub.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(compiler_invoked))}\n"
+                "exit 97\n",
+                encoding="utf-8",
+            )
+            compiler_stub.chmod(0o755)
+
+            make_stub = stub_bin / "make"
+            make_stub.write_text(
+                "#!/bin/sh\n"
+                "printf 'SHARED_STUB_MAKE_STDOUT\\n'\n"
+                "printf 'SHARED_STUB_MAKE_STDERR\\n' >&2\n"
+                "exit 23\n",
+                encoding="utf-8",
+            )
+            make_stub.chmod(0o755)
+
+            run_id = "shared-musl-test-run"
+            run_attempt = "1"
+            upload_parent = repository / ".artifacts" / "indirect-control" / f"musl-{run_id}-{run_attempt}"
+            artifact_root = upload_parent / "shared"
+            environment = {
+                "PATH": os.pathsep.join((str(stub_bin), "/usr/bin", "/bin")),
+                "HOME": str(temporary_root),
+                "TMPDIR": str(temporary_root),
+                "LANG": "C",
+                "LC_ALL": "C",
+            }
+            result = subprocess.run(
+                [
+                    str(isolated_runner),
+                    "--tier",
+                    "pr",
+                    "--runtime",
+                    "musl",
+                    "--unit",
+                    "runtime.indirect-control.shared-table.musl.host-context-entry",
+                    "--artifact-root",
+                    str(artifact_root),
+                ],
+                cwd=repository,
+                env=environment,
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+
+            self.assertEqual(23, result.returncode, result.stderr.decode(errors="replace"))
+            self.assertEqual(b"", result.stdout)
+            self.assertEqual(b"shared jump-table native fixture/helper build failed with status 23\n", result.stderr)
+            self.assertEqual(b"SHARED_STUB_MAKE_STDOUT\n", (artifact_root / "native-build.stdout").read_bytes())
+            self.assertEqual(b"SHARED_STUB_MAKE_STDERR\n", (artifact_root / "native-build.stderr").read_bytes())
+            self.assertEqual(b"23\n", (artifact_root / "native-build.status").read_bytes())
+            self.assertFalse(compiler_invoked.exists(), "the availability-only musl-gcc stub must never execute")
+
+            command_lines = dict(
+                line.split("=", 1)
+                for line in (artifact_root / "native-build.command.txt").read_text(encoding="utf-8").splitlines()
+            )
+            expected_native_root = str(native_root.resolve())
+            self.assertEqual(expected_native_root, command_lines["cwd"])
+            self.assertEqual("musl", command_lines["runtime"])
+            argv = shlex.split(command_lines["argv"])
+            self.assertEqual("make", argv[0])
+            self.assertEqual(["-C", expected_native_root], argv[1:3])
+            self.assertIn(f"CC={compiler_stub}", argv)
+            self.assertIn("LD=ld", argv)
+            self.assertIn("HOST_ADAPTER_CFLAGS=-mno-outline-atomics", argv)
+            self.assertIn("BUILD_DIR=build/musl-shared-jump-table", argv)
+            self.assertEqual(
+                ["shared-jump-table-fixture", "host-context-image-handoff"],
+                argv[-2:],
+            )
+            self.assertTrue(artifact_root.resolve().is_relative_to(upload_parent.resolve()))
 
     def test_musl_jump_table_runner_retains_and_propagates_stubbed_make_failure(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pr29-musl-build-status-") as temporary_directory:

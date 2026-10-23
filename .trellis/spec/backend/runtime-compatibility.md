@@ -2027,7 +2027,9 @@ The ordinary native AArch64/glibc root is locally retained and independently
 checked. This environment has no `musl-gcc`, Docker, or Podman, so no local
 ordinary-musl execution is claimed; the pinned hosted musl producer/checker gate
 remains pending. Bionic, shared-musl, provider, and other indirect-control rows
-remain outside this evidence slice and are not promoted by it.
+are separate evidence slices (see [shared-table musl
+evidence](#scenario-native-shared-table-musl-evidence)); this ordinary-row
+implementation does not cover or promote them.
 
 ### 2. Signatures
 
@@ -2131,8 +2133,8 @@ new owner field, schema version, or runtime-support claim is introduced.
   and 256 MiB aggregate file bytes, in addition to the existing per-file
   bounds. It rechecks descriptor and tree identity during reads and before
   completion. Checker helper modules are loaded from the sibling file resolved
-  from `__file__` through bounded `O_NOFOLLOW` reads, not ambient
-  `PYTHONPATH`/module discovery.
+  from `__file__` through bounded `O_NOFOLLOW | O_NONBLOCK` reads, not ambient
+  `PYTHONPATH`/module discovery; a replaced FIFO is rejected without blocking.
 - Historical glibc evidence without a carrier remains readable in default
   compatibility mode. A present carrier is always validated, even when it is
   optional. Fresh ordinary glibc producer/checker invocations require it, and
@@ -2233,4 +2235,154 @@ bind the handoff to its exact image and native process
 -> verify retained helper/libc/loader bytes, interpreter and maps identity
 -> require the trusted runtime-specific identity policy and pass the closed-root
    checker before recording successful evidence
+```
+
+## Scenario: Native shared-table musl evidence
+
+### 1. Scope / Trigger
+
+Apply this evidence-only contract to the controlled shared signed-relative-32
+jump-table HostContext slice when `scripts/run-shared-jump-table-copy-e2e.sh`
+selects `--runtime musl`. It proves selected-consumer clone dispatch and
+unselected-observer preservation for one native AArch64/musl fixture only. It
+does not change ELF resolution, layout, Protected Image, Native Image, HostContext
+ABI, or product CLI behavior; it does not promote shared-table support on musl,
+other table encodings, Bionic, or general indirect control. The row remains
+`unknown` / non-promoted. A passing hosted producer/checker gate permits retaining
+this scoped observation only; promotion still requires explicit review of the
+task-wide three-runtime acceptance criteria and remaining required gates.
+
+### 2. Signatures
+
+```sh
+scripts/run-shared-jump-table-copy-e2e.sh --tier pr|nightly|release \
+  --runtime musl \
+  --unit runtime.indirect-control.shared-table.musl.host-context-entry \
+  --artifact-root .artifacts/indirect-control/musl-<run>-<attempt>/shared
+
+make -C native/urprotect-runtime \
+  "CC=$(command -v musl-gcc)" "LD=ld" \
+  HOST_ADAPTER_CFLAGS=-mno-outline-atomics \
+  BUILD_DIR=build/musl-shared-jump-table \
+  shared-jump-table-fixture host-context-image-handoff
+
+python3 scripts/check-rehydration-evidence.py ROOT \
+  --tier pr|nightly|release --runtime musl \
+  --unit runtime.indirect-control.shared-table.musl.host-context-entry \
+  --require-runtime-identity
+python3 scripts/check-shared-jump-table-evidence.py ROOT \
+  --runtime musl \
+  --unit runtime.indirect-control.shared-table.musl.host-context-entry \
+  --selected-function dynsym:<urp_entry-index>
+```
+
+### 3. Contracts
+
+- Use a fresh run-specific evidence root under
+  `.artifacts/indirect-control/`; refuse a pre-existing root. Build the shared
+  fixture and HostContext helper with a distinct `build/musl-shared-jump-table`
+  directory, selected `musl-gcc` as `CC`, direct `LD=ld`, and
+  `HOST_ADAPTER_CFLAGS=-mno-outline-atomics` only for `host_adapter.o`. Do not
+  share that build directory with an independent Make process.
+- The outer Make sidecars are `<run-root>/native-build.command.txt`,
+  `native-build.stdout`, `native-build.stderr`, and numeric `native-build.status`.
+  On failure, preserve them, propagate the exact Make status, and stop before
+  `readelf`, handoff, or positive-evidence checks. The nested HostContext build
+  sidecars are outside the positive unit root but inside the run root at
+  `<run-root>/<unit>.native-build-diagnostics/host-context-image-handoff/` with
+  the same command/stdout/stderr/status set. Upload both roots even on failure.
+- A successful positive root contains measured selected `urp_entry` source and
+  transformed handoffs plus measured unselected `urp_observer` source and
+  transformed handoffs. It retains source and Native Image bytes, process exit
+  statuses, stdout/stderr bytes, `shared-table-behavior.json`, and a closed
+  `SHA256SUMS` manifest. The independent checker reparses source and output
+  ELF, verifies every declared table target was selected in the retained
+  execution, proves the selected consumer reads the distinct PF_R-only clone,
+  and proves the observer and original source table remain unchanged.
+- Musl mode requires independently checked native runtime identity on all four
+  handoffs: selected source (`role=source`, source-image digest), selected
+  transformed (`role=target`, Native Image digest), observer source, and
+  observer transformed. Bind each identity to its own process, image, helper,
+  loader/interpreter, mapped files, maps, and retained bytes. All four must
+  independently identify the expected pinned musl runtime, and their common
+  runtime family/version/interpreter/helper/libc/loader identity must agree.
+  Retain separate role/image bindings; do not require the four process IDs or
+  image digests to be equal.
+- The shared checker scans a bounded no-follow evidence tree before reading,
+  hashing, or allocating; file reads are descriptor-anchored and bounded by
+  the preflight snapshot. It loads `evidence_load_range.py`,
+  `check-rehydration-evidence.py`, and `native_runtime_identity.py` through
+  explicit sibling-file `O_NOFOLLOW | O_NONBLOCK` bounded reads, never ambient
+  `PYTHONPATH`; a replaced FIFO is rejected without blocking. ELF symbol
+  projection is additionally limited to 16,384 total records, a 4 KiB maximum
+  decoded name, and 4 MiB aggregate decoded name bytes; search for each
+  terminator is bounded to the per-name limit and symbol entries are unpacked
+  without copying an entire table. It checks the tree remains unchanged through
+  validation and requires the manifest to name exactly the preflighted files
+  other than itself. In musl mode it requires identities regardless of whether
+  a mutable evidence JSON field requests them; glibc's historical optional-
+  identity rule remains separate.
+- `--runtime` and the musl unit are evidence-runner/checker selectors only.
+  Missing `musl-gcc`, wrong host architecture, build failure, identity mismatch,
+  missing handoff, tree mutation, or checker failure is a required-lane failure,
+  not a skipped/pass result. Neither a green local glibc row nor fixture
+  presence substitutes for the hosted native musl gate.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Musl compiler/toolchain or native AArch64 runtime is unavailable | Explicit environment failure; no positive evidence or compatibility promotion |
+| Outer or nested Make fails | Preserve exact command, cwd/runtime, both streams and numeric status; propagate status and stop before positive checks |
+| Any of the four handoffs lacks identity or binds the wrong role/image/runtime | Reject at that handoff; do not let the first missing record mask untested consumers |
+| Handoffs independently validate but runtime identities disagree | Reject the evidence root |
+| Root/path contains symlink, non-regular entry, exceeds tree/read limit, or changes after preflight | Reject before accepting success |
+| Manifest omits, duplicates, forges, or adds a path outside the preflighted tree | Reject the closed evidence root |
+| Selected consumer does not read the distinct read-only clone, observer changes, or one target is not executed | Reject the positive evidence |
+| All four identity proofs, table/reference/target proofs, process results and exact-root checks pass on the pinned hosted lane | Retain scoped observation only; do not promote automatically; keep runtime/feature status unknown pending review of the task-wide compatibility criteria and remaining required runtime gates |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a fresh AArch64/musl job builds with the pinned `musl-gcc` configuration,
+  retains outer and nested build provenance, executes all four measured handoffs,
+  proves the selected clone and unchanged observer, and passes both exact-root
+  checkers.
+- Base: native AArch64/glibc shared-table evidence remains its separate row and
+  historical evidence shape; musl identity is never inferred from the glibc
+  host or from a container tag.
+- Bad: silently skip for missing musl tooling, re-use the glibc build directory,
+  run only the selected consumer, accept three of four identity records, trust
+  self-reported JSON without parsing retained maps/ELFs, read mutable files by
+  path after tree preflight, or call a local observation `validated` support.
+
+### 6. Tests Required
+
+- `tests/test_shared_jump_table_evidence.py` checks the selected and both
+  observer handoffs, missing identity individually for all four, each role/image
+  mutation, cross-handoff runtime mismatch, exact root, symlink rejection,
+  preflight/read mutation, `os.replace()` file replacement, root replacement,
+  refreshed-manifest tampering, and symbol-record/name-byte budget boundaries.
+- `tests/test_regression_matrix.py` requires the separate musl row, its exact
+  command/unit/runtime, native AArch64-container platform and budget, all four
+  identity witnesses, and outer/nested build-diagnostic artifacts.
+- `tests/test_protected_image_workflow.py` ties the CI step to the musl runner,
+  explicit runtime/unit, `--require-runtime-identity` rehydration checker and
+  shared-table checker. `tests/test_rehydration_evidence.py` covers scoped
+  musl compiler/linker/adapter-only flags and retained/propagated nested build
+  failure behavior.
+- Run `PYTHONPATH= python3 -m unittest discover -s tests`, the focused shared,
+  rehydration, matrix, and workflow tests, JSON/regression-matrix validation,
+  shell syntax checks, `git diff --check`, and the separate native glibc
+  regression. Native musl execution and exact-root validation must run in the
+  pinned hosted AArch64 job; absence of a local toolchain is not a test pass.
+
+### 7. Wrong vs Correct
+
+```text
+Wrong: infer musl from an OCI label, validate only the selected source identity,
+       then treat three missing observer/transformed identities as acceptable.
+Correct: bind every measured handoff to its exact image and pinned native musl
+         identity, compare the shared runtime identities while preserving each
+         process/role/image binding, and pass the closed-root checker on the
+         hosted AArch64/musl job before recording the scoped observation.
 ```
