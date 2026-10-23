@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
-
+import subprocess
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -51,6 +52,48 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         ):
             self.assertIn(f"      - {job}", block)
         self.assertIn("Require every mandatory validation result", block)
+
+    def test_shared_musl_run_block_uses_posix_dynsym_index_validation(self) -> None:
+        start = self.workflow.index("      - name: Run shared musl indirect jump-table evidence")
+        end = self.workflow.index("      - name: Upload musl container and indirect-control evidence", start)
+        block = self.workflow[start:end]
+        run_script = textwrap.dedent(block.split("run: |\n", 1)[1])
+
+        for bash_only_token in ("[[", "]]", "=~"):
+            with self.subTest(bash_only_token=bash_only_token):
+                self.assertNotIn(bash_only_token, run_script)
+
+        syntax_check = subprocess.run(
+            ["/bin/sh", "-n"], input=run_script, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
+
+        function_start = run_script.index("is_dynsym_index() {")
+        function_end = run_script.index("\n}", function_start) + len("\n}")
+        validation_line = next(
+            line for line in run_script[function_end:].splitlines()
+            if line.startswith("is_dynsym_index ")
+        )
+        validator = (
+            run_script[function_start:function_end]
+            + '\nselected_function="$1"\n'
+            + validation_line
+        )
+        for index in ("dynsym:0", "dynsym:7", "dynsym:12345"):
+            with self.subTest(index=index):
+                result = subprocess.run(
+                    ["/bin/sh", "-c", validator, "dynsym-index-test", index],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+        for index in ("dynsym:", "dynsym:x", "dynsym:12x", "dynsym:-1", "12"):
+            with self.subTest(index=index):
+                result = subprocess.run(
+                    ["/bin/sh", "-c", validator, "dynsym-index-test", index],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
 
     def test_shared_musl_jump_table_row_runs_with_exact_identity_and_checker(self) -> None:
         start = self.workflow.index("      - name: Run shared musl indirect jump-table evidence")

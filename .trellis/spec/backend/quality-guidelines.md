@@ -386,6 +386,10 @@ Correct: CC=musl-gcc LD=ld; set HOST_ADAPTER_CFLAGS=-mno-outline-atomics
 ## CI and Release Contract
 
 - Required native Linux jobs run on `aarch64` and retain an environment report.
+- In the Alpine musl container job, Actions runs steps under `/bin/sh` unless
+  an explicit `shell` is selected. Keep container `run` blocks POSIX-compatible
+  (or select a shell guaranteed by the pinned image), and test extracted blocks
+  with that shell rather than assuming the hosted runner's default.
 - Changes to an auxiliary registry such as `fixtures/manifest.json` or
   `fixtures/real-samples/manifest.json` must update the corresponding
   `retainedEvidenceRegistries` digest in

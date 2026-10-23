@@ -1489,7 +1489,17 @@ jobs:
             --tier "${tier}" --runtime musl --require-runtime-identity --unit "${unit}"
           shared_source=native/urprotect-runtime/build/musl-shared-jump-table/host-context-shared-jump-table-fixture.so
           selected_function="$(readelf -Ws "${shared_source}" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
-          [[ "${selected_function}" =~ ^dynsym:[0-9]+$ ]] || { echo 'shared musl fixture has no selected urp_entry dynsym' >&2; exit 1; }
+          is_dynsym_index() {
+            case "$1" in
+              dynsym:*) dynsym_index=${1#dynsym:} ;;
+              *) return 1 ;;
+            esac
+            case "${dynsym_index}" in
+              ''|*[!0123456789]*) return 1 ;;
+              *) return 0 ;;
+            esac
+          }
+          is_dynsym_index "${selected_function}" || { echo 'shared musl fixture has no selected urp_entry dynsym' >&2; exit 1; }
           python3 scripts/check-shared-jump-table-evidence.py "${shared_positive}" \
             --unit "${unit}" --selected-function "${selected_function}" --runtime musl
       - name: Upload musl container and indirect-control evidence
