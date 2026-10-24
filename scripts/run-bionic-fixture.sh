@@ -272,7 +272,10 @@ run_shell -c '
   set -eu
   export PATH="${PREFIX}/bin:${PATH}"
   test "$#" -eq 8
-  apt_cache_dir="$(mktemp -d /tmp/urprotect-bionic-apt-archives.XXXXXX)"
+  termux_tmp_dir="${PREFIX%/}/tmp"
+  mkdir -p "${termux_tmp_dir}"
+  export TMPDIR="${termux_tmp_dir}"
+  apt_cache_dir="$(mktemp -d "${TMPDIR%/}/urprotect-bionic-apt-archives.XXXXXX")"
   # Cleanup is unprivileged and stays inside the producer.
   # find does not follow a replaced apt-archives symlink and treats it as a leaf.
   find /artifacts/apt-archives -maxdepth 1 -type f -name "*.deb" -delete

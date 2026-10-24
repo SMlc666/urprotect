@@ -2540,8 +2540,11 @@ and required evidence are asserted by
   The fixture prepares only its Bionic case root, the `host-context` root, and
   an empty `apt-archives` evidence root; each nested handoff prepares
   only its evidence-unit root and, when present, its exact identity-output leaf
-  directory. Apt's partial/download cache remains in the disposable container
-  filesystem and apt runs with the same sandbox identity as the producer. Stale
+  directory. The apt phase creates `${PREFIX}/tmp` inside the disposable
+  Termux container, exports it as `TMPDIR`, and places the private apt cache
+  there; it must not assume `/tmp` exists. Apt's partial/download cache remains
+  in the disposable container filesystem and apt runs with the same sandbox
+  identity as the producer. Stale
   top-level `.deb` evidence files are removed within the container from the
   prepared archive root by unprivileged one-level `find` with default no-follow
   behavior; only locked `.deb` files are copied

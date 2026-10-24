@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import pwd
@@ -311,6 +312,240 @@ class BionicArtifactPermissionTests(unittest.TestCase):
             PREPARE_HELPER.validate_tree(str(depth), maximum_depth=2)
             with self.assertRaisesRegex(ValueError, "depth 1"):
                 PREPARE_HELPER.validate_tree(str(depth), maximum_depth=1)
+
+    def test_apt_phase_uses_termux_prefix_tmp_when_system_tmp_is_absent(self) -> None:
+        real_uname = shutil.which("uname")
+        real_mktemp = shutil.which("mktemp")
+        self.assertIsNotNone(real_uname)
+        self.assertIsNotNone(real_mktemp)
+        assert real_uname is not None
+        assert real_mktemp is not None
+
+        with tempfile.TemporaryDirectory(prefix="bionic-termux-tmp-") as raw_temp:
+            temp = Path(raw_temp)
+            temp.chmod(0o755)
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            fake_uname = fake_bin / "uname"
+            fake_uname.write_text(
+                "#!/bin/sh\n"
+                'if [ "$1" = "-m" ]; then printf "aarch64\\n"; '
+                'elif [ "$1" = "-r" ]; then printf "test-kernel\\n"; '
+                f'else exec "{real_uname}" "$@"; fi\n',
+                encoding="utf-8",
+            )
+            fake_uname.chmod(0o755)
+
+            file_marker = temp / "host-file-command-invoked"
+            fake_file = fake_bin / "file"
+            fake_file.write_text(
+                f"#!/bin/sh\nprintf invoked > {str(file_marker)!r}\nexit 99\n",
+                encoding="utf-8",
+            )
+            fake_file.chmod(0o755)
+
+            termux_prefix = temp / "data/data/com.termux/files/usr"
+            termux_prefix.mkdir(parents=True)
+            termux_tmp = termux_prefix / "tmp"
+            self.assertFalse(termux_tmp.exists())
+            observation_path = temp / "apt-cache-observation.json"
+            legacy_mktemp_failure = temp / "legacy-mktemp-failure.txt"
+
+            fake_mktemp = fake_bin / "mktemp"
+            fake_mktemp.write_text(
+                f"#!{sys.executable}\n"
+                + """import os
+from pathlib import Path
+import sys
+
+args = sys.argv[1:]
+template = args[args.index("-d") + 1] if "-d" in args else args[-1]
+if template.startswith("/tmp/urprotect-bionic-apt-archives."):
+    Path(os.environ["BIONIC_TEST_LEGACY_MKTEMP_FAILURE"]).write_text(template, encoding="utf-8")
+    print("mktemp: failed to create directory via template: No such file or directory", file=sys.stderr)
+    raise SystemExit(1)
+real_mktemp = os.environ["BIONIC_TEST_REAL_MKTEMP"]
+os.execv(real_mktemp, [real_mktemp, *args])
+""",
+                encoding="utf-8",
+            )
+            fake_mktemp.chmod(0o755)
+
+            fake_apt_get = fake_bin / "apt-get"
+            fake_apt_get.write_text(
+                f"#!{sys.executable}\n"
+                + """import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+
+args = sys.argv[1:]
+if "--download-only" not in args:
+    raise SystemExit(0)
+archive_option = next(arg for arg in args if arg.startswith("Dir::Cache::archives="))
+cache_dir = Path(archive_option.split("=", 1)[1])
+tmp_dir = Path(os.environ["TMPDIR"])
+cache_metadata = cache_dir.stat()
+tmp_metadata = tmp_dir.stat()
+producer_user = subprocess.run(["id", "-un"], check=True, capture_output=True, text=True).stdout.strip()
+sandbox_user = next(arg.split("=", 1)[1] for arg in args if arg.startswith("APT::Sandbox::User="))
+observation = {
+    "prefix": os.environ["PREFIX"],
+    "tmpdir": str(tmp_dir),
+    "tmp_mode": stat.S_IMODE(tmp_metadata.st_mode),
+    "tmp_uid": tmp_metadata.st_uid,
+    "tmp_writable": os.access(tmp_dir, os.W_OK | os.X_OK),
+    "cache_dir": str(cache_dir),
+    "cache_option": archive_option,
+    "cache_mode": stat.S_IMODE(cache_metadata.st_mode),
+    "cache_uid": cache_metadata.st_uid,
+    "producer_uid": os.geteuid(),
+    "producer_user": producer_user,
+    "sandbox_user": sandbox_user,
+}
+Path(os.environ["BIONIC_TEST_APT_OBSERVATION"]).write_text(
+    json.dumps(observation, sort_keys=True), encoding="utf-8"
+)
+valid = (
+    tmp_dir == Path(os.environ["PREFIX"]) / "tmp"
+    and tmp_dir.is_dir()
+    and not tmp_dir.is_symlink()
+    and tmp_metadata.st_uid == os.geteuid()
+    and stat.S_IMODE(tmp_metadata.st_mode) == 0o770
+    and observation["tmp_writable"]
+    and cache_dir.parent == tmp_dir
+    and stat.S_IMODE(cache_metadata.st_mode) == 0o700
+    and cache_metadata.st_uid == os.geteuid()
+    and archive_option == "Dir::Cache::archives=" + str(cache_dir)
+    and sandbox_user == producer_user
+)
+if not valid:
+    print("fake apt observed an invalid temporary/cache configuration", file=sys.stderr)
+    raise SystemExit(98)
+print("simulated apt download failure after cache validation", file=sys.stderr)
+raise SystemExit(47)
+""",
+                encoding="utf-8",
+            )
+            fake_apt_get.chmod(0o755)
+            fake_dpkg_query = fake_bin / "dpkg-query"
+            fake_dpkg_query.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_dpkg_query.chmod(0o755)
+
+            fake_runtime = temp / "fake-container-runtime"
+            fake_runtime.write_text(
+                f"#!{sys.executable}\n"
+                + """import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+args = sys.argv[1:]
+if args[:1] == ["version"]:
+    print("linux/arm64")
+elif args[:1] == ["pull"]:
+    pass
+elif args[:2] == ["image", "inspect"]:
+    image = args[2]
+    if "--format" not in args:
+        print(json.dumps({"Architecture": "arm64", "RepoDigests": [image]}))
+    elif "Architecture" in args[args.index("--format") + 1]:
+        print("arm64")
+    else:
+        print(image)
+elif args[:1] == ["run"]:
+    command_indexes = [index for index, value in enumerate(args) if value == "-c"]
+    script_index = command_indexes[-1] + 1
+    script = args[script_index]
+    if "container_arch=" in script:
+        gid = os.environ["BIONIC_TEST_HOST_GID"]
+        print("\\n".join((
+            "container_arch=aarch64",
+            "container_uid=1000",
+            "container_user=system",
+            "container_gid=1000",
+            f"container_groups=1000 {gid}",
+            "container_umask=0007",
+            f"host_artifact_gid={gid}",
+            "container_kernel=test-kernel",
+            "container_page_size=4096",
+            "android_runtime=absent",
+        )))
+    elif "apt_get update" in script:
+        mount = next(value for value in args if value.startswith("type=bind,src=") and ",dst=/artifacts" in value)
+        artifact_root = Path(mount.split("src=", 1)[1].split(",dst=/artifacts", 1)[0])
+        actual_script = script.replace("/artifacts", str(artifact_root))
+        environment = dict(os.environ)
+        environment.update({
+            "PREFIX": os.environ["BIONIC_TEST_TERMUX_PREFIX"],
+            "TMPDIR": "/tmp",
+            "HOST_ARTIFACT_GID": os.environ["BIONIC_TEST_HOST_GID"],
+            "TERMUX_PACKAGE_REPOSITORY": "https://packages.termux.dev/apt/termux-main",
+        })
+        command = [
+            "/bin/sh", "-c", 'umask 0007; exec "$@"', "bionic-umask-boundary",
+            "/bin/sh", "-c", actual_script, *args[script_index + 1:],
+        ]
+        phase = subprocess.run(command, env=environment, capture_output=True, text=True, check=False)
+        sys.stdout.write(phase.stdout)
+        sys.stderr.write(phase.stderr)
+        raise SystemExit(phase.returncode)
+    else:
+        raise SystemExit("unexpected container command: " + repr(args))
+else:
+    raise SystemExit("unexpected container runtime command: " + repr(args))
+""",
+                encoding="utf-8",
+            )
+            fake_runtime.chmod(0o755)
+
+            artifact_root = temp / "artifacts"
+            environment = dict(os.environ)
+            for name in ("ANDROID_ROOT", "ANDROID_DATA"):
+                environment.pop(name, None)
+            environment.update({
+                "PATH": f"{fake_bin}:{environment.get('PATH', '')}",
+                "TMPDIR": "/tmp",
+                "BIONIC_ARTIFACT_ROOT": str(artifact_root),
+                "BIONIC_CONTAINER_RUNTIME": str(fake_runtime),
+                "BIONIC_TEST_HOST_GID": str(os.getgid()),
+                "BIONIC_TEST_TERMUX_PREFIX": str(termux_prefix),
+                "BIONIC_TEST_APT_OBSERVATION": str(observation_path),
+                "BIONIC_TEST_LEGACY_MKTEMP_FAILURE": str(legacy_mktemp_failure),
+                "BIONIC_TEST_REAL_MKTEMP": real_mktemp,
+                "PYTHONDONTWRITEBYTECODE": "1",
+            })
+            result = subprocess.run(
+                ["bash", str(FIXTURE_RUNNER)],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(47, result.returncode, f"stdout={result.stdout!r} stderr={result.stderr!r}")
+            self.assertIn("simulated apt download failure after cache validation", result.stderr)
+            self.assertFalse(legacy_mktemp_failure.exists(), "apt phase still requested a top-level /tmp cache")
+            self.assertFalse(file_marker.exists(), "fixture advanced beyond the apt download phase")
+            self.assertTrue(observation_path.is_file())
+            observation = json.loads(observation_path.read_text(encoding="utf-8"))
+            self.assertEqual(str(termux_prefix), observation["prefix"])
+            self.assertEqual(str(termux_tmp), observation["tmpdir"])
+            self.assertEqual(0o770, observation["tmp_mode"])
+            self.assertEqual(os.geteuid(), observation["tmp_uid"])
+            self.assertTrue(observation["tmp_writable"])
+            self.assertTrue(termux_tmp.is_dir())
+            cache_dir = Path(observation["cache_dir"])
+            self.assertEqual(termux_tmp, cache_dir.parent)
+            self.assertEqual(0o700, observation["cache_mode"])
+            self.assertEqual(os.geteuid(), observation["cache_uid"])
+            self.assertEqual("Dir::Cache::archives=" + str(cache_dir), observation["cache_option"])
+            self.assertEqual(os.geteuid(), observation["producer_uid"])
+            self.assertEqual(observation["producer_user"], observation["sandbox_user"])
 
     def test_fixture_finalization_does_not_follow_container_replaced_apt_paths(self) -> None:
         if os.geteuid() != 0:
@@ -903,10 +1138,14 @@ else:
         self.assertNotIn("sudo ", fixture)
         self.assertNotIn("trap cleanup_incomplete_apt_download EXIT", fixture)
         self.assertNotIn("chmod -R", fixture)
-        self.assertIn('apt_cache_dir="$(mktemp -d /tmp/urprotect-bionic-apt-archives.', fixture)
+        self.assertIn('termux_tmp_dir="${PREFIX%/}/tmp"', fixture)
+        self.assertIn('mkdir -p "${termux_tmp_dir}"', fixture)
+        self.assertIn('export TMPDIR="${termux_tmp_dir}"', fixture)
+        apt_cache_setup = 'apt_cache_dir="$(mktemp -d "${TMPDIR%/}/urprotect-bionic-apt-archives.XXXXXX")"'
+        self.assertIn(apt_cache_setup, fixture)
         self.assertGreater(
             fixture.index('find /artifacts/apt-archives -maxdepth 1 -type f -name "*.deb" -delete'),
-            fixture.index('apt_cache_dir="$(mktemp -d /tmp/urprotect-bionic-apt-archives.'),
+            fixture.index(apt_cache_setup),
         )
         self.assertIn('chmod 0640 "${destination_archive}"', fixture)
         self.assertNotIn("chown -R", fixture + bridge + ownership_helper)
