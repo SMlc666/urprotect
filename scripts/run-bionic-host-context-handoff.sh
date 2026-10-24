@@ -99,12 +99,28 @@ if [[ -n "$identity_directory" ]]; then
 fi
 python3 "$repo_root/scripts/prepare-bionic-write-root.py" "${write_root_args[@]}" || exit 1
 
-resolved_image="$("$container_runtime" image inspect "$oci_image" --format '{{.Id}}|{{join .RepoDigests ","}}')"
-resolved_digests="${resolved_image#*|}"
-case ",$resolved_digests," in
-  *",$oci_image,"*) ;;
-  *) echo "Bionic handoff image inspect did not return the exact pinned repository digest" >&2; exit 2 ;;
-esac
+if ! "$container_runtime" image inspect "$oci_image" --format '{{json .RepoDigests}}' |
+  python3 -c '
+import json
+import sys
+
+maximum_bytes = 64 * 1024
+raw = sys.stdin.buffer.read(maximum_bytes + 1)
+if len(raw) > maximum_bytes:
+    sys.exit(1)
+
+try:
+    digests = json.loads(raw.decode("utf-8"))
+except (json.JSONDecodeError, UnicodeDecodeError):
+    sys.exit(1)
+
+if type(digests) is not list or any(type(digest) is not str for digest in digests):
+    sys.exit(1)
+sys.exit(0 if sys.argv[1] in digests else 1)
+' "$oci_image"; then
+  echo "Bionic handoff image inspect did not return the exact pinned repository digest" >&2
+  exit 2
+fi
 
 container_shell='/data/data/com.termux/files/usr/bin/sh'
 container_status=0

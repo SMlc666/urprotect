@@ -111,7 +111,31 @@ class BionicHandoffBridgeTests(unittest.TestCase):
             "    print('linux/arm64')\n"
             "    raise SystemExit(0)\n"
             "if len(args) >= 2 and args[:2] == ['image', 'inspect']:\n"
-            f"    print('sha256:' + 'a' * 64 + '|' + {IMAGE!r})\n"
+            "    inspect_template = args[args.index('--format') + 1] if '--format' in args else None\n"
+            "    if inspect_template != '{{json .RepoDigests}}':\n"
+            "        print('unexpected image inspect format', file=sys.stderr)\n"
+            "        raise SystemExit(96)\n"
+            "    mode = os.environ.get('FAKE_CONTAINER_MODE', 'success')\n"
+            "    image = args[2]\n"
+            "    if mode == 'inspect-malformed-json':\n"
+            "        print('{not-json')\n"
+            "    elif mode == 'inspect-invalid-utf8':\n"
+            "        sys.stdout.buffer.write(bytes([0xff, 10]))\n"
+            "    elif mode == 'inspect-raw-nul':\n"
+            "        sys.stdout.buffer.write(b'[\\\"' + image.encode('utf-8') + b'\\x00\\\"]\\n')\n"
+            "    elif mode == 'inspect-oversized-json':\n"
+            "        sys.stdout.buffer.write(b'[\\\"' + image.encode('utf-8') + b'\\\",\\\"' + b'x' * (64 * 1024) + b'\\\"]\\n')\n"
+            "    elif mode == 'inspect-command-failure':\n"
+            "        print(json.dumps([image]))\n"
+            "        raise SystemExit(47)\n"
+            "    elif mode == 'inspect-wrong-root-type':\n"
+            "        print(json.dumps({'RepoDigests': [image]}))\n"
+            "    elif mode == 'inspect-non-string-item':\n"
+            "        print(json.dumps([image, 17]))\n"
+            "    elif mode == 'inspect-missing-pin':\n"
+            "        print(json.dumps([image.rsplit('@', 1)[0] + '@sha256:' + 'b' * 64]))\n"
+            "    else:\n"
+            "        print(json.dumps([image]))\n"
             "    raise SystemExit(0)\n"
             "if not args or args[0] != 'run':\n"
             "    print('unexpected fake container argv', file=sys.stderr)\n"
@@ -536,6 +560,13 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
                     )
 
             calls = [json.loads(line) for line in log_path.read_text().splitlines()]
+            inspect_calls = [call for call in calls if call[:2] == ["image", "inspect"]]
+            self.assertEqual(2, len(inspect_calls))
+            for call in inspect_calls:
+                self.assertEqual(
+                    ["image", "inspect", IMAGE, "--format", "{{json .RepoDigests}}"],
+                    call,
+                )
             runs = [call for call in calls if call and call[0] == "run"]
             self.assertEqual(2, len(runs))
             expected_roles = ("source", "target")
@@ -562,6 +593,96 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
                      f"/evidence/runtime-identity/{role}", f"runtime-identity/{role}", role],
                     call[marker + 1 :],
                 )
+
+    def test_bridge_rejects_invalid_repo_digest_json_before_container_run(self) -> None:
+        invalid_modes = (
+            "inspect-malformed-json",
+            "inspect-invalid-utf8",
+            "inspect-oversized-json",
+            "inspect-command-failure",
+            "inspect-wrong-root-type",
+            "inspect-non-string-item",
+            "inspect-missing-pin",
+        )
+        with self.ensure_test_bridge_helper():
+            for mode in invalid_modes:
+                with self.subTest(mode=mode), tempfile.TemporaryDirectory(
+                    prefix="bionic-bridge-inspect-"
+                ) as raw_temp:
+                    temp = Path(raw_temp)
+                    env, log_path = self.fake_environment(temp, mode=mode)
+                    with tempfile.TemporaryDirectory(
+                        prefix="bionic-bridge-inspect-evidence-",
+                        dir=ROOT / ".artifacts/indirect-control",
+                    ) as raw_root:
+                        evidence_root = Path(raw_root)
+                        source = evidence_root / "source-image.bin"
+                        record = evidence_root / "handoff.json"
+                        source.write_bytes(b"source image bytes")
+                        result = self.run_process(
+                            [str(BRIDGE), IMAGE, str(source), "urp_entry", str(record)],
+                            env,
+                        )
+                        self.assertEqual(2, result.returncode, result.stderr)
+                        self.assertIn(
+                            "did not return the exact pinned repository digest",
+                            result.stderr,
+                        )
+                        calls = [
+                            json.loads(line)
+                            for line in log_path.read_text(encoding="utf-8").splitlines()
+                        ]
+                        inspect_calls = [
+                            call for call in calls if call[:2] == ["image", "inspect"]
+                        ]
+                        self.assertEqual(1, len(inspect_calls))
+                        self.assertEqual(
+                            ["image", "inspect", IMAGE, "--format", "{{json .RepoDigests}}"],
+                            inspect_calls[0],
+                        )
+                        self.assertFalse(
+                            any(call and call[0] == "run" for call in calls),
+                            "invalid image-inspect JSON must be rejected before container run",
+                        )
+                        self.assertFalse(record.exists())
+
+    def test_bridge_rejects_raw_nul_image_inspect_output_before_container_run(self) -> None:
+        with self.ensure_test_bridge_helper(), tempfile.TemporaryDirectory(
+            prefix="bionic-bridge-inspect-nul-"
+        ) as raw_temp:
+            temp = Path(raw_temp)
+            env, log_path = self.fake_environment(temp, mode="inspect-raw-nul")
+            with tempfile.TemporaryDirectory(
+                prefix="bionic-bridge-inspect-nul-evidence-",
+                dir=ROOT / ".artifacts/indirect-control",
+            ) as raw_root:
+                evidence_root = Path(raw_root)
+                source = evidence_root / "source-image.bin"
+                record = evidence_root / "handoff.json"
+                source.write_bytes(b"source image bytes")
+                result = self.run_process(
+                    [str(BRIDGE), IMAGE, str(source), "urp_entry", str(record)],
+                    env,
+                )
+                self.assertEqual(2, result.returncode, result.stderr)
+                self.assertIn(
+                    "did not return the exact pinned repository digest",
+                    result.stderr,
+                )
+                calls = [
+                    json.loads(line)
+                    for line in log_path.read_text(encoding="utf-8").splitlines()
+                ]
+                self.assertEqual(
+                    [["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"],
+                     ["image", "inspect", IMAGE, "--format", "{{json .RepoDigests}}"]],
+                    calls,
+                )
+                self.assertFalse(
+                    any(call and call[0] == "run" for call in calls),
+                    "raw NUL in image-inspect JSON must be rejected before container run",
+                )
+                self.assertFalse(record.exists(), "invalid inspect output must not publish a record")
 
     def test_bridge_rejects_preexisting_output_symlink_before_container_run(self) -> None:
         with self.ensure_test_bridge_helper(), tempfile.TemporaryDirectory(
