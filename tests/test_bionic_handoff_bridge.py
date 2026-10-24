@@ -55,6 +55,12 @@ class BionicHandoffBridgeTests(unittest.TestCase):
             "    raise SystemExit(96)\n"
             "print('fake-container-stdout')\n"
             "print('fake-container-stderr', file=sys.stderr)\n"
+            "if mode in ('record-symlink', 'exit-39-with-symlink'):\n"
+            "    if len(helper_args) not in (3, 6):\n        raise SystemExit(95)\n"
+            "    record_container = helper_args[2]\n"
+            "    record_path = pathlib.Path(evidence_mount) / record_container.removeprefix('/evidence/')\n"
+            "    record_path.symlink_to(os.environ['FAKE_OUTSIDE_RECORD'])\n"
+            "    raise SystemExit(39 if mode == 'exit-39-with-symlink' else 91)\n"
             f"if mode == 'exit-39' or mode == 'target-failure':\n    raise SystemExit(39)\n"
             "if mode == 'source-missing-record' and run_index == 1:\n"
             "    raise SystemExit(91)\n"
@@ -464,6 +470,9 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
             ):
                 self.assertIn("--platform", call)
                 self.assertEqual("linux/arm64", call[call.index("--platform") + 1])
+                self.assertEqual("1000:1000", call[call.index("--user") + 1])
+                self.assertEqual(str(os.getgid()), call[call.index("--group-add") + 1])
+                self.assertIn("umask 0007", call[call.index("-c") + 1])
                 self.assertIn("--mount", call)
                 mounts = [call[index + 1] for index, value in enumerate(call[:-1]) if value == "--mount"]
                 self.assertEqual(
@@ -479,6 +488,91 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
                      f"/evidence/runtime-identity/{role}", f"runtime-identity/{role}", role],
                     call[marker + 1 :],
                 )
+
+    def test_bridge_rejects_preexisting_output_symlink_before_container_run(self) -> None:
+        with self.ensure_test_bridge_helper(), tempfile.TemporaryDirectory(
+            prefix="bionic-bridge-preexisting-tree-"
+        ) as raw_temp:
+            temp = Path(raw_temp)
+            env, log_path = self.fake_environment(temp)
+            outside_record = temp / "outside-record.tmp"
+            outside_bytes = b"do not truncate before container execution\\n"
+            outside_record.write_bytes(outside_bytes)
+            with tempfile.TemporaryDirectory(
+                prefix="bionic-bridge-preexisting-evidence-", dir=ROOT / ".artifacts/indirect-control"
+            ) as raw_root:
+                evidence_root = Path(raw_root)
+                source = evidence_root / "source-image.bin"
+                source.write_bytes(b"source image bytes")
+                record = evidence_root / "handoff.json"
+                (evidence_root / "handoff.json.tmp").symlink_to(outside_record)
+                result = self.run_process(
+                    [str(BRIDGE), IMAGE, str(source), "urp_entry", str(record)],
+                    env,
+                )
+                self.assertEqual(2, result.returncode, result.stderr)
+                self.assertIn("symlink", result.stderr.lower())
+                calls = [json.loads(line) for line in log_path.read_text().splitlines()]
+                self.assertFalse(any(call and call[0] in {"run", "image"} for call in calls))
+                self.assertEqual(outside_bytes, outside_record.read_bytes())
+
+    def test_bridge_rejects_container_record_symlink_before_capture_can_parse_it(self) -> None:
+        with self.ensure_test_bridge_helper(), tempfile.TemporaryDirectory(
+            prefix="bionic-bridge-tree-guard-"
+        ) as raw_temp:
+            temp = Path(raw_temp)
+            env, _ = self.fake_environment(temp, mode="record-symlink")
+            outside_record = temp / "outside-record.json"
+            outside_bytes = b'{"status":"passed","entryStatus":91}\\n'
+            outside_record.write_bytes(outside_bytes)
+            env["FAKE_OUTSIDE_RECORD"] = str(outside_record)
+            with tempfile.TemporaryDirectory(
+                prefix="bionic-bridge-tree-evidence-", dir=ROOT / ".artifacts/indirect-control"
+            ) as raw_root:
+                evidence_root = Path(raw_root)
+                source = evidence_root / "source-image.bin"
+                record = evidence_root / "handoff.json"
+                source.write_bytes(b"source image bytes")
+                result = self.run_process(
+                    [sys.executable, str(CAPTURE), "--root", str(evidence_root), "--label", "handoff",
+                     "--record", str(record), "--expected-status", "91", "--",
+                     str(BRIDGE), IMAGE, str(source), "urp_entry", str(record)],
+                    env,
+                )
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn("artifact tree invalid; success record not read", result.stderr)
+                self.assertEqual("91\n", (evidence_root / "handoff.process-status").read_text())
+                self.assertTrue(record.is_symlink())
+                self.assertIn(b"symlink", (evidence_root / "handoff.stderr").read_bytes().lower())
+                self.assertEqual(outside_bytes, outside_record.read_bytes())
+
+    def test_bridge_preserves_nonzero_status_when_container_tree_is_invalid(self) -> None:
+        with self.ensure_test_bridge_helper(), tempfile.TemporaryDirectory(
+            prefix="bionic-bridge-tree-failure-"
+        ) as raw_temp:
+            temp = Path(raw_temp)
+            env, _ = self.fake_environment(temp, mode="exit-39-with-symlink")
+            outside_record = temp / "outside-record.json"
+            outside_record.write_bytes(b"not read from an invalid tree\\n")
+            env["FAKE_OUTSIDE_RECORD"] = str(outside_record)
+            with tempfile.TemporaryDirectory(
+                prefix="bionic-bridge-tree-failure-evidence-", dir=ROOT / ".artifacts/indirect-control"
+            ) as raw_root:
+                evidence_root = Path(raw_root)
+                source = evidence_root / "source-image.bin"
+                record = evidence_root / "handoff.json"
+                source.write_bytes(b"source image bytes")
+                result = self.run_process(
+                    [sys.executable, str(CAPTURE), "--root", str(evidence_root), "--label", "handoff",
+                     "--record", str(record), "--expected-status", "91", "--",
+                     str(BRIDGE), IMAGE, str(source), "urp_entry", str(record)],
+                    env,
+                )
+                self.assertEqual(39, result.returncode, result.stderr)
+                self.assertEqual("39\n", (evidence_root / "handoff.process-status").read_text())
+                self.assertIn(b"symlink", (evidence_root / "handoff.stderr").read_bytes().lower())
+                self.assertTrue(record.is_symlink())
+                self.assertEqual(b"not read from an invalid tree\\n", outside_record.read_bytes())
 
     def test_capture_retains_exact_bridge_failure_before_missing_record_parse(self) -> None:
         with self.ensure_test_bridge_helper(), tempfile.TemporaryDirectory(prefix="bionic-bridge-failure-") as raw_temp:

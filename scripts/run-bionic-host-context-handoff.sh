@@ -24,8 +24,18 @@ server_platform="$("$container_runtime" version --format '{{.Server.Os}}/{{.Serv
 [[ "$server_platform" == linux/arm64 ]] || { echo "Bionic handoff requires a native Linux/arm64 container engine; got $server_platform" >&2; exit 2; }
 
 unit_root_arg="$(dirname -- "$record_arg")"
+artifact_base_arg="$repo_root/.artifacts/indirect-control"
+path_validation=(
+  --validate-directory "$unit_root_arg"
+  --validate-tree "$unit_root_arg"
+  --validate-directory "$build_root_arg"
+  --validate-directory "$artifact_base_arg"
+  --validate-file "$input_elf"
+)
+if [[ $# -eq 7 ]]; then path_validation+=(--validate-directory "$5"); fi
+python3 "$repo_root/scripts/prepare-bionic-write-root.py" "${path_validation[@]}" || exit 2
 unit_root="$(realpath -e -- "$unit_root_arg" 2>/dev/null || true)"
-artifact_base="$(realpath -e -- "$repo_root/.artifacts/indirect-control" 2>/dev/null || true)"
+artifact_base="$(realpath -e -- "$artifact_base_arg" 2>/dev/null || true)"
 [[ -n "$unit_root" && -n "$artifact_base" && -d "$unit_root" && ! -L "$unit_root_arg" ]] || {
   echo "Bionic handoff evidence unit root is not a real directory" >&2
   exit 2
@@ -69,6 +79,7 @@ record_in_container="/evidence/$record_name"
 [[ "$entry_symbol" =~ ^[A-Za-z_][A-Za-z0-9_]{0,127}$ ]] || { echo "Bionic handoff entry symbol is malformed" >&2; exit 2; }
 args=("$input_in_container" "$entry_symbol" "$record_in_container")
 identity_in_container=
+identity_directory=
 if [[ $# -eq 7 ]]; then
   identity_directory="$(realpath -e -- "$5" 2>/dev/null || true)"
   [[ -n "$identity_directory" && -d "$identity_directory" && ! -L "$5" ]] || { echo "Bionic runtime identity output directory is not a real directory" >&2; exit 2; }
@@ -79,8 +90,14 @@ if [[ $# -eq 7 ]]; then
   [[ "$role" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Bionic runtime identity role is malformed" >&2; exit 2; }
   identity_in_container="/evidence/${identity_directory#"$unit_root"/}"
   args+=("$identity_in_container" "$identity_relative_directory" "$role")
-  chmod a+rwx "$unit_root" "$identity_directory" || exit 1
 fi
+
+host_artifact_gid="$(id -g)"
+write_root_args=(--group-gid "$host_artifact_gid" --directory "$unit_root")
+if [[ -n "$identity_directory" ]]; then
+  write_root_args+=(--directory "$identity_directory")
+fi
+python3 "$repo_root/scripts/prepare-bionic-write-root.py" "${write_root_args[@]}" || exit 1
 
 resolved_image="$("$container_runtime" image inspect "$oci_image" --format '{{.Id}}|{{join .RepoDigests ","}}')"
 resolved_digests="${resolved_image#*|}"
@@ -90,23 +107,40 @@ case ",$resolved_digests," in
 esac
 
 container_shell='/data/data/com.termux/files/usr/bin/sh'
-"$container_runtime" run --rm --platform linux/arm64 --user 1000:1000 \
+container_status=0
+if "$container_runtime" run --rm --platform linux/arm64 --user 1000:1000 \
+  --group-add "$host_artifact_gid" \
   --env PREFIX=/data/data/com.termux/files/usr \
   --env HOME=/tmp \
-  --env "IDENTITY_DIR=$identity_in_container" \
+  --env "HOST_ARTIFACT_GID=$host_artifact_gid" \
   --mount "type=bind,src=$unit_root,dst=/evidence" \
   --mount "type=bind,src=$build_root,dst=/bionic-build,readonly" \
   "$oci_image" "$container_shell" -c '
+umask 0007
 set -u
+case " $(id -G) " in *" ${HOST_ARTIFACT_GID} "*) ;; *) echo "host artifact group is missing from the Bionic handoff container" >&2; exit 1 ;; esac
 helper=/bionic-build/host-context-image-handoff
-set +e
-"$helper" "$@"
-status=$?
-if [ -n "$IDENTITY_DIR" ]; then
-  for retained in "$IDENTITY_DIR"/*; do
-    [ -f "$retained" ] && chmod 0644 "$retained" || :
-  done
-  chmod 0755 "$IDENTITY_DIR" || :
+exec "$helper" "$@"
+' bionic-handoff "${args[@]}"; then
+  :
+else
+  container_status=$?
 fi
-exit "$status"
-' bionic-handoff "${args[@]}"
+
+tree_status=0
+if python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-tree "$unit_root"; then
+  :
+else
+  tree_status=$?
+fi
+if [[ "$tree_status" -ne 0 ]]; then
+  if [[ "$container_status" -ne 0 ]]; then
+    printf 'Bionic handoff artifact tree validation failed; preserving container exit=%s\n' \
+      "$container_status" >&2
+    exit "$container_status"
+  fi
+  exit "$tree_status"
+fi
+if [[ "$container_status" -ne 0 ]]; then
+  exit "$container_status"
+fi

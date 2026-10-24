@@ -26,6 +26,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 native_root="$repo_root/native/urprotect-runtime"
 native_build_dir_relative=build
 make_args=()
+artifact_base_arg="$repo_root/.artifacts/indirect-control"
+if [[ "$runtime" == bionic ]]; then
+  path_validation=(--validate-directory "${BIONIC_INDIRECT_CONTROL_BUILD_ROOT:-}")
+  path_validation+=(--validate-creation-path "$artifact_base_arg")
+  if [[ -n "$artifact_root_arg" ]]; then path_validation+=(--validate-creation-path "$artifact_root_arg"); fi
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" "${path_validation[@]}" || exit 2
+fi
 if [[ "$runtime" == musl ]]; then
   command -v musl-gcc >/dev/null 2>&1 || { echo "environment-unavailable: pinned musl-gcc is required for native musl jump-table evidence" >&2; exit 2; }
   runtime_cc="$(command -v musl-gcc)"
@@ -43,7 +50,7 @@ if [[ "$runtime" != bionic ]]; then
   make_args+=("BUILD_DIR=$native_build_dir_relative")
   native_build_dir="$native_root/$native_build_dir_relative"
 fi
-artifact_base="$(realpath -m -- "$repo_root/.artifacts/indirect-control")"
+artifact_base="$(realpath -m -- "$artifact_base_arg")"
 if [[ -n "$artifact_root_arg" ]]; then
   root="$(realpath -m -- "$artifact_root_arg")"
   [[ "$root" == "$artifact_base/"* ]] || { echo "indirect evidence root must be under .artifacts/indirect-control" >&2; exit 2; }
@@ -57,11 +64,17 @@ native_build_diagnostics_root="${root}.native-build-diagnostics"
   exit 2
 }
 positive="$root/$unit"
-mkdir -p "$positive" "$native_build_diagnostics_root" || exit 1
+if [[ "$runtime" == bionic ]]; then
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+    --group-gid "$(id -g)" --create-directory "$positive" --create-directory "$native_build_diagnostics_root" || exit 1
+else
+  mkdir -p "$positive" "$native_build_diagnostics_root" || exit 1
+fi
 if [[ "$runtime" == bionic ]]; then
   for diagnostic in native-build.command.txt native-build.stdout native-build.stderr; do
-    [[ -f "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/$diagnostic" && ! -L "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/$diagnostic" ]] || {
-      echo "Bionic fixture build did not retain regular non-symlink diagnostic $diagnostic" >&2
+    python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+      --validate-file "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT/$diagnostic" || {
+      echo "Bionic fixture build did not retain a safely reachable regular diagnostic $diagnostic" >&2
       exit 1
     }
   done
@@ -92,12 +105,12 @@ if [[ "$native_build_status" != "0" ]]; then
   exit "$native_build_status"
 fi
 if [[ "$runtime" == bionic ]]; then
-  [[ -n "${BIONIC_RUNTIME_RESULT:-}" && -f "$BIONIC_RUNTIME_RESULT" && ! -L "$BIONIC_RUNTIME_RESULT" ]] || {
-    echo "Bionic runtime provenance result is missing or not a regular file" >&2
+  [[ -n "${BIONIC_RUNTIME_RESULT:-}" ]] || {
+    echo "Bionic runtime provenance result is not configured" >&2
     exit 2
   }
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-file "$BIONIC_RUNTIME_RESULT" || exit 2
   cp -- "$BIONIC_RUNTIME_RESULT" "$positive/bionic-runtime-environment.json" || exit 1
-  chmod a+rwx "$positive" || exit 1
 fi
 source_file="$native_build_dir/host-context-jump-table-fixture.so"
 function_id="$(readelf -Ws "$source_file" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"

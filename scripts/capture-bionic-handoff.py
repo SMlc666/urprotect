@@ -122,7 +122,7 @@ def main(argv: Sequence[str]) -> int:
     stdout_name = f"{options.label}.stdout"
     stderr_name = f"{options.label}.stderr"
     command_name = f"{options.label}.command.json"
-    stdout_fd = stderr_fd = -1
+    stdout_fd = stderr_fd = status_fd = -1
     try:
         write_new(
             root_fd,
@@ -141,13 +141,29 @@ def main(argv: Sequence[str]) -> int:
             0o644,
             dir_fd=root_fd,
         )
+        # Pre-open status before handing the evidence root to the container.
+        # Post-return status retention then uses only this already-verified fd;
+        # a planted status-name symlink is detected by the later tree walk.
+        status_fd = os.open(
+            status_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | nofollow,
+            0o644,
+            dir_fd=root_fd,
+        )
         try:
             completed = subprocess.run(command, stdout=stdout_fd, stderr=stderr_fd, check=False)
             status = completed.returncode if completed.returncode >= 0 else 128 - completed.returncode
         except OSError as error:
             os.write(stderr_fd, f"unable to execute Bionic handoff command: {error}\n".encode())
             status = 127
-        write_new(root_fd, status_name, f"{status}\n".encode("ascii"))
+        status_bytes = f"{status}\n".encode("ascii")
+        status_offset = 0
+        while status_offset < len(status_bytes):
+            count = os.write(status_fd, status_bytes[status_offset:])
+            if count <= 0:
+                raise OSError("no progress while retaining Bionic handoff process status")
+            status_offset += count
+        os.fsync(status_fd)
     except OSError as error:
         return fail(f"could not retain invocation/result sidecars: {error}")
     finally:
@@ -155,15 +171,35 @@ def main(argv: Sequence[str]) -> int:
             os.close(stdout_fd)
         if stderr_fd >= 0:
             os.close(stderr_fd)
+        if status_fd >= 0:
+            os.close(status_fd)
         os.close(root_fd)
 
     # Status and streams are durable before any success-record parsing begins.
+    # The container can write anywhere under this evidence root. Revalidate the
+    # complete tree before reading the record, even when its expected handoff
+    # status is nonzero (the entry fixture commonly returns 91 on success).
+    tree_validation = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("prepare-bionic-write-root.py")),
+         "--validate-tree", str(resolved)],
+        capture_output=True,
+        check=False,
+    )
+    tree_error = tree_validation.stderr.decode("utf-8", errors="replace").strip()
     if status != expected_status:
+        message = (
+            f"Bionic handoff process status {status} differs from expected {expected_status}; sidecars retained"
+        )
+        if tree_validation.returncode != 0:
+            message += f"; artifact tree invalid, record not read: {tree_error}"
+        print(message, file=sys.stderr)
+        return status if status != 0 else 1
+    if tree_validation.returncode != 0:
         print(
-            f"Bionic handoff process status {status} differs from expected {expected_status}; sidecars retained",
+            f"Bionic handoff artifact tree invalid; success record not read: {tree_error}; sidecars retained",
             file=sys.stderr,
         )
-        return status if status != 0 else 1
+        return 1
     try:
         validate_record(record_path, expected_status, status)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:

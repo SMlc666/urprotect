@@ -58,6 +58,7 @@ native_root="$repo_root/native/urprotect-runtime"
 native_build_dir="$native_root/$native_build_dir_relative"
 if [[ "$runtime" == bionic ]]; then
   [[ -n "${BIONIC_INDIRECT_CONTROL_BUILD_ROOT:-}" ]] || { echo "environment-unavailable: pinned Bionic fixture build root is required" >&2; exit 2; }
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-directory "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" || exit 2
   native_build_dir="$(realpath -e -- "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" 2>/dev/null || true)"
   [[ -n "$native_build_dir" && -d "$native_build_dir" && ! -L "$BIONIC_INDIRECT_CONTROL_BUILD_ROOT" ]] || { echo "Bionic fixture build root is not a real directory" >&2; exit 2; }
 elif [[ "$runtime" == musl ]]; then
@@ -68,21 +69,48 @@ else
 fi
 artifact_root="${PROTECTED_IMAGE_ARTIFACT_ROOT:-${repo_root}/.artifacts/protected-image/${tier}/${runtime}/${unit}}"
 work_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/urprotect-host-context-rehydration-${tier}-${runtime}-$$"
-mkdir -p "$artifact_root" "$work_root"
-trap 'rm -rf -- "$work_root"' EXIT
-rm -rf -- "$artifact_root"
-mkdir -p "$artifact_root"
 if [[ -z "$source_file" ]]; then
   source_file="$native_build_dir/host-context-entry-fixture.so"
 elif [[ "$source_file" != /* ]]; then
   source_file="$repo_root/$source_file"
 fi
+native_build_diagnostics_root="${URP_NATIVE_BUILD_DIAGNOSTICS_ROOT:-${artifact_root}.native-build-diagnostics}"
+if [[ "$runtime" == bionic ]]; then
+  path_validation=(--validate-creation-path "$artifact_root" --validate-creation-path "$native_build_diagnostics_root")
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" "${path_validation[@]}" || exit 2
+  if [[ -e "$artifact_root" || -L "$artifact_root" ]]; then
+    python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-directory "$artifact_root" || exit 2
+    existing_entries="$(find "$artifact_root" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+    if [[ -n "$existing_entries" ]]; then
+      [[ "$existing_entries" == bionic-runtime-environment.json && -n "${BIONIC_RUNTIME_RESULT:-}" ]] || {
+        echo "refusing to reuse unexpected Bionic HostContext artifact root contents: $artifact_root" >&2
+        exit 2
+      }
+      python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-file "$BIONIC_RUNTIME_RESULT" || exit 2
+      python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-file "$artifact_root/bionic-runtime-environment.json" || exit 2
+      cmp -- "$BIONIC_RUNTIME_RESULT" "$artifact_root/bionic-runtime-environment.json" || {
+        echo "existing Bionic runtime provenance differs from the selected runtime result" >&2
+        exit 2
+      }
+    fi
+    python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+      --group-gid "$(id -g)" --directory "$artifact_root" || exit 2
+  else
+    python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+      --group-gid "$(id -g)" --create-directory "$artifact_root" || exit 2
+  fi
+else
+  mkdir -p "$artifact_root"
+  rm -rf -- "$artifact_root"
+  mkdir -p "$artifact_root"
+fi
+mkdir -p "$work_root"
+trap 'rm -rf -- "$work_root"' EXIT
 make_args=("BUILD_DIR=$native_build_dir_relative")
 if [[ "$runtime" == musl ]]; then
   make_args+=("CC=$runtime_cc" "LD=ld")
   make_args+=("HOST_ADAPTER_CFLAGS=-mno-outline-atomics")
 fi
-native_build_diagnostics_root="${URP_NATIVE_BUILD_DIAGNOSTICS_ROOT:-${artifact_root}.native-build-diagnostics}"
 artifact_root_resolved="$(realpath -m -- "$artifact_root")" || exit 1
 native_build_diagnostics_root_resolved="$(realpath -m -- "$native_build_diagnostics_root")" || exit 1
 case "$native_build_diagnostics_root_resolved" in
@@ -96,11 +124,17 @@ if [[ -e "$nested_build_diagnostics_root" || -L "$nested_build_diagnostics_root"
   echo "refusing to overwrite existing HostContext native-build diagnostics: $nested_build_diagnostics_root" >&2
   exit 2
 fi
-mkdir -p "$nested_build_diagnostics_root" || exit 1
+if [[ "$runtime" == bionic ]]; then
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+    --group-gid "$(id -g)" --create-directory "$nested_build_diagnostics_root" || exit 1
+else
+  mkdir -p "$nested_build_diagnostics_root" || exit 1
+fi
 if [[ "$runtime" == bionic ]]; then
   for diagnostic in native-build.command.txt native-build.stdout native-build.stderr; do
-    [[ -f "$native_build_dir/$diagnostic" && ! -L "$native_build_dir/$diagnostic" ]] || {
-      echo "Bionic native build is missing regular non-symlink diagnostic $diagnostic" >&2
+    python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+      --validate-file "$native_build_dir/$diagnostic" || {
+      echo "Bionic native build is missing a safely reachable regular diagnostic $diagnostic" >&2
       exit 1
     }
     cp -- "$native_build_dir/$diagnostic" "$nested_build_diagnostics_root/$diagnostic" || exit 1
@@ -130,12 +164,19 @@ if [[ "$native_build_status" != "0" ]]; then
   exit "$native_build_status"
 fi
 if [[ "$runtime" == bionic ]]; then
-  [[ -n "${BIONIC_RUNTIME_RESULT:-}" && -f "$BIONIC_RUNTIME_RESULT" && ! -L "$BIONIC_RUNTIME_RESULT" ]] || { echo "Bionic pinned runtime provenance result is missing" >&2; exit 2; }
+  [[ -n "${BIONIC_RUNTIME_RESULT:-}" ]] || { echo "Bionic pinned runtime provenance result is not configured" >&2; exit 2; }
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-file "$BIONIC_RUNTIME_RESULT" || exit 2
   cp -- "$BIONIC_RUNTIME_RESULT" "$artifact_root/bionic-runtime-environment.json" || exit 1
+fi
+if [[ "$runtime" == bionic ]]; then
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-file "$source_file" || exit 2
 fi
 source_file="$(realpath -e -- "$source_file" 2>/dev/null || true)"
 [[ -f "$source_file" && ! -L "$source_file" ]] || { echo "HostContext source fixture is not a regular ELF" >&2; exit 2; }
 native_helper_elf="$native_build_dir/host-context-image-handoff"
+if [[ "$runtime" == bionic ]]; then
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" --validate-file "$native_helper_elf" || exit 2
+fi
 [[ -x "$native_helper_elf" && -f "$native_helper_elf" && ! -L "$native_helper_elf" ]] || { echo "HostContext native handoff helper is missing from the selected runtime build directory" >&2; exit 2; }
 helper_interpreter="$(readelf -lW "$native_helper_elf" | sed -n 's/.*Requesting program interpreter: \([^]]*\)].*/\1/p' | head -n 1)"
 if [[ "$runtime" == bionic ]]; then
@@ -216,8 +257,14 @@ dotnet "$cli" rehydrate-image "$source_path" \
 [[ -s "$native_path" && -s "$record_path" ]] || { echo "HostContext managed rehydration did not publish a Native Image" >&2; exit 1; }
 identity_args=()
 if [[ "$require_runtime_identity" -eq 1 ]]; then
-  mkdir -p "$artifact_root/runtime-identity/target" "$artifact_root/runtime-identity/source"
-  if [[ "$runtime" == bionic ]]; then chmod a+rwx "$artifact_root" "$artifact_root/runtime-identity" "$artifact_root/runtime-identity/target" "$artifact_root/runtime-identity/source" || exit 1; fi
+  if [[ "$runtime" == bionic ]]; then
+    python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+      --group-gid "$(id -g)" \
+      --create-directory "$artifact_root/runtime-identity/target" \
+      --create-directory "$artifact_root/runtime-identity/source" || exit 1
+  else
+    mkdir -p "$artifact_root/runtime-identity/target" "$artifact_root/runtime-identity/source"
+  fi
   identity_args=("$artifact_root/runtime-identity/target" runtime-identity/target target)
 fi
 if [[ "$runtime" == bionic ]]; then

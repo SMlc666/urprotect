@@ -745,8 +745,13 @@ static int retain_bytes(int directory_fd, const char *name, const uint8_t *bytes
 {
     int fd;
     int result;
+    mode_t output_mode = 0600;
     if (directory_fd < 0 || name == NULL || bytes == NULL || size == 0U) return 0;
-    fd = openat(directory_fd, name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+#if defined(__BIONIC__) || defined(__ANDROID__)
+    /* The host reads Bionic-produced evidence through the explicitly shared setgid root. */
+    output_mode = 0640;
+#endif
+    fd = openat(directory_fd, name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, output_mode);
     if (fd < 0) return 0;
     result = write_all(fd, bytes, size) && fsync(fd) == 0;
     if (close(fd) != 0) result = 0;

@@ -78,9 +78,31 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
   only for canonical zero. Valid nonzero status is retained and propagated;
   missing or malformed status fails before downstream inspection or identity
   publication. Per-handoff argv/status/stdout/stderr sidecars likewise precede
-  success-record parsing. The capture helper still lacks a per-process timeout
-  and stdout/stderr byte cap; track those as a non-blocking P3 follow-up, not an
-  existing guarantee. See the single Bionic scenario in
+  success-record parsing. The nested Bionic handoff validates its existing
+  evidence-unit tree before launching the container and again after it returns;
+  the capture helper retains status through a descriptor opened before launch
+  and validates the tree before reading the success record. Invalid entries
+  block later reads while preserving a nonzero container status. The capture
+  helper still lacks a per-process timeout and stdout/stderr byte cap; track
+  those as a non-blocking P3 follow-up, not an existing guarantee. Artifact
+  permissions use explicitly declared host-group
+  roots and no-follow ownership checks. A foreign/symlinked root or missing
+  container supplementary group is a hard runner error; original artifact
+  path components are opened with `O_NOFOLLOW` and descriptor-relative creation,
+  so initial symlink-root/intermediate rejection precedes fixture writes. The
+  fixture also runs the helper's bounded descriptor-relative `--validate-tree`
+  pass before host writes and immediately after each container return; it rejects
+  symlink, special, non-regular/non-directory, multiply-linked, and over-bound
+  tree entries. A successful container with an invalid tree fails before later
+  host output opens; if both container status and tree validation fail, preserve
+  the exact container status and do not read unsafe failure-log paths. This is
+  not a general race-free guarantee under the intentionally group-writable root.
+  Apt partial-download/cache state stays in the disposable container and locked
+  `.deb` files alone are copied to the prepared evidence root; no privileged
+  host recursive chmod or EXIT cleanup traverses container-writable apt paths.
+  No recursive repair, world-write fallback, or privileged host-write bypass
+  is allowed. Host `readelf` report-open/command failures remain required
+  failures after native status retention. See the single Bionic scenario in
   [`runtime-compatibility.md`](runtime-compatibility.md#scenario-native-bionic-indirect-control-evidence)
   for the exact schema, roots, and error table.
 

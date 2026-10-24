@@ -2492,6 +2492,83 @@ and required evidence are asserted by
   publication, or Bionic runtime-environment copy. A valid nonzero status is
   retained and propagated unchanged; malformed status is a required-lane
   failure, not success or a skip.
+- **Least-privilege artifact ownership handoff.** Before any fixture artifact
+  creation or write, `prepare-bionic-write-root.py` traverses the original
+  absolute or relative path components using directory descriptors and
+  `O_NOFOLLOW`; explicit creation uses descriptor-relative `mkdir` operations,
+  not path-resolving `mkdir -p`. The original `BIONIC_ARTIFACT_ROOT` is passed
+  unchanged, and symlink roots or intermediate components are rejected during
+  initial root setup before the fixture's subsequent writes; adversarial tests
+  prove that prevalidation rejection leaves the outside tree unchanged. After
+  preparing the case root, the fixture validates its existing contents before
+  any host-side output open/redirection. The helper's `--validate-tree` operation
+  reuses the descriptor-relative path opener and traverses entries through
+  `dir_fd` operations with `O_NOFOLLOW`; it rejects symlinks, special or
+  non-regular/non-directory entries, and multiply-linked regular files. It
+  bounds the complete walk to 20,000 total entries (including root), 4,096
+  directories (including root), 16,000 files, and depth 64 (root depth zero),
+  and closes opened descriptors on every path. Immediately after each container
+  `run_shell` return, the fixture revalidates the case tree before returning to
+  caller-side redirections, subsequent host writes, or failure-log reads. An
+  invalid tree after a successful container command fails closed; if the
+  container returned nonzero, its exact status is preserved and unsafe failure
+  logs are not read. This bounds validation of the container-produced tree but
+  is not a general race-free guarantee against another concurrent writer under
+  the intentionally group-writable root. The nested Bionic HostContext handoff validates its existing evidence-unit
+  tree before launching the container, so a pre-existing symlink or other
+  invalid entry is rejected before the producer can create its temporary
+  record or redirect process streams. It revalidates immediately after the
+  container returns and before caller-side record parsing. The
+  `capture-bionic-handoff.py` helper creates argv/status/stdout/stderr sidecars
+  before execution, retains status through a pre-opened descriptor, and
+  validates the tree before reading the success record. An invalid tree blocks
+  later reads while preserving a nonzero container status. This remains
+  bounded validation, not a general race-free guarantee under concurrent
+  writers in the intentionally group-writable root. Bionic native
+  identity files are created with mode `0640` under `__ANDROID__` so the host
+  reads them through the explicit shared group; the bridge does not path-chmod
+  container-writable identity entries after handoff. Nested Bionic runners
+  likewise validate original artifact/build paths before `realpath` or artifact
+  writes.
+  Every prepared root must be a distinct real directory owned by the current
+  host writer.
+  The helper creates only explicitly declared path components, changes only
+  those prepared directory GIDs to the host writer's primary GID, and sets
+  owner/group-only `2770` (setgid) permissions. It bounds path operands to 16,
+  4096 encoded bytes, 128 components and 255 encoded bytes per component, and
+  rejects foreign-owned or symlinked roots without traversing descendants.
+  The fixture prepares only its Bionic case root, the `host-context` root, and
+  an empty `apt-archives` evidence root; each nested handoff prepares
+  only its evidence-unit root and, when present, its exact identity-output leaf
+  directory. Apt's partial/download cache remains in the disposable container
+  filesystem and apt runs with the same sandbox identity as the producer. Stale
+  top-level `.deb` evidence files are removed within the container from the
+  prepared archive root by unprivileged one-level `find` with default no-follow
+  behavior; only locked `.deb` files are copied
+  from the private cache into the prepared evidence root with owner/group read
+  and owner-only write permissions. No privileged
+  host recursive apt-cache mutation or EXIT cleanup traverses a container-
+  replaceable path. The container receives
+  that numeric host GID through `--group-add`; both fixture and nested handoff
+  fail closed if the supplementary group is absent, and set `umask 0007`.
+  The generated indirect-control build root is individually assigned that
+  group and `2770`, so the host can retain native status/stream sidecars and
+  write its readelf report while generated/identity files inherit the shared
+  group. Host/container UID, GID, supplementary-group, umask, and root/build
+  ownership/mode facts are retained in `host-provenance.txt`,
+  `container-facts.txt`, and `host-context-artifact-ownership.txt`; ownership
+  observed after ZIP extraction is not treated as evidence of the original
+  producer inode owner. This is a bounded same-run artifact bridge, not a
+  permission repair for arbitrary imported roots. Real-UID DAC regressions
+  exercise pre-setup denial and post-setup command/status/stdout/stderr plus
+  identity-file retention, canonical status parsing, and actual host `readelf`
+  report creation from a retained local ELF; the local ELF is permission-test
+  material, not Bionic runtime evidence. The host `readelf` commands
+  remain direct, required commands: a report-open or readelf failure still
+  stops the fixture and preserves native build status, command, stdout, stderr,
+  and host failure diagnostics. No world-writable mode, recursive ownership
+  change, sudo host-writer bypass, product/runtime behavior, or evidence-root
+  guard relaxation is introduced.
 - **Handoff sidecars precede record parsing.**
   `capture-bionic-handoff.py` creates the exact argv record and separate
   `<label>.process-status`, `<label>.stdout`, and `<label>.stderr` files before
@@ -2565,8 +2642,12 @@ and required evidence are asserted by
 | Pinned digest/package lock, native AArch64 Linux/arm64 engine, or live Bionic identity is unavailable | Required hosted lane fails; no substitute runtime and no positive Bionic root |
 | OCI reference, input ELF, record, or optional identity path escapes its declared bridge domain | Reject before container execution; do not remap through a host-path fallback |
 | Build status is missing, empty, non-regular, symlinked, changing, over-bound, noncanonical, or outside 0..255 | Preserve command/stdout/stderr; fail closed before `readelf`, managed handoff, identity copy, or successful evidence/checksum publication |
+| Prepared case tree contains a symlink, special entry, multiply-linked regular file, or exceeds the entry/directory/file/depth bounds | Fail closed before later host writes/redirections; preserve a failing container's actual status and do not read failure logs from an invalid tree |
 | Canonical native build status is nonzero (for example `37\n`) | Retain exact build diagnostics and propagate the same status; do not continue to a handoff |
 | Canonical native build status is exactly `0\n` | The three runner paths may continue; no other byte spelling is accepted as zero |
+| Artifact setup names a symlinked, non-directory, foreign-owned, duplicate, or over-count root | Reject before changing permissions; do not traverse or repair imported/extracted trees |
+| The declared host GID is absent from the container supplementary groups, or exact output roots cannot be opened | Fail before the fixture/handoff; do not fall back to world-writable permissions or host-side privilege bypass |
+| Host readelf output creation fails after a canonical zero build | Preserve the native status and all build/handoff diagnostics; fail the required fixture rather than skipping/ignoring readelf |
 | Handoff exits with unexpected status or the success record is missing/malformed | Keep command/status/stdout/stderr sidecars; reject the handoff and do not claim success |
 | Handoff subprocess runs too long or produces excessive output | Current runner has no per-handoff timeout/output cap; outer CI timeout is not a bound. Track as non-blocking P3: add explicit duration/output limits, process-group semantics, and tests; do not claim such a cap exists |
 | Bionic interpreter, map owner, libc/loader digest, image/role binding, or retained ELF/map facts disagree | Reject identity; never infer from image tags or self-reported JSON alone |
@@ -2602,6 +2683,16 @@ and required evidence are asserted by
   and `test_all_three_bionic_runners_progress_only_on_canonical_zero_and_propagate_nonzero`.
   It also verifies the exact handoff argv and that process-status, stdout and
   stderr are persisted before success-record parsing.
+- `tests/test_bionic_artifact_permissions.py` must perform real DAC checks under
+  distinct container/host UIDs, including container-UID and root-owned
+  generated roots that deny the host writer before the bounded shared-group
+  setup, then verify host readelf-report creation, canonical native-status
+  reading, and retained identity writes/reads afterward. It preserves an
+  outside-root sentinel's bytes, owner, group, and modes; static assertions
+  additionally pin the direct/fatal `readelf` command and forbid `chmod 777` /
+  `chmod a+rwx` in the Bionic fixture/identity runners. The root-capable test
+  may skip only when the harness cannot set distinct UIDs; it does not replace
+  the required live hosted Bionic lane.
 - `tests/test_rehydration_evidence.py` covers Bionic environment/schema,
   interpreter, mapped-file fingerprint, exact-integer schema/page-size and
   kernel/page relationships plus refreshed-hash tampering; shared identity
