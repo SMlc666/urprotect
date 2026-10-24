@@ -2466,6 +2466,15 @@ and required evidence are asserted by
   Docker server/container; it rejects Android/emulator/Waydroid and other
   architectures and has no host or emulation fallback. The checked-in locks,
   not a runtime label or a new guess, own these facts.
+- **Controlled fixture link shape.** The Bionic fixture build passes the
+  single Make argument
+  `INDIRECT_CONTROL_FIXTURE_LDFLAGS='--pack-dyn-relocs=none --no-relax'`; the
+  Makefile forwards it to the ordinary and shared jump-table fixture link
+  commands. `--no-relax` prevents the pinned Bionic `ld.lld` from relaxing the
+  fixture's deliberate `ADRP; ADD :lo12:` table reference into `NOP; ADR`,
+  preserving the instruction family consumed by the existing narrow resolver.
+  This is fixture construction only: it does not add ADR-based reference
+  support or change product analysis/admission.
 - **Bridge argument and path domains.** In
   `run-bionic-host-context-handoff.sh`, argument 1 is the exact OCI reference
   and must equal the `BIONIC_TERMUX_IMAGE` digest pin; argument 2 is a separate

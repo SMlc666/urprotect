@@ -460,6 +460,7 @@ elif args[:1] == ["run"]:
     command_indexes = [index for index, value in enumerate(args) if value == "-c"]
     script_index = command_indexes[-1] + 1
     script = args[script_index]
+    script_arguments = args[script_index + 1:]
     if "container_arch=" in script:
         gid = os.environ["BIONIC_TEST_HOST_GID"]
         print("\\n".join((
@@ -485,9 +486,12 @@ elif args[:1] == ["run"]:
             "HOST_ARTIFACT_GID": os.environ["BIONIC_TEST_HOST_GID"],
             "TERMUX_PACKAGE_REPOSITORY": "https://packages.termux.dev/apt/termux-main",
         })
+        if len(script_arguments) != 9 or script_arguments[0] != "--":
+            print("embedded apt phase must receive -- plus eight package specs", file=sys.stderr)
+            raise SystemExit(96)
         command = [
             "/bin/sh", "-c", 'umask 0007; exec "$@"', "bionic-umask-boundary",
-            "/bin/sh", "-c", actual_script, *args[script_index + 1:],
+            "/bin/sh", "-c", actual_script, *script_arguments,
         ]
         phase = subprocess.run(command, env=environment, capture_output=True, text=True, check=False)
         sys.stdout.write(phase.stdout)

@@ -345,7 +345,7 @@ run_shell -c '
   printf "%s\\n" \
     "cwd=/workspace/native/urprotect-runtime" \
     "runtime=bionic" \
-    "argv=make -C /workspace/native/urprotect-runtime SHELL=$PREFIX/bin/sh BUILD_DIR=/artifacts/host-context/indirect-control-build CC=clang LD=ld.lld AS=/workspace/scripts/termux-aarch64-as.sh HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ INDIRECT_CONTROL_FIXTURE_LDFLAGS=--pack-dyn-relocs=none jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture shared-jump-table-fixture host-context-image-handoff" \
+    "argv=make -C /workspace/native/urprotect-runtime SHELL=$PREFIX/bin/sh BUILD_DIR=/artifacts/host-context/indirect-control-build CC=clang LD=ld.lld AS=/workspace/scripts/termux-aarch64-as.sh HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ INDIRECT_CONTROL_FIXTURE_LDFLAGS=\"--pack-dyn-relocs=none --no-relax\" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture shared-jump-table-fixture host-context-image-handoff" \
     > "$build_dir/native-build.command.txt"
   set +e
   make -C /workspace/native/urprotect-runtime \
@@ -353,7 +353,7 @@ run_shell -c '
     BUILD_DIR="$build_dir" \
     CC=clang LD=ld.lld AS=/workspace/scripts/termux-aarch64-as.sh \
     HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ \
-    INDIRECT_CONTROL_FIXTURE_LDFLAGS=--pack-dyn-relocs=none \
+    INDIRECT_CONTROL_FIXTURE_LDFLAGS="--pack-dyn-relocs=none --no-relax" \
     jump-table-fixture jump-table-index-clobber-fixture \
     external-jump-table-fixture shared-jump-table-fixture host-context-image-handoff \
     > "$build_dir/native-build.stdout" 2> "$build_dir/native-build.stderr"

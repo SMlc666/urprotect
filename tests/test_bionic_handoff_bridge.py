@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import shlex
 import struct
 import subprocess
 import sys
@@ -24,6 +25,79 @@ BUILD_ROOT = ROOT / ".artifacts/bionic/c-termux-bionic-pie/host-context/indirect
 class BionicHandoffBridgeTests(unittest.TestCase):
     def run_process(self, command: list[str], env: dict[str, str], *, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
         return subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, check=False)
+
+    def test_bionic_fixture_link_flags_are_recorded_passed_and_forwarded(self) -> None:
+        runner = (ROOT / "scripts/run-bionic-fixture.sh").read_text(encoding="utf-8")
+        variable = "INDIRECT_CONTROL_FIXTURE_LDFLAGS"
+        flags = "--pack-dyn-relocs=none --no-relax"
+        expected_assignment = f"{variable}={flags}"
+
+        actual_assignment_lines = [
+            line.strip() for line in runner.splitlines()
+            if line.strip().startswith(f"{variable}=")
+        ]
+        self.assertEqual(1, len(actual_assignment_lines))
+        self.assertEqual(
+            [expected_assignment],
+            shlex.split(actual_assignment_lines[0].removesuffix("\\").strip()),
+        )
+
+        recorded_lines = [
+            line.strip() for line in runner.splitlines()
+            if '"argv=make -C /workspace/native/urprotect-runtime ' in line
+        ]
+        self.assertEqual(1, len(recorded_lines))
+        self.assertTrue(recorded_lines[0].endswith('" \\'))
+        recorded_fields = shlex.split(recorded_lines[0].removesuffix("\\").strip())
+        self.assertEqual(1, len(recorded_fields))
+        self.assertTrue(recorded_fields[0].startswith("argv="))
+        recorded_argv = shlex.split(recorded_fields[0][len("argv=") :])
+        self.assertEqual(
+            [expected_assignment],
+            [argument for argument in recorded_argv if argument.startswith(f"{variable}=")],
+        )
+
+        makefile = ROOT / "native/urprotect-runtime/Makefile"
+        with tempfile.TemporaryDirectory(prefix="bionic-jump-table-make-dry-run-") as raw_temp:
+            env = os.environ.copy()
+            env.pop("MAKEFLAGS", None)
+            env.pop("MFLAGS", None)
+            result = subprocess.run(
+                [
+                    "make", "--dry-run", "-C", str(makefile.parent),
+                    f"BUILD_DIR={Path(raw_temp) / 'build'}", "AS=unused", "LD=ld.lld",
+                    expected_assignment, "jump-table-fixture", "shared-jump-table-fixture",
+                ],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        link_commands = [
+            shlex.split(line)
+            for line in result.stdout.splitlines()
+            if line.startswith("ld.lld ")
+        ]
+        self.assertEqual(2, len(link_commands), result.stdout)
+        by_output = {
+            Path(command[command.index("-o") + 1]).name: command
+            for command in link_commands
+        }
+        self.assertEqual(
+            {
+                "host-context-jump-table-fixture.so",
+                "host-context-shared-jump-table-fixture.so",
+            },
+            set(by_output),
+        )
+        for command in by_output.values():
+            flag_index = command.index("--pack-dyn-relocs=none")
+            self.assertEqual(
+                ["--pack-dyn-relocs=none", "--no-relax"],
+                command[flag_index : flag_index + 2],
+            )
 
     def make_runtime_stub(self, directory: Path, log_path: Path, *, mode: str = "success") -> Path:
         executable = directory / "docker-stub"
