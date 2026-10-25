@@ -145,10 +145,10 @@ for a fresh required execution.
   all other section payloads remain bounded by the ELF bytes.
 
 - [x] **Step 1: Add parser boundary tests**
-  Construct a minimal bounded AArch64 ELF containing an `SHT_NOBITS` section
-  whose conceptual range extends past EOF, plus nearest negatives for an
-  equally out-of-bounds file-backed section and overflowing 64-bit
-  `sh_offset + sh_size` arithmetic.
+  Construct a valid minimal AArch64 `ET_REL` ELF with a non-allocated
+  `SHT_NOBITS` section (`sh_addr=0`, `sh_offset=EOF`) whose conceptual range
+  extends past EOF, plus nearest negatives for an equally out-of-bounds
+  file-backed section and overflowing 64-bit `sh_offset + sh_size` arithmetic.
 - [x] **Step 2: Run the focused tests and verify the intended failure**
   Run: `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_shared_jump_table_evidence.SharedJumpTableEvidenceTests.test_nobits_section_range_is_not_required_to_be_file_backed`
   Expected before the fix: the valid `SHT_NOBITS` case failed with

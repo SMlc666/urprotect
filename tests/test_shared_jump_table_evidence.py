@@ -299,7 +299,7 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
             "<HHIQQQIHHHHHH",
             image,
             16,
-            3,
+            1,
             183,
             1,
             0,
@@ -320,7 +320,7 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
             0,
             section_type,
             0,
-            0x2000,
+            0,
             file_offset,
             size,
             0,
@@ -334,14 +334,14 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
         checker = self._load_checker_module()
         with self.subTest(section_type="SHT_NOBITS"):
             program_headers, sections = checker.parse_elf(
-                self._minimal_elf_with_section(8, 160, 64), "synthetic ELF"
+                self._minimal_elf_with_section(8, 192, 64), "synthetic ELF"
             )
             self.assertEqual([], program_headers)
             self.assertEqual(64, sections[1]["size"])
 
         with self.subTest(section_type="file-backed"):
             with self.assertRaises(SystemExit) as failure:
-                checker.parse_elf(self._minimal_elf_with_section(1, 160, 64), "synthetic ELF")
+                checker.parse_elf(self._minimal_elf_with_section(1, 192, 64), "synthetic ELF")
             self.assertIn("out-of-bounds section", str(failure.exception))
 
         with self.subTest(section_type="SHT_NOBITS offset overflow"):
