@@ -339,7 +339,7 @@
         ".artifacts/host-context/managed/host-context-packed.json",
         ".artifacts/host-context/managed/result.txt",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "constraints": [
         "The current frame is v3 with an explicit host-context-entry profile and bounded urp_entry metadata.",
@@ -506,7 +506,7 @@
         "native/urprotect-runtime/host_context_image_handoff.c",
         ".artifacts/protected-image/tls/tls.initial-exec.glibc.host-context-entry",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ]
     },
     {
@@ -581,7 +581,7 @@
         ".artifacts/bionic/c-termux-bionic-pie/host-context/build-and-test.log",
         ".artifacts/bionic/c-termux-bionic-pie/host-context/build/host-context-entry-fixture.so",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "constraints": [
         "The native adapter test builds the HostContext entry shared object in the pinned Termux userspace and runs the current HostContext frame through /system/bin/linker64's bionic dlopen implementation.",
@@ -629,7 +629,7 @@
         "native/urprotect-runtime/test_managed_host_context.sh",
         ".artifacts/host-context/managed/tls-result.txt",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "constraints": [
         "The first slice is AArch64 initial-exec TLS with a structurally bounded PT_TLS segment and R_AARCH64_TLS_TPREL64 relocation; the system loader owns module allocation and initialization.",
@@ -664,7 +664,7 @@
         ".artifacts/host-context/managed/sha256.txt",
         "README.md",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "constraints": [
         "The capability is opt-in, default absent, valid only for host-context-entry, and advertised only when a glibc build/runtime is verified.",
@@ -687,7 +687,7 @@
         "native/urprotect-runtime/test_managed_host_context.sh",
         ".artifacts/host-context/managed/property-result.txt",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "constraints": [
         "The first slice accepts a GNU property note containing only AArch64 FEATURE_1 BTI/PAC bits and rejects unknown feature bits or malformed notes.",
@@ -708,7 +708,7 @@
         "native/urprotect-runtime/test_managed_host_context.sh",
         ".artifacts/host-context/managed/dependency-result.txt",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "constraints": [
         "The first slice accepts exactly one DT_NEEDED system libc basename (libc.so.6, libc.so, libc.musl-aarch64.so.1, or libc.so.1), with bounded DT_STRTAB/DT_STRSZ metadata and no RPATH/RUNPATH.",
@@ -776,7 +776,7 @@
         ".artifacts/host-context/managed/fake-loader-probe.log",
         ".artifacts/host-context/managed/sha256.txt",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "negativeWitness": "native/urprotect-runtime/host_context_graph_self_test.c",
       "negativeOracle": "native/urprotect-runtime/host_image_validation.c",
@@ -807,7 +807,7 @@
         ".artifacts/host-context/managed/dependency-result.txt",
         ".artifacts/host-context/managed/lifecycle-marker.txt",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md"
+        "docs/engineering/specs/backend/runtime-compatibility.md"
       ],
       "constraints": [
         "The system loader runs nonzero DT_INIT/DT_INIT_ARRAY metadata before urp_entry and DT_FINI/DT_FINI_ARRAY metadata during release.",
@@ -828,7 +828,7 @@
         "native/urprotect-runtime/host_context_entry_fixture.c",
         "native/urprotect-runtime/README.md",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md",
+        "docs/engineering/specs/backend/runtime-compatibility.md",
         ".artifacts/host-context/pr/self-test.log"
       ],
       "reason": "HostContext v1 and the current system-loader adapter define no dynamic path-search roots, ordering, or precedence semantics for in-process images; loader path resolution alone is not a compatibility proof.",
@@ -853,7 +853,7 @@
         "native/urprotect-runtime/host_context_entry_fixture.c",
         "native/urprotect-runtime/README.md",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md",
+        "docs/engineering/specs/backend/runtime-compatibility.md",
         ".artifacts/host-context/pr/self-test.log"
       ],
       "reason": "HostContext v1 and the current system-loader adapter define no writable-text relocation or W^X/protection semantics for in-process images; loader acceptance alone is not a compatibility proof.",
@@ -881,7 +881,7 @@
         "native/urprotect-runtime/host_context_entry_fixture.c",
         "native/urprotect-runtime/README.md",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md",
+        "docs/engineering/specs/backend/runtime-compatibility.md",
         ".artifacts/host-context/pr/self-test.log",
         ".artifacts/host-context/managed/plt-self-test.log"
       ],
@@ -908,7 +908,7 @@
         "native/urprotect-runtime/host_context_entry_fixture.c",
         "native/urprotect-runtime/README.md",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md",
+        "docs/engineering/specs/backend/runtime-compatibility.md",
         ".artifacts/host-context/pr/self-test.log"
       ],
       "reason": "HostContext v1 defines only checked AArch64 RELATIVE/RELR relocation semantics; Android packed relocation encodings have no adapter contract and are rejected before system-loader handoff.",
@@ -934,7 +934,7 @@
         "native/urprotect-runtime/host_context_version_self_test.c",
         "native/urprotect-runtime/README.md",
         "COMPATIBILITY.md",
-        ".trellis/spec/backend/runtime-compatibility.md",
+        "docs/engineering/specs/backend/runtime-compatibility.md",
         ".artifacts/host-context/pr/self-test.log",
         ".artifacts/host-context/managed/version-self-test.log"
       ],
