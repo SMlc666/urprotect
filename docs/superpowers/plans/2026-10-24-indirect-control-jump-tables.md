@@ -201,12 +201,18 @@ passed.
   Run the focused test, then
   `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_protected_image_workflow tests.test_runtime_matrix tests.test_ci_push_pr_dedup`.
   Expected: all tests pass with no ambient `PYTHONPATH`.
-- [ ] **Step 5: Push and verify a fresh hosted runtime-matrix handoff**
-  Use the authorized full CI dispatch. Expected: runtime-matrix downloads the
-  Bionic tree at the expected root, runs its covering set, and its retained
-  evidence checker passes. Keep unrelated fixture and real-sample failures
-  separately classified; do not claim the global quality gate passed unless
-  it does.
+- [x] **Step 5: Push and verify a fresh hosted runtime-matrix handoff**
+  Commit `b738fb4` was pushed and full run `40223771421` was dispatched. Its
+  first runtime-matrix attempt stopped before artifact download when the pinned
+  musl source fetch returned `Network is unreachable`; rerunning only that job
+  succeeded. Hosted logs confirm the Bionic artifact downloaded into
+  `.artifacts`, the covering set passed, and the independent retained runtime
+  matrix checker reported `runtime matrix evidence valid: nightly`. The
+  extracted artifact has `bionic/c-termux-bionic-pie` at its archive root (no
+  nested `bionic/bionic`), its 4,515 listed file hashes verify, and independent
+  Bionic/musl protection and ordinary/shared evidence checks pass. The same run
+  still fails in unrelated `fixture-nightly` and `real-sample-matrix` lanes;
+  the global quality gate is not green.
 
 ### CI triage from run `40216643128` (before Task 2 fix)
 
@@ -254,3 +260,26 @@ passed.
 - The overall workflow and quality gate failed for these independent lanes.
   Task 3 still requires a fresh hosted run to verify the corrected artifact
   handoff; no global green CI result is claimed.
+
+### CI triage from post-fix run `40223771421`
+
+- `bionic-native-arm64`, `musl-container-smoke`, and `managed-tests` passed.
+  The first runtime-matrix attempt stopped in pinned musl source acquisition
+  with `urllib.error.URLError: [Errno 101] Network is unreachable`; the
+  artifact-download and covering-set steps were skipped in that attempt.
+- Rerunning only `runtime-matrix-native-arm64` succeeded: the workflow log
+  records the Bionic artifact downloading to `.artifacts`, `run-runtime-matrix`
+  passing its covering set, and the retained checker reporting
+  `runtime matrix evidence valid: nightly`. The extracted artifact contains
+  `.artifacts/bionic/c-termux-bionic-pie` at the expected root, and all 4,515
+  entries in its `SHA256SUMS` verify. Independent fresh-run Bionic and musl
+  ordinary/shared checkers and the Bionic protection checker also pass.
+- A local post-download invocation of the runtime-matrix checker was
+  inconclusive because the rebuilt local CLI assembly hash differed from the
+  evidence's producer-build hash; the same checker passed within the exact
+  hosted producer job. No source change was made for this local/environmental
+  mismatch.
+- `fixture-nightly` still fails on the unrelated `zig-musl` TLS ownership
+  case, and `real-sample-matrix` still reports HTTP 404 for the locked Node.js
+  sample. Those, plus the downstream quality gate, are the only failed jobs in
+  the completed full run.
