@@ -74,7 +74,9 @@ class RegressionMatrixTests(unittest.TestCase):
             e2e["command"],
         )
         self.assertIn("check-external-provider-evidence.py", e2e["command"])
-        self.assertIn(external_root + "/SHA256SUMS", e2e["artifacts"])
+        provider_unit = external_root + "/runtime.indirect-control.external-provider.glibc.host-context-entry"
+        self.assertIn(provider_unit + "/SHA256SUMS", e2e["artifacts"])
+        self.assertNotIn(external_root + "/SHA256SUMS", e2e["artifacts"])
         self.assertIn("transformed-native-rollback.json", " ".join(e2e["artifacts"]))
         self.assertIn("provider-ci-logs/external-provider-*.log", " ".join(e2e["artifacts"]))
         rollback = provider_cases["native.external-provider-provider-loaded-rollback"]

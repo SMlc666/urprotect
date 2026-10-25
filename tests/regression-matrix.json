@@ -611,7 +611,7 @@
       "required": true,
       "expected": "pass",
       "artifacts": [
-        ".artifacts/indirect-control/external-provider/current/SHA256SUMS",
+        ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/SHA256SUMS",
         ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/external-provider-evidence.json",
         ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/transformed-native-rollback.json",
         ".artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry/build-provenance.tar.gz",

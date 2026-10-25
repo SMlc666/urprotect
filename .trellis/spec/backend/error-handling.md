@@ -77,7 +77,10 @@ Pack categories include `UnsupportedPackInput`, `UnsupportedInterpreter`,
   then parse its status with the bounded no-follow parser and allow continuation
   only for canonical zero. Valid nonzero status is retained and propagated;
   missing or malformed status fails before downstream inspection or identity
-  publication. Per-handoff argv/status/stdout/stderr sidecars likewise precede
+  publication. Before container execution, the nested handoff also pipes raw
+  image-inspect output through a bounded strict JSON parser and requires the
+  exact pinned repo digest; malformed output or a nonzero inspect command fails
+  before `run`. Per-handoff argv/status/stdout/stderr sidecars likewise precede
   success-record parsing. The nested Bionic handoff validates its existing
   evidence-unit tree before launching the container and again after it returns;
   the capture helper retains status through a descriptor opened before launch
@@ -195,9 +198,14 @@ Apply this contract at the `protect-image` / `rehydrate-image` host-input,
 provider-reader, canonical-snapshot and final Native Image publication
 boundaries. Managed admission alone does not establish runtime behavior. A
 scoped native AArch64/glibc source-versus-rehydrated-Native-Image observation
-and separate provider-loaded rollback evidence are retained, but the runtime row
-remains unknown/non-promoted pending hosted CI and broader runtime gates. Owners
-and exact proof/fixup checks are in
+and separate provider-loaded rollback evidence are retained. Hosted provider
+producer/checker/root-bound gates passed in PR #25 run `39559228628` and
+merged-main run `39561529902`, including the provider positive and separate
+provider-loaded rollback evidence. Hosted results are evidence, not automatic
+support promotion: the runtime row remains `unknown` /
+`scoped-observation-not-promoted`; the documentation/registry consistency review
+is complete while broader task/runtime criteria remain open. These runs do not
+establish branch-protection required-check mapping. Owners and exact proof/fixup checks are in
 [external consumer publication](./external-consumer-proof.md); descriptor
 requirements are in [safe provider input](./quality-guidelines.md#scenario-bounded-private-provider-file-input).
 
@@ -302,8 +310,11 @@ only that some earlier malformed input happened to reject.
   binding and verifies cleanup plus successful retry/release; the transformed
   Native Image rollback record verifies the corresponding post-binding failure
   path for the produced image. Root-bound checkers validate each record and
-  refreshed-checksum regressions. These local artifacts do not replace the
-  hosted CI result or promote other runtime profiles.
+  refreshed-checksum regressions. Hosted producer/checker/root-bound gates
+  passed in PR #25 run `39559228628` and merged-main run `39561529902`, including
+  the provider positive and separate provider-loaded rollback evidence. These
+  hosted results and the local artifacts do not widen the scoped observation or
+  promote other runtime profiles.
 
 ### 7. Wrong vs Correct
 

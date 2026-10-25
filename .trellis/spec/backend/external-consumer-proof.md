@@ -6,10 +6,23 @@ Use this contract when changing the demand-driven external-provider query in
 `Aarch64JumpTableResolver`, pinned provider input, SPS6 consumer serialization,
 selected-consumer emission, or rehydration publication. Managed Slice B is
 independently accepted for one selected consumer of one four-entry
-signed-relative-32 provider table. A scoped native AArch64/glibc source-versus-
-rehydrated-Native-Image observation and separate provider-loaded rollback
-observation are now retained and independently checked; the feature row remains
-unknown/non-promoted pending hosted CI and runtime-specific gates.
+signed-relative-32 provider table. Dated local AArch64/glibc source-versus-
+rehydrated-Native-Image and separate provider-loaded rollback records are
+retained. An earlier local exact-root review accepted those copies under the
+then-current checker; that result is historical, not present exact-root
+acceptance. The latest local-root audit reports that the preserved positive
+unit root fails the current checker with `retained build provenance tar has an
+unexpected member count`, and the rollback root fails because
+`evidence-tools/run-external-provider-rollback-oracle.sh` is absent. Both
+SHA256SUMS closures verify, but checksum closure alone is not semantic
+acceptance. Separately, hosted provider producer/checker/root-bound gates
+passed in PR #25 run `39559228628` and merged-main run `39561529902`, including
+the provider positive and separate provider-loaded rollback evidence. These
+hosted results are scoped evidence, not automatic support promotion: the
+report remains `scoped-observation-not-promoted` and the feature row remains
+`unknown`; the documentation/registry consistency review is complete while
+broader task/runtime criteria remain open. The runs do not establish
+branch-protection required-check mapping or promote musl/Bionic support.
 
 The public proof query remains a proof-only seam: success or a constructed DTO
 does not authorize publication. Ordinary `Analyze` / `protect` without the
@@ -230,8 +243,11 @@ new public diagnostic API. See the error spec for safe-file and codec errors.
 - **Good:** all four host flags, one SHA-pinned provider snapshot, exact source
   owner proof, SPS6 kinds 8+9, identity-preserved GOT, source-derived fixups,
   neutral validation and complete physical re-emission comparison succeed;
-  publication is managed evidence, while the retained source/transformed native
-  run remains a separate scoped observation until hosted CI confirms it.
+  publication is managed evidence, while the hosted provider gates have been
+  observed passing and the native run remains scoped-only/non-promoted; the
+  documentation/registry consistency review is complete while broader
+  task/runtime criteria remain open. These runs do not establish
+  branch-protection required-check mapping.
 - **Base:** a legacy provider-only SPS6 record still decodes to identical
   canonical bytes. Ordinary same-image/shared table and dynamic-import paths
   retain their own owners/regressions. The unconfigured external consumer
@@ -287,16 +303,32 @@ new public diagnostic API. See the error spec for safe-file and codec errors.
   checks/self-tests and 7 boundary unit tests. Exact commands are recorded in
   the task implementation log. They remain managed evidence, not a substitute
   for the separate native row.
-- Native Slice C evidence is retained under
+- Dated local Native Slice C records are retained under
   `.artifacts/indirect-control/provider-rollback-native-image-implementation-20261020-4/`
   (transformed provider positive/rollback) and
   `.artifacts/indirect-control/provider-loaded-rollback-ci-validation-20261020T153308Z-18193`
-  (source-loader rollback). Current root-bound Python suites pass 26/26 and
-  5/5 respectively; focused fixture/digest-chain/regression tests pass 3/3.
-  The retained full local gate records managed 754/754, native runtime suite
-  success and Python 458/458. The independent integration review passed the
-  exact current roots, but no official hosted Actions run has occurred; the
-  fixture/runtime row stays `unknown` and non-promoted. See
+  (source-loader rollback). Historical local validation recorded the
+  root-bound Python suites passing 26/26 and 5/5, focused fixture/digest-chain/
+  regression tests passing 3/3, and a full local gate with managed 754/754,
+  native runtime success, and Python 458/458. The 2026-10-24 local integration
+  review also reported exact-root acceptance under the checker then in use;
+  these are historical results, not present local-root acceptance.
+- The later local-root audit reports that
+  `.artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry`
+  fails the current positive checker with `retained build provenance tar has
+  an unexpected member count`, and
+  `.artifacts/indirect-control/provider-loaded-rollback/current` fails its
+  current checker because
+  `evidence-tools/run-external-provider-rollback-oracle.sh` is missing. Both
+  retained SHA256SUMS closures verify; this establishes byte closure only, not
+  semantic acceptance. The roots were not rewritten or regenerated. This does
+  not contradict the separate hosted provider producer/checker/root-bound
+  passes in PR #25 run `39559228628` and merged-main run `39561529902`, which
+  retained the provider positive and separate rollback evidence. Hosted results
+  do not automatically promote support: the fixture/runtime row remains
+  `unknown`, the report remains `scoped-observation-not-promoted`, and broader
+  task/runtime criteria remain open. The hosted runs do not establish
+  branch-protection required-check mapping or promote musl/Bionic support. See
   [runtime evidence and its inventory](./runtime-compatibility.md#scenario-external-provider-managed-admission-and-scoped-native-evidence).
 
 ## 7. Wrong vs Correct

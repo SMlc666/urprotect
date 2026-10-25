@@ -484,10 +484,10 @@
         ".artifacts/indirect-control/provider-loaded-rollback/current/report.json",
         ".artifacts/indirect-control/provider-loaded-rollback/current/rollback-record.json"
       ],
-      "nextEvidence": "Keep this status unknown/non-promoted until the required native AArch64/glibc CI producers, exact-root independent checkers, and root-bound regressions pass on fresh current roots and final documentation review is complete. Preserve the original PRD's open musl/Bionic runtime rows, other provider/table families, and final general report criteria.",
+      "nextEvidence": "Keep this row unknown/non-promoted. Hosted provider producer/checker/root-bound gates passed in PR #25 run 39559228628 and merged-main run 39561529902, retaining the provider-positive and separate provider-loaded rollback evidence; the documentation/registry consistency review is complete. Broader task/runtime criteria remain open, including musl/Bionic, general ownership, other provider/table families, and general indirect-control support. These runs do not establish branch-protection required-check mapping.",
       "constraints": [
         "The observation covers only the project-built self-contained liburprotect-jump-table-provider.so.1 with exact trusted SONAME, build ID, and SHA-256, one selected consumer, and the checked native AArch64/glibc execution; it does not admit arbitrary providers, dependencies, or search paths.",
-        "The report acceptanceState is scoped-observation-not-promoted. Keep registry status unknown until fresh required CI and final documentation review; this row does not prove arbitrary external-table or indirect-call support.",
+        "The report acceptanceState remains scoped-observation-not-promoted and this row remains unknown. Hosted provider producer/checker/root-bound gates passed in PR #25 run 39559228628 and merged-main run 39561529902, with provider-positive and separate provider-loaded rollback evidence; the documentation/registry consistency review is complete while broader task/runtime criteria remain open. These runs do not establish branch-protection required-check mapping or prove arbitrary external-table or indirect-call support.",
         "No musl, Bionic, other runtime/profile, or provider/table family is promoted by this observation."
       ]
     },

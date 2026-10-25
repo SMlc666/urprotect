@@ -236,17 +236,23 @@ executable pathname.
   net descriptor increase after rollback.
   The pair claim does not extend to musl or bionic.
 - `runtime.host-context.external-table-provider` remains **unknown and
-  non-promoted**, not a validated transformed-runtime row. Managed Slice B is
-  accepted for one explicitly host-pinned consumer with typed GLOB_DAT/GOT
-  ownership, source-derived fixup validation, and complete final-emission
-  checking. A scoped native AArch64/glibc source-versus-rehydrated-Native-Image
-  observation now also exists: it checks selected `urp_entry`, unselected
-  `urp_observer`, all four provider targets and the safe default, mappings,
-  bytes, statuses, streams, release, and rollback. The retained report still
-  says `scoped-observation-not-promoted`; only local retained-root checks have
-  been performed and no official hosted CI run has confirmed the new workflow.
-  Keep the fixture/evaluator row `unknown` until the required CI gate passes.
-  See [managed admission and scoped native evidence](#scenario-external-provider-managed-admission-and-scoped-native-evidence),
+  non-promoted**, not a validated general transformed-runtime row. Managed
+  Slice B is accepted for one explicitly host-pinned consumer with typed
+  GLOB_DAT/GOT ownership, source-derived fixup validation, and complete
+  final-emission checking. A scoped native AArch64/glibc
+  source-versus-rehydrated-Native-Image observation checks selected `urp_entry`,
+  unselected `urp_observer`, all four provider targets and the safe default,
+  mappings, bytes, statuses, streams, release, and rollback. Hosted provider
+  producer/checker/root-bound gates passed in PR #25 run `39559228628` and
+  merged-main run `39561529902`; both runs retained the provider positive and
+  separate provider-loaded rollback evidence. Hosted verification is not
+  automatic promotion: the retained report remains
+  `scoped-observation-not-promoted` and the fixture/evaluator row remains
+  `unknown`; the documentation/registry consistency review is complete while
+  broader task/runtime criteria remain open. These runs do not establish
+  branch-protection required-check mapping. The task checkpoint also records
+  that main-push runtime skips do not establish musl/Bionic table execution. See [managed admission and scoped
+  native evidence](#scenario-external-provider-managed-admission-and-scoped-native-evidence),
   [external consumer publication](./external-consumer-proof.md), and the
   [current gap audit](../../tasks/10-06-indirect-control-jump-tables/research/current-gap-audit.md).
   This does not widen the libc singleton/pair, arbitrary dependency-graph, or
@@ -1726,13 +1732,21 @@ they must not promote the 100 registered synthetic samples into a claim of
 
 Use this contract when reporting or extending the bounded external-table
 provider path. **Managed Slice B and one scoped native AArch64/glibc
-source-versus-rehydrated-Native-Image observation are retained.** The row
+source-versus-rehydrated-Native-Image observation, plus a separate rollback
+observation, have dated local records.** Earlier local exact-root acceptance
+was under the checker then in use; the latest local-root audit reports that
+the preserved positive and rollback copies fail the current checkers (details
+in the evidence inventory below). Hosted provider producer/checker/root-bound
+gates separately passed in PR #25 run `39559228628` and merged-main run
+`39561529902`, retaining the provider positive and separate rollback evidence.
+These hosted results do not automatically promote the row:
 `runtime.host-context.external-table-provider` remains `unknown` and
-`scoped-observation-not-promoted` until the required hosted CI gate passes and
-any review/registry gates are complete. The local observation is one project-
-built dependency-free provider DSO and one consumer; it does not establish
-arbitrary provider, dependency-graph, table-family, indirect-call, musl, or
-Bionic support.
+`scoped-observation-not-promoted`; the documentation/registry consistency
+review is complete while broader task/runtime criteria remain open. The runs
+do not establish branch-protection required-check mapping or promote musl/Bionic
+support. The observation is limited to one project-built dependency-free
+provider DSO and one consumer; it does not establish arbitrary provider,
+dependency-graph, table-family, or indirect-call support.
 
 ### 2. Signatures
 
@@ -1847,14 +1861,20 @@ helper is not the provider-aware execution path.
 
 ### 5. Good / Base / Bad Cases
 
-- Good: preserve the exact-root local source/transformed observation and
-  separate provider-loaded rollback record; independently rederive the selected
-  live output chain, observer binding, provider targets, hashes, mappings,
-  statuses, streams and release state. Keep the row unknown until the required
-  hosted gate is observed.
-- Base: managed publication and native source-loader checks pass, but no
-  transformed Native Image execution root or no official hosted result is
-  available; record the available scoped evidence without promoting the row.
+- Good: preserve the dated local source/transformed and provider-loaded
+  rollback records as historical evidence, and do not describe them as present
+  exact-root passes when the current checkers reject the local copies. Record
+  the separate hosted passes `39559228628` and `39561529902`; independently
+  rederive the selected live output chain, observer binding, provider targets,
+  hashes, mappings, statuses, streams and release state. Keep the row `unknown`
+  / `scoped-observation-not-promoted`; the documentation/registry consistency
+  review is complete while broader task/runtime criteria remain open. Hosted
+  verification does not automatically promote support.
+- Base (hypothetical incomplete-evidence state): if managed publication and
+  native source-loader checks pass without a transformed Native Image execution
+  root or a hosted provider result, record only the available scoped evidence
+  and do not promote the row. This is not the current provider checkpoint; its
+  hosted runs are recorded above.
 - Bad: run the source fixture twice and label one transformed, infer target
   identity from a constant name array, trust absolute ASLR addresses or helper
   exit 0, treat the source-loader rollback root as transformed execution, or
@@ -1919,15 +1939,20 @@ wiring, tests, and remaining hosted/promotion gates follow it below.
 
 #### Current retained evidence, CI declaration, and remaining gates
 
-1. **Transformed managed/native positive:**
+1. **Transformed managed/native positive (historical local record):**
    `scripts/run-external-provider-e2e.sh --tier pr --artifact-root ROOT` drives
    source → `protect-image` → `rehydrate-image` → Native Image, then invokes
    `host-context-external-provider-image-handoff` for source/transformed
-   `urp_entry` and `urp_observer`, indices 0–4. The retained current local root
-   is
+   `urp_entry` and `urp_observer`, indices 0–4. The dated local record is at
    `.artifacts/indirect-control/provider-rollback-native-image-implementation-20261020-4/runtime.indirect-control.external-provider.glibc.host-context-entry`.
-   It reports direct native AArch64/glibc 2.43 execution, no emulation, and
-   `acceptanceState=scoped-observation-not-promoted`. Provider identity is
+   Its report records direct native AArch64/glibc 2.43 execution, no emulation,
+   and `acceptanceState=scoped-observation-not-promoted`; these are retained
+   observation facts, not present exact-root acceptance. The earlier local
+   exact-root review used the then-current checker. The current local positive
+   unit copy at
+   `.artifacts/indirect-control/external-provider/current/runtime.indirect-control.external-provider.glibc.host-context-entry`
+   now fails the current checker with `retained build provenance tar has an
+   unexpected member count` (see item 4). Provider identity is
    SONAME `liburprotect-jump-table-provider.so.1`, GNU build ID
    `a82d6ab982fab000f733cb631639b28f16f0bdb6`, SHA-256
    `30efdbcd717c30a518bc7c83851ed3b43ba57a9e130064be04d176d0764e1746`.
@@ -1968,44 +1993,65 @@ wiring, tests, and remaining hosted/promotion gates follow it below.
    report digest
    `fa3d2a2c6d1e5c9fbf03380f43ffd15b8122064aa02d49688bcafe88353be6b0`.
    The older `20261020T152000Z` source-loader root has a current-checker hash
-   mismatch and remains historical; it was not rewritten or substituted.
-4. **Independent tests and local gates:** current root-bound transformed
-   provider tests passed 26/26, source-loader rollback tests 5/5, and focused
-   fixture/digest-chain/regression tests 3/3. The retained local gate reports
-   Release build 0 warnings/errors, managed tests 754/754, native runtime suite
-   exit 0, full Python discovery 458/458 with no skips, 39 evaluator tests,
-   13 fixtures, 27 regression cases, and 100 evaluator rows. The independent
-   integration review
+   mismatch and remains historical; it was not rewritten or substituted. The
+   latest audit also reports that the present local rollback copy at
+   `.artifacts/indirect-control/provider-loaded-rollback/current` fails because
+   `evidence-tools/run-external-provider-rollback-oracle.sh` is absent. Its
+   SHA256SUMS closure verifies byte inventory only, not semantic acceptance;
+   the root was not regenerated.
+4. **Historical local tests/gates and present checker result:** dated local
+   validation recorded the transformed provider and rollback test suites
+   passing 26/26 and 5/5, focused fixture/digest-chain/regression tests passing
+   3/3, and a full gate with Release build 0 warnings/errors, managed tests
+   754/754, native runtime suite exit 0, Python 458/458, 39 evaluator tests,
+   13 fixture registrations, 27 regression cases, and 100 evaluator rows. The
+   2026-10-24 integration report
    `/root/.pi/agent/sessions/--root-urprotect--/subagent-artifacts/41606f2f-bbdf-4150-8757-2428ab7fc6cf_trellis-check_output.md`
    (SHA-256 `04461a5761415abff30396ab7fcb036916abf102970336e7bf996bf1edca7a17`)
-   rechecked the exact current roots and reported a scoped integration pass.
-   These are local retained results, not a hosted Actions run.
+   reported exact-root acceptance under the then-current checker; it is not a
+   present-day local-root pass. The latest local-root audit reports that the
+   positive unit root above fails with `retained build provenance tar has an
+   unexpected member count`, and
+   `.artifacts/indirect-control/provider-loaded-rollback/current` fails
+   because `evidence-tools/run-external-provider-rollback-oracle.sh` is
+   missing. Both SHA256SUMS closures verify, but that proves byte closure only,
+   not semantic acceptance; neither root was rewritten or regenerated.
 5. **CI and registry:** provider producer/checker gates are wired in the
    mandatory `protection-and-tls` job on `ubuntu-24.04-arm`, timeout 40 minutes,
-   and use `if: always()` with run-keyed markers/logs/statuses. Exact `current` roots are
+   and use `if: always()` with run-keyed markers/logs/statuses. The workflow's
+   configured evidence output paths are
    `.artifacts/indirect-control/external-provider/current` and
    `.artifacts/indirect-control/provider-loaded-rollback/current`; upload runs
    under `if: always()` with `include-hidden-files: true`. Both regression rows
    are required on `native-arm64` at 1200 seconds. The evaluator digest chain is
-   current, but the fixture row remains `unknown`; no official hosted workflow
-   has exercised this uncommitted YAML, and branch-protection status mapping is
-   not inspectable here.
-6. **Remaining scope:** hosted CI/branch-protection confirmation, the final
-   general target-resolution/address-map report, owner policy for incomplete
-   table inventories, independent musl/Bionic rows, arbitrary providers/
-   dependencies, other table encodings/indirect-call families, and general
-   runtime promotion remain open. The historical Bionic staged-merge Python
-   failures recorded in the task gap audit are unexplained; a later green suite
-   does not erase them.
+   current, while the fixture row remains `unknown`. Hosted PR #25 run
+   `39559228628` and merged-main run `39561529902` passed the provider
+   producer/checker/root-bound gates; both retained the provider positive and
+   separate provider-loaded rollback evidence. These runs are observed hosted
+   evidence, not automatic promotion. The documentation/registry consistency
+   review is complete while broader task/runtime criteria remain open; main-push
+   runtime skips do not establish musl/Bionic table execution. The run results do not themselves establish branch-protection
+   required-check mapping.
+6. **Remaining scope:** broader task/runtime acceptance remains open: general/
+   exhaustive owner enumeration and private-versus-shared inference beyond the
+   narrow validated additional-owner-pair case, independent musl/Bionic rows,
+   arbitrary providers/dependencies, other table encodings/indirect-call
+   families, and general runtime promotion. The documentation/registry
+   consistency review is complete. The target-resolution/address-map report has
+   been added and is no longer an outstanding item. The historical Bionic
+   staged-merge Python failures recorded in the task gap audit are unexplained;
+   a later green suite does not erase them.
 
 ### 7. Wrong vs Correct
 
 ```text
 Wrong: local scoped provider E2E + source-loader rollback + green local suites
        => runtime.host-context.external-table-provider validated everywhere.
-Correct: retain the scoped evidence as non-promoted; require the hosted native
-         CI/checker gate, preserve separate rollback provenance, and keep
-         musl/Bionic and general indirect-control acceptance open.
+Correct: retain the scoped evidence as non-promoted; record the passing hosted
+         producer/checker runs and separate rollback provenance; recognize the
+         documentation/registry consistency review as complete while keeping
+         broader task/runtime gates open before any promotion; keep musl/Bionic
+         and general indirect-control acceptance open.
 ```
 
 ## Scenario: Native runtime identity and PT_LOAD ownership for ordinary indirect-control evidence
@@ -2019,9 +2065,15 @@ Image format, product `urprotect` command grammar, resolver/publication behavior
 shared-table runner, or provider admission. It is an independent consistency
 check of retained process/ELF/maps facts, not an authenticity mechanism or a
 runtime-support promotion. The ownership proof distinguishes page-rounded file
-offset candidates from page-rounded virtual-memory owners: a partial file-range
-candidate may be skipped under the unique complete-owner rule below, while
-virtual-memory containment remains strict.
+offset candidates from page-rounded virtual-memory owners. During conservative
+load-bias discovery, executable mappings still require one unambiguous complete
+file owner. After the bias is established, a fully containing file candidate
+whose checked expected VMA start differs from the actual start is a non-owner
+and is skipped before permission filtering or owner counting. Partial file-range
+candidates are likewise not owners. Neither skip applies to the independent,
+strict virtual-memory containment proof. This is evidence-checker behavior only;
+it does not promote Bionic or any runtime-support claim, and Bionic remains
+`unknown` / non-promoted.
 
 The ordinary native AArch64/glibc root is locally retained and independently
 checked. This environment has no `musl-gcc`, Docker, or Podman, so no local
@@ -2108,14 +2160,20 @@ new owner field, schema version, or runtime-support claim is introduced.
   stable regular-file descriptors and the checker independently verifies
   retained SHA-256, device/inode, ELF, interpreter, and maps facts.
 - Map ownership has two independent proofs over strict half-open intervals.
-  For the file proof, derive each checked page-rounded `PT_LOAD` file interval
-  and consider its relation to the VMA's file interval. A candidate that only
-  partially intersects the VMA is not an owner and may be skipped. Accept the
-  file proof only when exactly one candidate fully contains the complete VMA,
-  its `PT_LOAD` permissions are compatible, and its checked load bias agrees
-  with the process mapping. Reject when no complete candidate survives or when
-  two or more complete candidates survive, even if both appear individually
-  compatible; do not choose between two full file owners by VA or bias.
+  During initial load-bias discovery from executable mappings, retain the
+  conservative rule: a full file candidate must support one consistent bias,
+  and ambiguous/multiple complete owners reject; do not use the later known-bias
+  skip to discover a bias. After the bias is established, derive each checked
+  page-rounded `PT_LOAD` file interval and compare it with the VMA's file
+  interval. A partial intersection is not an owner and may be skipped. For a
+  fully containing candidate, calculate its expected mapped start with checked
+  arithmetic under the established bias. If that address differs from the VMA
+  start, the candidate is a non-owner and must be skipped before permissions
+  are checked or the owner count is incremented. An address-matching candidate
+  with incompatible `PT_LOAD` permissions rejects. Accept only exactly one
+  fully containing, address-matching, permission-compatible file owner; reject
+  no owner or multiple owners, including two full candidates that both match
+  the known bias and VMA. Arithmetic overflow remains fail-closed.
 - Independently, subtract the proven load bias from the VMA address and require
   its complete half-open virtual interval to be contained by exactly one
   checked page-rounded `PT_LOAD` memory interval derived from `p_vaddr +
@@ -2154,8 +2212,11 @@ new owner field, schema version, or runtime-support claim is introduced.
 | Musl carrier absent, malformed, bound to glibc, or claiming a runtime version from any combined libc/loader digest other than `4fe353b2b485ffc2905b400ca8ab364b88d402ca11adec3553cb5f8928bb01b9` | Reject; no musl identity fallback or generic-token admission |
 | Schema has missing/extra fields, wrong version, or non-exact integer types | Reject the identity record, including refreshed-checksum mutations |
 | Image, role, runtime/version marker, interpreter, maps path, device/inode, retained bytes, or source/target identity differs | Reject the evidence root |
-| A VMA only partially intersects a page-rounded `PT_LOAD` file interval, but exactly one permission-compatible full file owner with a consistent load bias remains | Skip that partial file candidate; continue to the independent memory-owner proof |
-| No fully containing file owner remains, or two or more fully containing file owners remain | Reject; file ownership must be unique, including the conservative two-full-candidate case |
+| During initial load-bias discovery, executable-map candidates are ambiguous or do not establish one consistent bias | Reject; the later known-bias candidate skip does not relax discovery |
+| After bias is known, a candidate only partially intersects the page-rounded `PT_LOAD` file interval | Skip that partial file candidate; continue to the independent memory-owner proof |
+| After bias is known, a fully containing candidate's checked expected VMA start differs from the actual start | Skip it before permission filtering or owner counting; it is a non-owner for this VMA |
+| A fully containing candidate matches the expected VMA start but has incompatible permissions, or address arithmetic overflows | Reject; do not skip an address-matching permission conflict or malformed interval |
+| No fully containing address-matching file owner remains, or two or more full candidates both match the known bias and VMA | Reject; file ownership must be unique |
 | A VMA only partially intersects a page-rounded `PT_LOAD` memory interval from checked `p_vaddr + p_memsz`, or a second segment aliases the virtual pages | Reject before accepting the runtime identity; memory ownership requires one complete owner matching the file owner |
 | A second owner is BSS-only/zero-`p_filesz`, or arithmetic/page rounding overflows | Reject before accepting the runtime identity |
 | Adjacent half-open VMAs or valid RELRO splits have unique file and memory owners | Accept the mapping proof |
@@ -2168,35 +2229,50 @@ successful handoff, behavior comparison, or runtime-evidence row.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: a partial rounded file-interval candidate is skipped when exactly one
-  complete permission-compatible file owner with a consistent load bias
-  remains; the independent page-rounded `p_memsz` proof then establishes that
-  same unique owner. A fresh ordinary glibc run also retains native source and
-  target identities, exact-root manifests, and passing source/transformed
-  behavior. This remains a scoped glibc observation only.
+- Good: after conservative bias discovery, a partial rounded file candidate
+  or a fully contained candidate whose expected VMA address differs is skipped
+  as a non-owner. Exactly one complete, address-matching, permission-compatible
+  file owner remains, and the independent page-rounded `p_memsz` proof
+  establishes that same unique owner. The address-mismatch rule is checker
+  behavior only and does not claim live Bionic acceptance or promote any
+  runtime; any separate runtime observation remains scoped and non-promoting.
 - Base: an older glibc root without `runtimeIdentity` remains readable when the
   caller did not require the new carrier; if the carrier exists, it is still
   fully validated. Adjacent half-open mappings and valid RELRO splits remain
   acceptable only when each has unique complete owners in both domains.
-- Bad: accept when only a partial file candidate exists, choose between two
-  fully containing file candidates, allow any partial/multiple/BSS/VA-alias
-  `p_memsz` owner, accept a self-reported runtime version without checking the
-  retained libc/loader bytes, treat a local glibc pass as musl evidence, or
-  convert missing musl tooling into a passing or `not-applicable` result.
+- Bad: accept when only a partial file candidate exists; count a fully
+  containing candidate whose checked expected VMA address differs; skip a
+  permission conflict on an address-matching candidate; choose between two
+  full candidates that both match the known bias and VMA; allow any
+  partial/multiple/BSS/VA-alias `p_memsz` owner; accept a self-reported runtime
+  version without checking retained libc/loader bytes; treat synthetic or local
+  evidence-checker success as live Bionic acceptance; or promote runtime
+  support from this checker correction.
 
 ### 6. Tests Required
 
 - `native_process_identity_test.c` must keep its `-Werror` self-test for
   distinct-VA reuse of partially overlapping rounded file pages when one full
-  file owner remains; permission excess; no complete file owner; and two full
-  file-owner candidates that still reject. It must separately retain strict
-  page-rounded `p_memsz` negatives for partial intersections, duplicate and
-  file-disjoint virtual aliases, zero-file-size BSS overlap, checked memory-end
-  and page-rounding overflow, plus adjacent half-open pages and a valid
-  musl-shaped RELRO split.
-- `tests/test_rehydration_evidence.py` must verify the matching Python
-  file-candidate behavior (including conservative two-full-candidate refusal),
-  strict memory-owner cases, exact schema/integer types,
+  file owner remains. Its permission-order regression uses four `PT_LOAD`
+  records: an RX mapping establishes bias at VA/file page zero; two `PF_R`
+  candidates map file page `P` at VAs `4P` and `8P`; and a `PF_R|PF_W` owner
+  maps that page at VA `12P`, matching an `rw-p` VMA. The wrong-VA read-only
+  candidates fully contain the mapped file range but must be skipped before
+  permission comparison; moving permission filtering ahead of the known-bias
+  expected-VA check must make this regression fail. Preserve rejection of
+  same-VA duplicate full owners, permission excess, and no complete owner. The
+  initial bias discovery policy remains conservative. It must separately retain
+  strict page-rounded `p_memsz` negatives for partial intersections, duplicate
+  and file-disjoint virtual aliases, zero-file-size BSS overlap, checked
+  memory-end and page-rounding overflow, plus adjacent half-open pages and a
+  valid musl-shaped RELRO split.
+- `tests/test_rehydration_evidence.py` must verify the matching four-`PT_LOAD`
+  known-bias behavior with source and target libc maps, including wrong-VA
+  `PF_R` decoys against the writable VMA and refreshed identity/handoff/
+  manifests. This fixture must likewise fail if permission filtering is moved
+  before the expected-VA mismatch skip. Preserve conservative same-VA
+  two-full-candidate refusal, partial/alias, permission, and strict
+  memory-owner cases. Also retain exact schema/integer types,
   required-versus-optional historical glibc policy, mandatory musl identity,
   source/target agreement, retained-file/version/interpreter/maps binding,
   checksum-refreshed virtual-owner and overflow rejection, and adjacent-page
@@ -2204,11 +2280,16 @@ successful handoff, behavior comparison, or runtime-evidence row.
   the first over-limit directory before descent, and symlink root/path guards.
 - Run focused evidence tests and full Python discovery without ambient
   `PYTHONPATH`; the loaders must use owned file-relative imports. Keep exact-root
-  checker and SHA256SUMS verification separate from producer success. Current
-  scoped review passed: ten C identity cases, four focused Python ownership
+  checker and SHA256SUMS verification separate from producer success. An earlier
+  review checkpoint recorded ten C identity cases, four focused Python ownership
   cases, 29 provider-positive tests, eight rollback tests, and 487 Python tests
-  with no skips; retained ordinary-glibc and provider-rollback exact roots also
-  passed. The review found no blocking findings. The local musl E2E remains
+  with no skips; its local exact-root acceptances were under the checker then in
+  use and are historical, not current local-root passes. The current preserved
+  provider positive/rollback root failures are recorded in the managed
+  external-provider scenario above. The latest independent review of the
+  known-bias owner-candidate correction passed the native `-Werror` self-test
+  (17 cases) and three focused Python ownership regressions; it did not rerun
+  exact-root checkers or query hosted artifacts. The local musl E2E remains
   unrun because `musl-gcc` and a container runtime are unavailable; the hosted
   musl gate remains pending.
 
@@ -2217,10 +2298,11 @@ successful handoff, behavior comparison, or runtime-evidence row.
 #### Wrong
 
 ```text
-reject every partial rounded file-interval candidate even when another
-complete owner uniquely contains the VMA
--> or skip a partial page-rounded p_memsz intersection / choose between two
-   complete file candidates
+reject a fully contained rounded-file candidate whose expected VMA address
+  differs after the load bias is already proven
+-> or use that skip during conservative load-bias discovery / skip an
+   address-matching permission conflict / skip a partial p_memsz intersection
+-> choose between two full candidates that both match the known bias and VMA
 -> trust a runtime label or self-reported version
 ```
 
@@ -2228,8 +2310,10 @@ complete owner uniquely contains the VMA
 
 ```text
 bind the handoff to its exact image and native process
--> for FILE ownership, skip partial candidates and require exactly one complete,
-   permission-compatible owner with a consistent load bias
+-> establish load bias conservatively from executable mappings
+-> with bias known, skip partial file intersections and fully contained candidates
+   whose checked expected VMA start differs, before permission filtering/counting
+-> require exactly one full address-matching, permission-compatible file owner
 -> independently require exactly one full page-rounded VIRTUAL p_memsz owner
    for the complete VMA, identical to the file owner; reject partial, multiple,
    BSS, VA-alias and overflow cases
@@ -2483,10 +2567,19 @@ and required evidence are asserted by
   optional identity arguments are constrained to that unit. The ELF must
   resolve under either the evidence unit or the fixed Bionic build root and is
   mapped to `/evidence/...` or read-only `/bionic-build/...`; all other path
-  domains reject. The bridge verifies the runtime's `linux/arm64` server and
-  exact image repo digest, then invokes the helper in the pinned image. OCI
-  image and ELF arguments are not interchangeable, and ambient host paths are
-  not passed as payload paths or serialized into product state.
+  domains reject. Before container execution, the bridge verifies the runtime's
+  `linux/arm64` server and pipes raw
+  `"$BIONIC_CONTAINER_RUNTIME" image inspect "$oci_image"` stdout directly
+  to a bounded host parser. The parser reads at most 4 MiB plus a one-byte
+  overflow probe; rejects NULs, invalid UTF-8, malformed JSON, duplicate object
+  keys, and non-JSON constants; and requires a one-element top-level array
+  containing one object whose `RepoDigests` is an array of strings with the
+  exact requested pin. `set -o pipefail` makes a nonzero inspect command fatal
+  even if its stdout is valid JSON. Any inspect or parse failure stops before
+  the container `run`; the bridge does not extract repo digests through
+  container-engine Go templates or shell command substitution. OCI image and
+  ELF arguments are not interchangeable, and ambient host paths are not passed
+  as payload paths or serialized into product state.
 - **Build status publication gate.** The Bionic ordinary, shared, and nested
   HostContext runner paths all retain the native build command, stdout, and
   stderr sidecars before invoking the same
@@ -2653,6 +2746,7 @@ and required evidence are asserted by
 |---|---|
 | Pinned digest/package lock, native AArch64 Linux/arm64 engine, or live Bionic identity is unavailable | Required hosted lane fails; no substitute runtime and no positive Bionic root |
 | OCI reference, input ELF, record, or optional identity path escapes its declared bridge domain | Reject before container execution; do not remap through a host-path fallback |
+| Image inspect exits nonzero, exceeds 4 MiB, contains NUL/duplicate keys, invalid UTF-8/JSON or non-JSON constants, has the wrong root/object/RepoDigests shape, or lacks the exact pin | Reject before container `run`; preserve pipeline failure semantics even when inspect stdout is otherwise parseable |
 | Build status is missing, empty, non-regular, symlinked, changing, over-bound, noncanonical, or outside 0..255 | Preserve command/stdout/stderr; fail closed before `readelf`, managed handoff, identity copy, or successful evidence/checksum publication |
 | Prepared case tree contains a symlink, special entry, multiply-linked regular file, or exceeds the entry/directory/file/depth bounds | Fail closed before later host writes/redirections; preserve a failing container's actual status and do not read failure logs from an invalid tree |
 | Canonical native build status is nonzero (for example `37\n`) | Retain exact build diagnostics and propagate the same status; do not continue to a handoff |
@@ -2680,11 +2774,13 @@ and required evidence are asserted by
   synthetic/unit tests can prove parser/checker behavior but cannot substitute
   for the hosted native container run.
 - Bad: accept a tag or host label as proof of Bionic execution; conflate the
-  OCI argument with the input ELF path; parse build status after downstream
-  inspection; treat a missing/empty status as zero; parse the success JSON
-  before retaining sidecars; invent a semantic Bionic version; omit a shared
-  observer; claim kernel/page facts beyond the checked equality relation; or
-  promote runtime support from these scoped rows.
+  OCI argument with the input ELF path; project `RepoDigests` through a
+  container-engine Go template or shell command substitution; ignore a failed
+  image-inspect command because its stdout looks valid; parse build status after
+  downstream inspection; treat a missing/empty status as zero; parse the
+  success JSON before retaining sidecars; invent a semantic Bionic version;
+  omit a shared observer; claim kernel/page facts beyond the checked equality
+  relation; or promote runtime support from these scoped rows.
 
 ### 6. Tests Required
 
@@ -2695,6 +2791,14 @@ and required evidence are asserted by
   and `test_all_three_bionic_runners_progress_only_on_canonical_zero_and_propagate_nonzero`.
   It also verifies the exact handoff argv and that process-status, stdout and
   stderr are persisted before success-record parsing.
+- The same suite exercises exact pinned-image inspection using a fake runtime.
+  `test_bridge_rejects_invalid_repo_digest_json_before_container_run` covers
+  command failure with valid-looking JSON, over-limit output, invalid UTF-8,
+  malformed JSON, duplicate-key JSON, non-JSON constants, wrong root cardinality/type, malformed
+  image and RepoDigests types, and missing/wrong pin; the raw-NUL regression
+  separately covers NUL bytes. Every invalid case asserts no container `run`
+  and no published record, while valid exact pins reach the two expected
+  source/target handoffs.
 - `tests/test_bionic_artifact_permissions.py` must perform real DAC checks under
   distinct container/host UIDs, including container-UID and root-owned
   generated roots that deny the host writer before the bounded shared-group
@@ -2728,14 +2832,15 @@ and required evidence are asserted by
 ### 7. Wrong vs Correct
 
 ```text
-Wrong: parse or interpret build status only after `readelf`/handoff, treat an
-       absent status as zero, parse success JSON before saving actual process
-       streams/status, swap the OCI and ELF arguments, trust a container tag or
-       self-report as runtime proof, invent a Bionic version, or promote support.
-Correct: validate canonical `0..255\n` on the shared no-follow parser before
-         any continuation and proceed only on exact zero; durably retain argv,
-         status, stdout and stderr before parsing the success record; run only
-         the declared ELF through the exact pinned Termux image, check runtime
-         identities and kernel/page relationships from retained observations,
-         validate every handoff separately, and keep the rows unknown/non-promoted.
+Wrong: project the pinned repo digest through a container-engine template,
+       capture inspect output in a shell variable, or accept valid-looking JSON
+       despite a failed inspect; also parse build status only after `readelf`,
+       treat an absent status as zero, parse success JSON before saving process
+       streams/status, swap OCI and ELF arguments, or promote support.
+Correct: pipe raw inspect stdout through the bounded duplicate-key-rejecting
+         host JSON parser and require the exact digest before `run`; retain the
+         inspect command's failure through `pipefail`; then validate canonical
+         `0..255\n` before continuation, retain handoff argv/status/streams,
+         validate each measured handoff and its identity, and keep both runtime
+         rows unknown/non-promoted.
 ```

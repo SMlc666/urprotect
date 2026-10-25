@@ -273,9 +273,7 @@ relations. The evidence report deliberately remains
 verifies post-provider-acquisition failure cleanup and successful reload; it is
 not a substitute for the transformed behavior record. A wrong-provider-SHA
 negative remains a pre-publication/no-loader case, and the transformed Native
-Image rollback is a separate failure stage. The CI producers/checkers and
-unknown fixture/regression row are wired locally, but an official hosted CI run
-and branch-protection confirmation remain open.
+Image rollback is a separate failure stage. Hosted provider producer/checker/root-bound gates passed in PR #25 run `39559228628` and merged-main run `39561529902`; both retained the provider-positive and separate provider-loaded rollback evidence. These results are scoped observations, not automatic support promotion: the report remains `scoped-observation-not-promoted`, the fixture/runtime row remains `unknown`, and the documentation/registry consistency review is complete while broader task/runtime criteria remain open. The runs do not establish branch-protection required-check mapping.
 
 Nearest negatives include absent provider configuration, missing `DT_NEEDED`
 with both configured and unconfigured adapters, same-SONAME wrong-hash provider,

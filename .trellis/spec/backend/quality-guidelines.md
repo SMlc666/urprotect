@@ -141,10 +141,14 @@ tests plus the relevant malformed-input path:
   Neither managed publication nor the earlier native source-loader self-test
   alone establishes runtime acceptance. A scoped native AArch64/glibc
   source-versus-rehydrated-Native-Image run and separate provider-loaded
-  rollback evidence are now retained with exact-root checkers and local CI
-  wiring; the feature remains `unknown` / `scoped-observation-not-promoted`
-  until the hosted gate passes. See the [runtime evidence contract and current
-  inventory](./runtime-compatibility.md#scenario-external-provider-managed-admission-and-scoped-native-evidence).
+  rollback evidence are retained with exact-root checkers and local CI wiring.
+  Hosted PR #25 run `39559228628` and merged-main run `39561529902` passed the
+  provider positive and separate provider-loaded rollback evidence checks.
+  Hosted verification is not automatic promotion: the feature remains
+  `unknown` / `scoped-observation-not-promoted`; the documentation/registry
+  consistency review is complete while broader task/runtime criteria remain
+  open. These runs do not establish branch-protection required-check mapping.
+  See the [runtime evidence contract and current inventory](./runtime-compatibility.md#scenario-external-provider-managed-admission-and-scoped-native-evidence).
   Do not promote musl/Bionic or general provider/table support. Layout evidence
   remains schema 3 to retain clone ranges, permissions, ownership, rewrite
   policy, and per-entry target/base bindings. The Protected Image ABI
@@ -244,15 +248,19 @@ tests plus the relevant malformed-input path:
   not a substitute for the glibc cell.
 - Native indirect-control evidence must bind a handoff to independently checked
   runtime identity and prove both unique file-backed and page-rounded `p_memsz`
-  `PT_LOAD` ownership of each VMA, using checked half-open arithmetic. In the
-  FILE proof, skip a partial rounded file-interval candidate only when exactly
-  one complete, permission-compatible owner with a consistent load bias
-  survives; reject zero or multiple complete candidates, including two full
-  candidates. Independently, the page-rounded VIRTUAL `p_memsz` proof must fully
-  contain the VMA in exactly one owner identical to the file owner; reject
+  `PT_LOAD` ownership of each VMA, using checked half-open arithmetic. Keep
+  executable-map load-bias discovery conservative. After bias is known, skip a
+  partial rounded-file candidate and skip a fully containing candidate whose
+  checked expected VMA start differs before permission filtering or owner
+  counting. An address-matching permission-incompatible candidate rejects, and
+  exactly one fully containing address-matching compatible file owner is
+  required; two full candidates that both match still reject. Independently,
+  the page-rounded VIRTUAL `p_memsz` proof must fully contain the VMA in exactly
+  one owner identical to the file owner; reject
   partial or multiple memory intersections, BSS overlaps, VA-only aliases, and
   overflow. Accept valid adjacent ranges and RELRO splits only when both owner
-  proofs pass. Standalone checkers must
+  proofs pass. This is evidence-checker behavior only and does not promote
+  Bionic or any runtime support. Standalone checkers must
   scan a bounded no-follow evidence tree (512 directories including root) and
   load sibling helpers through explicit file-relative bounded reads rather
   than ambient `PYTHONPATH`. Run Python evidence tests with `PYTHONPATH` unset;
