@@ -57,12 +57,14 @@
 
   Expected: PASS, including the new observation/projection regression and the existing malformed/out-of-bounds TLS cases.
 
-- [ ] **Step 5: Verify checks and commit the parser change.**
+- [x] **Step 5: Verify checks and commit the parser change.**
 
   Run: `git diff --check`
 
   Expected: exit 0. Commit only the design, plan, parser, and structural test files with message `fix: retain bounded ownerless zero-file TLS facts`.
 
-- [ ] **Step 6: Verify hosted fixture evidence.**
+- [x] **Step 6: Verify hosted fixture evidence.**
 
   Push fast-forward to `feat/indirect-control-runtime-evidence`, then explicitly dispatch the full workflow with `gh workflow run ci.yml --ref feat/indirect-control-runtime-evidence` because push events skip nightly lanes. Expected: `fixture-nightly` succeeds, including `zig-musl` baseline and no-op output status/stream equality. Keep separate results for the existing unrelated external sample acquisition failure; do not mark the overall CI gate green from the fixture lane alone.
+
+  Hosted result (run `40226790546` on code commit `9ff0c80`): `fixture-nightly`, `bionic-native-arm64`, `musl-container-smoke`, and `runtime-matrix-native-arm64` succeeded. The uploaded `zig-musl` artifact confirms baseline/output status 0, equal stdout/stderr, and byte-identical source/no-op copy; the nightly evidence gate passed. The overall workflow correctly remains failed because `real-sample-matrix` could not acquire the locked Node.js archive (HTTP 404); the Alpine libarchive download succeeded. Therefore this fixture result is not an overall CI pass.
