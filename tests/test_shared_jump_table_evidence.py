@@ -291,6 +291,66 @@ class SharedJumpTableEvidenceTests(unittest.TestCase):
         checker_spec.loader.exec_module(checker)
         return checker
 
+    @staticmethod
+    def _minimal_elf_with_section(section_type: int, file_offset: int, size: int) -> bytes:
+        image = bytearray(64 + 2 * 64)
+        image[:7] = b"\x7fELF\x02\x01\x01"
+        struct.pack_into(
+            "<HHIQQQIHHHHHH",
+            image,
+            16,
+            3,
+            183,
+            1,
+            0,
+            0,
+            64,
+            0,
+            64,
+            56,
+            0,
+            64,
+            2,
+            0,
+        )
+        struct.pack_into(
+            "<IIQQQQIIQQ",
+            image,
+            128,
+            0,
+            section_type,
+            0,
+            0x2000,
+            file_offset,
+            size,
+            0,
+            0,
+            8,
+            0,
+        )
+        return bytes(image)
+
+    def test_nobits_section_range_is_not_required_to_be_file_backed(self) -> None:
+        checker = self._load_checker_module()
+        with self.subTest(section_type="SHT_NOBITS"):
+            program_headers, sections = checker.parse_elf(
+                self._minimal_elf_with_section(8, 160, 64), "synthetic ELF"
+            )
+            self.assertEqual([], program_headers)
+            self.assertEqual(64, sections[1]["size"])
+
+        with self.subTest(section_type="file-backed"):
+            with self.assertRaises(SystemExit) as failure:
+                checker.parse_elf(self._minimal_elf_with_section(1, 160, 64), "synthetic ELF")
+            self.assertIn("out-of-bounds section", str(failure.exception))
+
+        with self.subTest(section_type="SHT_NOBITS offset overflow"):
+            with self.assertRaises(SystemExit) as failure:
+                checker.parse_elf(
+                    self._minimal_elf_with_section(8, (1 << 64) - 32, 64), "synthetic ELF"
+                )
+            self.assertIn("overflowing section file range", str(failure.exception))
+
     def test_symbol_record_count_is_bounded_before_record_materialization(self) -> None:
         checker = self._load_checker_module()
         count = checker.MAX_EVIDENCE_SYMBOL_RECORDS + 1

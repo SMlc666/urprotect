@@ -43,15 +43,16 @@ and demand-driven.
   general indirect-call or runtime target-translation behavior. Absence of an
   observed extra owner does not prove privacy.
 - [ ] **open: child.cross-runtime-evidence** — scoped AArch64/glibc rows do not
-  cover the declared cross-runtime matrix. Shared-table musl plus ordinary and
-  shared Bionic exact-root execution remain outstanding. The earlier hosted
-  Bionic identity run predating the known-bias wrong-VA owner correction failed
-  at `helper-maps-check`. Hosted run `40213194543` advanced past that stage but
-  failed the ordinary Bionic identity gate because `run-bionic-fixture.sh`
-  omitted `imageDigest` from its result JSON while the independent checker
-  requires the digest pinned by the exact fixture image. Bionic ordinary/shared
-  and shared-table musl evidence must be rerun after the producer fix.
-  Musl/Bionic are not promoted by glibc or checker-only results.
+  cover the declared cross-runtime matrix. In hosted run `40216643128`, the
+  repaired Bionic result JSON's `imageDigest` matched its pinned Termux image;
+  the Bionic ordinary exact-root checker and musl ordinary/shared exact-root
+  checkers passed. Bionic shared-table production and runtime behavior also
+  passed, but its independent checker rejected the valid `.relro_padding`
+  `SHT_NOBITS` section because `sh_offset + sh_size` extends past the ELF file
+  (the section has no file-backed bytes). The corrected checker now passes all
+  four retained ordinary/shared Bionic/musl roots locally; rerun hosted evidence
+  before closing this criterion. Musl/Bionic are not promoted by glibc or
+  checker-only results.
 
 ## Evidence facts and non-promotion constraints
 
@@ -127,4 +128,70 @@ for a fresh required execution.
   Expected: both commands pass.
 - [ ] **Step 5: Re-run hosted Bionic and musl exact-root evidence**
   Validate only fresh run-specific artifacts with the current independent checkers;
-  leave `child.cross-runtime-evidence` open unless all declared rows pass.
+  leave `child.cross-runtime-evidence` open unless all declared rows pass. Run
+  `40216643128` proved the producer fix and Bionic ordinary/musl rows; the
+  patched checker subsequently accepted all four retained roots locally.
+
+### Task 2: Respect valid SHT_NOBITS section ranges in the shared checker
+
+**Files:**
+- Modify: `scripts/check-shared-jump-table-evidence.py` (`parse_elf` section bounds)
+- Test: `tests/test_shared_jump_table_evidence.py` (bounded synthetic ELF regressions)
+- Update: this plan and its execution ledger
+
+**Interfaces:**
+- Consumes bounded ELF section headers for the independent shared-table checker.
+- Produces validated section facts without treating `SHT_NOBITS` as file-backed;
+  all other section payloads remain bounded by the ELF bytes.
+
+- [x] **Step 1: Add parser boundary tests**
+  Construct a minimal bounded AArch64 ELF containing an `SHT_NOBITS` section
+  whose conceptual range extends past EOF, plus nearest negatives for an
+  equally out-of-bounds file-backed section and overflowing 64-bit
+  `sh_offset + sh_size` arithmetic.
+- [x] **Step 2: Run the focused tests and verify the intended failure**
+  Run: `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_shared_jump_table_evidence.SharedJumpTableEvidenceTests.test_nobits_section_range_is_not_required_to_be_file_backed`
+  Expected before the fix: the valid `SHT_NOBITS` case failed with
+  `synthetic ELF has an out-of-bounds section`; the overflow negative also
+  lacked its checked-add diagnostic.
+- [x] **Step 3: Correct only the section backing rule**
+  Permit non-file-backed `SHT_NOBITS` conceptual ranges after checked unsigned
+  64-bit offset-plus-size arithmetic. Keep file bounds mandatory for every
+  other section type and retain the existing virtual-range overflow check.
+- [x] **Step 4: Run focused and related local verification**
+  Run the focused regression, then
+  `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_shared_jump_table_evidence tests.test_rehydration_evidence`.
+  Expected: every test passes without ambient `PYTHONPATH`.
+- [x] **Step 5: Recheck retained hosted artifacts with the corrected checker**
+  Against run `40216643128`, independently check Bionic ordinary/shared and
+  musl ordinary/shared evidence roots. Expected: all four root checks pass;
+  the Bionic image digest remains bound to the pinned image.
+- [ ] **Step 6: Push and run fresh hosted cross-runtime evidence**
+  Push the reviewed fix, then trigger the authorized full CI workflow and
+  inspect Bionic and musl job results and exact-root artifacts. Expected: the
+  fresh Bionic shared independent checker accepts the valid `SHT_NOBITS`
+  section and both hosted runtime rows pass. Keep unrelated failing CI lanes
+  separately classified; do not claim the global quality gate passed unless it
+  did.
+
+### CI triage from run `40216643128` (before Task 2 fix)
+
+- Bionic native ARM64 reached the shared Bionic exact-root checker and failed
+  only on the source ELF's valid `SHT_NOBITS` section boundary; Task 2 now passes
+  all four retained Bionic/musl ordinary/shared roots locally.
+- `managed-tests` reported one failure:
+  `LinuxSafeFileInputTests.RejectsFifoPromptlyWithoutAnExternalWriter` exceeded
+  its 2-second completion assertion. Three isolated local AArch64 runs passed;
+  treat this as unresolved timing sensitivity until the fresh full suite passes.
+- `fixture-nightly` failed on required `zig-musl`: the produced ELF has an
+  ownerless `PT_TLS` with `p_filesz=0`, nonzero `p_vaddr`, and nonzero `p_memsz`.
+  The current managed parser has an explicit negative test for ownerless
+  zero-file TLS with nonzero virtual address. Do not weaken that parser contract
+  as part of Task 2; resolve the fixture-versus-contract question separately.
+- `real-sample-matrix` could not acquire the locked Node.js sample (HTTP 404);
+  the subsequent environment-unavailable/evidence-accounting errors are
+  downstream consequences. This is the known external sample availability
+  blocker, not a Task 1/2 regression.
+- The global quality gate consequently remained failed. Fresh hosted evidence
+  and a full-suite rerun are still required; these lane findings are not proof
+  that the checker-only fix caused or resolved them.
