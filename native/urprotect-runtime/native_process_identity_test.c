@@ -112,7 +112,7 @@ static int make_elf_with_loads(
     if (result == NULL || loads == NULL || page_size == 0U
         || page_size > (uint64_t)sizeof(result->bytes)
         || file_pages == 0U || file_pages > sizeof(result->bytes) / (size_t)page_size
-        || load_count == 0U || load_count > 2U) return 0;
+        || load_count == 0U || load_count > 4U) return 0;
     image_size = file_pages * (size_t)page_size;
     memset(result, 0, sizeof(*result));
     memcpy(header.e_ident, ELFMAG, SELFMAG);
@@ -253,6 +253,49 @@ static int test_rounded_file_page_alias_at_distinct_virtual_addresses(uint64_t p
         return 0;
     }
     (void)printf("PASS native identity rounded file-page alias at distinct virtual addresses\n");
+    return 1;
+}
+
+static int test_fully_contained_file_page_reuse_skips_wrong_va_permission_incompatible_candidate(uint64_t page_size)
+{
+    test_elf elf;
+    Elf64_Phdr loads[4];
+    char maps[1024] = {0};
+    size_t used = 0U;
+    loads[0] = make_load(page_size, 0U, 0U, page_size, page_size, PF_R | PF_X);
+    loads[1] = make_load(page_size, page_size, 4U * page_size, page_size, page_size, PF_R);
+    loads[2] = make_load(page_size, page_size, 8U * page_size, page_size, page_size, PF_R);
+    loads[3] = make_load(page_size, page_size, 12U * page_size, page_size, page_size, PF_R | PF_W);
+    if (!make_elf_with_loads(&elf, page_size, 2U, loads, 4U)
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 0U, 0U, 1U, "r-xp")
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 4U, 1U, 1U, "r--p")
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 8U, 1U, 1U, "r--p")
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 12U, 1U, 1U, "rw-p")
+        || !verify(&elf, maps, 1)) {
+        (void)fprintf(stderr, "FAIL native identity wrong-VA PF_R file-page decoy is skipped before permission filtering\n");
+        return 0;
+    }
+    (void)printf("PASS native identity wrong-VA PF_R file-page decoy is skipped before permission filtering\n");
+    return 1;
+}
+
+static int test_same_va_duplicate_full_file_owners_after_bias_rejected(uint64_t page_size)
+{
+    test_elf elf;
+    Elf64_Phdr loads[3];
+    char maps[1024] = {0};
+    size_t used = 0U;
+    loads[0] = make_load(page_size, 0U, 0U, page_size, page_size, PF_R | PF_X);
+    loads[1] = make_load(page_size, page_size, 4U * page_size, page_size, page_size, PF_R | PF_W);
+    loads[2] = loads[1];
+    if (!make_elf_with_loads(&elf, page_size, 2U, loads, 3U)
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 0U, 0U, 1U, "r-xp")
+        || !append_map_at(maps, sizeof(maps), &used, page_size, 4U, 1U, 1U, "rw-p")
+        || !verify(&elf, maps, 0)) {
+        (void)fprintf(stderr, "FAIL native identity same-VA duplicate full file owners after bias rejection\n");
+        return 0;
+    }
+    (void)printf("PASS native identity same-VA duplicate full file owners after bias rejection\n");
     return 1;
 }
 
@@ -505,6 +548,8 @@ int main(void)
         || !test_musl_version_template_rejects_ambiguous_or_malformed_inputs()
         || !test_musl_combined_loader_relro_splits(page_size)
         || !test_rounded_file_page_alias_at_distinct_virtual_addresses(page_size)
+        || !test_fully_contained_file_page_reuse_skips_wrong_va_permission_incompatible_candidate(page_size)
+        || !test_same_va_duplicate_full_file_owners_after_bias_rejected(page_size)
         || !test_incompatible_pt_load_permissions_rejected(page_size)
         || !test_duplicate_full_pt_load_rejected(page_size)
         || !test_partial_pt_load_overlap_rejected(page_size)

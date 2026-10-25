@@ -468,14 +468,16 @@ static int find_file_backed_mapping_owner(
          * intersection is not an owner; the complete VMA must be contained by
          * one candidate, and its VA/memsz owner is checked independently. */
         if (mapping->file_offset < file_page_start || map_file_end > file_page_end) continue;
-        if ((map_flags & ~segment->flags) != 0U) return 0;
         delta = mapping->file_offset - file_page_start;
         if (!checked_add_u64(virtual_page_start, delta, &expected_vaddr)) return 0;
         if (load_bias_known) {
-            if (!checked_add_u64(load_bias, expected_vaddr, &expected_vaddr)
-                || mapping->map_start != expected_vaddr) return 0;
+            if (!checked_add_u64(load_bias, expected_vaddr, &expected_vaddr)) return 0;
+            /* With bias established, a full file candidate at another VA is a non-owner. */
+            if (mapping->map_start != expected_vaddr) continue;
+            if ((map_flags & ~segment->flags) != 0U) return 0;
             candidate_bias = load_bias;
         } else {
+            if ((map_flags & ~segment->flags) != 0U) return 0;
             if (mapping->map_start < expected_vaddr) return 0;
             candidate_bias = mapping->map_start - expected_vaddr;
         }

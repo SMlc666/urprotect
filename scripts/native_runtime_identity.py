@@ -530,13 +530,14 @@ def _verify_maps_file(
                 page_start, page_end = page_range
                 if map_file_start < page_start or map_file_end > page_end:
                     continue
-                if flags & ~segment["flags"]:
-                    _fail(f"{label} map permissions exceed its PT_LOAD owner")
                 virtual_page_start = segment["virtualAddress"] & page_mask
                 expected_start = _checked_add(load_bias, virtual_page_start, f"{label} PT_LOAD load bias")
                 expected_start = _checked_add(expected_start, map_file_start - page_start, f"{label} PT_LOAD mapping address")
+                # With bias established, a full file candidate at another VA is a non-owner.
                 if row["start"] != expected_start:
-                    _fail(f"{label} map intersects a PT_LOAD at a conflicting virtual address")
+                    continue
+                if flags & ~segment["flags"]:
+                    _fail(f"{label} map permissions exceed its PT_LOAD owner")
                 owner_index = segment_index
                 owner_count += 1
         if owner_count > 1:

@@ -2630,6 +2630,65 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             result = self.run_checker(root, runtime="glibc", require_runtime_identity=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_native_runtime_identity_skips_wrong_va_permission_incompatible_full_file_candidate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="runtime-identity-file-alias-full-candidate-") as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.create_evidence(source)
+            root = self.copy_evidence(source, Path(directory))
+            positive = root / INDIRECT_UNIT
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            for role in ("source", "target"):
+                # Four PT_LOAD headers would overlap this helper ELF's version marker at 0x100.
+                # Place the synthetic table later in the first file page before writing the layout.
+                identity_path = positive / "runtime-identity" / role / "identity.json"
+                identity = json.loads(identity_path.read_text(encoding="utf-8"))
+                libc_path = positive / identity["libc"]["retainedPath"]
+                libc_image = bytearray(libc_path.read_bytes())
+                struct.pack_into("<Q", libc_image, 32, 0x200)
+                libc_path.write_bytes(libc_image)
+                self.set_runtime_pt_load_layout(
+                    positive,
+                    role,
+                    (
+                        (0, 0, page_size, page_size, 5),
+                        (page_size, 4 * page_size, page_size, page_size, 4),
+                        (page_size, 8 * page_size, page_size, page_size, 4),
+                        (page_size, 12 * page_size, page_size, page_size, 6),
+                    ),
+                    (
+                        (0, 0, 1, "r-xp"),
+                        (4, 1, 1, "r--p"),
+                        (8, 1, 1, "r--p"),
+                        (12, 1, 1, "rw-p"),
+                    ),
+                    file_pages=2,
+                )
+                self.refresh_runtime_identity(positive, role)
+            _refresh_indirect_manifest(root)
+            result = self.run_checker(root, runtime="glibc", require_runtime_identity=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_runtime_identity_rejects_same_va_duplicate_full_file_candidates_after_bias(self) -> None:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+
+        def duplicate_full_owners(positive: Path, role: str) -> None:
+            self.set_runtime_pt_load_layout(
+                positive,
+                role,
+                (
+                    (0, 0, page_size, page_size, 5),
+                    (page_size, 4 * page_size, page_size, page_size, 6),
+                    (page_size, 4 * page_size, page_size, page_size, 6),
+                ),
+                ((0, 0, 1, "r-xp"), (4, 1, 1, "rw-p")),
+                file_pages=2,
+            )
+
+        result = self.reject_runtime_identity_mutation(duplicate_full_owners)
+        self.assertIn("multiple fully-containing pt_load owners", result.stderr.lower())
+        self.assertNotIn("manifest digest mismatch", result.stderr.lower())
+
     def test_native_runtime_identity_still_rejects_pt_load_permission_excess(self) -> None:
         page_size = os.sysconf("SC_PAGE_SIZE")
 
