@@ -1,6 +1,0 @@
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Shared workflow, atomic publication, structural/selected-function boundaries, and test requirements."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed profile materialization and no-partial-publication behavior."}
-{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Current v3 profiles, HostContext handoff, and independent runtime evidence."}
-{"file":".trellis/tasks/10-06-architecture-boundary-refactor/prd.md","reason":"G2 scope, complete HostContext decision, and no-history gate."}
-{"file":".trellis/tasks/10-06-unified-protection-workflow/design.md","reason":"Current workflow data flow and profile-specific ownership."}
-{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/design.md","reason":"Shared semantic/layout/artifact ownership and parent dependency ordering."}

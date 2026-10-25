@@ -1,6 +1,0 @@
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review single-responsibility, dependency direction, no-duplicate-model, and test requirements."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review cross-layer boundaries and forbidden dependency checks."}
-{"file":".trellis/tasks/10-06-responsibility-boundaries/prd.md","reason":"Review G1 acceptance and no-history constraints."}
-{"file":".trellis/tasks/10-06-responsibility-boundaries/design.md","reason":"Review ownership tree, extraction seams, and dependency direction."}
-{"file":".trellis/tasks/10-06-responsibility-boundaries/implement.md","reason":"Review ordered refactor steps, validation, and rollback points."}
-{"file":".trellis/tasks/10-06-architecture-boundary-refactor/research/architecture-audit.md","reason":"Cross-check file/type responsibility findings against source evidence."}
