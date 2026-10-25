@@ -44,10 +44,13 @@ and demand-driven.
   observed extra owner does not prove privacy.
 - [ ] **open: child.cross-runtime-evidence** — scoped AArch64/glibc rows do not
   cover the declared cross-runtime matrix. Shared-table musl plus ordinary and
-  shared Bionic exact-root execution remain outstanding. The latest hosted
+  shared Bionic exact-root execution remain outstanding. The earlier hosted
   Bionic identity run predating the known-bias wrong-VA owner correction failed
-  at `helper-maps-check`; the new C/Python regression and native identity
-  self-tests pass locally, but hosted Bionic must be rerun before acceptance.
+  at `helper-maps-check`. Hosted run `40213194543` advanced past that stage but
+  failed the ordinary Bionic identity gate because `run-bionic-fixture.sh`
+  omitted `imageDigest` from its result JSON while the independent checker
+  requires the digest pinned by the exact fixture image. Bionic ordinary/shared
+  and shared-table musl evidence must be rerun after the producer fix.
   Musl/Bionic are not promoted by glibc or checker-only results.
 
 ## Evidence facts and non-promotion constraints
@@ -98,3 +101,30 @@ python3 scripts/check-runtime-matrix-evidence.py
 Runtime producers require native AArch64 toolchains and must use unique evidence
 roots. Do not substitute emulation, glibc for musl/Bionic, or historical roots
 for a fresh required execution.
+
+### Task 1: Bionic runtime image digest provenance
+
+**Files:**
+- Modify: `scripts/run-bionic-fixture.sh` (runtime result JSON producer)
+- Test: `tests/test_bionic_artifact_permissions.py` (execute the actual embedded JSON emitter)
+- Update: this plan's cross-runtime evidence state
+
+**Interfaces:**
+- Consumes the pinned `image` argument already passed to the runtime result producer.
+- Produces `result.json.imageDigest`, exactly the digest suffix after `@` in `result.json.image`.
+
+- [x] **Step 1: Write a failing producer-output regression test**
+  Execute the Python emitter embedded in `run-bionic-fixture.sh` with a pinned
+  image digest and controlled package-lock/fixture inputs; assert that the
+  emitted JSON retains the image and its exact `imageDigest`.
+- [x] **Step 2: Run the focused test and verify the expected missing-field failure**
+  Run: `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_bionic_artifact_permissions.BionicArtifactPermissionTests.test_fixture_result_reports_locked_image_digest`
+  Expected: FAIL because the emitted JSON is missing `imageDigest`.
+- [x] **Step 3: Add the exact image digest to the producer JSON**
+  Derive it from the already pinned `image` input; do not invent a second source of truth.
+- [x] **Step 4: Run focused and full Python evidence tests**
+  Run the focused test, then `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_bionic_artifact_permissions tests.test_rehydration_evidence`.
+  Expected: both commands pass.
+- [ ] **Step 5: Re-run hosted Bionic and musl exact-root evidence**
+  Validate only fresh run-specific artifacts with the current independent checkers;
+  leave `child.cross-runtime-evidence` open unless all declared rows pass.
