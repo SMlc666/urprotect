@@ -346,7 +346,7 @@ public sealed class ElfParserTests
     }
 
     [Fact]
-    public void RejectsOwnerlessZeroFileTlsWithNonZeroVirtualAddress()
+    public void PreservesOwnerlessZeroFileTlsWithNonZeroVirtualAddressForStructuralObservation()
     {
         var bytes = ElfFixture.TlsPie();
         var tlsHeaderOffset = ElfFixture.FirstProgramHeaderOffset + (4 * ElfConstants.ProgramHeaderSize64);
@@ -368,6 +368,31 @@ public sealed class ElfParserTests
         BinaryPrimitives.WriteUInt64LittleEndian(
             bytes.AsSpan(tlsHeaderOffset + ElfProgramHeaderOffsets.Alignment),
             8);
+
+        var result = ElfParser.Parse(bytes);
+
+        Assert.True(result.IsSuccess, string.Join(Environment.NewLine, result.Diagnostics));
+        var file = Assert.IsType<ElfFile>(result.File);
+        var tls = Assert.Single(file.TlsMetadata.Segments);
+        Assert.Equal(-1, tls.OwningLoadProgramHeaderIndex);
+        Assert.Equal(0UL, tls.FileSize);
+        Assert.Equal(new VirtualAddress(0x400), tls.TemplateAddress);
+        Assert.Equal(16UL, tls.MemorySize);
+
+        var projection = TlsStructuralAdapter.CreateImageModule(file);
+        Assert.False(projection.IsSuccess);
+        Assert.Contains(
+            projection.Diagnostics,
+            diagnostic => diagnostic.Code == DiagnosticCode.TlsBindingUnresolved);
+    }
+
+    [Fact]
+    public void RejectsOwnerlessNonZeroFileTlsTemplate()
+    {
+        var bytes = ElfFixture.TlsPie();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            bytes.AsSpan(ElfFixture.FirstProgramHeaderOffset + ElfProgramHeaderOffsets.VirtualAddress),
+            0x1000);
 
         var result = ElfParser.Parse(bytes);
 
