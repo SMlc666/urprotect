@@ -10,6 +10,8 @@
 
 **Design:** [project-local Superpowers adoption and Trellis retirement](../specs/2026-10-24-project-local-superpowers-and-trellis-retirement-design.md)
 
+**Execution status:** Tasks 1–8 are complete in the current branch. Three reversible migration slices plus this execution record are local; nothing has been pushed. The final checklist leaves user review as the gate before any further operation.
+
 ## Global constraints
 
 1. Install only with `pi install --local git:github.com/obra/superpowers@2ce8aa15d05bd57213e6f746f953aafb7ded7a8b`; upstream URI is `https://github.com/obra/superpowers`. Verify the checked-out source has exactly that full SHA. Pi may keep its managed source cache under the user agent directory, but the package declaration must exist only in this project's `.pi/settings.json`; do not alter global package registration or global settings.
@@ -139,12 +141,14 @@ git diff --check
 
 ### Task 8: Commit reversible migration slices (no push)
 
-- [ ] Commit the migrated engineering docs, active plans, and registry/test changes as a documentation-only slice.
-- [ ] Commit the project-local package and replacement `AGENTS.md` guidance separately, staging a sanitized `.pi/settings.json` derived from the committed base plus migration-owned changes only.
-- [ ] Commit Trellis integration removal and `.trellis/` deletion in a separate reversible slice.
-- [ ] Inspect every commit with `git show --stat`, `git show --check`, and `git show <commit>:.pi/settings.json`; verify no absolute user skill paths or global/Codex setup entered history.
-- [ ] Confirm rollback by reverting the removal slice in a temporary worktree and restoring the external backup files/runtime archive by manifest. Do not alter the live workspace's unrelated dirty changes.
-- [ ] Do not push or archive/close the two product tasks. The migration's success does not complete their open product/runtime acceptance criteria.
+- [x] Commit the migrated engineering docs, active plans, and registry/test changes as a documentation-only slice (`7b5af05`, `docs: migrate engineering specs and active plans`).
+- [x] Commit the project-local package and replacement `AGENTS.md` guidance separately, staging a sanitized `.pi/settings.json` derived from the committed base plus migration-owned changes only (`fdfba43`, `chore: configure project-local Superpowers`).
+- [x] Commit Trellis integration removal and `.trellis/` deletion in a separate reversible slice (`e4f5ea5`, `chore: remove Trellis project integration`).
+- [x] Inspect every commit with `git show --stat`, `git show --check`, and each committed `.pi/settings.json`; verify no absolute user skill paths or global/Codex setup entered history. The worktree-only `.pi/settings.json` skill entries remain intact and unstaged.
+- [x] Confirm rollback in an isolated temporary clone (not a linked worktree): revert all three migration commits to the exact base tree, restore the external backup files/runtime archive, then verify the `.trellis` manifest (926 entries) and five byte/mode-exact worktree files. The live workspace's user settings change was not altered.
+- [x] Do not push or archive/close the two product tasks. The migration's success does not complete their open product/runtime acceptance criteria.
+
+**Commit and rollback record:** the three commit IDs are `7b5af057348e857efc858696643da311394b3c85`, `fdfba43ab94fc27e95043a0acc13a263c3d68ba4`, and `e4f5ea58c6c6c071f025a0abbe788394160f515f`. The isolated rollback rehearsal returned to base `b1c8224857b91cbfa3a678b94cb39c945e78f607`, restored the final archive by manifest, and passed the external `sha256sums`. No push occurred. Full Python validation: 534 tests, 532 passed and 2 skipped; migration regression suite: 8/8; fixture, regression, runtime-matrix, documentation-link, and diff-hygiene checks pass. A read-only final review returned PASS with no issues.
 
 ## Final acceptance checklist
 
@@ -154,6 +158,6 @@ git diff --check
 - [x] All durable contracts remain discoverable under `docs/engineering/` and fixture/test references pass.
 - [x] Both active plans preserve every open source acceptance criterion, evidence limitation, and parent/child relation; neither claims task completion.
 - [x] The complete `.trellis/` tree and all active Trellis-specific hooks, extensions, prompts, agents, and skills are removed only after validation.
-- [ ] Existing local `.gitattributes`, `.pi/settings.json`, journal, and `.trellis/` data can be restored byte-for-byte from the restricted backup; machine-specific paths did not enter commits.
+- [x] Existing local `.gitattributes`, `.pi/settings.json`, journal, and `.trellis/` data were restored byte-for-byte in the isolated rollback rehearsal; machine-specific paths did not enter commits.
 - [x] Tests and validators pass; no product/runtime-support claim changed; local and hosted provider evidence remain accurately distinct.
-- [ ] All commits are local; there is no push, and the user reviews the final diff before any further operation.
+- [ ] All three commits are local and no push occurred; present the final diff to the user for review before any further operation.

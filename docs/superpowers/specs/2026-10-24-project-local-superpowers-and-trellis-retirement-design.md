@@ -1,6 +1,6 @@
 # Project-local Superpowers adoption and Trellis retirement
 
-**Status:** Migration work through Tasks 1–7 is complete; Task 8 local commit slices are pending independent review and final audit. The user approved project-local Superpowers adoption and Trellis retirement and selected stepwise execution in the current branch. No commits have been created and nothing has been pushed.
+**Status:** Migration implementation, validation, and three local commit slices are complete. Read-only final review passed. The user approved project-local Superpowers adoption and Trellis retirement and selected stepwise execution in the current branch. Nothing has been pushed; final diff review by the user is the remaining gate before further operation.
 **Date:** 2026-10-24
 **Scope owner:** Repository workflow and project knowledge migration.
 
@@ -299,24 +299,26 @@ global Pi settings, package registration, or trust state.
       transferred before workspace deletion; every original diff has a
       documented preserve/discard disposition and can be restored byte-for-byte
       on rollback.
-- [ ] Migration commits do not contain host-specific absolute skill paths from
+- [x] Migration commits do not contain host-specific absolute skill paths from
       the dirty user settings; the local worktree retains that user-owned diff
-      unchanged. This commit-dependent check remains open until Task 8 audits
-      each staged and committed blob.
+      unchanged. Each committed blob was audited.
 - [x] Trellis-specific Pi/Codex/agent instructions, hooks, agents, prompts,
       task scripts, task/spec tree, and active project references are removed;
       generic Codex configuration remains and receives no Superpowers setup.
 - [x] No product code/runtime claims are changed. Bionic and general provider/
       table support remain unknown/non-promoted; local and hosted evidence stay
       separately described.
-- [ ] Migration is committed in reversible slices and the final audit finds no
-      broken links, dangling task loaders, or active Trellis integration. Commit
-      and rollback rehearsal remain open until Task 8.
+- [x] Migration is committed in reversible slices and the final audit finds no
+      broken links, dangling task loaders, or active Trellis integration. A full
+      isolated-clone revert and external-backup restoration rehearsal passed.
 
 ## 10. Approval and execution record
 
 The user approved the migration and asked for stepwise execution on the current
-branch. Tasks 1–7 are recorded as complete in the migration plan; Task 8 commit
-slices and final review remain open. The user chose a project-local Pi
-installation only; no global or Codex Superpowers setup is authorized. No
-product feature or runtime-support criteria are completed by this migration.
+branch. Tasks 1–8 implementation and validation are complete; final diff review
+is presented to the user before any further operation. Three commits are local:
+`7b5af05` (engineering docs/plans and registry), `fdfba43` (project-local
+Superpowers and `AGENTS.md`), and `e4f5ea5` (Trellis integration/data removal).
+No push was performed. The user chose a project-local Pi installation only; no
+global or Codex Superpowers setup was added. No product feature or runtime-
+support criteria are completed by this migration.
