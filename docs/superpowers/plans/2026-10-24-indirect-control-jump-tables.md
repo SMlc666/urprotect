@@ -42,17 +42,14 @@ and demand-driven.
   chains, fully symbol-less selection, native metadata-missing variants, and
   general indirect-call or runtime target-translation behavior. Absence of an
   observed extra owner does not prove privacy.
-- [ ] **open: child.cross-runtime-evidence** — scoped AArch64/glibc rows do not
-  cover the declared cross-runtime matrix. In hosted run `40216643128`, the
-  repaired Bionic result JSON's `imageDigest` matched its pinned Termux image;
-  the Bionic ordinary exact-root checker and musl ordinary/shared exact-root
-  checkers passed. Bionic shared-table production and runtime behavior also
-  passed, but its independent checker rejected the valid `.relro_padding`
-  `SHT_NOBITS` section because `sh_offset + sh_size` extends past the ELF file
-  (the section has no file-backed bytes). The corrected checker now passes all
-  four retained ordinary/shared Bionic/musl roots locally; rerun hosted evidence
-  before closing this criterion. Musl/Bionic are not promoted by glibc or
-  checker-only results.
+- [x] **complete: child.cross-runtime-evidence** — hosted run `40220438826`
+  passed the Bionic native and musl container evidence jobs. The current
+  independent checkers also pass all four fresh ordinary/shared Bionic/musl
+  exact roots from that run, and the Bionic `imageDigest` matches the pinned
+  image suffix. This closes only these scoped evidence rows: the same run had a
+  separate runtime-matrix artifact handoff failure, tracked in Task 3, and no
+  general ownership or runtime-support claim follows. Musl/Bionic are not
+  promoted by glibc or checker-only results.
 
 ## Evidence facts and non-promotion constraints
 
@@ -126,11 +123,11 @@ for a fresh required execution.
 - [x] **Step 4: Run focused and full Python evidence tests**
   Run the focused test, then `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_bionic_artifact_permissions tests.test_rehydration_evidence`.
   Expected: both commands pass.
-- [ ] **Step 5: Re-run hosted Bionic and musl exact-root evidence**
-  Validate only fresh run-specific artifacts with the current independent checkers;
-  leave `child.cross-runtime-evidence` open unless all declared rows pass. Run
-  `40216643128` proved the producer fix and Bionic ordinary/musl rows; the
-  patched checker subsequently accepted all four retained roots locally.
+- [x] **Step 5: Re-run hosted Bionic and musl exact-root evidence**
+  Against fresh run `40220438826`, the Bionic result retained its exact pinned
+  image digest, both Bionic and musl workflow jobs passed, and independent
+  rechecks passed the ordinary/shared exact roots for both runtimes. This is
+  limited to the declared evidence rows; it does not promote general support.
 
 ### Task 2: Respect valid SHT_NOBITS section ranges in the shared checker
 
@@ -166,13 +163,50 @@ for a fresh required execution.
   Against run `40216643128`, independently check Bionic ordinary/shared and
   musl ordinary/shared evidence roots. Expected: all four root checks pass;
   the Bionic image digest remains bound to the pinned image.
-- [ ] **Step 6: Push and run fresh hosted cross-runtime evidence**
+- [x] **Step 6: Push and run fresh hosted cross-runtime evidence**
   Push the reviewed fix, then trigger the authorized full CI workflow and
-  inspect Bionic and musl job results and exact-root artifacts. Expected: the
-  fresh Bionic shared independent checker accepts the valid `SHT_NOBITS`
-  section and both hosted runtime rows pass. Keep unrelated failing CI lanes
-  separately classified; do not claim the global quality gate passed unless it
-  did.
+  inspect Bionic and musl job results and exact-root artifacts. Hosted run
+  `40220438826` passed the fresh Bionic shared checker (including the valid
+  `SHT_NOBITS` section) and both Bionic/musl evidence jobs; independent checks
+  passed all four exact roots. Keep the runtime-matrix handoff and unrelated
+  failing lanes separately classified; the global quality gate did not pass.
+
+### Task 3: Preserve the Bionic artifact root in runtime-matrix handoff
+
+**Evidence:** The Bionic upload includes both `.artifacts/bionic/` and
+`.artifacts/indirect-control/`, so `upload-artifact` stores paths relative to
+`.artifacts`. The runtime-matrix job downloads that artifact into
+`.artifacts/bionic`, producing `.artifacts/bionic/bionic/c-termux-bionic-pie`
+while the runner expects `.artifacts/bionic/c-termux-bionic-pie`; hosted run
+`40220438826` failed at this boundary after the Bionic and musl producer jobs
+passed.
+
+**Files:**
+- Modify: `.github/workflows/ci.yml` (runtime-matrix artifact download destination)
+- Test: `tests/test_protected_image_workflow.py` (Bionic upload/download root contract)
+- Update: this plan and its execution ledger
+
+- [x] **Step 1: Write a failing workflow-root regression test**
+  Assert the Bionic artifact is downloaded by the runtime-matrix job to
+  `.artifacts`, while the expected Bionic subtree remains
+  `.artifacts/bionic/c-termux-bionic-pie`.
+- [x] **Step 2: Run the focused test and verify the current nested-root failure**
+  Run: `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_protected_image_workflow.ProtectedImageWorkflowTests.test_runtime_matrix_download_preserves_bionic_artifact_root`
+  Expected: FAIL because the workflow currently downloads into
+  `.artifacts/bionic`.
+- [x] **Step 3: Download the artifact at its actual archive root**
+  Change only the runtime-matrix download `path` to `.artifacts`; retain the
+  upload layout and the runner's expected Bionic subtree.
+- [x] **Step 4: Run focused and related workflow tests**
+  Run the focused test, then
+  `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_protected_image_workflow tests.test_runtime_matrix tests.test_ci_push_pr_dedup`.
+  Expected: all tests pass with no ambient `PYTHONPATH`.
+- [ ] **Step 5: Push and verify a fresh hosted runtime-matrix handoff**
+  Use the authorized full CI dispatch. Expected: runtime-matrix downloads the
+  Bionic tree at the expected root, runs its covering set, and its retained
+  evidence checker passes. Keep unrelated fixture and real-sample failures
+  separately classified; do not claim the global quality gate passed unless
+  it does.
 
 ### CI triage from run `40216643128` (before Task 2 fix)
 
@@ -195,3 +229,28 @@ for a fresh required execution.
 - The global quality gate consequently remained failed. Fresh hosted evidence
   and a full-suite rerun are still required; these lane findings are not proof
   that the checker-only fix caused or resolved them.
+
+### CI triage from run `40220438826` (after Tasks 1–2, before Task 3)
+
+- `bionic-native-arm64` and `musl-container-smoke` passed. The Bionic image
+  digest matched the pinned image suffix, and independent current checkers
+  passed all four ordinary/shared Bionic/musl exact roots.
+- `runtime-matrix-native-arm64` failed during its covering set, after the
+  initial musl smoke and launcher tests but before consuming the Bionic root.
+  The upload contains paths rooted at `bionic/`, while the download target was
+  `.artifacts/bionic`; the runner therefore could not find
+  `.artifacts/bionic/c-termux-bionic-pie`. Task 3 changes only the download
+  destination to `.artifacts`.
+- `managed-tests` passed, so the previous FIFO completion-time failure was not
+  reproduced in this run.
+- `fixture-nightly` again failed only at `zig-musl`; its retained validator
+  output is `TlsMetadataMalformed @0x3380`, and `readelf` shows the zero-file,
+  nonzero-memory `PT_TLS` has no unique containing `PT_LOAD` with a matching
+  file/virtual mapping. This remains a separate fixture-versus-parser contract
+  issue, not part of Task 3.
+- `real-sample-matrix` again failed to acquire the required locked Node.js
+  sample: `curl` received HTTP 404. Follow-on environment/evidence-accounting
+  failures are downstream; the external sample availability blocker remains.
+- The overall workflow and quality gate failed for these independent lanes.
+  Task 3 still requires a fresh hosted run to verify the corrected artifact
+  handoff; no global green CI result is claimed.

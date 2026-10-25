@@ -1105,7 +1105,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bionic-native-arm64-${{ github.run_id }}
-          path: .artifacts/bionic
+          path: .artifacts
       - name: Validate registry and run native/container covering set
         env:
           RUNTIME_MATRIX_ARTIFACT_ROOT: .artifacts/runtime-matrix/${{ env.RUNTIME_MATRIX_TIER }}
