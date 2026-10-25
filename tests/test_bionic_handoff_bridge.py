@@ -111,31 +111,49 @@ class BionicHandoffBridgeTests(unittest.TestCase):
             "    print('linux/arm64')\n"
             "    raise SystemExit(0)\n"
             "if len(args) >= 2 and args[:2] == ['image', 'inspect']:\n"
-            "    inspect_template = args[args.index('--format') + 1] if '--format' in args else None\n"
-            "    if inspect_template != '{{json .RepoDigests}}':\n"
-            "        print('unexpected image inspect format', file=sys.stderr)\n"
+            "    if len(args) != 3:\n"
+            "        print('unexpected image inspect argv', file=sys.stderr)\n"
             "        raise SystemExit(96)\n"
             "    mode = os.environ.get('FAKE_CONTAINER_MODE', 'success')\n"
             "    image = args[2]\n"
+            "    inspected = {'Id': 'sha256:' + 'a' * 64, 'RepoTags': [], 'RepoDigests': [image],\n"
+            "                 'Created': '2026-01-01T00:00:00Z', 'Config': {'Env': []}}\n"
             "    if mode == 'inspect-malformed-json':\n"
-            "        print('{not-json')\n"
+            "        sys.stdout.write('{not-json\\n')\n"
             "    elif mode == 'inspect-invalid-utf8':\n"
             "        sys.stdout.buffer.write(bytes([0xff, 10]))\n"
             "    elif mode == 'inspect-raw-nul':\n"
-            "        sys.stdout.buffer.write(b'[\\\"' + image.encode('utf-8') + b'\\x00\\\"]\\n')\n"
+            "        sys.stdout.buffer.write(b'[{\\\"RepoDigests\\\":[\\\"' + image.encode('utf-8') + b'\\x00\\\"]}]\\n')\n"
             "    elif mode == 'inspect-oversized-json':\n"
-            "        sys.stdout.buffer.write(b'[\\\"' + image.encode('utf-8') + b'\\\",\\\"' + b'x' * (64 * 1024) + b'\\\"]\\n')\n"
+            "        sys.stdout.buffer.write(b'[{\\\"RepoDigests\\\":[\\\"' + image.encode('utf-8') +\n"
+            "                                 b'\\\"],\\\"Config\\\":{\\\"Labels\\\":{\\\"padding\\\":\\\"' +\n"
+            "                                 b'x' * (4 * 1024 * 1024) + b'\\\"}}}]\\n')\n"
             "    elif mode == 'inspect-command-failure':\n"
-            "        print(json.dumps([image]))\n"
+            "        print(json.dumps([inspected]))\n"
             "        raise SystemExit(47)\n"
             "    elif mode == 'inspect-wrong-root-type':\n"
-            "        print(json.dumps({'RepoDigests': [image]}))\n"
+            "        print(json.dumps(inspected))\n"
+            "    elif mode == 'inspect-empty-root-list':\n"
+            "        print('[]')\n"
+            "    elif mode == 'inspect-multiple-images':\n"
+            "        print(json.dumps([inspected, inspected]))\n"
+            "    elif mode == 'inspect-non-object-image':\n"
+            "        print(json.dumps([17]))\n"
+            "    elif mode == 'inspect-missing-repodigests':\n"
+            "        print(json.dumps([{'Id': inspected['Id']}]))\n"
+            "    elif mode == 'inspect-wrong-repodigests-type':\n"
+            "        print(json.dumps([{'RepoDigests': image}]))\n"
             "    elif mode == 'inspect-non-string-item':\n"
-            "        print(json.dumps([image, 17]))\n"
+            "        print(json.dumps([{'RepoDigests': [image, 17]}]))\n"
             "    elif mode == 'inspect-missing-pin':\n"
-            "        print(json.dumps([image.rsplit('@', 1)[0] + '@sha256:' + 'b' * 64]))\n"
+            "        print(json.dumps([{'RepoDigests': [image.rsplit('@', 1)[0] + '@sha256:' + 'b' * 64]}]))\n"
+            "    elif mode == 'inspect-duplicate-key':\n"
+            "        print('[{\\\"RepoDigests\\\":[' + json.dumps(image) + '],\\\"RepoDigests\\\":[' + json.dumps(image) + ']}]')\n"
+            "    elif mode == 'inspect-nonstandard-json-constant':\n"
+            "        inspected['Config']['NaN'] = float('nan')\n"
+            "        print(json.dumps([inspected]))\n"
             "    else:\n"
-            "        print(json.dumps([image]))\n"
+            "        print(json.dumps([inspected]))\n"
             "    raise SystemExit(0)\n"
             "if not args or args[0] != 'run':\n"
             "    print('unexpected fake container argv', file=sys.stderr)\n"
@@ -563,10 +581,7 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
             inspect_calls = [call for call in calls if call[:2] == ["image", "inspect"]]
             self.assertEqual(2, len(inspect_calls))
             for call in inspect_calls:
-                self.assertEqual(
-                    ["image", "inspect", IMAGE, "--format", "{{json .RepoDigests}}"],
-                    call,
-                )
+                self.assertEqual(["image", "inspect", IMAGE], call)
             runs = [call for call in calls if call and call[0] == "run"]
             self.assertEqual(2, len(runs))
             expected_roles = ("source", "target")
@@ -598,11 +613,19 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
         invalid_modes = (
             "inspect-malformed-json",
             "inspect-invalid-utf8",
+            "inspect-raw-nul",
             "inspect-oversized-json",
             "inspect-command-failure",
             "inspect-wrong-root-type",
+            "inspect-empty-root-list",
+            "inspect-multiple-images",
+            "inspect-non-object-image",
+            "inspect-missing-repodigests",
+            "inspect-wrong-repodigests-type",
             "inspect-non-string-item",
             "inspect-missing-pin",
+            "inspect-duplicate-key",
+            "inspect-nonstandard-json-constant",
         )
         with self.ensure_test_bridge_helper():
             for mode in invalid_modes:
@@ -636,10 +659,7 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
                             call for call in calls if call[:2] == ["image", "inspect"]
                         ]
                         self.assertEqual(1, len(inspect_calls))
-                        self.assertEqual(
-                            ["image", "inspect", IMAGE, "--format", "{{json .RepoDigests}}"],
-                            inspect_calls[0],
-                        )
+                        self.assertEqual(["image", "inspect", IMAGE], inspect_calls[0])
                         self.assertFalse(
                             any(call and call[0] == "run" for call in calls),
                             "invalid image-inspect JSON must be rejected before container run",
@@ -675,7 +695,7 @@ if [ "$1" = -m ]; then echo aarch64; else exec /usr/bin/uname "$@"; fi
                 ]
                 self.assertEqual(
                     [["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"],
-                     ["image", "inspect", IMAGE, "--format", "{{json .RepoDigests}}"]],
+                     ["image", "inspect", IMAGE]],
                     calls,
                 )
                 self.assertFalse(

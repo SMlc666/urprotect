@@ -99,21 +99,43 @@ if [[ -n "$identity_directory" ]]; then
 fi
 python3 "$repo_root/scripts/prepare-bionic-write-root.py" "${write_root_args[@]}" || exit 1
 
-if ! "$container_runtime" image inspect "$oci_image" --format '{{json .RepoDigests}}' |
+if ! "$container_runtime" image inspect "$oci_image" |
   python3 -c '
 import json
 import sys
 
-maximum_bytes = 64 * 1024
+# Full image-inspect metadata can include large labels/history; cap the raw response.
+maximum_bytes = 4 * 1024 * 1024
 raw = sys.stdin.buffer.read(maximum_bytes + 1)
-if len(raw) > maximum_bytes:
+if len(raw) > maximum_bytes or b"\x00" in raw:
     sys.exit(1)
+
+def reject_duplicate_keys(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON object key")
+        value[key] = item
+    return value
+
+def reject_non_json_constant(_constant):
+    raise ValueError("non-JSON numeric constant")
 
 try:
-    digests = json.loads(raw.decode("utf-8"))
-except (json.JSONDecodeError, UnicodeDecodeError):
+    inspected = json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=reject_duplicate_keys,
+        parse_constant=reject_non_json_constant,
+    )
+except (ValueError, UnicodeDecodeError, RecursionError):
     sys.exit(1)
 
+if type(inspected) is not list or len(inspected) != 1:
+    sys.exit(1)
+image = inspected[0]
+if type(image) is not dict:
+    sys.exit(1)
+digests = image.get("RepoDigests")
 if type(digests) is not list or any(type(digest) is not str for digest in digests):
     sys.exit(1)
 sys.exit(0 if sys.argv[1] in digests else 1)
