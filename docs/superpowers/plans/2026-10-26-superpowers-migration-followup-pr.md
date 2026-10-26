@@ -15,8 +15,8 @@
 1. Project-only package declaration: `git:github.com/obra/superpowers@2ce8aa15d05bd57213e6f746f953aafb7ded7a8b`; never configure Superpowers globally or for Codex.
 2. Do not change global Pi settings, package registration, or trust state; use one-time approval only for a fresh project-package validation.
 3. Preserve the exact child/parent task acceptance state; migration must not mark product/runtime criteria complete.
-4. Preserve current-main changes and local user state; do not overwrite `.pi/settings.json` in `/root/urprotect` or alter local `main`.
-5. Do not commit machine-specific absolute paths such as `/root/.pi/agent/skills/`.
+4. Preserve current-main changes and local user state; do not overwrite the original worktree's local `.pi/settings.json` edit or alter local `main`.
+5. Do not commit machine-specific absolute paths for Pi skills directories.
 6. Keep migration, package activation, and Trellis removal as separate reversible commits.
 7. Run Python and fixture/runtime validation without ambient `PYTHONPATH`.
 
@@ -68,10 +68,10 @@
 
 **Files:** `.trellis/**`, `.agents/skills/trellis-*`, `.pi` Trellis entries, `.codex` Trellis entries, stale project references, and migration tests.
 
-- [ ] Port the retirement represented by source commit `e4f5ea5`, then compare against current `origin/main`; remove any current-main-only Trellis files/references so the entire `.trellis/` tree and active Trellis entrypoints are absent.
-- [ ] Preserve generic Codex configuration and all non-Trellis resources. Keep the original project package pin and sanitized settings from Task 4.
-- [ ] Run migration/fixture/regression/real-sample test modules and all three fixture, regression, and runtime-matrix validators with `PYTHONPATH` unset. Run repository searches and `git diff --check`.
-- [ ] Commit Trellis retirement separately and update the migration record to describe the clean-branch port rather than claiming the old branch is the PR.
+- [x] Port the reviewed retirement from source commit `e4f5ea5` and reconcile current `origin/main`; remove all current-main Trellis assets/references so the full `.trellis/` tree and active Trellis entrypoints are absent. The current-main specifications were retained under `docs/engineering/`.
+- [x] Preserve generic Codex configuration and non-Trellis resources. Keep the exact project package pin and sanitized settings from Task 4.
+- [x] Run migration/fixture/regression/real-sample modules and all fixture, regression, and runtime-matrix validators with `PYTHONPATH` unset. Full Python discovery passes (479 tests, 3 skipped) after the required locked Release build; searches show only intentional regression assertions mention retired paths, and `git diff --check` passes.
+- [x] Commit Trellis retirement separately and update the migration record to describe the clean-branch port rather than claiming the old branch is the PR.
 
 ### Task 6: Review, push, and open the migration PR
 

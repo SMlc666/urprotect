@@ -160,6 +160,9 @@ class SuperpowersMigrationTests(unittest.TestCase):
             with self.subTest(path=relative):
                 self.assertFalse((REPO_ROOT / relative).exists())
 
+        trellis_skills = tuple(sorted((REPO_ROOT / ".agents/skills").glob("trellis-*")))
+        self.assertEqual((), trellis_skills, "all Trellis project skills must be retired")
+
         agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertNotIn("trellis", agents.lower())
         attributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
@@ -185,6 +188,8 @@ class SuperpowersMigrationTests(unittest.TestCase):
             / "docs/superpowers/specs/2026-10-24-project-local-superpowers-and-trellis-retirement-design.md",
             REPO_ROOT
             / "docs/superpowers/plans/2026-10-24-project-local-superpowers-and-trellis-retirement.md",
+            REPO_ROOT
+            / "docs/superpowers/plans/2026-10-26-superpowers-migration-followup-pr.md",
         )
         for path in documents:
             with self.subTest(path=path.name):
