@@ -78,6 +78,6 @@
 - [x] Compare the branch to `origin/main`; verify no product/runtime code, unrelated evaluator changes, newly introduced absolute machine paths, or local settings edits are present.
 - [x] Run the complete relevant Python suite and all migration/fixture/regression/runtime-matrix validators; require a clean diff check.
 - [x] Perform an independent self-review pass (delegation was not requested); resolve any correctness issues before publication.
-- [ ] Push only `fix/superpowers-migration-pr`, open a PR against `main`, and inspect its CI. Do not merge it locally or on GitHub without a separate merge instruction.
+- [x] Push only `fix/superpowers-migration-pr`, open PR #30 against `main`, and inspect its CI. Do not merge it locally or on GitHub without a separate merge instruction. The PR run passed every other executed lane; the required real-sample lane remains blocked by the locked Node.js mirror HTTP 404 documented in the PR body.
 
 **Migration acceptance:** only durable docs/task-state migration, project-local package configuration, and Trellis retirement are included; open product criteria remain open; the PR diff is based on current `origin/main` and contains no legacy branch history spillover.
