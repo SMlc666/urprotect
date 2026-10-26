@@ -39,9 +39,10 @@ LAYOUT_DEFAULT = "generic-elf-layout-v1"
 def _load_native_runtime_identity_helper() -> Any:
     helper_path = Path(__file__).resolve(strict=True).with_name("native_runtime_identity.py")
     nofollow = getattr(os, "O_NOFOLLOW", None)
-    if nofollow is None:
-        raise ImportError("runtime identity helper load requires O_NOFOLLOW")
-    descriptor = os.open(helper_path, os.O_RDONLY | os.O_CLOEXEC | nofollow)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nofollow is None or nonblock is None:
+        raise ImportError("runtime identity helper load requires O_NOFOLLOW and O_NONBLOCK")
+    descriptor = os.open(helper_path, os.O_RDONLY | os.O_CLOEXEC | nofollow | nonblock)
     try:
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > 1024 * 1024:
@@ -1031,7 +1032,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact_root", type=Path)
     parser.add_argument("--tier", choices=("pr", "nightly", "release"), required=True)
-    parser.add_argument("--runtime", choices=("glibc", "musl"), required=True)
+    parser.add_argument("--runtime", choices=("glibc", "musl", "bionic"), required=True)
     parser.add_argument("--require-runtime-identity", action="store_true")
     parser.add_argument("--unit", required=True)
     parser.add_argument("--expect-failure", action="store_true")

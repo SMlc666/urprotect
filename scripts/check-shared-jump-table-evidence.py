@@ -5,12 +5,13 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
+import stat
 import struct
+import types
 from pathlib import Path
 from typing import Any
-
-from evidence_load_range import resolve_isolated_evidence_root, unique_file_backed_pt_load
 
 PF_X = 1
 PF_W = 2
@@ -28,29 +29,128 @@ EXPECTED_RELEASE_ORDER = "entry-dispatch-before-release-image"
 MAX_EVIDENCE_JSON_BYTES = 16 * 1024 * 1024
 MAX_IMAGE_BYTES = 128 * 1024 * 1024
 MAX_OBSERVER_STREAM_BYTES = 1024 * 1024
+MAX_EVIDENCE_FILES = 1000
+MAX_EVIDENCE_SYMBOL_RECORDS = 16384
+MAX_EVIDENCE_SYMBOL_NAME_BYTES = 4 * 1024 * 1024
+MAX_EVIDENCE_SYMBOL_NAME_LENGTH = 4096
+MAX_EVIDENCE_DIRECTORIES = 512  # Includes the root.
+MAX_EVIDENCE_ENTRIES = 1024
+MAX_EVIDENCE_TREE_BYTES = 256 * 1024 * 1024
+_ACTIVE_EVIDENCE_TREE: Any | None = None
+
+
+def _load_bounded_sibling_module(filename: str, module_prefix: str, maximum_bytes: int) -> Any:
+    helper_path = Path(__file__).resolve(strict=True).with_name(filename)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nofollow is None or nonblock is None:
+        raise ImportError(f"{filename} loading requires O_NOFOLLOW and O_NONBLOCK")
+    descriptor = os.open(helper_path, os.O_RDONLY | os.O_CLOEXEC | nofollow | nonblock)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > maximum_bytes:
+            raise ImportError(f"{filename} exceeds its bounded regular-file contract")
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                raise ImportError(f"{filename} was truncated while reading")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ImportError(f"{filename} grew while reading")
+        after = os.fstat(descriptor)
+        identity = lambda item: (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+        if identity(before) != identity(after) or not stat.S_ISREG(after.st_mode):
+            raise ImportError(f"{filename} changed while reading")
+    finally:
+        os.close(descriptor)
+    source = b"".join(chunks)
+    module_name = f"{module_prefix}_{hashlib.sha256(source).hexdigest()[:16]}"
+    module = types.ModuleType(module_name)
+    namespace = types.ModuleType.__getattribute__(module, "__dict__")
+    namespace["__file__"] = str(helper_path)
+    namespace["__package__"] = ""
+    exec(compile(source, str(helper_path), "exec"), namespace)
+    return module
+
+
+try:
+    _EVIDENCE_RANGE_HELPER = _load_bounded_sibling_module(
+        "evidence_load_range.py", "_urprotect_shared_evidence_range", 1024 * 1024
+    )
+    unique_file_backed_pt_load = _EVIDENCE_RANGE_HELPER.unique_file_backed_pt_load
+except (ImportError, OSError, AttributeError) as error:
+    raise SystemExit(f"bounded shared-table PT_LOAD range helper is unavailable: {error}") from error
+
+
+def _load_native_runtime_identity_helper() -> Any:
+    return _load_bounded_sibling_module(
+        "native_runtime_identity.py", "_urprotect_shared_runtime_identity", 1024 * 1024
+    )
+
+
+def _load_bounded_evidence_tree(root: Path) -> Any:
+    try:
+        module = _load_bounded_sibling_module(
+            "check-rehydration-evidence.py", "_urprotect_shared_evidence_tree", 1024 * 1024
+        )
+        if (
+            module.MAX_FILES != MAX_EVIDENCE_FILES
+            or module.MAX_DIRECTORIES != MAX_EVIDENCE_DIRECTORIES
+            or module.MAX_ENTRIES != MAX_EVIDENCE_ENTRIES
+            or module.MAX_TREE_BYTES != MAX_EVIDENCE_TREE_BYTES
+        ):
+            raise ImportError("shared-table and rehydration evidence-tree limits diverge")
+        tree = module.BoundedEvidenceTree(root)
+        tree.preflight()
+        return tree
+    except SystemExit as error:
+        fail(f"shared-table evidence tree preflight failed: {error}")
+    except (ImportError, OSError, AttributeError) as error:
+        fail(f"bounded shared-table evidence reader is unavailable: {error}")
 
 
 def fail(message: str) -> None:
     raise SystemExit(message)
 
 
-def require_file(root: Path, relative: str) -> Path:
-    path = root / relative
-    if path.is_symlink() or not path.is_file():
-        fail(f"missing or unsafe shared-table evidence file: {relative}")
+def _evidence_relative(root: Path, path: Path) -> str:
+    if _ACTIVE_EVIDENCE_TREE is None:
+        fail("shared-table evidence root was not preflighted before file access")
     try:
-        path.resolve().relative_to(root.resolve())
+        relative = path.relative_to(root).as_posix()
     except ValueError:
-        fail(f"shared-table evidence path escapes artifact root: {relative}")
-    return path
+        fail("shared-table evidence read escaped its root")
+    if not relative or relative in (".", "..") or relative.startswith("../"):
+        fail("shared-table evidence path is not a safe relative path")
+    return relative
+
+
+def read_evidence_bytes(root: Path, relative: str, limit: int) -> bytes:
+    if _ACTIVE_EVIDENCE_TREE is None:
+        fail("shared-table evidence root was not preflighted before file access")
+    size = _ACTIVE_EVIDENCE_TREE.file_size(relative)
+    if size is None:
+        fail(f"missing or unsafe shared-table evidence file: {relative}")
+    if size > limit:
+        fail(f"shared-table evidence file exceeds its read bound: {relative}")
+    try:
+        return _ACTIVE_EVIDENCE_TREE.read(relative, limit)
+    except SystemExit as error:
+        fail(str(error))
+
+
+def require_file(root: Path, relative: str) -> Path:
+    if _ACTIVE_EVIDENCE_TREE is None or _ACTIVE_EVIDENCE_TREE.file_size(relative) is None:
+        fail(f"missing or unsafe shared-table evidence file: {relative}")
+    return root / relative
 
 
 def read_json(root: Path, relative: str) -> dict[str, Any]:
-    path = require_file(root, relative)
-    if path.stat().st_size > MAX_EVIDENCE_JSON_BYTES:
-        fail(f"shared-table evidence JSON exceeds its bound: {relative}")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(read_evidence_bytes(root, relative, MAX_EVIDENCE_JSON_BYTES).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         fail(f"invalid JSON evidence {relative}: {error}")
     if not isinstance(value, dict):
@@ -59,7 +159,10 @@ def read_json(root: Path, relative: str) -> dict[str, Any]:
 
 
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    if _ACTIVE_EVIDENCE_TREE is None:
+        fail("shared-table evidence root was not preflighted before hashing")
+    relative = _evidence_relative(_ACTIVE_EVIDENCE_TREE.root, path)
+    return hashlib.sha256(read_evidence_bytes(_ACTIVE_EVIDENCE_TREE.root, relative, MAX_EVIDENCE_TREE_BYTES)).hexdigest()
 
 
 def value(field: dict[str, Any], key: str) -> int:
@@ -138,24 +241,38 @@ def parse_elf(image: bytes, label: str) -> tuple[list[dict[str, int]], list[dict
 
 def symbol_records(image: bytes, sections: list[dict[str, int]], label: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    record_count = 0
+    decoded_name_bytes = 0
     for table_index, table in enumerate(sections):
         if table["type"] not in (SHT_SYMTAB, SHT_DYNSYM):
             continue
         if table["link"] >= len(sections) or table["entsize"] != 24 or table["size"] % 24:
             fail(f"{label} has malformed symbol-table links")
         string_table = sections[table["link"]]
-        strings = image[string_table["offset"]:string_table["offset"] + string_table["size"]]
-        table_bytes = image[table["offset"]:table["offset"] + table["size"]]
-        for index in range(table["size"] // 24):
-            entry = table_bytes[index * 24:(index + 1) * 24]
-            name_offset, info, other, section_index, address, size = struct.unpack("<IBBHQQ", entry)
-            if name_offset >= len(strings):
+        string_start = string_table["offset"]
+        string_end = string_start + string_table["size"]
+        table_record_count = table["size"] // 24
+        if table_record_count > MAX_EVIDENCE_SYMBOL_RECORDS - record_count:
+            fail(f"{label} exceeds the bounded symbol-record count")
+        record_count += table_record_count
+        for index in range(table_record_count):
+            name_offset, info, other, section_index, address, size = struct.unpack_from(
+                "<IBBHQQ", image, table["offset"] + index * 24
+            )
+            if name_offset >= string_table["size"]:
                 fail(f"{label} has an out-of-range symbol-name offset")
-            end = strings.find(b"\0", name_offset)
+            name_start = string_start + name_offset
+            end = image.find(
+                b"\0", name_start, min(string_end, name_start + MAX_EVIDENCE_SYMBOL_NAME_LENGTH + 1)
+            )
             if end < 0:
-                fail(f"{label} has an unterminated symbol name")
+                fail(f"{label} has an unterminated or overlong symbol name")
+            name_length = end - name_start
+            if name_length > MAX_EVIDENCE_SYMBOL_NAME_BYTES - decoded_name_bytes:
+                fail(f"{label} exceeds the bounded aggregate symbol-name byte count")
+            decoded_name_bytes += name_length
             try:
-                symbol_name = strings[name_offset:end].decode("utf-8")
+                symbol_name = image[name_start:end].decode("utf-8")
             except UnicodeDecodeError:
                 fail(f"{label} has an invalid UTF-8 symbol name")
             records.append({
@@ -347,8 +464,17 @@ def adr_target(word: int, address: int) -> tuple[int, int] | None:
     return address + signed(immediate, 21), word & 0x1F
 
 
-def check_manifest(root: Path) -> None:
-    manifest = require_file(root, "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+def check_manifest(root: Path, actual_files: dict[str, int]) -> None:
+    require_file(root, "SHA256SUMS")
+    manifest_size = actual_files.get("SHA256SUMS")
+    if manifest_size is None:
+        fail("shared-table evidence is missing its preflighted SHA256SUMS")
+    if manifest_size > MAX_EVIDENCE_JSON_BYTES:
+        fail("shared-table SHA256SUMS exceeds its configured byte bound")
+    try:
+        manifest = read_evidence_bytes(root, "SHA256SUMS", MAX_EVIDENCE_JSON_BYTES).decode("utf-8").splitlines()
+    except UnicodeDecodeError as error:
+        fail(f"shared-table SHA256SUMS is not UTF-8: {error}")
     entries: dict[str, str] = {}
     for line in manifest:
         match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
@@ -357,15 +483,13 @@ def check_manifest(root: Path) -> None:
         expected, relative = match.groups()
         if relative in entries:
             fail(f"duplicate manifest path: {relative}")
+        if relative not in actual_files or relative == "SHA256SUMS":
+            fail(f"shared-table manifest names a file outside the preflighted tree: {relative}")
         path = require_file(root, relative)
         if digest(path) != expected:
             fail(f"shared-table manifest digest mismatch: {relative}")
         entries[relative] = expected
-    actual = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.name != "SHA256SUMS"
-    }
+    actual = set(actual_files) - {"SHA256SUMS"}
     if actual != set(entries):
         fail("shared-table SHA256SUMS is not closed")
 
@@ -391,29 +515,67 @@ def check_handoff(
         fail(f"{symbol_name} handoff does not bind the expected image, loader, process/entry status, and release order")
 
 
+def validate_runtime_identity_agreement(
+    root: Path,
+    identity_helper: Any,
+    handoffs: list[tuple[str, dict[str, Any], str, str]],
+    *,
+    expected_runtime: str,
+) -> None:
+    runtime_identities: list[dict[str, Any]] = []
+    for label, handoff, role, image_sha256 in handoffs:
+        try:
+            identity = identity_helper.validate_handoff_runtime_identity(
+                root,
+                handoff,
+                expected_runtime=expected_runtime,
+                expected_role=role,
+                expected_image_sha256=image_sha256,
+                required=True,
+            )
+        except ValueError as error:
+            fail(f"{label} native runtime identity is invalid: {error}")
+        if identity is None:
+            fail(f"{label} handoff is missing its required native runtime identity")
+        runtime_identities.append(identity)
+    try:
+        for identity in runtime_identities[1:]:
+            identity_helper.require_same_runtime_identity(runtime_identities[0], identity)
+    except ValueError as error:
+        fail(f"shared-table handoffs used different native runtime identities: {error}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Independently validate shared jump-table copy-and-retarget evidence")
     parser.add_argument("artifact_root", type=Path)
     parser.add_argument("--unit", required=True)
     parser.add_argument("--selected-function", required=True)
+    parser.add_argument("--runtime", choices=("glibc", "musl", "bionic"), default="glibc")
     args = parser.parse_args()
+    candidate_root = Path(os.path.abspath(args.artifact_root))
     try:
-        root = resolve_isolated_evidence_root(args.artifact_root, "shared-table evidence root")
-    except ValueError as error:
-        fail(str(error))
+        resolved_root = candidate_root.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        fail(f"shared-table evidence root cannot be resolved safely: {error}")
+    if resolved_root != candidate_root or not candidate_root.is_dir():
+        fail("shared-table evidence root must be an isolated non-symlink directory")
+    root = candidate_root
+    global _ACTIVE_EVIDENCE_TREE
+    evidence_tree = _load_bounded_evidence_tree(root)
+    _ACTIVE_EVIDENCE_TREE = evidence_tree
+    evidence_files = {relative: facts[0] for relative, facts in evidence_tree.files.items()}
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", args.unit):
         parser.error("unit id is malformed")
+    expected_unit = f"runtime.indirect-control.shared-table.{args.runtime}.host-context-entry"
+    if args.unit != expected_unit:
+        parser.error("unit id does not match the selected shared-table runtime")
     if not re.fullmatch(r"dynsym:[0-9]+", args.selected_function):
         parser.error("the shared fixture must select urp_entry by dynsym index")
 
-    source_path = require_file(root, "source-image.bin")
-    native_path = require_file(root, "native-image.bin")
-    if source_path.stat().st_size > MAX_IMAGE_BYTES or native_path.stat().st_size > MAX_IMAGE_BYTES:
-        fail("shared-table Source Image or Native Image exceeds its configured byte bound")
-    source = source_path.read_bytes()
-    source_sha256 = digest(source_path)
-    native = native_path.read_bytes()
-    native_sha256 = digest(native_path)
+    source = read_evidence_bytes(root, "source-image.bin", MAX_IMAGE_BYTES)
+    source_sha256 = hashlib.sha256(source).hexdigest()
+    native = read_evidence_bytes(root, "native-image.bin", MAX_IMAGE_BYTES)
+    native_sha256 = hashlib.sha256(native).hexdigest()
     source_phdrs, source_sections = parse_elf(source, "source image")
     native_phdrs, native_sections = parse_elf(native, "Native Image")
     stage = read_json(root, "stage.json")
@@ -754,6 +916,27 @@ def main() -> None:
     check_handoff(observer_source, "urp_observer", EXPECTED_OBSERVER_STATUS, source_sha256)
     check_handoff(observer_target, "urp_observer", EXPECTED_OBSERVER_STATUS, native_sha256)
     behavior = read_json(root, "shared-table-behavior.json")
+    behavior_runtime = behavior.get("runtime")
+    if (args.runtime in {"musl", "bionic"} and behavior_runtime != args.runtime) or (
+        args.runtime == "glibc" and behavior_runtime not in (None, "glibc")
+    ):
+        fail("shared-table behavior runtime discriminator does not match the requested runtime")
+    if args.runtime in {"musl", "bionic"}:
+        try:
+            identity_helper = _load_native_runtime_identity_helper()
+        except (ImportError, OSError) as error:
+            fail(f"native runtime identity helper is unavailable: {error}")
+        validate_runtime_identity_agreement(
+            root,
+            identity_helper,
+            [
+                ("selected source", source_handoff, "source", source_sha256),
+                ("selected transformed", target_handoff, "target", native_sha256),
+                ("observer source", observer_source, "source", source_sha256),
+                ("observer transformed", observer_target, "target", native_sha256),
+            ],
+            expected_runtime=args.runtime,
+        )
     process_statuses: dict[str, int] = {}
     process_status_digests: dict[str, str] = {}
     for prefix, handoff, expected in (
@@ -761,7 +944,7 @@ def main() -> None:
         ("observer-transformed", observer_target, EXPECTED_OBSERVER_STATUS),
     ):
         status_path = require_file(root, f"{prefix}.process-status")
-        status_bytes = status_path.read_bytes()
+        status_bytes = read_evidence_bytes(root, f"{prefix}.process-status", 16)
         if len(status_bytes) > 16 or not re.fullmatch(rb"[0-9]+\n?", status_bytes):
             fail(f"{prefix} process-status evidence is malformed")
         observed_status = int(status_bytes.strip())
@@ -775,11 +958,9 @@ def main() -> None:
     for prefix in ("observer-source", "observer-transformed"):
         for suffix in ("stdout", "stderr"):
             stream_path = require_file(root, f"{prefix}.{suffix}")
-            if stream_path.stat().st_size > MAX_OBSERVER_STREAM_BYTES:
-                fail(f"{prefix} {suffix} exceeds the observer stream bound")
-            stream_bytes = stream_path.read_bytes()
+            stream_bytes = read_evidence_bytes(root, f"{prefix}.{suffix}", MAX_OBSERVER_STREAM_BYTES)
             observer_streams[(prefix, suffix)] = stream_bytes
-            observer_stream_digests[(prefix, suffix)] = digest(stream_path)
+            observer_stream_digests[(prefix, suffix)] = hashlib.sha256(stream_bytes).hexdigest()
             # The controlled observer returns a status only; it emits no stream
             # bytes. Retain this exact fixture behavior, not a copied claim.
             if stream_bytes != b"":
@@ -787,7 +968,7 @@ def main() -> None:
     for suffix in ("stdout", "stderr"):
         if observer_streams[("observer-source", suffix)] != observer_streams[("observer-transformed", suffix)]:
             fail(f"observer source/transformed {suffix} observations differ")
-        if require_file(root, f"baseline.{suffix}").read_bytes() != require_file(root, f"target.{suffix}").read_bytes():
+        if read_evidence_bytes(root, f"baseline.{suffix}", MAX_OBSERVER_STREAM_BYTES) != read_evidence_bytes(root, f"target.{suffix}", MAX_OBSERVER_STREAM_BYTES):
             fail("selected source/transformed host-context streams differ")
 
     behavior_stream_facts = {
@@ -820,7 +1001,11 @@ def main() -> None:
         or behavior.get("observerSourceHandoffSha256") != digest(require_file(root, "observer-source-handoff.json"))
         or behavior.get("observerTransformedHandoffSha256") != digest(require_file(root, "observer-transformed-handoff.json"))):
         fail("shared-table behavior evidence does not bind both consumers, process results, streams, and cloned-table assertions")
-    check_manifest(root)
+    check_manifest(root, evidence_files)
+    try:
+        evidence_tree.verify_unchanged()
+    except SystemExit as error:
+        fail(f"shared-table evidence tree changed during validation: {error}")
     print("Shared jump-table evidence valid: selected consumer loads the read-only clone; observer and source table remain unchanged")
 
 
