@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Restore PR CI acquisition of the locked Termux Node.js 26.4.0-1 sample by switching only its source archive URL to a listed Termux mirror that serves the exact locked bytes.
+**Goal:** Restore PR CI acquisition of the locked Termux Node.js 26.4.0-1 sample by using a listed Termux mirror that serves the exact locked bytes and preserving partial progress across bounded retries.
 
-**Architecture:** Keep the existing package identity, archive path, version, size, SHA-256, install repository, execution policy, runtime status, and compatibility claims unchanged. Update the single canonical expected URL and its current registry owners, then refresh only derived lock/manifest metadata digests and the metadata-only aggregate.
+**Architecture:** Keep the existing package identity, archive path, version, size, SHA-256, install repository, execution policy, runtime status, and compatibility claims unchanged. Update the single canonical expected URL and its current registry owners, then refresh only derived lock/manifest metadata digests and the metadata-only aggregate. The real-sample downloader retains its per-attempt time and retry caps but uses HTTP range continuation so a slow reviewed mirror does not restart from byte zero on every retry.
 
 **Tech Stack:** Python unittest and registry validators; JSON registries; bounded HTTPS download for the local archive verification.
 
@@ -14,6 +14,7 @@
 
 - The exact locked archive remains `nodejs_26.4.0-1_aarch64.deb`, 10,349,280 bytes, SHA-256 `eaf3ed8a6e4b72ebaa8c2cb3bad778c577cdf9ea87ca91761213d8a3940fc090`.
 - A different mirror is acceptable only after the existing size and SHA-256 match; do not refresh archive identity from bytes returned by a new URL.
+- Archive acquisition remains bounded to one 180-second curl attempt and at most three retries; retries must resume the private partial file with HTTP range support. The complete file still must pass the existing size and SHA-256 checks before extraction.
 - Keep the Termux package installation repository `https://packages-cf.termux.dev/apt/termux-main` unchanged; only source-archive acquisition provenance changes.
 - Keep the 100 project identities, Node.js identity/fingerprint, expected statuses, runtime claims, and all execution policies unchanged.
 - Keep raw archives and extracted binaries in private temporary storage; do not check them in or upload them.
@@ -46,3 +47,17 @@
 - [x] **Step 3: Apply the URL-only change.** Set the canonical `NODE_SOURCE_URL` and source-archive URL owners to the verified ISCAS mirror. Leave all package bytes/metadata and runtime outcomes untouched; recompute the bionic Node.js lock SHA-256 and selected-manifest SHA-256 owners. Regenerate the metadata-only aggregate only with `python3 scripts/render-real-sample-report.py fixtures/real-samples/manifest.json --tier pr --registry-only --artifact-root fixtures/real-samples --output-json fixtures/real-samples/baseline-aggregate.json --output-markdown fixtures/real-samples/baseline-aggregate.md` if the output depends on the manifest URL.
 - [x] **Step 4: Verify GREEN and registry closure. Focused registry tests: 106/106; full Python suite: 471 passed, 2 skipped. Both registry validators passed; Release build had 0 warnings/errors. Registry-only rendering produced no aggregate diff.** Run the focused lock test, `tests.test_real_sample_manifest`, `tests.test_real_sample_fingerprint`, `tests.test_real_sample_evidence`, `tests.test_real_sample_aggregate`, and `tests.test_runtime_closures`; run the real-sample and runtime-closure validators with `PYTHONPATH` unset. Build Release assemblies if required by runtime-matrix tests, then run `env -u PYTHONPATH PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py'`. Confirm the 100-identity count and that only source URL and derived metadata digests changed.
 - [x] **Step 5: Review and commit.** `git diff --check` passed, the restricted diff was reviewed, and the implementation was committed as `4bb1f61` (`fix: use verified Termux mirror for locked Node.js archive`).
+
+### Task 2: Resume bounded downloads after hosted mirror timeouts
+
+**Evidence:** Hosted run `40333000365` retrieved about 4.4 MB of the 10,349,280-byte locked archive during each 180-second attempt, then restarted at byte zero on retries. The reviewed ISCAS mirror serves the locked file and supports HTTP 206 byte ranges; the packages-cf endpoint does not serve this historical archive. Preserve the verified URL and package identity, and make retries resume the private partial archive.
+
+**Files:**
+- Modify: `tests/test_real_sample_worker.py`
+- Modify: `scripts/run-real-sample-matrix.sh`
+
+- [x] **Step 1: Add a failing downloader-contract regression.** Extract a named `download_source_archive` helper into the worker function graph and add a test that invokes it with a stub `curl`, asserting `--continue-at -`, the existing 180-second per-attempt bound, three retries, and the existing maximum-size argument.
+- [x] **Step 2: Verify RED.** The focused test failed because `download_source_archive` did not yet exist.
+- [x] **Step 3: Implement resumable acquisition.** Moved the existing bounded `curl` arguments to `download_source_archive`, added `--continue-at -`, and called the helper from `process_project`; retained the bounded temporary root and downstream exact-size/SHA checks.
+- [x] **Step 4: Verify GREEN.** The downloader test and `tests.test_real_sample_worker` passed (13 tests); the full Python suite passed (472 tests, 2 skipped); real-sample and runtime-closure validators passed for all 100 identities; shell syntax and `git diff --check` passed. A local interrupted-transfer test confirmed curl requested `Range: bytes=32768-`, resumed, and reconstructed the exact 1 MiB payload.
+- [ ] **Step 5: Push and inspect hosted verification.** Push the follow-up commit to this PR branch and confirm the Node.js archive completes at its locked size/digest and `real-sample-matrix` passes. Treat unrelated intermittent FIFO failures separately and rerun that failed job only if needed.

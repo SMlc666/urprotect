@@ -28,6 +28,7 @@ WORKER_FUNCTIONS = (
     "run_isolated_baseline",
     "prepare_runtime_root",
     "resolve_artifact",
+    "download_source_archive",
     "process_project",
 )
 
@@ -603,6 +604,56 @@ if reap_next_project_worker; then exit 88; fi
             capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    def test_source_archive_download_uses_bounded_resumable_retries(self):
+        definitions = self._worker_definition_source()
+        url = "https://mirror.example.invalid/nodejs_26.4.0-1_aarch64.deb"
+        max_bytes = 10_349_280
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_bin = root / "bin"
+            fake_bin.mkdir(mode=0o700)
+            argument_log = root / "curl-arguments.txt"
+            archive = root / "nodejs.deb"
+            fake_curl = fake_bin / "curl"
+            fake_curl.write_text(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$CURL_ARGUMENTS\"\n",
+                encoding="utf-8",
+            )
+            fake_curl.chmod(0o700)
+            definitions_path = root / "worker-definitions.sh"
+            definitions_path.write_text(definitions, encoding="utf-8")
+            command = r'''set -euo pipefail
+source "$1"
+export CURL_ARGUMENTS="$2"
+export PATH="$3:$PATH"
+download_source_archive "$4" "$5" "$6"
+'''
+            result = subprocess.run(
+                [
+                    "bash", "-c", command, "archive-downloader-test",
+                    str(definitions_path), str(argument_log), str(fake_bin),
+                    str(archive), url, str(max_bytes),
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = argument_log.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(
+            arguments,
+            [
+                "--fail", "--location", "--proto", "=https", "--tlsv1.2",
+                "--retry", "3", "--retry-all-errors", "--continue-at", "-",
+                "--connect-timeout", "20", "--max-time", "180",
+                "--max-filesize", str(max_bytes), "--output", str(archive), url,
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -920,6 +920,13 @@ PY
   return 1
 }
 
+download_source_archive() {
+  local archive="$1" archive_url="$2" max_bytes="$3"
+  curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors \
+    --continue-at - --connect-timeout 20 --max-time 180 --max-filesize "${max_bytes}" \
+    --output "${archive}" "${archive_url}"
+}
+
 process_project() {
   local json_record="$1"
   local id archive_url version archive_path archive_sha archive_format artifact_path producer expected_static baseline_applicable expected_baseline baseline_mode baseline_command_b64 baseline_expected_status baseline_invocation outer_applicable expected_outer outer_mode runtime loader apk_metadata_b64 source_kind
@@ -948,9 +955,7 @@ process_project() {
   printf 'pending archive verification\n' > "${sample_root}/hashes.txt"
 
   local archive_status=0
-  if curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors \
-      --connect-timeout 20 --max-time 180 --max-filesize "${max_archive_bytes}" \
-      --output "${archive}" "${archive_url}" \
+  if download_source_archive "${archive}" "${archive_url}" "${max_archive_bytes}" \
       >"${sample_root}/logs/acquisition.log" 2>&1; then archive_status=0; else archive_status=$?; fi
   if [[ "${archive_status}" -ne 0 || ! -s "${archive}" ]]; then
     write_failure_evidence "${sample_root}" "${id}" "${expected_static}" "${expected_baseline}" "${expected_outer}" not-applicable "archive download failed"
@@ -1789,6 +1794,7 @@ while IFS= read -r project_json; do
       run_isolated_baseline \
       prepare_runtime_root \
       resolve_artifact \
+      download_source_archive \
       process_project
     printf '%s\n' \
       'set -euo pipefail' \
