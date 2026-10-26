@@ -15,7 +15,7 @@
 1. Preserve exact source/runtime identity and evidence provenance; do not promote support based on local tests or a different runtime.
 2. Preserve bounds, no-follow checks, unique owner rules, strict half-open intervals, and fail-closed checker behavior.
 3. A zero-file `PT_TLS` structural observation may have no owner only when its zero-length file range and virtual range are bounded; semantic TLS projection must remain unresolved without a unique owner.
-4. Bionic evidence must carry the exact digest suffix of the locked image; musl admission must retain the reviewed libc digest requirement.
+4. Bionic evidence must carry the exact digest suffix of the locked image, and the runtime-matrix checker must independently bind that digest and the retained bounded image inspection to the lock; musl admission must retain the reviewed libc digest requirement.
 5. GitHub container steps remain POSIX-shell compatible; artifact handoff paths must match the actual archive root.
 6. The PR2 branch is stacked on `fix/superpowers-migration-pr`; review/merge order is migration first, runtime second. Never merge or force-push without explicit authorization.
 7. Do not alter `/root/urprotect/.pi/settings.json`, local `main`, or other worktrees.
@@ -24,7 +24,7 @@
 
 1. Bounded checker arithmetic: valid `SHT_NOBITS` may extend conceptually past EOF, while other section bytes and all checked arithmetic remain bounded.
 2. Zero-file TLS distinction: preserve the bounded ownerless structural fact without projecting it into a resolved semantic binding; reject unbounded offsets and conflicting owners.
-3. Runtime identity: Bionic pinned image digest and musl reviewed libc digest must be independently checked against retained bytes.
+3. Runtime identity: Bionic `result.json.imageDigest` and retained bounded `image-inspect.json` must independently bind to the exact locked OCI reference; musl reviewed libc digest must be checked against retained bytes.
 4. Artifact handoff: downloading an artifact containing `bionic/` at its archive root must not create `bionic/bionic/` or weaken run-specific checksums.
 5. CI failures from unavailable locked Node.js archives or runner/network timing must be reported separately from code regressions and must not be masked.
 
@@ -65,7 +65,8 @@
 
 ### Task 4: Full local and hosted verification; publish stacked PR
 
-- [x] Run `dotnet test UrProtect.sln` after restoring packages; run the full Python unittest suite with `PYTHONPATH` removed, fixture PR validator, regression-matrix validator, runtime-matrix validator, relevant identity checker tests, `bash -n` for modified scripts, and `git diff --check`. Results: managed tests 765/765; full Python discovery 538 tests, 2 skipped, no failures; fixture PR validation 13 cases; regression matrix 7/7; runtime matrix tests 14/14 plus six-cell registry validation; runtime closures 19/19; native AArch64 `make -C native/urprotect-runtime test` passed, including native identity cases; `bash -n` passed for all six modified shell scripts and the complete PR diff passed `git diff --check`. The first Python run exposed one stale migration-state expectation after the scoped cross-runtime criterion was marked complete; updated that regression, then its isolated test and the full suite passed.
+- [x] Run `dotnet test UrProtect.sln` after restoring packages; run the full Python unittest suite with `PYTHONPATH` removed, fixture PR validator, regression-matrix validator, runtime-matrix validator, relevant identity checker tests, `bash -n` for modified scripts, and `git diff --check`. Results before independent review: managed tests 765/765; full Python discovery 538 tests, 2 skipped, no failures; fixture PR validation 13 cases; regression matrix 7/7; runtime matrix tests 14/14 plus six-cell registry validation; runtime closures 19/19; native AArch64 `make -C native/urprotect-runtime test` passed, including native identity cases; `bash -n` passed for all six modified shell scripts and the complete PR diff passed `git diff --check`. The first Python run exposed one stale migration-state expectation after the scoped cross-runtime criterion was marked complete; updated that regression, then its isolated test and the full suite passed.
+- [x] Address the independent review P1: require the retained Bionic image inspection, parse it with a bounded no-follow reader, bind its exact `RepoDigests` and reported `imageDigest` to the immutable fixture lock, and reject missing, mismatched, symlinked, malformed, duplicate-key, and oversized inspection evidence. The regression was confirmed red against the prior checker (tampered `imageDigest` returned exit 0); the fixed checker passes the positive path and rejects every tampered case. `tests.test_runtime_matrix` plus `tests.test_bionic_artifact_permissions` passed 27/27; full Python discovery passed 539 tests (2 skipped); `dotnet test UrProtect.sln --no-restore` passed 765/765.
 - [ ] Push `fix/runtime-evidence-followup-pr` and open its PR with base `fix/superpowers-migration-pr`; verify GitHub reports only runtime/evidence changes in the PR diff.
 - [ ] Trigger/inspect fresh hosted Bionic, musl, and runtime-matrix exact-root evidence. Retain run-specific artifacts and digest checks.
 - [ ] Report `real-sample-matrix` HTTP 404 or transient network/timing failures as separate lane outcomes; do not claim global CI green unless every mandatory job passes.

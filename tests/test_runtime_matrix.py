@@ -440,6 +440,7 @@ Dynamic section at offset 0xf00 contains 1 entry:
             "schemaVersion": 1,
             "case": "c-termux-bionic-pie",
             "image": case["host"]["image"],
+            "imageDigest": case["host"]["image"].rsplit("@", 1)[1],
             "compilerPackages": packages,
             "compilerPackage": case["host"]["compilerPackage"],
             "termuxSourceCommit": case["host"]["sourceCommit"],
@@ -493,6 +494,14 @@ Dynamic section at offset 0xf00 contains 1 entry:
             },
         }
         (root / "result.json").write_text(json.dumps(document), encoding="utf-8")
+        (root / "image-inspect.json").write_text(
+            json.dumps([{
+                "Os": "linux",
+                "Architecture": "arm64",
+                "RepoDigests": [case["host"]["image"]],
+            }]),
+            encoding="utf-8",
+        )
         self._fixture_manifest_path = fixture_manifest_path
 
     def test_pr_evidence_gate_consumes_bionic_and_native_page_probe(self) -> None:
@@ -503,6 +512,71 @@ Dynamic section at offset 0xf00 contains 1 entry:
             self.make_bionic_evidence(bionic)
             result = self.gate(root, bionic, self._fixture_manifest_path)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_bionic_matrix_binds_reported_digest_to_retained_image_inspection(self) -> None:
+        for tamper in (
+            "wrong-reported-digest",
+            "missing-reported-digest",
+            "wrong-inspection-digest",
+            "missing-inspection",
+            "symlink-inspection",
+            "malformed-inspection",
+            "duplicate-inspection-key",
+            "oversized-inspection",
+        ):
+            with self.subTest(tamper=tamper), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.make_core_evidence(root)
+                bionic = root / "bionic"
+                self.make_bionic_evidence(bionic)
+                fixture_manifest = json.loads(
+                    self._fixture_manifest_path.read_text(encoding="utf-8")
+                )
+                pinned_image = next(
+                    item
+                    for item in fixture_manifest["cases"]
+                    if item["id"] == "c-termux-bionic-pie"
+                )["host"]["image"]
+                result_path = bionic / "result.json"
+                document = json.loads(result_path.read_text(encoding="utf-8"))
+                inspection_path = bionic / "image-inspect.json"
+
+                if tamper == "wrong-reported-digest":
+                    document["imageDigest"] = "sha256:" + "0" * 64
+                    result_path.write_text(json.dumps(document), encoding="utf-8")
+                elif tamper == "missing-reported-digest":
+                    document.pop("imageDigest")
+                    result_path.write_text(json.dumps(document), encoding="utf-8")
+                elif tamper == "wrong-inspection-digest":
+                    wrong_image = pinned_image.rsplit("@", 1)[0] + "@sha256:" + "0" * 64
+                    inspection_path.write_text(
+                        json.dumps([{
+                            "Os": "linux",
+                            "Architecture": "arm64",
+                            "RepoDigests": [wrong_image],
+                        }]),
+                        encoding="utf-8",
+                    )
+                elif tamper == "missing-inspection":
+                    inspection_path.unlink()
+                elif tamper == "symlink-inspection":
+                    target_path = bionic / "inspection-target.json"
+                    target_path.write_bytes(inspection_path.read_bytes())
+                    inspection_path.unlink()
+                    inspection_path.symlink_to(target_path.name)
+                elif tamper == "malformed-inspection":
+                    inspection_path.write_text("not JSON\n", encoding="utf-8")
+                elif tamper == "duplicate-inspection-key":
+                    inspection_path.write_text(
+                        '[{"Os":"linux","Architecture":"arm64",'
+                        '"RepoDigests":[],"RepoDigests":[]}]',
+                        encoding="utf-8",
+                    )
+                else:
+                    inspection_path.write_bytes(b" " * (4 * 1024 * 1024 + 1))
+
+                result = self.gate(root, bionic, self._fixture_manifest_path)
+                self.assertNotEqual(result.returncode, 0, f"checker accepted {tamper}")
 
     def test_bionic_sectionless_boundary_marker_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -141,6 +141,7 @@
       "hostContextEvidence": "host-context/build-and-test.log",
       "requiredArtifacts": [
         "result.json",
+        "image-inspect.json",
         "apt-archives/clang_21.1.8-3_aarch64.deb",
         "apt-archives/libcompiler-rt_21.1.8-3_aarch64.deb",
         "apt-archives/libllvm_21.1.8-3_aarch64.deb",

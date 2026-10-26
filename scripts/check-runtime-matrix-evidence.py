@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import stat
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = {"pr", "nightly", "release"}
+MAX_IMAGE_INSPECT_BYTES = 4 * 1024 * 1024
 CONTAINER_FIXTURES = {
     "glibc.older.ubuntu-22.04-arm64": {
         "glibc-4k",
@@ -45,6 +47,66 @@ def read_json(path: Path, label: str) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
+        fail(f"{label} is invalid JSON: {exc}")
+
+
+def read_bounded_json(path: Path, label: str, maximum_bytes: int) -> Any:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        fail(f"{label} requires O_NOFOLLOW support")
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        fail(f"{label} cannot be opened safely: {exc}")
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > maximum_bytes:
+            fail(f"{label} is not a bounded regular file")
+        content = bytearray()
+        while len(content) < before.st_size:
+            chunk = os.read(descriptor, min(64 * 1024, before.st_size - len(content)))
+            if not chunk:
+                fail(f"{label} was truncated while reading")
+            content.extend(chunk)
+        if os.read(descriptor, 1):
+            fail(f"{label} grew beyond its checked size")
+        after = os.fstat(descriptor)
+        before_identity = (
+            before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns
+        )
+        after_identity = (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        )
+        if before_identity != after_identity or not stat.S_ISREG(after.st_mode):
+            fail(f"{label} changed while being read")
+    except OSError as exc:
+        fail(f"{label} could not be read safely: {exc}")
+    finally:
+        os.close(descriptor)
+
+    raw = bytes(content)
+    if b"\x00" in raw:
+        fail(f"{label} contains a NUL byte")
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON object key")
+            value[key] = item
+        return value
+
+    def reject_non_json_constant(constant: str) -> None:
+        raise ValueError(f"non-JSON numeric constant {constant}")
+
+    try:
+        return json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_non_json_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
         fail(f"{label} is invalid JSON: {exc}")
 
 
@@ -221,6 +283,41 @@ def check_bionic_evidence(
     except (KeyError, StopIteration, TypeError):
         fail("locked bionic case is missing from fixtures/manifest.json")
     host_lock = manifest_case.get("host", {})
+    locked_image = host_lock.get("image")
+    if not isinstance(locked_image, str) or re.fullmatch(
+        r"[^@\s]+@sha256:[0-9a-f]{64}", locked_image
+    ) is None:
+        fail("bionic manifest image is not an immutable OCI digest reference")
+    expected_image_digest = locked_image.rsplit("@", 1)[1]
+    if document.get("imageDigest") != expected_image_digest:
+        fail("bionic result imageDigest does not match the reviewed image pin")
+
+    safe_artifact(root, "image-inspect.json", "bionic image inspection")
+    image_inspection_path = root / "image-inspect.json"
+    image_inspection = read_bounded_json(
+        image_inspection_path, "bionic image inspection", MAX_IMAGE_INSPECT_BYTES
+    )
+    if (
+        type(image_inspection) is not list
+        or len(image_inspection) != 1
+        or type(image_inspection[0]) is not dict
+    ):
+        fail("bionic image inspection must contain exactly one image object")
+    inspected_image = image_inspection[0]
+    inspected_digests = inspected_image.get("RepoDigests")
+    if (
+        type(inspected_digests) is not list
+        or any(type(digest) is not str for digest in inspected_digests)
+    ):
+        fail("bionic image inspection RepoDigests must be an array of strings")
+    if locked_image not in inspected_digests:
+        fail("bionic image inspection does not contain the reviewed image pin")
+    if (
+        inspected_image.get("Os") != "linux"
+        or inspected_image.get("Architecture") not in {"arm64", "aarch64"}
+    ):
+        fail("bionic image inspection is not linux/arm64")
+
     expected_clang = str(host_lock.get("compilerPackage", "")).split("=", 1)[-1]
     if expected_clang not in document.get("clangVersion", ""):
         fail("bionic clang version differs from its compiler-package lock")
