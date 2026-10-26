@@ -922,9 +922,19 @@ PY
 
 download_source_archive() {
   local archive="$1" archive_url="$2" max_bytes="$3"
-  curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors \
-    --continue-at - --connect-timeout 20 --max-time 180 --max-filesize "${max_bytes}" \
-    --output "${archive}" "${archive_url}"
+  local attempt status=0
+  # Fresh curl processes make --continue-at re-read the partial file on retries.
+  for attempt in 1 2 3 4; do
+    if curl --fail --location --proto '=https' --tlsv1.2 \
+        --continue-at - --connect-timeout 20 --max-time 180 --max-filesize "${max_bytes}" \
+        --output "${archive}" "${archive_url}"; then
+      return 0
+    else
+      status=$?
+    fi
+    if (( attempt < 4 )); then sleep "$((1 << (attempt - 1)))"; fi
+  done
+  return "${status}"
 }
 
 process_project() {

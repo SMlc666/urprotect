@@ -619,15 +619,38 @@ if reap_next_project_worker; then exit 88; fi
             archive = root / "nodejs.deb"
             fake_curl = fake_bin / "curl"
             fake_curl.write_text(
-                "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$CURL_ARGUMENTS\"\n",
+                """#!/usr/bin/env bash
+set -euo pipefail
+attempt=0
+if [[ -f "$CURL_STATE" ]]; then read -r attempt < "$CURL_STATE"; fi
+attempt=$((attempt + 1))
+printf '%s\\n' "$attempt" > "$CURL_STATE"
+printf '%s\\n' "$@" >> "$CURL_ARGUMENTS"
+printf '%s\\n' '--END-ATTEMPT--' >> "$CURL_ARGUMENTS"
+archive=''
+while (($#)); do
+  if [[ "$1" == '--output' ]]; then archive="$2"; shift 2; else shift; fi
+done
+if [[ "$attempt" -eq 1 ]]; then
+  : > "$archive"
+else
+  [[ -s "$archive" ]]
+fi
+printf 'partial-%s' "$attempt" >> "$archive"
+if [[ "$attempt" -lt 4 ]]; then exit 28; fi
+""",
                 encoding="utf-8",
             )
             fake_curl.chmod(0o700)
+            fake_sleep = fake_bin / "sleep"
+            fake_sleep.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            fake_sleep.chmod(0o700)
             definitions_path = root / "worker-definitions.sh"
             definitions_path.write_text(definitions, encoding="utf-8")
             command = r'''set -euo pipefail
 source "$1"
 export CURL_ARGUMENTS="$2"
+export CURL_STATE="$2.state"
 export PATH="$3:$PATH"
 download_source_archive "$4" "$5" "$6"
 '''
@@ -643,17 +666,22 @@ download_source_archive "$4" "$5" "$6"
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            arguments = argument_log.read_text(encoding="utf-8").splitlines()
+            argument_blocks = [
+                block.splitlines()
+                for block in argument_log.read_text(encoding="utf-8").split(
+                    "--END-ATTEMPT--\n"
+                )
+                if block.strip()
+            ]
 
-        self.assertEqual(
-            arguments,
-            [
-                "--fail", "--location", "--proto", "=https", "--tlsv1.2",
-                "--retry", "3", "--retry-all-errors", "--continue-at", "-",
-                "--connect-timeout", "20", "--max-time", "180",
-                "--max-filesize", str(max_bytes), "--output", str(archive), url,
-            ],
-        )
+        expected_arguments = [
+            "--fail", "--location", "--proto", "=https", "--tlsv1.2",
+            "--continue-at", "-", "--connect-timeout", "20", "--max-time", "180",
+            "--max-filesize", str(max_bytes), "--output", str(archive), url,
+        ]
+        self.assertEqual(len(argument_blocks), 4, argument_blocks)
+        for arguments in argument_blocks:
+            self.assertEqual(arguments, expected_arguments)
 
 
 if __name__ == "__main__":
