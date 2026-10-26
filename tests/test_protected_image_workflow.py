@@ -70,6 +70,26 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         self.assertIn("check-shared-jump-table-evidence.py", block)
         self.assertIn("include-hidden-files: true", block)
 
+    def test_runtime_matrix_download_preserves_bionic_artifact_root(self) -> None:
+        bionic_start = self.workflow.index("  bionic-native-arm64:")
+        bionic_end = self.workflow.index("  android-container-probe:", bionic_start)
+        upload_block = self.workflow[bionic_start:bionic_end]
+        self.assertIn("            .artifacts/bionic/", upload_block)
+        self.assertIn("            .artifacts/indirect-control/", upload_block)
+
+        matrix_start = self.workflow.index("  runtime-matrix-native-arm64:")
+        matrix_end = self.workflow.index("  bionic-native-arm64:", matrix_start)
+        matrix_block = self.workflow[matrix_start:matrix_end]
+        download_start = matrix_block.index("      - uses: actions/download-artifact@v4")
+        download_end = matrix_block.index("      - name: Validate registry", download_start)
+        download_block = matrix_block[download_start:download_end]
+        self.assertIn("name: bionic-native-arm64-${{ github.run_id }}", download_block)
+        self.assertIn("          path: .artifacts\n", download_block)
+        self.assertIn(
+            "BIONIC_MATRIX_ARTIFACT_ROOT: .artifacts/bionic/c-termux-bionic-pie",
+            matrix_block,
+        )
+
     def test_shared_musl_run_block_uses_posix_dynsym_index_validation(self) -> None:
         start = self.workflow.index("      - name: Run shared musl indirect jump-table evidence")
         end = self.workflow.index("      - name: Upload musl container and indirect-control evidence", start)

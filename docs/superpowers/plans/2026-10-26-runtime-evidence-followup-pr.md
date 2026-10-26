@@ -48,7 +48,7 @@
 - [x] Add/port Bionic handoff, image-inspection, and native identity regressions before the corresponding implementation changes; the pre-implementation regressions failed on the absent parser/bridge and Bionic runtime path, and the pinned-image/runtime-identity mismatch cases passed after implementation.
 - [x] Port only the matching scripts/native/workflow changes. Keep POSIX shell and source-derived independent checking contracts; omit Trellis-path docs, and reconcile the contract inventory with the current migration base.
 - [x] Run `tests.test_shared_jump_table_evidence`, `tests.test_rehydration_evidence`, `tests.test_bionic_handoff_bridge`, `tests.test_bionic_artifact_permissions`, and `tests.test_protected_image_workflow` with ambient `PYTHONPATH` removed. The combined related suite (including regression-matrix tests) passed 151/151 after a Release build; an initial run's four failures were all the missing Release CLI assembly prerequisite, not assertions.
-- [x] Commit the cross-runtime evidence slice separately. Exclude Trellis-path doc patches already represented by the migrated engineering specs.
+- [x] Commit the cross-runtime evidence slice separately. Exclude Trellis-path doc patches already represented by the migrated engineering specs. Committed as `606902c`.
 
 ### Task 3: Port and verify the diagnosed follow-up fixes
 
@@ -56,11 +56,12 @@
 
 **Files:** `scripts/run-bionic-fixture.sh`, `scripts/check-shared-jump-table-evidence.py`, `.github/workflows/ci.yml`, `src/UrProtect.Core/StructuralElf/ElfTlsParser.cs`, matching Python/managed regressions, and the migrated indirect-control/zero-file-TLS plans.
 
-- [ ] For Bionic `imageDigest`, execute the actual JSON emitter in the regression; show the emitted digest is missing before the producer fix and equals the pinned image suffix after it.
-- [ ] For `SHT_NOBITS`, use a standards-valid AArch64 ET_REL synthetic ELF (`sh_addr=0`, `sh_offset=EOF`); prove the conceptual range can extend past EOF while file-backed out-of-bounds and 64-bit overflow cases reject.
-- [ ] For runtime-matrix artifact handoff, show the workflow-root test fails when the archive is downloaded to `.artifacts/bionic`, then passes when downloaded at `.artifacts`.
-- [ ] For ownerless zero-file PT_TLS, add the parser regression first and prove it fails on nonzero `p_vaddr`; accept only bounded zero-file facts, retain owner index `-1`, preserve semantic `TlsBindingUnresolved`, and retain negative tests for unbounded ranges.
-- [ ] Run focused Python/managed regressions, update the active plan with hosted evidence and external-sample caveats, then commit the fixes as a separate slice.
+- [x] For Bionic `imageDigest`, execute the actual JSON emitter in the regression; the pre-fix test observed `imageDigest == None`, and the fixed emitter reports the pinned image suffix.
+- [x] For `SHT_NOBITS`, use a standards-valid AArch64 ET_REL synthetic ELF (`sh_addr=0`, `sh_offset=EOF`); the positive conceptual range is accepted, while file-backed out-of-bounds and 64-bit overflow cases reject.
+- [x] For runtime-matrix artifact handoff, the workflow-root test failed with the archive downloaded to `.artifacts/bionic`, then passed after download at `.artifacts`.
+- [x] For ownerless zero-file PT_TLS, the parser regression first failed on nonzero `p_vaddr`; it now accepts the bounded empty range at exact EOF, retains owner index `-1`, keeps semantic `TlsBindingUnresolved`, and still rejects out-of-bounds offsets and ownerless nonzero-file templates.
+- [x] Run focused Python/managed regressions and update the active/design plans with hosted evidence and external-sample caveats. The relevant Python modules passed 138/138, `ElfParserTests` passed 42/42, and ownerless TLS regressions passed 3/3; Python ran with `PYTHONPATH` unset.
+- [ ] Commit the follow-up fixes as a separate reviewable slice.
 
 ### Task 4: Full local and hosted verification; publish stacked PR
 

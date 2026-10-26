@@ -1177,6 +1177,70 @@ else:
         for runner in (ordinary, shared, rehydration):
             self.assertNotIn("chmod a+rwx", runner)
 
+    def test_fixture_result_reports_locked_image_digest(self) -> None:
+        fixture_runner = FIXTURE_RUNNER.read_text(encoding="utf-8")
+        invocation = 'python3 - "${case_root}/result.json"'
+        invocation_start = fixture_runner.index(invocation)
+        heredoc = "<<'PY'\n"
+        producer_start = fixture_runner.index(heredoc, invocation_start) + len(heredoc)
+        producer_end = fixture_runner.index("\nPY\n", producer_start)
+        producer = fixture_runner[producer_start:producer_end]
+
+        with tempfile.TemporaryDirectory(prefix="bionic-result-json-") as raw_temp:
+            temp = Path(raw_temp)
+            output_path = temp / "result.json"
+            package_lock_path = temp / "compiler-package-lock.json"
+            host_context_fixture = temp / "host-context-entry-fixture.so"
+            package_bytes = json.dumps(
+                [{"name": "clang", "version": "21.0.0", "sha256": "b" * 64}],
+                sort_keys=True,
+            ).encode("utf-8")
+            package_lock_path.write_bytes(package_bytes)
+            host_context_fixture.write_bytes(b"controlled fixture bytes\x00\xff")
+            image_digest = "sha256:" + "a" * 64
+            image = f"termux/termux-docker:0.118.0@{image_digest}"
+            command = [
+                sys.executable,
+                "-c",
+                producer,
+                str(output_path),
+                image,
+                "c" * 40,
+                "clang",
+                "21.0.0",
+                "6.8.0-test",
+                "6.8.0-test",
+                "4096",
+                "4096",
+                "0",
+                "0",
+                hashlib.sha256(package_bytes).hexdigest(),
+                str(package_lock_path),
+                str(host_context_fixture),
+            ]
+            environment = {
+                key: value for key, value in os.environ.items() if key != "PYTHONPATH"
+            }
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+
+            self.assertEqual(
+                0,
+                result.returncode,
+                f"stdout={result.stdout!r} stderr={result.stderr!r}",
+            )
+            report = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(image, report["image"])
+            self.assertEqual(image_digest, report.get("imageDigest"))
+
     def test_helper_rejects_symlink_and_directory_not_owned_by_invoking_host(self) -> None:
         if os.geteuid() != 0:
             self.skipTest("ownership guard regression requires a root-capable local test harness")

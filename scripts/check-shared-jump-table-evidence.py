@@ -220,7 +220,11 @@ def parse_elf(image: bytes, label: str) -> tuple[list[dict[str, int]], list[dict
         flags, address, section_offset, size = struct.unpack_from("<QQQQ", image, offset + 8)
         link, info = struct.unpack_from("<II", image, offset + 40)
         alignment, entsize = struct.unpack_from("<QQ", image, offset + 48)
-        if section_offset > len(image) or size > len(image) - section_offset:
+        if section_offset > MAX_U64 - size:
+            fail(f"{label} has an overflowing section file range")
+        if section_type != SHT_NOBITS and (
+            section_offset > len(image) or size > len(image) - section_offset
+        ):
             fail(f"{label} has an out-of-bounds section")
         if address > MAX_U64 - size:
             fail(f"{label} has an overflowing section virtual range")

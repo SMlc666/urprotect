@@ -663,6 +663,7 @@ document = {
     "androidRuntime": False,
     "emulation": False,
     "image": image,
+    "imageDigest": image.rsplit("@", 1)[1],
     "termuxSourceCommit": source_commit,
     "compilerPackage": compiler,
     "clangVersion": clang_version,
