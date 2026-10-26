@@ -50,19 +50,19 @@
 
 **Files:** `docs/engineering/**`, `docs/superpowers/specs/2026-10-24-project-local-superpowers-and-trellis-retirement-design.md`, the two active migrated plans, fixture registry references, and related fixture tests.
 
-- [ ] Port the reviewed docs/registry slice represented by source commit `7b5af05`; reconcile any current-main drift without copying unrelated runtime changes.
-- [ ] Preserve all safety contracts, evidence provenance, and source task open criteria. Ensure fixture-matrix retained-registry SHA-256 matches the exact updated manifest bytes.
-- [ ] Run migration, fixture, and real-sample manifest tests plus `scripts/validate-fixtures.py fixtures/manifest.json --tier pr` and `scripts/validate-runtime-matrix.py fixtures/runtime-matrix.json`.
-- [ ] Commit the documentation/registry slice independently.
+- [x] Port the reviewed docs/registry slice represented by source commit `7b5af05`; reconcile any current-main drift without copying unrelated runtime changes.
+- [x] Preserve all safety contracts, evidence provenance, and source task open criteria. Ensure fixture-matrix retained-registry SHA-256 matches the exact updated manifest bytes.
+- [x] Run migration, fixture, and real-sample manifest tests plus `scripts/validate-fixtures.py fixtures/manifest.json --tier pr` and `scripts/validate-runtime-matrix.py fixtures/runtime-matrix.json`.
+- [x] Commit the documentation/registry slice independently.
 
 ### Task 4: Register project-local Superpowers
 
 **Files:** `.pi/settings.json`, `.pi/git/.gitignore`, `AGENTS.md`.
 
-- [ ] Port the sanitized settings/guidance change represented by source commit `fdfba43`; preserve generic settings and include only the exact package pin.
-- [ ] Review the pinned upstream package source/manifest and verify a fresh project-scoped Pi process loads the pinned commit with one-time `--approve`; do not persist trust or modify global state.
-- [ ] Verify `git show :.pi/settings.json` contains one exact pin and no host-local absolute paths; keep only `.pi/git/.gitignore` tracked under the package cache.
-- [ ] Run migration settings tests; commit this slice separately.
+- [x] Port the sanitized settings/guidance change represented by source commit `fdfba43`; preserve generic settings and include only the exact package pin.
+- [x] Review the pinned upstream manifest and Pi extension source; `pi list --approve` reports the exact project-local source, and offline RPC `get_commands` discovers the bootstrap skill from the pinned checkout with one-time `--approve`.
+- [x] Verify `git show :.pi/settings.json` contains one exact pin and no host-local absolute paths; only `.pi/git/.gitignore` is tracked under the package cache. Global settings/trust hashes are unchanged.
+- [x] Run migration settings tests; commit this slice separately.
 
 ### Task 5: Retire Trellis integrations and current-main-only residue
 

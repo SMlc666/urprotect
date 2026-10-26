@@ -1,21 +1,41 @@
-<!-- TRELLIS:START -->
-# Trellis Instructions
+# Repository guidance
 
-These instructions are for AI assistants working in this project.
+## Project workflow
 
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+This repository uses the project-local Superpowers package declared in
+`.pi/settings.json`, pinned to the reviewed upstream commit. Follow its
+brainstorming, writing-plans, executing-plans, test-driven-development,
+systematic-debugging, and verification-before-completion skills where they fit
+the work. Use the current project plan under `docs/superpowers/plans/` as the
+source of task scope and progress; keep acceptance criteria explicit and do not
+mark open work complete because a narrower test passed.
 
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
+For substantial or ambiguous work, clarify the requirement and obtain approval
+before implementation. Write or update a plan, then execute its steps in order.
+Use test-first changes when practical, run focused tests after each change, and
+run the relevant full checks before reporting completion. Do not commit, push,
+or perform destructive repository operations unless the user has authorized
+them.
 
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
+## Durable engineering contracts
 
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
+The maintained engineering specifications are indexed at
+[`docs/engineering/specs/README.md`](docs/engineering/specs/README.md). Read the
+relevant specifications before changing code. In particular:
 
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
+- `docs/engineering/specs/backend/` defines ELF, AArch64, evidence, runtime,
+  and quality contracts.
+- `docs/engineering/specs/frontend/` defines frontend conventions.
+- `docs/engineering/specs/guides/` contains shared design and review guidance.
 
-<!-- TRELLIS:END -->
+Tests and evidence checkers are part of these contracts. Preserve bounded
+parsing, fail-closed behavior, exact evidence provenance, and the distinction
+between local test results, hosted observations, and promoted support claims.
+
+## Delegation and repository safety
+
+Use the installed Pi sub-agent facility only when the task or user authorizes
+delegation; keep one writer per working tree and use isolated worktrees for
+parallel writers. Review delegated changes independently before integration.
+Do not overwrite unrelated working-tree changes. Preserve project-local settings
+and keep machine-specific global paths out of committed configuration.
