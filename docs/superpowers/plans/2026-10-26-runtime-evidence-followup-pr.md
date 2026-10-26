@@ -61,11 +61,11 @@
 - [x] For runtime-matrix artifact handoff, the workflow-root test failed with the archive downloaded to `.artifacts/bionic`, then passed after download at `.artifacts`.
 - [x] For ownerless zero-file PT_TLS, the parser regression first failed on nonzero `p_vaddr`; it now accepts the bounded empty range at exact EOF, retains owner index `-1`, keeps semantic `TlsBindingUnresolved`, and still rejects out-of-bounds offsets and ownerless nonzero-file templates.
 - [x] Run focused Python/managed regressions and update the active/design plans with hosted evidence and external-sample caveats. The relevant Python modules passed 138/138, `ElfParserTests` passed 42/42, and ownerless TLS regressions passed 3/3; Python ran with `PYTHONPATH` unset.
-- [ ] Commit the follow-up fixes as a separate reviewable slice.
+- [x] Commit the follow-up fixes as a separate reviewable slice. Committed as `dfdeb82` after the 765/765 full managed test run.
 
 ### Task 4: Full local and hosted verification; publish stacked PR
 
-- [ ] Run `dotnet test UrProtect.sln` after the clean worktree has restored packages; run the full Python unittest suite with `PYTHONPATH` removed, fixture PR validator, regression-matrix validator, runtime-matrix validator, relevant identity checker tests, `bash -n` for modified scripts, and `git diff --check`.
+- [x] Run `dotnet test UrProtect.sln` after restoring packages; run the full Python unittest suite with `PYTHONPATH` removed, fixture PR validator, regression-matrix validator, runtime-matrix validator, relevant identity checker tests, `bash -n` for modified scripts, and `git diff --check`. Results: managed tests 765/765; full Python discovery 538 tests, 2 skipped, no failures; fixture PR validation 13 cases; regression matrix 7/7; runtime matrix tests 14/14 plus six-cell registry validation; runtime closures 19/19; native AArch64 `make -C native/urprotect-runtime test` passed, including native identity cases; `bash -n` passed for all six modified shell scripts and the complete PR diff passed `git diff --check`. The first Python run exposed one stale migration-state expectation after the scoped cross-runtime criterion was marked complete; updated that regression, then its isolated test and the full suite passed.
 - [ ] Push `fix/runtime-evidence-followup-pr` and open its PR with base `fix/superpowers-migration-pr`; verify GitHub reports only runtime/evidence changes in the PR diff.
 - [ ] Trigger/inspect fresh hosted Bionic, musl, and runtime-matrix exact-root evidence. Retain run-specific artifacts and digest checks.
 - [ ] Report `real-sample-matrix` HTTP 404 or transient network/timing failures as separate lane outcomes; do not claim global CI green unless every mandatory job passes.

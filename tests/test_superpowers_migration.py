@@ -69,7 +69,7 @@ class SuperpowersMigrationTests(unittest.TestCase):
             {
                 "child.ambiguous-safe-default": "complete",
                 "child.general-ownership": "open",
-                "child.cross-runtime-evidence": "open",
+                "child.cross-runtime-evidence": "complete",
             },
             _task_states(path),
         )
