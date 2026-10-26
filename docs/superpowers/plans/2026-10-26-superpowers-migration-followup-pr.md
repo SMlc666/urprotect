@@ -75,9 +75,9 @@
 
 ### Task 6: Review, push, and open the migration PR
 
-- [ ] Compare the branch to `origin/main`; verify no product/runtime code, unrelated evaluator changes, absolute machine paths, or local settings edits are present.
-- [ ] Run the complete relevant Python suite and all migration/fixture/regression/runtime-matrix validators; require a clean diff check.
-- [ ] Perform an independent self-review pass (delegation was not requested); resolve any correctness issues before publication.
+- [x] Compare the branch to `origin/main`; verify no product/runtime code, unrelated evaluator changes, newly introduced absolute machine paths, or local settings edits are present.
+- [x] Run the complete relevant Python suite and all migration/fixture/regression/runtime-matrix validators; require a clean diff check.
+- [x] Perform an independent self-review pass (delegation was not requested); resolve any correctness issues before publication.
 - [ ] Push only `fix/superpowers-migration-pr`, open a PR against `main`, and inspect its CI. Do not merge it locally or on GitHub without a separate merge instruction.
 
 **Migration acceptance:** only durable docs/task-state migration, project-local package configuration, and Trellis retirement are included; open product criteria remain open; the PR diff is based on current `origin/main` and contains no legacy branch history spillover.
