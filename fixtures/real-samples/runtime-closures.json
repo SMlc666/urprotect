@@ -29,7 +29,7 @@
       "resolver": "termux-container-v1",
       "execution": "locked-native-arm64-termux-container",
       "nodejsLock": "bionic-node-runtime-lock.json",
-      "nodejsLockSha256": "a67cb225b6761fddc10d6be9fce7f74ab2bf84676a1733ee37f708530afa3f2c",
+      "nodejsLockSha256": "aed615ec4de17471d38b90f68c12727bfafec83a9e9538dc169dba8fc02fb651",
       "packageRepository": "https://packages-cf.termux.dev/apt/termux-main",
       "image": "termux/termux-docker@sha256:e19ea56dd687563849826cbda57da714ae23277ee463e21f39917dbc0a59bab4",
       "imageId": "sha256:4afeef45d346a5e377724efede889c9ccad1046a71e097037494d16f15467c2e"
