@@ -55,7 +55,7 @@ class BionicNodeRuntimeLockTests(unittest.TestCase):
 
     def test_node_source_archive_url_is_synchronized_without_changing_package_identity(self) -> None:
         source_url = (
-            "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main/"
+            "https://mirror.iscas.ac.cn/termux/apt/termux-main/"
             "pool/main/n/nodejs/nodejs_26.4.0-1_aarch64.deb"
         )
         source_identity = {
