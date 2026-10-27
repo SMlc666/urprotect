@@ -3024,7 +3024,7 @@ def main() -> None:
     parser.add_argument("root", type=Path, nargs="?")
     parser.add_argument("--tier", choices=("pr", "nightly", "release"))
     parser.add_argument("--unit")
-    parser.add_argument("--runtime", choices=("glibc", "musl"), default="glibc")
+    parser.add_argument("--runtime", choices=("glibc", "musl", "bionic"), default="glibc")
     parser.add_argument("--require-runtime-identity", action="store_true")
     parser.add_argument("--inspect-external-table", type=Path)
     parser.add_argument("--selected-function")

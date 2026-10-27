@@ -485,10 +485,14 @@ complete newly installed compiler dependency closure must be version- and
 SHA-256-locked, with license identifiers and sources recorded in the lock.
 Before installation, the lane verifies that the downloaded artifacts exactly
 match the lock and hashes; it fails on missing, changed, or additional packages.
-The image digest pins the base userspace. The lane retains the lock, hash
-verification, apt logs, package policy, before/after package inventories, and
-reports `packageIndex: live` with `packageInputsReproducible: true` to distinguish live
-artifact discovery from pinned package inputs. It must record both host and
+The image digest pins the base userspace. The independent runtime-matrix
+Bionic gate also requires the retained `image-inspect.json`, parses it through
+a bounded no-follow reader, and binds both its exact `RepoDigests` entry and
+`result.json.imageDigest` to the locked OCI reference; producer-side validation
+alone is insufficient. The lane retains the lock, hash verification, apt logs,
+package policy, before/after package inventories, and reports `packageIndex:
+live` with `packageInputsReproducible: true` to distinguish live artifact
+discovery from pinned package inputs. It must record both host and
 container kernel/page-size facts, require an AArch64 host and a Linux/arm64
 Docker server and container, and reject active Android/AVD/Waydroid host
 contexts or non-ARM execution rather than silently falling back. The pinned

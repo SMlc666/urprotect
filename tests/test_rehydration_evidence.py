@@ -343,8 +343,10 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
     def test_musl_jump_table_runners_separate_compiler_and_linker_and_retain_build_status(self) -> None:
         indirect_runner = INDIRECT_RUNNER.read_text(encoding="utf-8")
         host_context_runner = (ROOT / "scripts/run-host-context-rehydration-e2e.sh").read_text(encoding="utf-8")
-        for runner in (indirect_runner, host_context_runner):
-            self.assertIn('make_args+=("CC=$runtime_cc" "LD=ld")', runner)
+        shared_runner = (ROOT / "scripts/run-shared-jump-table-copy-e2e.sh").read_text(encoding="utf-8")
+        for runner in (indirect_runner, host_context_runner, shared_runner):
+            self.assertIn('"CC=$runtime_cc"', runner)
+            self.assertIn('"LD=ld"', runner)
             self.assertNotIn('"LD=$runtime_cc"', runner)
 
         self.assertIn('native_build_diagnostics_root="${root}.native-build-diagnostics"', indirect_runner)
@@ -357,10 +359,127 @@ class RehydrationEvidenceContractTests(unittest.TestCase):
         self.assertIn('exit "$rehydration_status"', indirect_runner)
         self.assertIn('"${native_build_command[@]}"', indirect_runner)
         self.assertIn('make_args+=("HOST_ADAPTER_CFLAGS=-mno-outline-atomics")', host_context_runner)
+        self.assertIn('native_build_dir_relative=build/musl-shared-jump-table', shared_runner)
+        self.assertIn('native_build_command=(make -C "$native_root" "${make_args[@]}" shared-jump-table-fixture host-context-image-handoff)', shared_runner)
+        self.assertIn('native-build.command.txt', shared_runner)
+        self.assertIn('native-build.status', shared_runner)
+        self.assertIn('exit "$native_build_status"', shared_runner)
+        self.assertIn('--native-build-dir "$native_build_dir_relative"', shared_runner)
+        self.assertIn('make_args+=("CC=$runtime_cc" "LD=ld" "HOST_ADAPTER_CFLAGS=-mno-outline-atomics")', shared_runner)
+        self.assertIn('shared_checker_args=(--unit "$unit" --selected-function "$function_id" --runtime "$runtime")', shared_runner)
         makefile = (ROOT / "native/urprotect-runtime/Makefile").read_text(encoding="utf-8")
         self.assertIn("HOST_ADAPTER_CFLAGS ?=", makefile)
-        self.assertIn("$(CFLAGS) $(HOST_ADAPTER_CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1", makefile)
+        adapter_rule = makefile.split("$(BUILD_DIR)/host_adapter.o:", 1)[1].split(
+            "$(BUILD_DIR)/host_image_validation.o:", 1
+        )[0]
+        validation_rule = makefile.split("$(BUILD_DIR)/host_image_validation.o:", 1)[1].split(
+            "$(BUILD_DIR)/sha256.o:", 1
+        )[0]
+        self.assertIn("$(CFLAGS) $(HOST_ADAPTER_CFLAGS) -DURP_HOST_ADAPTER_TEST_DIAGNOSTICS=1", adapter_rule)
+        self.assertNotIn("HOST_ADAPTER_CFLAGS", validation_rule)
         self.assertIn("HOST_ADAPTER_CONFIG_STAMP := $(BUILD_DIR)/host_adapter.compile-config", makefile)
+
+    def test_musl_shared_jump_table_runner_retains_and_propagates_stubbed_make_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="musl-shared-jump-table-build-status-") as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            repository = temporary_root / "repo"
+            scripts = repository / "scripts"
+            native_root = repository / "native" / "urprotect-runtime"
+            stub_bin = temporary_root / "stub-bin"
+            scripts.mkdir(parents=True)
+            native_root.mkdir(parents=True)
+            stub_bin.mkdir()
+
+            isolated_runner = scripts / "run-shared-jump-table-copy-e2e.sh"
+            shutil.copy2(ROOT / "scripts/run-shared-jump-table-copy-e2e.sh", isolated_runner)
+            isolated_runner.chmod(0o755)
+
+            uname_stub = stub_bin / "uname"
+            uname_stub.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$#\" -eq 1 ] && [ \"$1\" = '-m' ]; then printf 'aarch64\\n'; exit 0; fi\n"
+                "exit 98\n",
+                encoding="utf-8",
+            )
+            uname_stub.chmod(0o755)
+
+            compiler_stub = stub_bin / "musl-gcc"
+            compiler_invoked = temporary_root / "musl-gcc-was-invoked"
+            compiler_stub.write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(compiler_invoked))}\n"
+                "exit 97\n",
+                encoding="utf-8",
+            )
+            compiler_stub.chmod(0o755)
+
+            make_stub = stub_bin / "make"
+            make_stub.write_text(
+                "#!/bin/sh\n"
+                "printf 'SHARED_STUB_MAKE_STDOUT\\n'\n"
+                "printf 'SHARED_STUB_MAKE_STDERR\\n' >&2\n"
+                "exit 23\n",
+                encoding="utf-8",
+            )
+            make_stub.chmod(0o755)
+
+            run_id = "shared-musl-test-run"
+            run_attempt = "1"
+            upload_parent = repository / ".artifacts" / "indirect-control" / f"musl-{run_id}-{run_attempt}"
+            artifact_root = upload_parent / "shared"
+            environment = {
+                "PATH": os.pathsep.join((str(stub_bin), "/usr/bin", "/bin")),
+                "HOME": str(temporary_root),
+                "TMPDIR": str(temporary_root),
+                "LANG": "C",
+                "LC_ALL": "C",
+            }
+            result = subprocess.run(
+                [
+                    str(isolated_runner),
+                    "--tier",
+                    "pr",
+                    "--runtime",
+                    "musl",
+                    "--unit",
+                    "runtime.indirect-control.shared-table.musl.host-context-entry",
+                    "--artifact-root",
+                    str(artifact_root),
+                ],
+                cwd=repository,
+                env=environment,
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+
+            self.assertEqual(23, result.returncode, result.stderr.decode(errors="replace"))
+            self.assertEqual(b"", result.stdout)
+            self.assertEqual(b"shared jump-table native fixture/helper build failed with status 23\n", result.stderr)
+            self.assertEqual(b"SHARED_STUB_MAKE_STDOUT\n", (artifact_root / "native-build.stdout").read_bytes())
+            self.assertEqual(b"SHARED_STUB_MAKE_STDERR\n", (artifact_root / "native-build.stderr").read_bytes())
+            self.assertEqual(b"23\n", (artifact_root / "native-build.status").read_bytes())
+            self.assertFalse(compiler_invoked.exists(), "the availability-only musl-gcc stub must never execute")
+
+            command_lines = dict(
+                line.split("=", 1)
+                for line in (artifact_root / "native-build.command.txt").read_text(encoding="utf-8").splitlines()
+            )
+            expected_native_root = str(native_root.resolve())
+            self.assertEqual(expected_native_root, command_lines["cwd"])
+            self.assertEqual("musl", command_lines["runtime"])
+            argv = shlex.split(command_lines["argv"])
+            self.assertEqual("make", argv[0])
+            self.assertEqual(["-C", expected_native_root], argv[1:3])
+            self.assertIn(f"CC={compiler_stub}", argv)
+            self.assertIn("LD=ld", argv)
+            self.assertIn("HOST_ADAPTER_CFLAGS=-mno-outline-atomics", argv)
+            self.assertIn("BUILD_DIR=build/musl-shared-jump-table", argv)
+            self.assertEqual(
+                ["shared-jump-table-fixture", "host-context-image-handoff"],
+                argv[-2:],
+            )
+            self.assertTrue(artifact_root.resolve().is_relative_to(upload_parent.resolve()))
 
     def test_musl_jump_table_runner_retains_and_propagates_stubbed_make_failure(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pr29-musl-build-status-") as temporary_directory:
@@ -743,6 +862,32 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             image[0x140 : 0x140 + len(version_string)] = version_string
         return bytes(image)
 
+    def write_bionic_runtime_environment(self, root: Path) -> None:
+        manifest = json.loads((ROOT / "fixtures/manifest.json").read_text(encoding="utf-8"))
+        host = next(item["host"] for item in manifest["cases"] if item["id"] == "c-termux-bionic-pie")
+        package_bytes = (json.dumps(host["compilerPackages"], indent=2, sort_keys=True) + "\n").encode()
+        image = host["image"]
+        _write_json(root / "bionic-runtime-environment.json", {
+            "schemaVersion": 1,
+            "case": "c-termux-bionic-pie",
+            "status": "validated",
+            "execution": "native-arm64-bionic-container",
+            "androidRuntime": False,
+            "emulation": False,
+            "image": image,
+            "imageDigest": image.rsplit("@", 1)[-1],
+            "termuxSourceCommit": host["sourceCommit"],
+            "compilerPackage": host["compilerPackage"],
+            "compilerPackages": host["compilerPackages"],
+            "packageRepository": host["packageRepository"],
+            "packageLockSha256": _sha(package_bytes),
+            "linker": "/system/bin/linker64",
+            "hostKernel": "6.8.0-test",
+            "containerKernel": "6.8.0-test",
+            "hostPageSize": 4096,
+            "containerPageSize": 4096,
+        })
+
     def write_runtime_identity(self, positive: Path, role: str, image_hash: str, *, runtime: str = "glibc", version_marker: bytes | None = None) -> dict[str, object]:
         identity_root = positive / "runtime-identity" / role
         identity_root.mkdir(parents=True)
@@ -777,6 +922,21 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             ).encode("ascii")
             runtime_version = "1.2.3"
             version_source = "musl-reviewed-libc-sha256-pinned-version-marker"
+        elif runtime == "bionic":
+            helper = self.runtime_elf(interpreter="/system/bin/linker64")
+            libc = self.runtime_elf()
+            loader = self.runtime_elf()
+            libc_path = "/system/lib64/libc.so"
+            loader_path = "/system/bin/linker64"
+            loader_inode = 1003
+            maps = (
+                "0000000000100000-0000000000101000 r-xp 00000000 08:01 1001 /evidence/host-context-image-handoff\n"
+                "0000000000150000-0000000000151000 rw-p 00000000 00:00 0 [heap]\n"
+                f"0000000000200000-0000000000201000 r-xp 00000000 08:01 1002 {libc_path}\n"
+                f"0000000000300000-0000000000301000 r-xp 00000000 08:01 {loader_inode} {loader_path}\n"
+            ).encode("ascii")
+            runtime_version = None
+            version_source = "bionic-semantic-version-not-claimed"
         else:
             raise ValueError("unsupported test runtime")
         loader_dev_inode = loader_inode
@@ -794,7 +954,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "retainedPath": f"runtime-identity/{role}/{name}",
             }
         identity = {
-            "schemaVersion": 1,
+            "schemaVersion": 2 if runtime == "bionic" else 1,
             "runtime": runtime,
             "architecture": "aarch64",
             "role": role,
@@ -802,8 +962,20 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             "imageSha256": image_hash,
             "runtimeVersion": runtime_version,
             "runtimeVersionSource": version_source,
+            **({
+                "runtimeFingerprint": {
+                    "kind": "mapped-libc-and-loader-sha256",
+                    "libcSha256": _sha(libc),
+                    "loaderSha256": _sha(loader),
+                },
+                "runtimeEnvironment": {"kernelRelease": "6.8.0-test", "pageSize": 4096},
+            } if runtime == "bionic" else {}),
             "interpreter": {
-                "declaredPath": "/lib/ld-linux-aarch64.so.1" if runtime == "glibc" else "/lib/ld-musl-aarch64.so.1",
+                "declaredPath": (
+                    "/lib/ld-linux-aarch64.so.1" if runtime == "glibc"
+                    else "/lib/ld-musl-aarch64.so.1" if runtime == "musl"
+                    else "/system/bin/linker64"
+                ),
                 "resolvedPath": loader_path,
                 "deviceMajor": 8,
                 "deviceMinor": 1,
@@ -820,7 +992,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
         identity_path = identity_root / "identity.json"
         _write_json(identity_path, identity)
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2 if runtime == "bionic" else 1,
             "path": f"runtime-identity/{role}/identity.json",
             "sha256": _sha(identity_path.read_bytes()),
         }
@@ -917,24 +1089,30 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             behavior["sourceHandoffSha256" if role == "source" else "targetHandoffSha256"] = _sha(handoff_path.read_bytes())
             _write_json(behavior_path, behavior)
 
-    def reject_runtime_identity_mutation(self, mutate, *, role: str = "target") -> subprocess.CompletedProcess[str]:
+    def reject_runtime_identity_mutation(
+        self, mutate, *, role: str = "target", runtime: str = "glibc"
+    ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory(prefix="indirect-control-runtime-identity-") as directory:
             source = Path(directory) / "source"
             source.mkdir()
-            self.create_evidence(source)
+            self.create_evidence(source, runtime=runtime)
             root = self.copy_evidence(source, Path(directory))
-            positive = root / INDIRECT_UNIT
+            unit = INDIRECT_UNIT if runtime == "glibc" else INDIRECT_UNIT.replace("glibc", runtime)
+            positive = root / unit
             mutate(positive, role)
             self.refresh_runtime_identity(positive, role)
             _refresh_indirect_manifest(root)
-            result = self.run_checker(root)
+            result = self.run_checker(root, runtime=runtime)
             self.assertNotEqual(result.returncode, 0, result.stdout)
             self.assertNotIn("SHA256SUMS", result.stderr)
             return result
 
-    def create_evidence(self, root: Path) -> None:
-        positive = root / INDIRECT_UNIT
+    def create_evidence(self, root: Path, *, runtime: str = "glibc") -> None:
+        unit = INDIRECT_UNIT if runtime == "glibc" else INDIRECT_UNIT.replace("glibc", runtime)
+        positive = root / unit
         positive.mkdir(parents=True)
+        if runtime == "bionic":
+            self.write_bionic_runtime_environment(positive)
         source = _jump_table_elf(transformed=False)
         protected = b"protected operation image"
         native = _jump_table_elf(transformed=True)
@@ -968,9 +1146,9 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             "releaseOrder": "entry-dispatch-before-release-image",
             "firstFailureStage": None,
         }
-        source_handoff["runtimeIdentity"] = self.write_runtime_identity(positive, "source", source_hash)
+        source_handoff["runtimeIdentity"] = self.write_runtime_identity(positive, "source", source_hash, runtime=runtime)
         target_handoff = {**source_handoff, "nativeImageSha256": native_hash}
-        target_handoff["runtimeIdentity"] = self.write_runtime_identity(positive, "target", native_hash)
+        target_handoff["runtimeIdentity"] = self.write_runtime_identity(positive, "target", native_hash, runtime=runtime)
         _write_json(positive / "source-handoff.json", source_handoff)
         _write_json(positive / "handoff.json", target_handoff)
         code_output_range = {
@@ -1083,7 +1261,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "schemaVersion": 1,
                 "stage": "rehydration",
                 "status": "passed",
-                "unitId": INDIRECT_UNIT,
+                "unitId": unit,
                 "profile": "host-context-entry",
                 "entrySymbol": "urp_entry",
                 "sourceSha256": source_hash,
@@ -1115,7 +1293,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             trace = ((trace << 8) | (result & 0xff)) & 0xffffffff
         behavior = {
             "schemaVersion": 2,
-            "unitId": INDIRECT_UNIT,
+            "unitId": unit,
             "selectedFunction": "dynsym:2",
             "sourceSha256": source_hash,
             "protectedSha256": protected_hash,
@@ -1155,7 +1333,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "schemaVersion": 1,
                 "stage": "protected-image-producer",
                 "status": "passed",
-                "unitId": INDIRECT_UNIT,
+                "unitId": unit,
                 "profile": "host-context-entry",
             },
         )
@@ -1165,7 +1343,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "schemaVersion": 1,
                 "stage": "native-image",
                 "status": "passed",
-                "unitId": INDIRECT_UNIT,
+                "unitId": unit,
                 "artifactRole": "native-image",
                 "profile": "host-context-entry",
                 "entrySymbol": "urp_entry",
@@ -1245,7 +1423,7 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                 "message": message,
                 "offset": 64,
             }
-            negative_unit = f"{INDIRECT_UNIT}.{negative_name}"
+            negative_unit = f"{unit}.{negative_name}"
             stage = {
                 "schemaVersion": 1,
                 "stage": "protected-image-producer",
@@ -1936,6 +2114,199 @@ class IndirectControlEvidenceTests(unittest.TestCase):
                     expected_image_sha256=image_hash, required=True,
                 )
 
+    def test_bionic_runtime_identity_uses_versioned_live_file_fingerprint_not_a_fake_release(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="bionic-runtime-identity-verified-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            self.write_bionic_runtime_environment(root)
+            image_hash = "9" * 64
+            source_carrier = self.write_runtime_identity(root, "source", image_hash, runtime="bionic")
+            target_carrier = self.write_runtime_identity(root, "target", image_hash, runtime="bionic")
+
+            def make_handoff(carrier: dict[str, object]) -> dict[str, object]:
+                return {
+                    "schemaVersion": 1,
+                    "stage": "host-context-handoff",
+                    "status": "passed",
+                    "loaderId": "host-context.sealed-memfd.dlopen",
+                    "nativeImageSha256": image_hash,
+                    "entryStatus": 23,
+                    "processStatus": 23,
+                    "releaseStatus": "passed",
+                    "releaseOrder": "entry-dispatch-before-release-image",
+                    "rehydrationRecordSha256": "f" * 64,
+                    "runtimeIdentity": carrier,
+                }
+
+            runtime_identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER
+            source = runtime_identity.validate_handoff_runtime_identity(
+                root, make_handoff(source_carrier), expected_runtime="bionic", expected_role="source",
+                expected_image_sha256=image_hash, required=True,
+            )
+            target = runtime_identity.validate_handoff_runtime_identity(
+                root, make_handoff(target_carrier), expected_runtime="bionic", expected_role="target",
+                expected_image_sha256=image_hash, required=True,
+            )
+            self.assertEqual(2, source["schemaVersion"])
+            self.assertIsNone(source["runtimeVersion"])
+            self.assertEqual("/system/bin/linker64", source["interpreter"]["declaredPath"])
+            self.assertEqual("/system/lib64/libc.so", source["libc"]["mappedPath"])
+            self.assertEqual(
+                runtime_identity.BIONIC_RUNTIME_FINGERPRINT_KIND,
+                source["runtimeFingerprint"]["kind"],
+            )
+            runtime_identity.require_same_runtime_identity(source, target)
+
+    def test_bionic_runtime_environment_must_match_the_exact_fixture_and_package_locks(self) -> None:
+        runtime_identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER
+        with tempfile.TemporaryDirectory(prefix="bionic-runtime-environment-tampering-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            self.write_bionic_runtime_environment(root)
+            environment_path = root / "bionic-runtime-environment.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["image"] = "termux/termux-docker:latest"
+            _write_json(environment_path, environment)
+            with self.assertRaisesRegex(ValueError, "differs from the pinned lock: image"):
+                runtime_identity._validate_bionic_runtime_environment(root)
+
+    def test_bionic_runtime_environment_rejects_non_integer_schema_and_page_sizes(self) -> None:
+        runtime_identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER
+        with tempfile.TemporaryDirectory(prefix="bionic-runtime-integer-tampering-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            self.write_bionic_runtime_environment(root)
+            environment_path = root / "bionic-runtime-environment.json"
+            original = json.loads(environment_path.read_text(encoding="utf-8"))
+            for field, value, message in (
+                ("schemaVersion", True, "schemaVersion must be an exact integer"),
+                ("hostPageSize", 4096.0, "hostPageSize must be an exact supported integer"),
+                ("containerPageSize", True, "containerPageSize must be an exact supported integer"),
+            ):
+                with self.subTest(field=field, value=value):
+                    mutated = dict(original)
+                    mutated[field] = value
+                    _write_json(environment_path, mutated)
+                    with self.assertRaisesRegex(ValueError, message):
+                        runtime_identity._validate_bionic_runtime_environment(root)
+
+    def test_bionic_same_kernel_facts_are_related_to_per_handoff_observations_after_rehash(self) -> None:
+        def mutate_environment(field: str, value: object, *, both: bool = False):
+            def mutate(positive: Path, role: str) -> None:
+                environment_path = positive / "bionic-runtime-environment.json"
+                environment = json.loads(environment_path.read_text(encoding="utf-8"))
+                environment[field] = value
+                if both:
+                    counterpart = "containerPageSize" if field == "hostPageSize" else "hostPageSize"
+                    if field in {"hostPageSize", "containerPageSize"}:
+                        environment[counterpart] = value
+                    else:
+                        counterpart = "containerKernel" if field == "hostKernel" else "hostKernel"
+                        environment[counterpart] = value
+                _write_json(environment_path, environment)
+            return mutate
+
+        cases = (
+            ("hostPageSize", 16384, False, "page sizes disagree"),
+            ("hostKernel", "6.8.1-test", False, "kernel releases disagree"),
+            ("hostKernel", "kernel release with spaces", True, "bounded kernel release token"),
+            ("hostPageSize", 16384, True, "per-handoff page size differs"),
+            ("hostKernel", "6.8.1-test", True, "per-handoff kernel release differs"),
+        )
+        for field, value, both, message in cases:
+            with self.subTest(field=field, value=value, both=both):
+                result = self.reject_runtime_identity_mutation(
+                    mutate_environment(field, value, both=both), runtime="bionic"
+                )
+                self.assertIn(message, result.stderr)
+
+        def mutate_handoff_page_size(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["runtimeEnvironment"]["pageSize"] = True
+            _write_json(identity_path, identity)
+
+        result = self.reject_runtime_identity_mutation(
+            mutate_handoff_page_size, runtime="bionic"
+        )
+        self.assertIn("Bionic per-handoff page size is not a bounded integer", result.stderr)
+
+        def mutate_handoff_kernel(positive: Path, role: str) -> None:
+            identity_path = positive / "runtime-identity" / role / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["runtimeEnvironment"]["kernelRelease"] = "unbounded kernel report"
+            _write_json(identity_path, identity)
+
+        result = self.reject_runtime_identity_mutation(
+            mutate_handoff_kernel, runtime="bionic"
+        )
+        self.assertIn("not a bounded kernel token", result.stderr)
+
+    def test_bionic_runtime_identity_fails_closed_on_carrier_version_interpreter_and_fingerprint_tampering(self) -> None:
+        runtime_identity = REHYDRATION_PRIVATE_CHECKER._RUNTIME_IDENTITY_HELPER
+        with tempfile.TemporaryDirectory(prefix="bionic-runtime-identity-tampering-") as directory:
+            root = Path(directory) / "evidence"
+            root.mkdir()
+            self.write_bionic_runtime_environment(root)
+            image_hash = "8" * 64
+            carrier = self.write_runtime_identity(root, "target", image_hash, runtime="bionic")
+            handoff = {
+                "schemaVersion": 1,
+                "stage": "host-context-handoff",
+                "status": "passed",
+                "loaderId": "host-context.sealed-memfd.dlopen",
+                "nativeImageSha256": image_hash,
+                "entryStatus": 23,
+                "processStatus": 23,
+                "releaseStatus": "passed",
+                "releaseOrder": "entry-dispatch-before-release-image",
+                "rehydrationRecordSha256": "7" * 64,
+                "runtimeIdentity": dict(carrier),
+            }
+            with self.assertRaisesRegex(ValueError, "carrier schemaVersion must be the exact integer 2"):
+                handoff["runtimeIdentity"]["schemaVersion"] = 1
+                runtime_identity.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="bionic", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
+            handoff["runtimeIdentity"]["schemaVersion"] = 2
+            identity_path = root / carrier["path"]
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["runtimeVersion"] = "1.0"
+            _write_json(identity_path, identity)
+            handoff["runtimeIdentity"]["sha256"] = _sha(identity_path.read_bytes())
+            with self.assertRaisesRegex(ValueError, "must not invent a semantic runtime version"):
+                runtime_identity.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="bionic", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
+
+            identity["runtimeVersion"] = None
+            identity["runtimeFingerprint"]["libcSha256"] = "0" * 64
+            _write_json(identity_path, identity)
+            handoff["runtimeIdentity"]["sha256"] = _sha(identity_path.read_bytes())
+            with self.assertRaisesRegex(ValueError, "fingerprint differs from retained mapped bytes"):
+                runtime_identity.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="bionic", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
+
+            identity["runtimeFingerprint"]["libcSha256"] = _sha((root / identity["libc"]["retainedPath"]).read_bytes())
+            helper_path = root / identity["helper"]["retainedPath"]
+            helper_bytes = bytearray(helper_path.read_bytes())
+            encoded = b"/system/bin/linker64\0"
+            helper_bytes[0x180 : 0x180 + len(encoded)] = encoded
+            helper_path.write_bytes(helper_bytes)
+            identity["helper"]["sha256"] = _sha(helper_bytes)
+            identity["interpreter"]["declaredPath"] = "/system/bin/not-linker64"
+            _write_json(identity_path, identity)
+            handoff["runtimeIdentity"]["sha256"] = _sha(identity_path.read_bytes())
+            with self.assertRaisesRegex(ValueError, "PT_INTERP differs from the retained helper ELF"):
+                runtime_identity.validate_handoff_runtime_identity(
+                    root, handoff, expected_runtime="bionic", expected_role="target",
+                    expected_image_sha256=image_hash, required=True,
+                )
+
     def test_rehydration_handoff_checker_preserves_optional_glibc_and_required_native_identity_gate(self) -> None:
         with tempfile.TemporaryDirectory(prefix="rehydration-runtime-identity-gate-") as directory:
             root = Path(directory) / "evidence"
@@ -2258,6 +2629,65 @@ class IndirectControlEvidenceTests(unittest.TestCase):
             _refresh_indirect_manifest(root)
             result = self.run_checker(root, runtime="glibc", require_runtime_identity=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_runtime_identity_skips_wrong_va_permission_incompatible_full_file_candidate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="runtime-identity-file-alias-full-candidate-") as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            self.create_evidence(source)
+            root = self.copy_evidence(source, Path(directory))
+            positive = root / INDIRECT_UNIT
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            for role in ("source", "target"):
+                # Four PT_LOAD headers would overlap this helper ELF's version marker at 0x100.
+                # Place the synthetic table later in the first file page before writing the layout.
+                identity_path = positive / "runtime-identity" / role / "identity.json"
+                identity = json.loads(identity_path.read_text(encoding="utf-8"))
+                libc_path = positive / identity["libc"]["retainedPath"]
+                libc_image = bytearray(libc_path.read_bytes())
+                struct.pack_into("<Q", libc_image, 32, 0x200)
+                libc_path.write_bytes(libc_image)
+                self.set_runtime_pt_load_layout(
+                    positive,
+                    role,
+                    (
+                        (0, 0, page_size, page_size, 5),
+                        (page_size, 4 * page_size, page_size, page_size, 4),
+                        (page_size, 8 * page_size, page_size, page_size, 4),
+                        (page_size, 12 * page_size, page_size, page_size, 6),
+                    ),
+                    (
+                        (0, 0, 1, "r-xp"),
+                        (4, 1, 1, "r--p"),
+                        (8, 1, 1, "r--p"),
+                        (12, 1, 1, "rw-p"),
+                    ),
+                    file_pages=2,
+                )
+                self.refresh_runtime_identity(positive, role)
+            _refresh_indirect_manifest(root)
+            result = self.run_checker(root, runtime="glibc", require_runtime_identity=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_native_runtime_identity_rejects_same_va_duplicate_full_file_candidates_after_bias(self) -> None:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+
+        def duplicate_full_owners(positive: Path, role: str) -> None:
+            self.set_runtime_pt_load_layout(
+                positive,
+                role,
+                (
+                    (0, 0, page_size, page_size, 5),
+                    (page_size, 4 * page_size, page_size, page_size, 6),
+                    (page_size, 4 * page_size, page_size, page_size, 6),
+                ),
+                ((0, 0, 1, "r-xp"), (4, 1, 1, "rw-p")),
+                file_pages=2,
+            )
+
+        result = self.reject_runtime_identity_mutation(duplicate_full_owners)
+        self.assertIn("multiple fully-containing pt_load owners", result.stderr.lower())
+        self.assertNotIn("manifest digest mismatch", result.stderr.lower())
 
     def test_native_runtime_identity_still_rejects_pt_load_permission_excess(self) -> None:
         page_size = os.sysconf("SC_PAGE_SIZE")

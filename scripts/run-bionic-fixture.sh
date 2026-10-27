@@ -8,13 +8,21 @@ case_id="c-termux-bionic-pie"
 case_root="${artifact_root}/${case_id}"
 container_runtime="${BIONIC_CONTAINER_RUNTIME:-docker}"
 
-mkdir -p "${case_root}"
-chmod a+rwx "${case_root}"
+host_artifact_gid="$(id -g)"
+python3 "${repo_root}/scripts/prepare-bionic-write-root.py" \
+  --group-gid "${host_artifact_gid}" \
+  --create-directory "${case_root}" \
+  --create-directory "${case_root}/apt-archives"
+host_artifact_uid="$(id -u)"
 
-cleanup_incomplete_apt_download() {
-  sudo rm -rf -- "${case_root}/apt-archives/partial" 2>/dev/null || true
+validate_artifact_tree() {
+  python3 "${repo_root}/scripts/prepare-bionic-write-root.py" --validate-tree "${case_root}"
 }
-trap cleanup_incomplete_apt_download EXIT
+
+# The prepared root is intentionally group-writable. Validate any pre-existing
+# contents before the first host-side file open/redirection; each container
+# return is checked again by run_shell before its caller can write or read logs.
+validate_artifact_tree
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
   echo "bionic fixture requires a native aarch64 host; got $(uname -m)" >&2
@@ -36,7 +44,7 @@ if [[ -n "${ANDROID_ROOT:-}" || -n "${ANDROID_DATA:-}" \
   echo "bionic fixture refuses an Android, emulator, or Waydroid host context" >&2
   exit 2
 fi
-for required_command in cmp file getconf readelf python3 sed sha256sum; do
+for required_command in cmp file getconf readelf python3 sed sha256sum stat; do
   if ! command -v "${required_command}" >/dev/null 2>&1; then
     echo "${required_command} is required for bionic fixture evidence" >&2
     exit 127
@@ -116,8 +124,8 @@ done
 package_lock_sha256="$(sha256sum "${package_lock_json}" | awk '{print $1}')"
 termux_prefix="/data/data/com.termux/files/usr"
 termux_shell="${termux_prefix}/bin/sh"
-mkdir -p "${case_root}/host-context"
-chmod a+rwx "${case_root}/host-context"
+python3 "${repo_root}/scripts/prepare-bionic-write-root.py" \
+  --group-gid "${host_artifact_gid}" --create-directory "${case_root}/host-context"
 
 if [[ "${linker}" != "/system/bin/linker64" ]]; then
   echo "unsupported bionic linker path: ${linker}" >&2
@@ -134,6 +142,8 @@ printf '%s\n' \
   "host_arch=$(uname -m)" \
   "host_kernel=${host_kernel}" \
   "host_page_size=${host_page_size}" \
+  "host_artifact_writer_uid=${host_artifact_uid}" \
+  "host_artifact_writer_gid=${host_artifact_gid}" \
   "container_runtime=${container_runtime}" \
   "execution=native-arm64-bionic-container" \
   "android_runtime=false" \
@@ -161,7 +171,9 @@ container_common=(
   --rm
   --platform linux/arm64
   --user 1000:1000
+  --group-add "${host_artifact_gid}"
   --env "PREFIX=${termux_prefix}"
+  --env "HOST_ARTIFACT_GID=${host_artifact_gid}"
   --env "HOME=/tmp"
   --env "TERMUX_PACKAGE_REPOSITORY=${package_repository}"
   --mount "type=bind,src=${repo_root},dst=/workspace,readonly"
@@ -169,11 +181,33 @@ container_common=(
 )
 
 run_shell() {
+  BIONIC_ARTIFACT_TREE_VALIDATION_FAILED=0
+  local status=0
   if "${container_runtime}" "${container_common[@]}" \
-      "${image}" "${termux_shell}" "$@"; then
-    return 0
+      "${image}" "${termux_shell}" -c 'umask 0007; exec "$@"' \
+      bionic-umask-boundary "${termux_shell}" "$@"; then
+    :
   else
-    local status=$?
+    status=$?
+  fi
+
+  local tree_status=0
+  if validate_artifact_tree; then
+    :
+  else
+    tree_status=$?
+  fi
+  if [[ "${tree_status}" -ne 0 ]]; then
+    BIONIC_ARTIFACT_TREE_VALIDATION_FAILED=1
+    if [[ "${status}" -ne 0 ]]; then
+      printf 'bionic artifact tree validation failed after container phase; preserving container exit=%s\n' \
+        "${status}" >&2
+      return "${status}"
+    fi
+    return "${tree_status}"
+  fi
+
+  if [[ "${status}" -ne 0 ]]; then
     printf 'bionic container phase failed (exit=%s)\n' "${status}" >&2
     for log in \
       "${case_root}/apt-update.log" \
@@ -187,11 +221,31 @@ run_shell() {
     done
     return "${status}"
   fi
+  return 0
+}
+
+# Status-capturing call sites may tolerate a container's nonzero result long
+# enough to retain/compare it, but an invalid tree must terminate immediately:
+# their next command's redirection is opened before that next function runs.
+run_shell_capturing_status() {
+  local status=0
+  run_shell "$@" || status=$?
+  if [[ "${BIONIC_ARTIFACT_TREE_VALIDATION_FAILED}" -ne 0 ]]; then
+    exit "${status}"
+  fi
+  return "${status}"
 }
 
 run_shell -c '
   set -eu
   printf "container_arch=%s\n" "$(uname -m)"
+  printf "container_uid=%s\n" "$(id -u)"
+  printf "container_user=%s\n" "$(id -un)"
+  printf "container_gid=%s\n" "$(id -g)"
+  printf "container_groups=%s\n" "$(id -G)"
+  printf "container_umask=%s\n" "$(umask)"
+  printf "host_artifact_gid=%s\n" "$HOST_ARTIFACT_GID"
+  case " $(id -G) " in *" ${HOST_ARTIFACT_GID} "*) ;; *) echo "host artifact group is missing from the Bionic container" >&2; exit 1 ;; esac
   container_kernel="$(uname -r)"
   test -n "${container_kernel}"
   printf "container_kernel=%s\n" "${container_kernel}"
@@ -218,21 +272,40 @@ run_shell -c '
   set -eu
   export PATH="${PREFIX}/bin:${PATH}"
   test "$#" -eq 8
-  mkdir -p /artifacts/apt-archives
+  termux_tmp_dir="${PREFIX%/}/tmp"
+  mkdir -p "${termux_tmp_dir}"
+  export TMPDIR="${termux_tmp_dir}"
+  apt_cache_dir="$(mktemp -d "${TMPDIR%/}/urprotect-bionic-apt-archives.XXXXXX")"
+  # Cleanup is unprivileged and stays inside the producer.
+  # find does not follow a replaced apt-archives symlink and treats it as a leaf.
   find /artifacts/apt-archives -maxdepth 1 -type f -name "*.deb" -delete
+  apt_sandbox_user="$(id -un)"
+  apt_get() {
+    apt-get -o "APT::Sandbox::User=${apt_sandbox_user}" "$@"
+  }
   dpkg-query -W -f="\${binary:Package}\t\${Version}\t\${Architecture}\t\${Status}\n" \
     | sort > /artifacts/packages-before.txt
-  apt-get update > /artifacts/apt-update.log 2>&1
-  apt-get -o Dir::Cache::archives=/artifacts/apt-archives --download-only install -y \
+  apt_get update > /artifacts/apt-update.log 2>&1
+  apt_get -o "Dir::Cache::archives=${apt_cache_dir}" --download-only install -y \
     "$@" > /artifacts/apt-download.log 2>&1
-  find /artifacts/apt-archives -maxdepth 1 -type f -name "*.deb" -printf "%f\n" \
+  find "${apt_cache_dir}" -maxdepth 1 -type f -name "*.deb" -printf "%f\n" \
     | sort > /artifacts/downloaded-debs.txt
   awk -F "\t" "NR > 1 { n = \$3; sub(/^.*\\//, \"\", n); print n }" \
     /artifacts/compiler-package-lock.tsv | sort > /artifacts/expected-debs.txt
   diff -u /artifacts/expected-debs.txt /artifacts/downloaded-debs.txt
+  while IFS= read -r archive_name; do
+    case "${archive_name}" in
+      ""|*/*|*[!A-Za-z0-9._+-]*) echo "invalid locked archive filename" >&2; exit 2 ;;
+    esac
+    source_archive="${apt_cache_dir}/${archive_name}"
+    destination_archive="/artifacts/apt-archives/${archive_name}"
+    test -f "${source_archive}" && test ! -L "${source_archive}"
+    cp -- "${source_archive}" "${destination_archive}"
+    chmod 0640 "${destination_archive}"
+  done < /artifacts/expected-debs.txt
   (cd /artifacts && sha256sum --check package-sha256sums.txt) \
     > /artifacts/package-hash-verification.txt
-  apt-get -o Dir::Cache::archives=/artifacts/apt-archives --no-download install -y \
+  apt_get -o "Dir::Cache::archives=${apt_cache_dir}" --no-download install -y \
     "$@" > /artifacts/apt-install.log 2>&1
   : > /artifacts/package-request.txt
   for package_spec do
@@ -265,13 +338,41 @@ run_shell -c '
     CC=clang self-test > /artifacts/host-context/build-and-test.log 2>&1
   grep -Fq "HostContext runtime self-test: PASS" \
     /artifacts/host-context/build-and-test.log
+  build_dir=/artifacts/host-context/indirect-control-build
+  mkdir -p "$build_dir"
+  chgrp "$HOST_ARTIFACT_GID" "$build_dir"
+  chmod 2770 "$build_dir"
+  printf "%s\\n" \
+    "cwd=/workspace/native/urprotect-runtime" \
+    "runtime=bionic" \
+    "argv=make -C /workspace/native/urprotect-runtime SHELL=$PREFIX/bin/sh BUILD_DIR=/artifacts/host-context/indirect-control-build CC=clang LD=ld.lld AS=/workspace/scripts/termux-aarch64-as.sh HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ INDIRECT_CONTROL_FIXTURE_LDFLAGS=\"--pack-dyn-relocs=none --no-relax\" jump-table-fixture jump-table-index-clobber-fixture external-jump-table-fixture shared-jump-table-fixture host-context-image-handoff" \
+    > "$build_dir/native-build.command.txt"
+  set +e
+  make -C /workspace/native/urprotect-runtime \
+    SHELL="${PREFIX}/bin/sh" \
+    BUILD_DIR="$build_dir" \
+    CC=clang LD=ld.lld AS=/workspace/scripts/termux-aarch64-as.sh \
+    HOST_CONTEXT_PLATFORM_CFLAGS=-D__ANDROID__ \
+    INDIRECT_CONTROL_FIXTURE_LDFLAGS="--pack-dyn-relocs=none --no-relax" \
+    jump-table-fixture jump-table-index-clobber-fixture \
+    external-jump-table-fixture shared-jump-table-fixture host-context-image-handoff \
+    > "$build_dir/native-build.stdout" 2> "$build_dir/native-build.stderr"
+  build_status=$?
+  set -e
+  printf "%s\\n" "$build_status" > "$build_dir/native-build.status"
+  if test "$build_status" -ne 0; then
+    cat "$build_dir/native-build.stderr" >&2
+    exit "$build_status"
+  fi
+  for output in host-context-jump-table-fixture.so host-context-jump-table-index-clobber-fixture.so host-context-external-jump-table-fixture.so host-context-shared-jump-table-fixture.so host-context-image-handoff; do
+    test -s "$build_dir/$output"
+  done
 ' -- "${compiler_package_specs[@]}"
 
-# The container's apt sandbox may leave its incomplete partial-download
-# directory root-owned and unreadable. It is not part of the locked package
-# evidence, so remove it before making retained archives readable.
-sudo rm -rf -- "${case_root}/apt-archives/partial"
-sudo chmod -R a+rX "${case_root}/apt-archives"
+# Apt caches and its partial-download directory stay inside the disposable
+# container filesystem. Only the eight locked archive files are copied into the
+# group-readable evidence directory by the unprivileged producer; no host-side
+# recursive chmod or cleanup traverses a container-writable path.
 
 python3 - "${case_root}/packages-before.txt" "${case_root}/packages.txt" \
   "${package_lock_json}" <<'PY'
@@ -337,11 +438,11 @@ if missing:
 PY
 
 set +e
-run_shell -c 'exec /artifacts/fixture' \
+run_shell_capturing_status -c 'exec /artifacts/fixture' \
   > "${case_root}/baseline.stdout" \
   2> "${case_root}/baseline.stderr"
 baseline_status=$?
-run_shell -c 'exec /system/bin/linker64' \
+run_shell_capturing_status -c 'exec /system/bin/linker64' \
   > "${case_root}/linker.stdout" \
   2> "${case_root}/linker.stderr"
 linker_status=$?
@@ -392,7 +493,7 @@ PY
   chmod --reference="${protection_input}" "${protection_output}"
   readelf -hW -lW -sW "${protection_output}" > "${case_root}/protection-readelf.txt"
   set +e
-  run_shell -c 'exec /artifacts/protected-fixture' \
+  run_shell_capturing_status -c 'exec /artifacts/protected-fixture' \
     > "${case_root}/protection.stdout" \
     2> "${case_root}/protection.stderr"
   protection_status=$?
@@ -438,10 +539,41 @@ fi
 
 container_page_size="$(sed -n 's/^container_page_size=//p' "${case_root}/container-facts.txt")"
 container_kernel="$(sed -n 's/^container_kernel=//p' "${case_root}/container-facts.txt")"
-if ! [[ "${container_page_size}" =~ ^[0-9]+$ ]] || [[ -z "${container_kernel}" ]]; then
-  echo "container kernel and page-size facts were not recorded" >&2
+if ! [[ "${host_page_size}" =~ ^(4096|16384|65536)$ && "${container_page_size}" =~ ^(4096|16384|65536)$ ]]; then
+  echo "Bionic host/container page sizes are not exact supported decimal tokens" >&2
   exit 1
 fi
+if [[ ! "${host_kernel}" =~ ^[A-Za-z0-9._+-]{1,128}$ || ! "${container_kernel}" =~ ^[A-Za-z0-9._+-]{1,128}$ ]]; then
+  echo "Bionic host/container kernel releases are not bounded release tokens" >&2
+  exit 1
+fi
+if [[ "${host_kernel}" != "${container_kernel}" || "${host_page_size}" != "${container_page_size}" ]]; then
+  echo "Bionic host/container kernel or page-size observations disagree for the native same-kernel lane" >&2
+  exit 1
+fi
+bionic_build_root="${case_root}/host-context/indirect-control-build"
+for output in host-context-jump-table-fixture.so host-context-jump-table-index-clobber-fixture.so host-context-external-jump-table-fixture.so host-context-shared-jump-table-fixture.so host-context-image-handoff; do
+  [[ -s "${bionic_build_root}/${output}" ]] || { echo "Bionic indirect-control build output is missing: ${output}" >&2; exit 1; }
+done
+{
+  printf 'host_writer_uid_gid=%s:%s\n' "${host_artifact_uid}" "${host_artifact_gid}"
+  printf 'host_context_root_uid_gid_mode=%s\n' "$(stat -c '%u:%g:%a' "${case_root}/host-context")"
+  printf 'build_root_uid_gid_mode=%s\n' "$(stat -c '%u:%g:%a' "${bionic_build_root}")"
+  printf 'build_helper_uid_gid_mode=%s\n' "$(stat -c '%u:%g:%a' "${bionic_build_root}/host-context-image-handoff")"
+} > "${case_root}/host-context-artifact-ownership.txt"
+readelf -hW -lW -dW "${bionic_build_root}/host-context-image-handoff" > "${bionic_build_root}/host-context-image-handoff.readelf.txt"
+if ! grep -Fq 'Requesting program interpreter: /system/bin/linker64' "${bionic_build_root}/host-context-image-handoff.readelf.txt"; then
+  echo "Bionic HostContext helper did not retain the exact /system/bin/linker64 interpreter" >&2
+  exit 1
+fi
+for fixture in host-context-jump-table-fixture.so host-context-jump-table-index-clobber-fixture.so host-context-external-jump-table-fixture.so host-context-shared-jump-table-fixture.so; do
+  readelf -hW -lW -dW "${bionic_build_root}/${fixture}" > "${bionic_build_root}/${fixture}.readelf.txt"
+  grep -Fq 'AArch64' "${bionic_build_root}/${fixture}.readelf.txt" || { echo "Bionic fixture is not AArch64: ${fixture}" >&2; exit 1; }
+  if grep -Eq '\(RELR\)|DT_RELR' "${bionic_build_root}/${fixture}.readelf.txt"; then
+    echo "Bionic fixture unexpectedly contains RELR metadata: ${fixture}" >&2
+    exit 1
+  fi
+done
 printf '%s\n' \
   "image=${image}" \
   "image_arch=${image_arch}" \
@@ -531,6 +663,7 @@ document = {
     "androidRuntime": False,
     "emulation": False,
     "image": image,
+    "imageDigest": image.rsplit("@", 1)[1],
     "termuxSourceCommit": source_commit,
     "compilerPackage": compiler,
     "clangVersion": clang_version,
@@ -587,5 +720,38 @@ document = {
 }
 pathlib.Path(path).write_text(json.dumps(document, indent=2) + "\n")
 PY
+
+if [[ "${BIONIC_INDIRECT_CONTROL_E2E:-false}" == "true" ]]; then
+  evidence_tier="${BIONIC_EVIDENCE_TIER:-${RUNTIME_MATRIX_TIER:-pr}}"
+  case "$evidence_tier" in pr|nightly|release) ;; *) echo "invalid Bionic indirect-control evidence tier: $evidence_tier" >&2; exit 2 ;; esac
+  evidence_run_id="${GITHUB_RUN_ID:-local}"
+  [[ "$evidence_run_id" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { echo "invalid Bionic CI run identifier" >&2; exit 2; }
+  evidence_parent="${repo_root}/.artifacts/indirect-control/bionic-${evidence_tier}-${evidence_run_id}-$$"
+  [[ ! -e "$evidence_parent" && ! -L "$evidence_parent" ]] || { echo "refusing to overwrite Bionic indirect-control evidence root: $evidence_parent" >&2; exit 2; }
+  python3 "$repo_root/scripts/prepare-bionic-write-root.py" \
+    --group-gid "$host_artifact_gid" --create-directory "$evidence_parent"
+  printf '%s\n' \
+    "ordinary=${evidence_parent}/ordinary" \
+    "shared=${evidence_parent}/shared" \
+    > "${case_root}/indirect-control-roots.txt"
+  export BIONIC_TERMUX_IMAGE="$image"
+  export BIONIC_INDIRECT_CONTROL_BUILD_ROOT="${case_root}/host-context/indirect-control-build"
+  export BIONIC_RUNTIME_RESULT="${case_root}/result.json"
+  export BIONIC_CONTAINER_RUNTIME="$container_runtime"
+  ordinary_unit="runtime.indirect-control.jump-table.bionic.host-context-entry"
+  shared_unit="runtime.indirect-control.shared-table.bionic.host-context-entry"
+  "$repo_root/scripts/run-indirect-control-e2e.sh" \
+    --tier "$evidence_tier" --runtime bionic --unit "$ordinary_unit" \
+    --artifact-root "${evidence_parent}/ordinary"
+  python3 "$repo_root/scripts/check-indirect-control-evidence.py" \
+    "${evidence_parent}/ordinary" --tier "$evidence_tier" --runtime bionic \
+    --require-runtime-identity --unit "$ordinary_unit"
+  "$repo_root/scripts/run-shared-jump-table-copy-e2e.sh" \
+    --tier "$evidence_tier" --runtime bionic --unit "$shared_unit" \
+    --artifact-root "${evidence_parent}/shared"
+  python3 "$repo_root/scripts/check-shared-jump-table-evidence.py" \
+    "${evidence_parent}/shared/${shared_unit}" --runtime bionic \
+    --unit "$shared_unit" --selected-function "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selectedFunction"])' "${evidence_parent}/shared/${shared_unit}/shared-table-behavior.json")"
+fi
 
 echo "PASS ${case_id}: SHA-256-locked Termux compiler packages, bionic linker, and native ARM64 execution validated"

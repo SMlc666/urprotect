@@ -1105,7 +1105,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bionic-native-arm64-${{ github.run_id }}
-          path: .artifacts/bionic
+          path: .artifacts
       - name: Validate registry and run native/container covering set
         env:
           RUNTIME_MATRIX_ARTIFACT_ROOT: .artifacts/runtime-matrix/${{ env.RUNTIME_MATRIX_TIER }}
@@ -1159,6 +1159,22 @@ jobs:
             aarch64 native-arm64-bionic-container
       - name: Verify Docker runtime
         run: docker version
+      - name: Select Bionic evidence tier
+        env:
+          RUN_RELEASE_FIXTURES: ${{ inputs.run_release_fixtures }}
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request) echo 'BIONIC_EVIDENCE_TIER=pr' >> "$GITHUB_ENV" ;;
+            release) echo 'BIONIC_EVIDENCE_TIER=release' >> "$GITHUB_ENV" ;;
+            workflow_dispatch)
+              if [[ "${RUN_RELEASE_FIXTURES}" == true ]]; then
+                echo 'BIONIC_EVIDENCE_TIER=release' >> "$GITHUB_ENV"
+              else
+                echo 'BIONIC_EVIDENCE_TIER=nightly' >> "$GITHUB_ENV"
+              fi
+              ;;
+            *) echo 'BIONIC_EVIDENCE_TIER=nightly' >> "$GITHUB_ENV" ;;
+          esac
       - name: Capture bionic Node.js candidate lock (manual only; not compatibility evidence)
         if: github.event_name == 'workflow_dispatch' && inputs.capture_bionic_node_closure == true
         run: |
@@ -1185,6 +1201,8 @@ jobs:
       - name: Run native ARM64 bionic fixture
         env:
           BIONIC_PROTECTION_E2E: 'true'
+          BIONIC_INDIRECT_CONTROL_E2E: 'true'
+          BIONIC_EVIDENCE_TIER: ${{ env.BIONIC_EVIDENCE_TIER }}
         run: ./scripts/run-bionic-fixture.sh
       - name: Check native ARM64 bionic evidence
         run: |
@@ -1196,6 +1214,27 @@ jobs:
             --feature runtime.host-context.bionic-handoff
           python3 scripts/check-protection-evidence.py \
             .artifacts/bionic/c-termux-bionic-pie --runtime bionic
+          roots=.artifacts/bionic/c-termux-bionic-pie/indirect-control-roots.txt
+          ordinary_root="$(sed -n 's/^ordinary=//p' "$roots")"
+          shared_root="$(sed -n 's/^shared=//p' "$roots")"
+          [[ -n "$ordinary_root" && -d "$ordinary_root" ]]
+          [[ -n "$shared_root" && -d "$shared_root" ]]
+          python3 scripts/check-indirect-control-evidence.py \
+            "$ordinary_root" --tier "$BIONIC_EVIDENCE_TIER" --runtime bionic \
+            --require-runtime-identity --unit runtime.indirect-control.jump-table.bionic.host-context-entry
+          python3 scripts/check-rehydration-evidence.py \
+            "$ordinary_root/runtime.indirect-control.jump-table.bionic.host-context-entry" \
+            --tier "$BIONIC_EVIDENCE_TIER" --runtime bionic --require-runtime-identity \
+            --unit runtime.indirect-control.jump-table.bionic.host-context-entry
+          python3 scripts/check-shared-jump-table-evidence.py \
+            "$shared_root/runtime.indirect-control.shared-table.bionic.host-context-entry" \
+            --runtime bionic --unit runtime.indirect-control.shared-table.bionic.host-context-entry \
+            --selected-function "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selectedFunction"])' \
+              "$shared_root/runtime.indirect-control.shared-table.bionic.host-context-entry/shared-table-behavior.json")"
+          python3 scripts/check-rehydration-evidence.py \
+            "$shared_root/runtime.indirect-control.shared-table.bionic.host-context-entry" \
+            --tier "$BIONIC_EVIDENCE_TIER" --runtime bionic --require-runtime-identity \
+            --unit runtime.indirect-control.shared-table.bionic.host-context-entry
       - name: Upload bionic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -1203,8 +1242,10 @@ jobs:
           name: bionic-native-arm64-${{ github.run_id }}
           path: |
             .artifacts/bionic/
+            .artifacts/indirect-control/
             !.artifacts/bionic/**/apt-archives/lock
             !.artifacts/bionic/**/apt-indexes/lock
+          include-hidden-files: true
           if-no-files-found: warn
 
   android-container-probe:
@@ -1473,6 +1514,35 @@ jobs:
             --tier "${tier}" --runtime musl --unit "${unit}" --artifact-root "${root}"
           python3 scripts/check-indirect-control-evidence.py "${root}" \
             --tier "${tier}" --runtime musl --require-runtime-identity --unit "${unit}"
+      - name: Run shared musl indirect jump-table evidence
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) tier=nightly ;;
+            release) tier=release ;;
+            *) tier=pr ;;
+          esac
+          unit=runtime.indirect-control.shared-table.musl.host-context-entry
+          root=".artifacts/indirect-control/musl-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/shared"
+          ./scripts/run-shared-jump-table-copy-e2e.sh \
+            --tier "${tier}" --runtime musl --unit "${unit}" --artifact-root "${root}"
+          shared_positive="${root}/${unit}"
+          python3 scripts/check-rehydration-evidence.py "${shared_positive}" \
+            --tier "${tier}" --runtime musl --require-runtime-identity --unit "${unit}"
+          shared_source=native/urprotect-runtime/build/musl-shared-jump-table/host-context-shared-jump-table-fixture.so
+          selected_function="$(readelf -Ws "${shared_source}" | awk '$8 == "urp_entry" && $1 ~ /^[0-9]+:/ && $4 == "FUNC" { sub(":", "", $1); print "dynsym:" $1; exit }')"
+          is_dynsym_index() {
+            case "$1" in
+              dynsym:*) dynsym_index=${1#dynsym:} ;;
+              *) return 1 ;;
+            esac
+            case "${dynsym_index}" in
+              ''|*[!0123456789]*) return 1 ;;
+              *) return 0 ;;
+            esac
+          }
+          is_dynsym_index "${selected_function}" || { echo 'shared musl fixture has no selected urp_entry dynsym' >&2; exit 1; }
+          python3 scripts/check-shared-jump-table-evidence.py "${shared_positive}" \
+            --unit "${unit}" --selected-function "${selected_function}" --runtime musl
       - name: Upload musl container and indirect-control evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -1481,7 +1551,8 @@ jobs:
           path: |
             .artifacts/musl-container/
             .artifacts/indirect-control/musl-${{ github.run_id }}-${{ github.run_attempt }}/
-          if-no-files-found: warn
+          if-no-files-found: error
+          include-hidden-files: true
 
   benchmark:
     needs: ci-event-gate

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
-
+import subprocess
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -51,6 +52,105 @@ class ProtectedImageWorkflowTests(unittest.TestCase):
         ):
             self.assertIn(f"      - {job}", block)
         self.assertIn("Require every mandatory validation result", block)
+
+    def test_bionic_indirect_control_runs_only_in_the_pinned_native_lane(self) -> None:
+        start = self.workflow.index("  bionic-native-arm64:")
+        end = self.workflow.index("  musl-container-smoke:", start)
+        block = self.workflow[start:end]
+        self.assertIn("runs-on: ubuntu-24.04-arm", block)
+        self.assertIn("docker version", block)
+        self.assertIn("BIONIC_INDIRECT_CONTROL_E2E: 'true'", block)
+        self.assertIn("BIONIC_EVIDENCE_TIER: ${{ env.BIONIC_EVIDENCE_TIER }}", block)
+        self.assertIn("run-bionic-fixture.sh", block)
+        self.assertIn("--runtime bionic", block)
+        self.assertIn("--require-runtime-identity", block)
+        self.assertIn("runtime.indirect-control.jump-table.bionic.host-context-entry", block)
+        self.assertIn("runtime.indirect-control.shared-table.bionic.host-context-entry", block)
+        self.assertIn("check-indirect-control-evidence.py", block)
+        self.assertIn("check-shared-jump-table-evidence.py", block)
+        self.assertIn("include-hidden-files: true", block)
+
+    def test_runtime_matrix_download_preserves_bionic_artifact_root(self) -> None:
+        bionic_start = self.workflow.index("  bionic-native-arm64:")
+        bionic_end = self.workflow.index("  android-container-probe:", bionic_start)
+        upload_block = self.workflow[bionic_start:bionic_end]
+        self.assertIn("            .artifacts/bionic/", upload_block)
+        self.assertIn("            .artifacts/indirect-control/", upload_block)
+
+        matrix_start = self.workflow.index("  runtime-matrix-native-arm64:")
+        matrix_end = self.workflow.index("  bionic-native-arm64:", matrix_start)
+        matrix_block = self.workflow[matrix_start:matrix_end]
+        download_start = matrix_block.index("      - uses: actions/download-artifact@v4")
+        download_end = matrix_block.index("      - name: Validate registry", download_start)
+        download_block = matrix_block[download_start:download_end]
+        self.assertIn("name: bionic-native-arm64-${{ github.run_id }}", download_block)
+        self.assertIn("          path: .artifacts\n", download_block)
+        self.assertIn(
+            "BIONIC_MATRIX_ARTIFACT_ROOT: .artifacts/bionic/c-termux-bionic-pie",
+            matrix_block,
+        )
+
+    def test_shared_musl_run_block_uses_posix_dynsym_index_validation(self) -> None:
+        start = self.workflow.index("      - name: Run shared musl indirect jump-table evidence")
+        end = self.workflow.index("      - name: Upload musl container and indirect-control evidence", start)
+        block = self.workflow[start:end]
+        run_script = textwrap.dedent(block.split("run: |\n", 1)[1])
+
+        for bash_only_token in ("[[", "]]", "=~"):
+            with self.subTest(bash_only_token=bash_only_token):
+                self.assertNotIn(bash_only_token, run_script)
+
+        syntax_check = subprocess.run(
+            ["/bin/sh", "-n"], input=run_script, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
+
+        function_start = run_script.index("is_dynsym_index() {")
+        function_end = run_script.index("\n}", function_start) + len("\n}")
+        validation_line = next(
+            line for line in run_script[function_end:].splitlines()
+            if line.startswith("is_dynsym_index ")
+        )
+        validator = (
+            run_script[function_start:function_end]
+            + '\nselected_function="$1"\n'
+            + validation_line
+        )
+        for index in ("dynsym:0", "dynsym:7", "dynsym:12345"):
+            with self.subTest(index=index):
+                result = subprocess.run(
+                    ["/bin/sh", "-c", validator, "dynsym-index-test", index],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+        for index in ("dynsym:", "dynsym:x", "dynsym:12x", "dynsym:-1", "12"):
+            with self.subTest(index=index):
+                result = subprocess.run(
+                    ["/bin/sh", "-c", validator, "dynsym-index-test", index],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_shared_musl_jump_table_row_runs_with_exact_identity_and_checker(self) -> None:
+        start = self.workflow.index("      - name: Run shared musl indirect jump-table evidence")
+        end = self.workflow.index("      - name: Upload musl container and indirect-control evidence", start)
+        block = self.workflow[start:end]
+        self.assertIn("run-shared-jump-table-copy-e2e.sh", block)
+        self.assertIn("--runtime musl", block)
+        self.assertIn("runtime.indirect-control.shared-table.musl.host-context-entry", block)
+        self.assertIn("check-rehydration-evidence.py", block)
+        self.assertIn("--require-runtime-identity", block)
+        self.assertIn("build/musl-shared-jump-table/host-context-shared-jump-table-fixture.so", block)
+        self.assertIn("check-shared-jump-table-evidence.py", block)
+
+        upload_start = self.workflow.index("      - name: Upload musl container and indirect-control evidence")
+        upload_end = self.workflow.index("  benchmark:\n", upload_start)
+        upload = self.workflow[upload_start:upload_end]
+        self.assertIn("if: always()", upload)
+        self.assertIn("include-hidden-files: true", upload)
+        self.assertIn("if-no-files-found: error", upload)
+        self.assertIn(".artifacts/indirect-control/musl-${{ github.run_id }}-${{ github.run_attempt }}/", upload)
 
     def test_runner_and_checker_are_checked_in(self) -> None:
         self.assertTrue(RUNNER.is_file())

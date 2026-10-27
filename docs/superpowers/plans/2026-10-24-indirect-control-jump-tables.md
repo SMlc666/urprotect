@@ -42,20 +42,27 @@ and demand-driven.
   chains, fully symbol-less selection, native metadata-missing variants, and
   general indirect-call or runtime target-translation behavior. Absence of an
   observed extra owner does not prove privacy.
-- [ ] **open: child.cross-runtime-evidence** — scoped AArch64/glibc rows do not
-  cover the declared cross-runtime matrix. Shared-table musl plus ordinary and
-  shared Bionic exact-root execution remain outstanding. The latest hosted
-  Bionic identity run predating the known-bias wrong-VA owner correction failed
-  at `helper-maps-check`; the new C/Python regression and native identity
-  self-tests pass locally, but hosted Bionic must be rerun before acceptance.
-  Musl/Bionic are not promoted by glibc or checker-only results.
+- [x] **complete: child.cross-runtime-evidence** — Fresh full workflow run
+  `40226790546` after the Bionic identity correction, pinned image-digest fix,
+  NOBITS checker fix, artifact-root fix, and zero-file TLS parser fix passed
+  `fixture-nightly`, `bionic-native-arm64`, `musl-container-smoke`, and
+  `runtime-matrix-native-arm64`. Bionic and musl ordinary/shared evidence
+  checkers passed on run-specific roots. This closes only the scoped
+  cross-runtime observation criterion; it does not promote general indirect
+  control support or Bionic/musl runtime support.
 
 ## Evidence facts and non-promotion constraints
 
 - The ordinary signed-relative-32 jump-table row passed identity-required
   exact-root checks in post-merge hosted run `39864478180`. This is a scoped
-  observation only, not runtime/feature promotion; it does not close the
-  cross-runtime criterion above.
+  observation only, not runtime/feature promotion.
+- Full workflow run `40226790546` passed the nightly Zig-musl fixture, Bionic,
+  musl, and runtime-matrix lanes after the follow-up fixes; the independent
+  Bionic/musl ordinary/shared evidence checks passed on the hosted roots. The
+  separate `real-sample-matrix` lane still failed because the locked Node.js
+  archive returned HTTP 404 (the Alpine libarchive sample downloaded). The
+  overall workflow/quality gate therefore remained failed; this hosted evidence
+  is not a global CI pass or a runtime-support promotion.
 - The external-provider feature stays `unknown` and
   `scoped-observation-not-promoted`. Hosted provider producer/checker/root-bound
   runs `39559228628` (PR #25) and `39561529902` (merged main) passed their
