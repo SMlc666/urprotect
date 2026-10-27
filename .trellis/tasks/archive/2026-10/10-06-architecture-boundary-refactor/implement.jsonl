@@ -1,8 +1,0 @@
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend quality, dependency direction, structural-default validation, bounded binary handling, atomic publication, and testing contracts for the refactor."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Stable diagnostics, fail-closed profile validation, no-partial-publication, and current pipeline error propagation."}
-{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Current v3/profile, HostContext ABI, independent runtime evidence, and no cross-runtime promotion contracts."}
-{"file":".trellis/tasks/10-06-architecture-boundary-refactor/research/architecture-audit.md","reason":"Repository-backed inventory of responsibilities, production migration paths, profile mismatch, and recommended dependency gates."}
-{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/prd.md","reason":"Parent requirements and structural-versus-selected-function boundary that this prerequisite must make executable."}
-{"file":".trellis/tasks/10-06-unify-elf-protection-infrastructure/design.md","reason":"Existing semantic-plan, layout-plan, artifact, workflow, runtime, and evidence ownership assumptions to revise under the current-only contract."}
-{"file":".trellis/tasks/archive/2026-10/10-06-aarch64-semantic-relocator/prd.md","reason":"Existing semantic IR/address-map/fixup handoff boundary that downstream TLS, CFI, and indirect-control work must consume without a second model."}
-{"file":".trellis/tasks/archive/2026-10/10-06-indirect-control-jump-tables/prd.md","reason":"Selected-function/demand-driven indirect-target constraints and proof-based target model that remain downstream of the architecture gates."}

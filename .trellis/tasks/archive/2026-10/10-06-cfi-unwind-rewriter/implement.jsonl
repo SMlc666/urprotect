@@ -1,5 +1,0 @@
-{"file": ".trellis/tasks/10-06-cfi-unwind-rewriter/prd.md", "reason": "CFI requirements and acceptance criteria"}
-{"file": ".trellis/tasks/10-06-cfi-unwind-rewriter/design.md", "reason": "CFI ownership, parser, rewrite, layout, and rollback design"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Stable diagnostics and fail-closed binary boundary"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Bounded reads, layout ownership, and testing rules"}
-{"file": ".trellis/tasks/10-06-unify-elf-protection-infrastructure/design.md", "reason": "Parent workflow and layout ownership"}

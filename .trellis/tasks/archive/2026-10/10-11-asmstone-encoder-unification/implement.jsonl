@@ -1,9 +1,0 @@
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines the project-owned Aarch64InstructionEncoder boundary, AsmStone round-trip contract, remaining-writer migration debt, and required adapter tests."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Defines fail-closed encoder failure propagation, stable diagnostic mapping, zero-word failures, and no source-word/manual fallback behavior."}
-{"file":".trellis/spec/backend/runtime-compatibility.md","reason":"Defines the runtime/evidence boundary and prevents an instruction-encoder migration from changing TLS runtime claims or ABI contracts."}
-{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/design.md","reason":"Records the existing TLS semantic/layout ownership and the current AsmStone integration correction that this task must consume."}
-{"file":".trellis/tasks/10-06-tls-relocation-runtime-matrix/research/aarch64-encoder-ownership.md","reason":"Provides the existing manual-encoding inventory, AsmStone capability evidence, and migration rules for fixture and production writers."}
-{"file":"src/UrProtect.Core/ElfLayout/ElfLayoutBranchEncoding.cs","reason":"Centralizes adapter-backed Branch26/Call26 final-word encoding for layout planning and materializer validation."}
-{"file":"scripts/check-aarch64-encoding-boundary.py","reason":"Deterministic production scan rejecting final AArch64 opcode/immediate writers outside the adapter."}
-{"file":"tests/test_aarch64_encoding_boundary.py","reason":"Positive production-tree and negative forbidden-writer architecture gate tests."}
-{"file":"tests/ArchitectureFixtures/ForbiddenAarch64WordWriter.cs","reason":"Non-production negative witness for the final-word boundary checker."}

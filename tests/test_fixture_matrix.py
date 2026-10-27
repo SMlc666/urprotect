@@ -522,7 +522,7 @@ class FixtureMatrixTests(unittest.TestCase):
         )
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertIn(
-            ".trellis/spec/backend/runtime-compatibility.md",
+            "docs/engineering/specs/backend/runtime-compatibility.md",
             feature["evidence"],
         )
         self.assertTrue(
@@ -601,7 +601,7 @@ class FixtureMatrixTests(unittest.TestCase):
         self.assertEqual(feature["negativeOracle"], "native/urprotect-runtime/host_image_validation.c")
         self.assertIn("COMPATIBILITY.md", feature["evidence"])
         self.assertIn(
-            ".trellis/spec/backend/runtime-compatibility.md",
+            "docs/engineering/specs/backend/runtime-compatibility.md",
             feature["evidence"],
         )
         self.assertTrue(any("DT_NULL" in item for item in feature["constraints"]))
